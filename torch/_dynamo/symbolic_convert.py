@@ -3655,6 +3655,28 @@ class InstructionTranslatorBase(
             - handle_inactive_ctx: If True, handles inactive context variables as described above. This is necessary
                 iff the resume function is traced
         """
+        # A zero-argument super.__init__ would see the resume function's
+        # arguments even if Dynamo let that call run eagerly.
+        if (
+            {"super", "__init__"} <= set(self.f_code.co_names)
+            and self.f_globals.get("super", self.f_builtins.get("super")) is super
+            and any(
+                load.opname == "LOAD_GLOBAL"
+                and load.argval == "super"
+                and attr.opname in ("LOAD_ATTR", "LOAD_METHOD")
+                and attr.argval == "__init__"
+                for load, attr in itertools.pairwise(self.instructions)
+            )
+        ):
+            unimplemented(
+                gb_type="Resuming a frame that calls super.__init__",
+                context="",
+                explanation="The call may need the original frame's first argument, which a resume function does not preserve.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
+
         # Handle inactive context variables.
         # The resume function assumes that context variables are the class, NOT the object.
         # e.g. torch.set_grad_enabled(True) will be reconstructed as torch.set_grad_enabled

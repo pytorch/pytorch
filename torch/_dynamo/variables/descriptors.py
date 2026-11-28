@@ -815,7 +815,7 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         # It first requires owner to be a type and a subtype of __objclass__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
         if obj is not None and owner.is_constant_none():
-            owner = obj.tp_getattro_impl(tx, "__class__")
+            owner = VariableTracker.build(tx, type).call_function(tx, [obj], {})
         owner_type = owner.python_type()
         if not issubclass(owner_type, type):
             raise_type_error(
@@ -1046,6 +1046,8 @@ class ClassMethodVariable(VariableTracker):
     ) -> VariableTracker:
         # cm_descr_get binds the wrapped function to the class.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
+        if obj is not None and owner.is_constant_none():
+            owner = VariableTracker.build(tx, type).call_function(tx, [obj], {})
         func = self.descriptor
         # NestedUserFunctionVariable is not a UserFunctionVariable, but it is a
         # Python function all the same and binds like one.

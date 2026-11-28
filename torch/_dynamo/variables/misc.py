@@ -36,6 +36,7 @@ from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeGuard
 import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
+from torch._C._dynamo import get_type_tp_name
 from torch._dynamo.variables.lists import TupleVariable
 from torch._guards import Source
 
@@ -47,6 +48,8 @@ from ..bytecode_transformation import (
 )
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
+    handle_observed_exception,
+    ObservedAttributeError,
     raise_observed_exception,
     raise_type_error,
     raise_value_error,
@@ -59,6 +62,7 @@ from ..source import (
     GenericAttrSource,
     GetItemSource,
     GlobalStateSource,
+    LocalSource,
     TypeMROSource,
     TypeSource,
     WeakRefCallSource,
@@ -90,7 +94,7 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .object_protocol import mro_attr_source, python_constant_repr_impl
+from .object_protocol import generic_getattr, mro_attr_source, python_constant_repr_impl
 from .user_defined import (
     call_random_fn,
     is_standard_setattr,
@@ -136,10 +140,142 @@ class SuperVariable(VariableTracker):
 
     @staticmethod
     def create(typevar: VariableTracker, objvar: VariableTracker) -> "SuperVariable":
-        return SuperVariable(typevar, objvar)
+        return SuperVariable(
+            typevar, objvar, mutation_type=variables.base.ValueMutationNew()
+        )
 
     def python_type(self) -> type:
         return builtins.super
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from ..resume_execution import ContinueExecutionCache
+        from ..symbolic_convert import InstructionTranslator
+        from .builder import VariableBuilder
+
+        if not isinstance(self, SuperVariable):
+            unimplemented(
+                gb_type="Reinitializing an existing super object",
+                context="",
+                explanation="Dynamo cannot replay super.__init__ on an object created outside the current graph.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        no_keywords(tx, "super", kwargs)
+        check_positional(tx, "super", len(args), 0, 2)
+        if args:
+            typevar = args[0]
+            objvar = args[1] if len(args) == 2 else None
+        else:
+            if tx.f_code in ContinueExecutionCache.generated_code_metadata:
+                unimplemented(
+                    gb_type="Zero-argument super.__init__ in a resume frame",
+                    context="",
+                    explanation="A resume frame does not have the original first argument in its first local slot.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if not tx.f_code.co_argcount:
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): no arguments"]
+                )
+            name = tx.f_code.co_varnames[0]
+            objvar = tx.symbolic_locals.get(name)
+            if name in tx.f_code.co_cellvars:
+                objvar = cast(CellVariable, tx._cellvar(name))._current_contents(tx)
+            elif (
+                objvar is None
+                and isinstance(tx, InstructionTranslator)
+                and name in tx.f_locals
+                and (
+                    sys.version_info >= (3, 12)
+                    or not any(
+                        inst.opname == "DELETE_FAST" and inst.argval == name
+                        for inst in tx.instructions
+                    )
+                )
+            ):
+                objvar = VariableBuilder(tx, LocalSource(name, is_input=True))(
+                    tx.f_locals[name]
+                )
+            if objvar is None or isinstance(objvar, (NullVariable, DeletedVariable)):
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): arg[0] deleted"]
+                )
+            if "__class__" not in tx.f_code.co_freevars:
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): __class__ cell not found"]
+                )
+            typevar = cast(CellVariable, tx._cellvar("__class__"))._current_contents(tx)
+            if typevar is None:
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): empty __class__ cell"]
+                )
+        if not issubclass(typevar.python_type(), type):
+            if not args:
+                msg = f"super(): __class__ is not a type ({typevar.python_type_name()})"
+                raise_observed_exception(RuntimeError, tx, args=[msg])
+            raise_type_error(
+                tx,
+                "super() argument 1 must be type, not "
+                + (
+                    "None"
+                    if typevar.is_constant_none()
+                    else get_type_tp_name(typevar.python_type())
+                ),
+            )
+        type_arg = typevar.as_python_constant()
+        if objvar is not None and objvar.is_constant_none():
+            objvar = None
+        if objvar is not None:
+            obj_type = objvar.python_type()
+            obj_is_type = issubclass(obj_type, type)
+            checked_type = objvar.as_python_constant() if obj_is_type else obj_type
+            # supercheck uses subtype checks without metaclass hooks.
+            valid = type.__subclasscheck__(
+                type_arg, checked_type
+            ) or type.__subclasscheck__(type_arg, obj_type)
+            if not valid:
+                try:
+                    classvar = generic_getattr(tx, objvar, "__class__")
+                    class_type = classvar.get_real_python_backed_value()
+                    if class_type is NO_SUCH_SUBOBJ:
+                        unimplemented(
+                            gb_type="super(): unresolved __class__",
+                            context=f"objvar: {objvar}, classvar: {classvar}",
+                            explanation="Dynamo cannot determine the object's __class__ "
+                            "to validate super() initialization.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
+                except ObservedAttributeError:
+                    handle_observed_exception(tx)
+                    class_type = None
+                valid = isinstance(class_type, type) and type.__subclasscheck__(
+                    type_arg, class_type
+                )
+                if valid:
+                    unimplemented(
+                        gb_type="super(): proxy __class__ initialization",
+                        context=f"objvar: {objvar}",
+                        explanation="Dynamo cannot reconstruct super() initialized "
+                        "through a proxy's __class__ without repeating attribute lookup.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+            if not valid:
+                msg = "super(type, obj): obj must be an instance or subtype of type"
+                if sys.version_info >= (3, 13):
+                    kind = "type" if obj_is_type else "instance of"
+                    msg = (
+                        f"super(type, obj): obj ({kind} {get_type_tp_name(checked_type)[:200]}) "
+                        f"is not an instance or subtype of type ({get_type_tp_name(type_arg)[:200]})."
+                    )
+                raise_type_error(tx, msg)
+        tx.output.side_effects.mutation(self)
+        self.typevar = typevar
+        self.objvar = objvar
+        return ConstantVariable.create(None)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         from .builder import SourcelessBuilder
@@ -256,7 +392,8 @@ class SuperVariable(VariableTracker):
         # not just AttrSource).
         value, source = self._resolved_getattr_and_source(tx, name)
         if not variables.ConstantVariable.is_literal(value):
-            return GetAttrVariable(self, name, py_type=type(value))
+            # Bound methods retain their receiver and MRO after super.__init__.
+            return GetAttrVariable(self.clone(), name, py_type=type(value))
         if source:
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return variables.ConstantVariable.create(value, source=source)

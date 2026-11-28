@@ -167,6 +167,11 @@ class StaticParamModule(torch.nn.Module):
         return x.sin()
 
 
+class ClassLookupModule(torch.nn.Module):
+    def forward(self, x):
+        return x + len(self.__class__.__name__)
+
+
 class _DescriptorCodeOwner:
     @property
     def prop(self):
@@ -534,6 +539,31 @@ print(eval(f"bbmod.{name}.{path}") is code)
         ctx.save_package(package, self.path())
         torch._dynamo.reset()
         return ctx.load_package(fn, self.path())
+
+    def test_module_class_lookup_guards_roundtrip(self):
+        module = ClassLookupModule()
+
+        def fn(x, module):
+            return module(x)
+
+        x = torch.ones(1)
+        package = CompilePackage(fn)
+        compiled = torch._dynamo.optimize(
+            "eager",
+            package=package,
+            guard_filter_fn=lambda guards: [True] * len(guards),
+        )(fn)
+        expected = fn(x, module)
+        self.assertEqual(compiled(x, module), expected)
+        self.assertTrue(package._codes[fn.__code__].guarded_codes)
+        restored, backends = self._reload_eager_package(
+            fn, package, package.cached_backends
+        )
+        restored.install(backends)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(
+                torch._dynamo.optimize(package=restored)(fn)(x, module), expected
+            )
 
     def test_refuse_callback_runs_a_miss_of_an_eager_fallback_frame_eagerly(self):
         from torch._dynamo.eval_frame import (

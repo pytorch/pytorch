@@ -1230,6 +1230,26 @@
       ]
     }
   ],
+  "GB3075": [
+    {
+      "Gb_type": "Resuming a frame that calls super.__init__",
+      "Context": "",
+      "Explanation": "The call may need the original frame's first argument, which a resume function does not preserve.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2816": [
+    {
+      "Gb_type": "Zero-argument super.__init__ in a resume frame",
+      "Context": "",
+      "Explanation": "A resume frame does not have the original first argument in its first local slot.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0070": [
     {
       "Gb_type": "Indexing list with non-scalar tensor",
@@ -5362,6 +5382,16 @@
       ]
     }
   ],
+  "GB4402": [
+    {
+      "Gb_type": "Reinitializing an existing super object",
+      "Context": "",
+      "Explanation": "Dynamo cannot replay super.__init__ on an object created outside the current graph.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB5565": [
     {
       "Gb_type": "list_richcompare_ordering_symbolic",
@@ -5489,6 +5519,16 @@
       "Hints": [
         "Use Placement types without custom __getattr__ methods",
         "Move the Placement usage outside the compiled region"
+      ]
+    }
+  ],
+  "GB8378": [
+    {
+      "Gb_type": "super(): unresolved __class__",
+      "Context": "objvar: {objvar}, classvar: {classvar}",
+      "Explanation": "Dynamo cannot determine the object's __class__ to validate super() initialization.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -6267,6 +6307,26 @@
       "Gb_type": "ContextVar.get() with non-constant default",
       "Context": "ContextVar('{self.cv_obj.name}').get(...)",
       "Explanation": "ContextVar.get() default argument must be a compile-time constant inside torch.compile.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8933": [
+    {
+      "Gb_type": "super(): proxy __class__ initialization",
+      "Context": "objvar: {objvar}",
+      "Explanation": "Dynamo cannot reconstruct super() initialized through a proxy's __class__ without repeating attribute lookup.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9976": [
+    {
+      "Gb_type": "Attribute access on an existing proxy super object",
+      "Context": "attribute: {name}",
+      "Explanation": "Dynamo cannot model the saved receiver type of a proxy super object created outside the current graph.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

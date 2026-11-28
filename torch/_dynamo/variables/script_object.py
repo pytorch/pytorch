@@ -48,9 +48,9 @@ from ..exc import (
     UnsafeScriptObjectError,
     Unsupported,
 )
-from ..source import AttrSource
+from ..source import AttrSource, TypeSource
 from ..utils import proxy_args_kwargs
-from .base import VariableTracker
+from .base import GetSet, unmodeled_setter, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import TupleVariable
@@ -241,6 +241,15 @@ class CustomClassVariable(UserDefinedVariable):
 
 class CustomClassObjectVariable(UserDefinedObjectVariable):
     _fake_script_object_cache: dict[int, "CustomClassObjectVariable"] = {}
+
+    def _get_class(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if isinstance(self.value, FakeScriptObject) and self.value.real_obj is not None:
+            return VariableTracker.build(
+                tx, type(self.value.real_obj), self.source and TypeSource(self.source)
+            )
+        return self._class_vt(tx)
+
+    tp_getset = {"__class__": GetSet(_get_class, unmodeled_setter)}
 
     @classmethod
     def is_matching_cls(cls, user_cls: type) -> bool:

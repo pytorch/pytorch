@@ -32,6 +32,75 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertIs(result, int)
 
+    @parametrize("explicit_none", [False, True])
+    def test_descriptor_default_owner_uses_type(self, explicit_none):
+        class Proxy:
+            def __init__(self):
+                self.reads = 0
+
+            @property
+            def __class__(self):
+                self.reads += 1
+                return int
+
+        def owner(cls):
+            return cls
+
+        def fn(x):
+            proxy = Proxy()
+            descriptor = classmethod(owner)
+            bound = (
+                descriptor.__get__(proxy, None)
+                if explicit_none
+                else descriptor.__get__(proxy)
+            )
+            return x + proxy.reads, bound() is Proxy
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), (x, True))
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_opaque_class_lookup(self):
+        from torch._custom_class_base import CustomClassBase
+        from torch._library.opaque_object import (
+            register_custom_class,
+            unregister_custom_class,
+        )
+
+        class Opaque(CustomClassBase):
+            pass
+
+        register_custom_class(Opaque, typ="symbolic")
+        self.addCleanup(unregister_custom_class, Opaque)
+        obj = Opaque()
+
+        def fn(x, obj):
+            return (
+                x + 1,
+                obj.__class__ is Opaque,
+                getattr(obj, "__class__", None) is Opaque,
+                hasattr(obj, "__class__"),
+            )
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(compiled(x, obj), (x + 1, True, True, True))
+
+    def test_script_object_class_lookup(self):
+        profiler = torch.ops.profiler
+        obj = profiler._record_function_enter_new("class lookup")
+        self.addCleanup(profiler._record_function_exit._RecordFunction, obj)
+
+        def fn(x, obj):
+            return x + 1, obj.__class__ is torch.ScriptObject
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), (x + 1, True))
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+
     def test_getattr_with_default_exists(self):
         def fn():
             return getattr("hello", "__class__", None)
@@ -52,6 +121,334 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertIsNone(result)
+
+    @parametrize("case", ["present", "missing", "fallback", "descriptor"])
+    @parametrize("access", ["getattr", "hasattr"])
+    def test_class_lookup_calls_getter_once(self, case, access):
+        class Target:
+            pass
+
+        class Proxy:
+            def __init__(self):
+                self.reads = 0
+
+            @property
+            def __class__(self):
+                self.reads += 1
+                if case != "present":
+                    raise AttributeError("missing class")
+                return Target
+
+        class Fallback(Proxy):
+            def __getattr__(self, name):
+                if name == "__class__":
+                    self.reads += 1
+                    return Target
+                raise AttributeError(name)
+
+        class Descriptor:
+            def __get__(self, instance, owner):
+                instance.reads += 1
+                return Target
+
+        class DescriptorProxy:
+            __class__ = Descriptor()
+
+            def __init__(self):
+                self.reads = 0
+
+        cls = {"fallback": Fallback, "descriptor": DescriptorProxy}.get(case, Proxy)
+
+        def fn(x):
+            current = cls()
+            if access == "getattr":
+                result = getattr(current, "__class__", None) is Target
+            else:
+                result = hasattr(current, "__class__")
+            return x + current.reads, result
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(compiled(x), expected)
+        self.assertEqual(compiled(x), expected)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("access", ["getattr", "hasattr"])
+    @parametrize("change", ["fallback", "class_descriptor", "getattribute"])
+    def test_class_lookup_invalidates_cache(self, access, change):
+        class Present:
+            pass
+
+        class Missing:
+            @property
+            def __class__(self):
+                raise AttributeError("missing class")
+
+        base = Missing if change == "fallback" else Present
+
+        class Proxy(base):
+            pass
+
+        existing = Proxy()
+
+        def fn(x):
+            obj = existing if change == "getattribute" else Proxy()
+            if access == "getattr":
+                result = getattr(obj, "__class__", None)
+            else:
+                result = hasattr(obj, "__class__")
+            return x + 1, result
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
+        if change == "fallback":
+
+            def fallback(self, name):
+                if name == "__class__":
+                    return Present
+                raise AttributeError(name)
+
+            Proxy.__getattr__ = fallback
+        elif change == "class_descriptor":
+            Proxy.__bases__ = (Missing,)
+        elif change == "getattribute":
+
+            def getattribute(self, name):
+                if name == "__class__":
+                    return Missing
+                return object.__getattribute__(self, name)
+
+            Proxy.__getattribute__ = getattribute
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("hook", ["__getattribute__", "__getattr__", "descriptor"])
+    def test_class_lookup_invalidates_changed_hook_code(self, hook):
+        def getattribute(self, name):
+            if name == "__class__":
+                return type(self)
+            return object.__getattribute__(self, name)
+
+        def missing(self, name):
+            raise AttributeError(name)
+
+        def present(self, name):
+            return object
+
+        class WithGetattribute:
+            __getattribute__ = getattribute
+
+        class WithFallback:
+            @property
+            def __class__(self):
+                raise AttributeError("__class__")
+
+            __getattr__ = missing
+
+        class Descriptor:
+            def __get__(self, instance, owner):
+                return object
+
+        def replacement(self, instance, owner):
+            return type(instance)
+
+        class WithDescriptor:
+            __class__ = Descriptor()
+
+        cls, function, code = {
+            "__getattribute__": (WithGetattribute, getattribute, present.__code__),
+            "__getattr__": (WithFallback, missing, present.__code__),
+            "descriptor": (WithDescriptor, Descriptor.__get__, replacement.__code__),
+        }[hook]
+        existing = cls()
+
+        def fn(x):
+            obj = existing if hook == "__getattribute__" else cls()
+            return x + 1, getattr(obj, "__class__", None)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+        function.__code__ = code
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("discarded", [False, True])
+    @parametrize("shadowed", [False, True])
+    def test_class_lookup_invalidates_instance_shadow(self, discarded, shadowed):
+        class Target:
+            pass
+
+        class Alternate:
+            pass
+
+        class Descriptor:
+            def __get__(self, instance, owner):
+                if instance.check_class:
+                    raise AttributeError("__class__")
+                return Target
+
+        class Proxy:
+            __class__ = Descriptor()
+            check_class = False
+
+        obj = Proxy()
+
+        def fn(x, obj):
+            if discarded:
+                obj.check_class = True
+                try:
+                    obj.__class__
+                except AttributeError:
+                    return x + 2
+                finally:
+                    obj.check_class = False
+                return x + 1
+            return x + (getattr(obj, "__class__", None) is Alternate)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for idx, has_shadow in enumerate((shadowed, not shadowed, shadowed)):
+            if has_shadow:
+                obj.__dict__["__class__"] = Alternate
+            else:
+                obj.__dict__.pop("__class__", None)
+            self.assertEqual(compiled(x, obj), fn(x, obj))
+            self.assertEqual(compiled(x, obj), fn(x, obj))
+            self.assertEqual(counter.frame_count, min(idx + 1, 2))
+
+    @parametrize(
+        "case",
+        [
+            "plain",
+            "class_attribute",
+            "property",
+            "descriptor",
+            "getattribute",
+            "fallback",
+            "attribute_fallback",
+            "missing",
+            "shadowed",
+        ],
+    )
+    def test_user_defined_class_attribute(self, case):
+        class Target:
+            pass
+
+        class Plain:
+            pass
+
+        class ClassAttribute:
+            __class__ = Target
+
+        class Property:
+            @property
+            def __class__(self):
+                return Target
+
+        class Descriptor:
+            def __get__(self, instance, owner):
+                return Target if owner is DescriptorObject else None
+
+        class DescriptorObject:
+            __class__ = Descriptor()
+
+        class Getattribute:
+            def __getattribute__(self, name):
+                if name == "__class__":
+                    return Target
+                return object.__getattribute__(self, name)
+
+        class Missing:
+            @property
+            def __class__(self):
+                raise AttributeError("__class__")
+
+        class Fallback(Missing):
+            def __getattr__(self, name):
+                return Target
+
+        class AttributeFallback:
+            def __getattribute__(self, name):
+                if name == "__class__":
+                    raise AttributeError(name)
+                return object.__getattribute__(self, name)
+
+            def __getattr__(self, name):
+                return Target
+
+        objects = {
+            "plain": Plain(),
+            "class_attribute": ClassAttribute(),
+            "property": Property(),
+            "descriptor": DescriptorObject(),
+            "getattribute": Getattribute(),
+            "fallback": Fallback(),
+            "attribute_fallback": AttributeFallback(),
+            "shadowed": ClassAttribute(),
+        }
+        obj = objects.get(case)
+        if case == "shadowed":
+            obj.__dict__["__class__"] = Plain
+
+        expected_class = Plain if case in ("plain", "shadowed") else Target
+
+        def fn(x):
+            current = Missing() if case == "missing" else obj
+            try:
+                direct = current.__class__
+            except AttributeError:
+                direct = None
+            try:
+                explicit = getattr(current, "__class__")  # noqa: B009
+            except AttributeError:
+                explicit = None
+            return (
+                x + (1 if direct is expected_class else 2),
+                x + (1 if explicit is expected_class else 2),
+                x + (1 if getattr(current, "__class__", None) is expected_class else 2),
+                x + (1 if hasattr(current, "__class__") else 2),
+            )
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("access", ["getattr", "super"])
+    def test_getattribute_class_fallback(self, access):
+        class Proxy:
+            @property
+            def __class__(self):
+                raise AttributeError("missing class")
+
+            def __getattr__(self, name):
+                return int
+
+        def fn(x):
+            obj = Proxy()
+            try:
+                if access == "getattr":
+                    cls = getattr(obj, "__class__")  # noqa: B009
+                else:
+                    cls = super(Proxy, obj).__getattribute__("__class__")
+            except AttributeError as error:
+                return x + 2, str(error)
+            return x + (1 if cls is int else 3), "no error"
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     # --- hasattr() builtin ---
 

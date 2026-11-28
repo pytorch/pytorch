@@ -6504,6 +6504,580 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
+    def test_super_init_reinitializes(self):
+        class Base:
+            def value(self, x):
+                return x + 1
+
+        class Derived(Base):
+            pass
+
+        def fn(x):
+            obj = Derived()
+            super_obj = super(Base, obj)
+            super.__init__(super_obj, Derived, obj)
+            return super_obj.value(x)
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_super_init_reinitializes_existing_object(self):
+        class Base:
+            pass
+
+        class Derived(Base):
+            pass
+
+        def fn(x, super_obj, obj):
+            super.__init__(super_obj, Derived, obj)
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager")
+        x = torch.ones(1)
+        for _ in range(2):
+            obj = Derived()
+            super_obj = super(Base, obj)
+            self.assertEqual(compiled(x, super_obj, obj), x + 1)
+            self.assertIs(super_obj.__thisclass__, Derived)
+
+    @parametrize("fullgraph", [False, True])
+    def test_super_init_preserves_bound_methods(self, fullgraph):
+        class Base:
+            def __init__(self, offset):
+                self.offset = offset
+
+            def value(self, x):
+                return x + self.offset
+
+        class Derived(Base):
+            def value(self, x):
+                return x + 2 * self.offset
+
+        class Leaf(Derived):
+            pass
+
+        def fn(x):
+            first, second = Leaf(1), Leaf(3)
+            super_obj = super(Leaf, first)
+            alias = super_obj
+            method = super_obj.value
+            before = method(x)
+            super.__init__(alias, Derived, second)
+            rebound = super_obj.value(x)
+            super.__init__(super_obj, Leaf, second)
+            if not fullgraph:
+                torch._dynamo.graph_break()
+            return before, rebound, alias.value(x), method(x), method
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=fullgraph)
+        x = torch.ones(1)
+        expected = fn(x)
+        actual = compiled(x)
+        self.assertEqual(actual[:-1], expected[:-1])
+        self.assertEqual(actual[-1](x), expected[-1](x))
+        frame_count = counter.frame_count
+        self.assertGreater(frame_count, 0)
+        expected = fn(x + 1)
+        actual = compiled(x + 1)
+        self.assertEqual(actual[:-1], expected[:-1])
+        self.assertEqual(actual[-1](x), expected[-1](x))
+        self.assertEqual(counter.frame_count, frame_count)
+
+    @parametrize("local", [False, True])
+    def test_super_init_in_cond(self, local):
+        class Base:
+            def value(self, x):
+                return x + 1
+
+        class Derived(Base):
+            def value(self, x):
+                return x + 2
+
+        class Leaf(Derived):
+            pass
+
+        def fn(pred, x):
+            obj = Leaf()
+            outer = super(Leaf, obj)
+
+            def true_fn(x):
+                inner = super(Leaf, obj) if local else outer
+                super.__init__(inner, Derived, obj)
+                return inner.value(x)
+
+            def false_fn(x):
+                return outer.value(x)
+
+            return torch.cond(pred, true_fn, false_fn, (x,))
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        if local:
+            self.assertEqual(compiled(torch.tensor(True), x), x + 1)
+            self.assertEqual(compiled(torch.tensor(False), x), x + 2)
+        else:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "HOP: Unsafe side effect",
+            ):
+                compiled(torch.tensor(False), x)
+
+    @parametrize("case", ["constructor", "instance", "classmethod", "cell", "none"])
+    def test_super_init_without_arguments(self, case):
+        class Base:
+            def value(self, x):
+                return x + 1
+
+        class Derived(Base):
+            def value(self, x):
+                if case == "constructor":
+                    return super().value(x)
+                super_obj = super(Base, self)
+                if case == "none":
+                    self = None
+                super.__init__(super_obj)
+                if case == "none":
+                    return x + 1, super_obj
+                return super_obj.value(x)
+
+            @classmethod
+            def class_value(cls, x):
+                super_obj = super(Base, cls)
+                super.__init__(super_obj)
+                return super_obj.value(cls, x)
+
+            def cell_value(self, x):
+                def get_self():
+                    return self
+
+                super_obj = super(Base, get_self())
+                super.__init__(super_obj)
+                return super_obj.value(x)
+
+        def fn(x):
+            if case == "classmethod":
+                return Derived.class_value(x)
+            if case == "cell":
+                return Derived().cell_value(x)
+            return Derived().value(x)
+
+        x = torch.ones(1)
+        if case == "none":
+            result, sp = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(result, x + 1)
+            self.assertIsNone(sp.__self__)
+            self.assertIsNone(sp.__self_class__)
+            return
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_super_init_without_arguments_pruned_receiver(self):
+        class Base:
+            def value(self, x):
+                return x + self.amount
+
+        class Derived(Base):
+            def __init__(self, amount):
+                self.amount = amount
+
+            def reinit(self, x):
+                sp = super(Base, Base())
+                super.__init__(sp)
+                return sp.value(x)
+
+        compiled = torch.compile(Derived.reinit, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(Derived(2), x), x + 2)
+        self.assertEqual(compiled(Derived(3), x), x + 3)
+
+    @parametrize("create_before_break", [False, True])
+    def test_super_init_without_arguments_after_graph_break(self, create_before_break):
+        class Base:
+            def value(self, x):
+                return x + 1
+
+        class Derived(Base):
+            def reinit(self, x):
+                if create_before_break:
+                    sp = super(Base, self)
+                x = x + 1
+                torch._dynamo.graph_break()
+                if not create_before_break:
+                    sp = super(Base, self)
+                super.__init__(sp)
+                return sp.value(x)
+
+        x = torch.ones(1)
+        obj = Derived()
+        compiled = torch.compile(obj.reinit, backend="eager")
+        self.assertEqual(compiled(x), obj.reinit(x))
+        self.assertEqual(compiled(x), x + 2)
+
+    @parametrize(
+        "case",
+        [
+            "no_arguments",
+            "missing_class",
+            "deleted",
+            "deleted_cell",
+            "non_type",
+            "empty_class",
+        ],
+    )
+    def test_super_init_without_arguments_errors(self, case):
+        class Base:
+            def value(self, x):
+                return x + 1
+
+        class Derived(Base):
+            def value(self, x):
+                # Make self a cell variable.
+                def get_self():
+                    return self
+
+                super_obj = super(Derived, self)
+                del self
+                try:
+                    super.__init__(super_obj)
+                except RuntimeError as error:
+                    return super_obj.value(x), str(error)
+                return x, "no error"
+
+            def deleted_value(self, x):
+                super_obj = super(Derived, self)
+                del self
+                try:
+                    super.__init__(super_obj)
+                except RuntimeError as error:
+                    return super_obj.value(x), str(error)
+                return x, "no error"
+
+        x = torch.ones(1)
+
+        def no_arguments():
+            super_obj = super(Derived, Derived())
+            try:
+                super.__init__(super_obj)
+            except RuntimeError as error:
+                return super_obj.value(x), str(error)
+            return x, "no error"
+
+        super_type = super
+
+        def missing_class(x):
+            super_obj = super_type(Derived, Derived())
+            try:
+                super_type.__init__(super_obj)
+            except RuntimeError as error:
+                return super_obj.value(x), str(error)
+            return x, "no error"
+
+        def make_invalid_class():
+            __class__ = 1
+
+            def invalid_class(x):
+                super_obj = super(Derived, Derived())
+                try:
+                    super.__init__(super_obj)
+                except RuntimeError as error:
+                    return super_obj.value(x), str(error)
+                return x, "no error"
+
+            if case == "empty_class":
+                del __class__
+            return invalid_class
+
+        if case == "no_arguments":
+            fn, args = no_arguments, ()
+        elif case == "missing_class":
+            fn, args = missing_class, (x,)
+        elif case in ("non_type", "empty_class"):
+            fn, args = make_invalid_class(), (x,)
+        elif case == "deleted_cell":
+            fn, args = Derived().value, (x,)
+        else:
+            fn, args = Derived().deleted_value, (x,)
+        expected = fn(*args)
+        self.assertNotEqual(expected[1], "no error")
+        if case == "missing_class":
+            self.assertEqual(expected[1], "super(): __class__ cell not found")
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(*args), expected
+        )
+
+    @parametrize("fullgraph", [False, True])
+    def test_super_init_deferred_class(self, fullgraph):
+        from torch._dynamo.variables.user_defined import UserDefinedObjectVariable
+
+        class Base:
+            pass
+
+        class Derived(Base):
+            pass
+
+        class Proxy:
+            @property
+            def __class__(self):
+                return Derived
+
+        def fn(x, obj):
+            super_obj = super(Base, Derived())
+            try:
+                super.__init__(super_obj, Derived, obj)
+            except TypeError:
+                return x + 2
+            return x + 1
+
+        getattro = UserDefinedObjectVariable.tp_getattro_impl
+
+        def deferred_getattro(obj, tx, name):
+            if type(obj.value) is Proxy and name == "__class__":
+                raise NotImplementedError
+            return getattro(obj, tx, name)
+
+        x, obj = torch.ones(1), Proxy()
+        expected = fn(x, obj)
+        with patch.object(
+            UserDefinedObjectVariable, "tp_getattro_impl", deferred_getattro
+        ):
+            compiled = torch.compile(fn, backend="eager", fullgraph=fullgraph)
+            if fullgraph:
+                with self.assertRaisesRegex(Unsupported, "unresolved __class__"):
+                    compiled(x, obj)
+            else:
+                self.assertEqual(compiled(x, obj), expected)
+
+    @parametrize(
+        "case",
+        [
+            "non_type",
+            "instance",
+            "class",
+            "metaclass",
+            "missing_class",
+            "shadowed_class",
+        ],
+    )
+    def test_super_init_invalid_arguments(self, case):
+        class Base:
+            def value(self, x):
+                return x + 1
+
+        class Derived(Base):
+            pass
+
+        class PermissiveMeta(type):
+            def __subclasscheck__(cls, subclass):
+                return True
+
+        class Unrelated(metaclass=PermissiveMeta):
+            pass
+
+        class MissingClass:
+            @property
+            def __class__(self):
+                raise AttributeError("__class__")
+
+        class ShadowedClass:
+            __class__ = Base
+
+        shadowed_obj = ShadowedClass()
+        shadowed_obj.__dict__["__class__"] = MissingClass
+
+        def fn(x):
+            obj = Derived()
+            super_obj = super(Derived, obj)
+            if case == "non_type":
+                args = (1, obj)
+            elif case == "instance":
+                args = (int, obj)
+            elif case == "class":
+                args = (int, Derived)
+            elif case == "missing_class":
+                args = (int, MissingClass())
+            elif case == "shadowed_class":
+                args = (Base, shadowed_obj)
+            else:
+                args = (Unrelated, obj)
+            try:
+                super.__init__(super_obj, *args)
+            except TypeError as error:
+                return super_obj.value(x), str(error)
+            return x + 2, "no error"
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertNotEqual(expected[1], "no error")
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
+    @parametrize(
+        "case",
+        [
+            "class",
+            "metaclass",
+            "tensor",
+            "none",
+            "unbound",
+            "proxy",
+            "getattribute",
+            "class_attribute",
+            "descriptor",
+            "fallback",
+            "attribute_fallback",
+        ],
+    )
+    @parametrize("fullgraph", [False, True])
+    def test_super_init_valid_arguments(self, case, fullgraph):
+        class Base:
+            pass
+
+        class Derived(Base):
+            pass
+
+        class Proxy:
+            @property
+            def __class__(self):
+                return Derived
+
+        class AttributeProxy:
+            def __getattribute__(self, name):
+                if name == "__class__":
+                    return Derived
+                return object.__getattribute__(self, name)
+
+        class PlainProxy:
+            __class__ = Derived
+
+        class ClassDescriptor:
+            def __get__(self, instance, owner):
+                return Derived
+
+        class DescriptorProxy:
+            __class__ = ClassDescriptor()
+
+        class FallbackProxy:
+            @property
+            def __class__(self):
+                raise AttributeError("__class__")
+
+            def __getattr__(self, name):
+                return Derived
+
+        class AttributeFallbackProxy:
+            def __getattribute__(self, name):
+                if name == "__class__":
+                    raise AttributeError(name)
+                return object.__getattribute__(self, name)
+
+            def __getattr__(self, name):
+                return Derived
+
+        attribute_proxy = AttributeProxy()
+        attribute_fallback = AttributeFallbackProxy()
+
+        def fn(x):
+            super_obj = super(Base, Derived())
+            if case == "class":
+                args = (Base, Derived)
+            elif case == "metaclass":
+                args = (type, Derived)
+            elif case == "unbound":
+                args = (Base,)
+            elif case == "getattribute":
+                args = (Base, attribute_proxy)
+            elif case == "class_attribute":
+                args = (Base, PlainProxy())
+            elif case == "descriptor":
+                args = (Base, DescriptorProxy())
+            elif case == "fallback":
+                args = (Base, FallbackProxy())
+            elif case == "attribute_fallback":
+                args = (Base, attribute_fallback)
+            elif case == "tensor":
+                args = (torch.Tensor, x)
+            elif case == "none":
+                args = (Base, None)
+            else:
+                args = (Base, Proxy())
+            super.__init__(super_obj, *args)
+            return x + 1, super_obj
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=fullgraph)
+        if fullgraph and case in (
+            "proxy",
+            "getattribute",
+            "class_attribute",
+            "descriptor",
+            "fallback",
+            "attribute_fallback",
+        ):
+            with self.assertRaisesRegex(Unsupported, "super.*proxy __class__"):
+                compiled(x)
+        else:
+            actual, actual_super = compiled(x)
+            expected, expected_super = fn(x)
+            self.assertEqual(actual, expected)
+            self.assertIs(actual_super.__thisclass__, expected_super.__thisclass__)
+            self.assertIs(actual_super.__self_class__, expected_super.__self_class__)
+            if case in ("class", "metaclass", "tensor", "none", "unbound"):
+                self.assertIs(actual_super.__self__, expected_super.__self__)
+
+    def test_super_init_proxy_preserves_class(self):
+        class Base:
+            def value(self, x):
+                return x + 1
+
+        class Derived(Base):
+            pass
+
+        class Proxy:
+            def __init__(self):
+                self.target = Derived
+
+            @property
+            def __class__(self):
+                return self.target
+
+        def fn(x, obj):
+            super_obj = super(Base, Derived())
+            super.__init__(super_obj, Derived, obj)
+            obj.target = Base
+            return super_obj.value(x), super_obj
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=False)
+        x = torch.ones(1)
+        for _ in range(2):
+            obj = Proxy()
+            result, super_obj = compiled(x, obj)
+            self.assertEqual(result, x + 1)
+            self.assertIs(super_obj.__self__, obj)
+            self.assertIs(super_obj.__self_class__, Derived)
+
+    @parametrize(
+        "name", ["value", "__class__", "__self__", "__self_class__", "__thisclass__"]
+    )
+    def test_super_init_existing_attributes(self, name):
+        class Base:
+            def value(self, x):
+                return x + 1
+
+        class Derived(Base):
+            pass
+
+        obj = super(Derived, Derived())
+
+        def fn(x):
+            result = getattr(obj, name)
+            return result(x) if name == "value" else (x + 1, result)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x), fn(x))
+
     def test_usr_cls_staticmethod(self):
         class Foo:
             @staticmethod

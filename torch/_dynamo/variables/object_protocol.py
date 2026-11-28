@@ -2678,6 +2678,13 @@ def generic_getattr(
 
     # Handle default for getattr(obj, name, default).
     if default is not _NO_DEFAULT:
+        if name == "__class__" and obj.lookup_tp_getset_member(name) is not None:
+            # A custom class getter can have side effects, so look it up once.
+            try:
+                return generic_getattr(tx, obj, name)
+            except ObservedAttributeError:
+                handle_observed_exception(tx)
+                return default  # type: ignore[return-value]
         if not generic_hasattr_str(tx, obj, name):
             return default  # type: ignore[return-value]
 
@@ -2733,6 +2740,7 @@ def generic_hasattr_str(
         except NotImplementedError:
             pass
 
+    class_lookup = name == "__class__" and obj.lookup_tp_getset_member(name) is not None
     try:
         # generic_getattr, not tp_getattro_impl, so pending in-frame stores
         # and tp_getset/tp_members resolve the same way getattr() sees them.
@@ -2753,13 +2761,15 @@ def generic_hasattr_str(
             # call that __getattr__, and it may mutate the object
             # (tempfile._TemporaryFileWrapper caches into __dict__). The traced
             # __getattr__ already guarded its own reads.
-            found_by_user_getattr = (
+            if class_lookup:
+                # Realize a lazy instance shadow so deletion invalidates the result.
+                value.realize()
+            elif obj.source and not (
                 isinstance(obj, variables.UserDefinedObjectVariable)
                 and isinstance(obj._check_for_getattr(), types.FunctionType)
                 and inspect.getattr_static(obj.value, name, NO_SUCH_SUBOBJ)
                 is NO_SUCH_SUBOBJ
-            )
-            if obj.source and not found_by_user_getattr:
+            ):
                 install_guard(
                     obj.source.make_guard(
                         functools.partial(GuardBuilder.HASATTR, attr=name)
@@ -2770,7 +2780,7 @@ def generic_hasattr_str(
         tx.exn_vt_stack.clear_current_exception()
         # No CPython analogue. A False answer rests on the attribute staying
         # absent, and nothing else guards that.
-        if obj.source:
+        if obj.source and not class_lookup:
             install_guard(
                 obj.source.make_guard(
                     functools.partial(GuardBuilder.HASATTR, attr=name)
