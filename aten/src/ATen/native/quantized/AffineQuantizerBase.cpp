@@ -123,14 +123,23 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   // cases away from zero, and can be consistent with SIMD implementations for
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
-  int64_t qvalue;
   constexpr int64_t qmin = std::numeric_limits<typename T::underlying>::min();
   constexpr int64_t qmax = std::numeric_limits<typename T::underlying>::max();
   float inv_scale = 1.0f / static_cast<float>(scale);
-  qvalue = static_cast<int64_t>(zero_point + std::nearbyint(value * inv_scale));
-  qvalue = std::max<int64_t>(qvalue, qmin);
-  qvalue = std::min<int64_t>(qvalue, qmax);
-  return static_cast<T>(qvalue);
+  const float qvalue =
+      static_cast<float>(zero_point) + std::nearbyint(value * inv_scale);
+
+  // Keep the value in range before converting from floating point to an
+  // integer. Converting an out-of-range float (including NaN or infinity) to
+  // int64_t is undefined behavior and can turn a large positive value into
+  // the minimum representable integer before the clamp below.
+  if (!(qvalue > static_cast<float>(qmin))) {
+    return static_cast<T>(qmin);
+  }
+  if (!(qvalue < static_cast<float>(qmax))) {
+    return static_cast<T>(qmax);
+  }
+  return static_cast<T>(static_cast<int64_t>(qvalue));
 }
 
 template <typename T>

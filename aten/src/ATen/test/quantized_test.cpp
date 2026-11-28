@@ -92,6 +92,19 @@ TEST(TestQTensor, RoundingMode) {
   }
 }
 
+#ifndef USE_FBGEMM
+TEST(TestQTensor, QuantizeValClampsBeforeIntegerConversion) {
+  // Values outside int64_t used to be converted before clamping, which is
+  // undefined behavior and produced -128 for large positive qint8 inputs.
+  EXPECT_EQ(
+      native::quantize_val<qint8>(1.0, 0, 1.0e19f).val_,
+      std::numeric_limits<int8_t>::max());
+  EXPECT_EQ(
+      native::quantize_val<qint8>(1.0, 0, -1.0e19f).val_,
+      std::numeric_limits<int8_t>::min());
+}
+#endif
+
 TEST(TestQTensor, Item) {
   Tensor r = at::ones({1});
   const float scale = 1;
