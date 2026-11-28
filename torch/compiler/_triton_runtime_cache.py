@@ -192,25 +192,32 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
                 group = _member_name(name.removeprefix("__grp__"))
                 entry = _read_json(path, path.read_bytes())
                 children = entry.get("child_paths") if isinstance(entry, dict) else None
-                if not isinstance(children, dict) or group not in children:
+                if not isinstance(children, (dict, list)) or group not in children:
                     raise RuntimeError(f"Incomplete Triton runtime-cache group: {path}")
                 members = list(children)
-                if not any(member.endswith(_BINARY_SUFFIXES) for member in members):
+                if len(members) != len(set(members)) or not any(
+                    isinstance(member, str) and member.endswith(_BINARY_SUFFIXES)
+                    for member in members
+                ):
                     raise RuntimeError(
                         f"Triton runtime-cache group has no compiled binary: {path}"
                     )
-                for member, original in children.items():
-                    member = _member_name(member)
-                    # Triton records paths under knobs.cache.dir, which may
-                    # spell the same directory differently.
-                    if not isinstance(original, str) or os.path.normpath(
-                        original
-                    ) != os.path.normpath(directory / member):
-                        raise RuntimeError(
-                            f"Triton runtime-cache group points outside its entry: "
-                            f"{path}"
-                        )
-                    add_file(key, member)
+                if isinstance(children, dict):
+                    for member, original in children.items():
+                        member = _member_name(member)
+                        # Triton records paths under knobs.cache.dir, which may
+                        # spell the same directory differently.
+                        if not isinstance(original, str) or os.path.normpath(
+                            original
+                        ) != os.path.normpath(directory / member):
+                            raise RuntimeError(
+                                f"Triton runtime-cache group points outside its entry: "
+                                f"{path}"
+                            )
+                        add_file(key, member)
+                else:
+                    for member in members:
+                        add_file(key, _member_name(member))
                 consumed.update(members)
                 consumed.add(name)
                 records.append(
@@ -372,6 +379,12 @@ def _group_matches(path: Path, root: Path, record: dict[str, Any]) -> bool:
     group = _read_json(path, path.read_bytes())
     children = group.get("child_paths") if isinstance(group, dict) else None
     expected = {name: root / record["key"] / name for name in record["members"]}
+    if isinstance(children, list):
+        return (
+            len(children) == len(expected)
+            and all(isinstance(child, str) for child in children)
+            and set(children) == expected.keys()
+        )
     # Triton records paths under knobs.cache.dir, which may spell the same
     # directory differently.
     return (
@@ -387,10 +400,7 @@ def _group_matches(path: Path, root: Path, record: dict[str, Any]) -> bool:
 
 def _group_contents(root: Path, record: dict[str, Any]) -> str:
     # The layout FileCacheManager.put_group writes; get_group checks each path.
-    key = record["key"]
-    return json.dumps(
-        {"child_paths": {name: str(root / key / name) for name in record["members"]}}
-    )
+    return json.dumps({"child_paths": sorted(record["members"])})
 
 
 def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:

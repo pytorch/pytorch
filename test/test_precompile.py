@@ -6920,6 +6920,52 @@ class TestTritonRuntimeCacheTransport(TestCase):
                     },
                 )
 
+    @parametrize("group_format", ("list", "dict"))
+    def test_roundtrip_accepts_list_and_dict_child_paths(self, group_format):
+        from triton.runtime.cache import get_cache_manager
+
+        from torch.compiler._triton_runtime_cache import (
+            export_runtime_cache,
+            import_runtime_cache,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            producer = pathlib.Path(tmp, "producer")
+            consumer = pathlib.Path(tmp, "consumer")
+            with _triton_cache_namespace(producer):
+                key, _ = _write_triton_runtime_entries()
+                entry = producer / key
+                group = entry / "__grp__kernel.json"
+                members = ["kernel.cubin", "kernel.json"]
+                if group_format == "list":
+                    child_paths: list[str] | dict[str, str] = members
+                else:
+                    child_paths = {name: str(entry / name) for name in members}
+                group.write_text(json.dumps({"child_paths": child_paths}))
+                bundle = export_runtime_cache(context=self.CONTEXT)
+            with _triton_cache_namespace(consumer):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                # Re-importing exercises _group_matches against the hydrated group.
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                self.assertEqual(
+                    get_cache_manager("ab" * 32).get_group("kernel.json"),
+                    {name: str(consumer / key / name) for name in members},
+                )
+
+    def test_export_rejects_duplicate_list_group_members(self):
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
+            key, _ = _write_triton_runtime_entries()
+            group = pathlib.Path(tmp, key, "__grp__kernel.json")
+            group.write_text(
+                json.dumps(
+                    {"child_paths": ["kernel.cubin", "kernel.cubin", "kernel.json"]}
+                )
+            )
+            with self.assertRaisesRegex(RuntimeError, "no compiled binary"):
+                export_runtime_cache(context=self.CONTEXT)
+
     def test_export_leaves_out_excluded_keys(self):
         from triton.runtime.cache import get_cache_manager
 
@@ -7301,6 +7347,8 @@ class TestTritonRuntimeCacheTransport(TestCase):
             entry = pathlib.Path(tmp, key)
             group = entry / "__grp__kernel.json"
             children = json.loads(group.read_text())["child_paths"]
+            if isinstance(children, list):
+                children = {name: str(entry / name) for name in children}
             if damage == "missing_binary":
                 (entry / "kernel.cubin").unlink()
                 error = "Incomplete Triton runtime-cache entry"
