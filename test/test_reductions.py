@@ -24,7 +24,7 @@ from torch.testing._internal.common_utils import (
     gradcheck, gradgradcheck,
     skipIfMPS,
     skipIfTorchDynamo, HardwareClassification,
-    IS_WINDOWS)
+    IS_WINDOWS, isRocmArchAnyOf, MI450_ARCH)
 from torch.testing._internal.common_device_type import (
     OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
     dtypesIfCPU, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
@@ -733,6 +733,84 @@ class TestReductionsDevice(TestCase):
 
         test((10,))
         test((5, 5))
+
+    @onlyCUDA
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.half, torch.bfloat16, torch.int16)
+    def test_all_any_contiguous_rows(self, device, dtype):
+        # any/all along the contiguous dim at row widths around the vectorized
+        # load widths, compared exactly with CPU. A vectorized row reduces its
+        # unaligned head and its tail one element per lane, so the single nonzero
+        # (or zero) of a row is placed at each of the first and last 16 columns,
+        # in rows that start at several offsets from a 16-byte boundary.
+        def at_offset(t, offset):
+            return torch.cat([t.new_zeros(offset), t.flatten()])[offset:].view_as(t)
+
+        def check(x_cpu, name, dims=(-1, 0)):
+            x = x_cpu.to(device)
+            for dim in dims:
+                for op in (torch.any, torch.all):
+                    expected = op(x_cpu, dim)
+                    expected_keepdim = op(x_cpu, dim, keepdim=True)
+                    for offset in (0, 1, 7, 15):
+                        t = at_offset(x, offset)
+                        msg = f"{op.__name__} {name} {tuple(x.shape)} {dim=} {offset=}"
+                        self.assertEqual(op(t, dim), expected, atol=0, rtol=0, msg=msg)
+                        self.assertEqual(op(t, dim, keepdim=True), expected_keepdim, atol=0, rtol=0, msg=f"{msg} keepdim")
+
+        torch.manual_seed(0)
+        shapes = [(4096, 256), (1024, 1280), (512, 8192), (64, 8193), (3, 17), (5, 1)]
+        shapes += [(64, cols) for cols in (63, 64, 65, 127, 128, 129, 135, 136, 143, 144, 160, 200, 241, 249, 250, 255, 256, 257, 271, 300)]
+        for rows, cols in shapes:
+            edges = sorted(set(range(min(cols, 16))) | set(range(max(cols - 16, 0), cols)))
+            # Row r has its nonzero at column r % cols, then each edge column has
+            # 16 rows of its own (16 different row alignments for an odd width),
+            # and the last row is all zero.
+            hot = torch.cat([torch.arange(rows) % cols, torch.tensor(edges).repeat_interleave(16)])
+            sparse = torch.zeros(hot.numel() + 1, cols, dtype=torch.uint8)
+            sparse[torch.arange(hot.numel()), hot] = 1
+            dense = (torch.rand(rows, cols) > 0.5).to(torch.uint8)
+            for name, base in (("one nonzero per row", sparse), ("one zero per row", 1 - sparse), ("dense", dense)):
+                check(base.to(dtype), name)
+
+        # A single row, split across blocks, and the same row reduced without a dim.
+        for cols in (256, 4096, 8193):
+            for col in (*range(16), cols // 2, *range(cols - 16, cols)):
+                row = torch.zeros(1, cols, dtype=torch.uint8)
+                row[0, col] = 1
+                for name, base in ((f"single row, nonzero at {col}", row), (f"single row, zero at {col}", 1 - row)):
+                    x_cpu = base.to(dtype)
+                    check(x_cpu, name, dims=(-1,))
+                    for op, offset in product((torch.any, torch.all), (0, 1)):
+                        self.assertEqual(op(at_offset(x_cpu.to(device), offset)), op(x_cpu), msg=f"{op.__name__} {name} no dim {offset=}")
+
+        # Regression: rows of 129 whose only nonzero is in column 0, the unaligned head.
+        col0 = torch.zeros(64, 129, dtype=dtype, device=device)
+        col0[:, 0] = 1
+        self.assertTrue(torch.any(col0, 1).all())
+
+        for op in (torch.any, torch.all):
+            empty = torch.zeros(4, 0, dtype=dtype, device=device)
+            self.assertEqual(op(empty, -1), op(empty.cpu(), -1))
+        if dtype == torch.bool:
+            # Bool bytes other than 0 and 1 read as True.
+            raw = torch.randint(0, 256, (64, 300), dtype=torch.uint8)
+            raw[::2] = raw[::2] * (raw[::2] > 200)
+            for op in (torch.any, torch.all):
+                self.assertEqual(op(raw.to(device).view(torch.bool), -1), op(raw != 0, -1), atol=0, rtol=0)
+        if dtype.is_floating_point:
+            # -0 is False; NaN, inf and denormals are True.
+            special = torch.zeros(5, 512, dtype=dtype)
+            special[0] = -0.0
+            special[1, 300] = float("nan")
+            special[2, 511] = float("-inf")
+            # gfx1250 reads a bf16 denormal as zero in any/all (also without the
+            # vectorized loads), so that row is left out there.
+            if dtype == torch.half or not isRocmArchAnyOf(MI450_ARCH):
+                special[3, 7] = torch.finfo(dtype).tiny / 2
+            special[4] = 1.0
+            special[4, 0] = -0.0
+            for op in (torch.any, torch.all):
+                self.assertEqual(op(special.to(device), -1), op(special, -1), atol=0, rtol=0)
 
     def test_all_any_with_dim(self, device):
         def test(x):

@@ -1113,7 +1113,13 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   // threads with different threadIdx.x are independent and will produce results for different outputs.
   // In such case, values in each loaded vector always correspond to different outputs.
   if (fastest_moving_stride == sizeof(scalar_t)) {
-    if (reduction_on_fastest_striding_dimension && dim0 >= 128 && iter.num_reduce_dims() == 1) {
+    // input_vectorized_thread_reduce_impl reduces the unaligned head and tail
+    // of a row one element per lane, so a row needs at least input_vec_size
+    // vectors.
+    constexpr int64_t min_vectorized_dim0 =
+        std::max<int64_t>(128, int64_t{input_vec_size} * input_vec_size);
+    if (reduction_on_fastest_striding_dimension &&
+        dim0 >= min_vectorized_dim0 && iter.num_reduce_dims() == 1) {
       // Case 1: "vectorize along input"
       // Note that if vt0 < ReduceConfig::vec_size, then this means the register pressure could be high, in such case,
       // we should avoid vectorization.
