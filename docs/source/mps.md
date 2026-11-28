@@ -25,6 +25,8 @@
     current_allocated_memory
     driver_allocated_memory
     recommended_max_memory
+    set_memory_budget
+    get_memory_budget
     compile_shader
     load_metallib
 ```
