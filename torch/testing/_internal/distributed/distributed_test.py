@@ -8497,9 +8497,12 @@ class DistributedTest:
 
             # Create a valid model. The constructor initializes the logger that we use later.
             # We never actually use the rest of the model - we only need its logger.
-            net = EmbeddingNetDifferentParams(0)
+            net = EmbeddingNetDifferentParams(0).to(self.rank)
+            # Device context creation can take seconds on one rank, so line the
+            # ranks up before DDP runs its first collective on the 5s group.
+            dist.barrier(group_gloo)
             net = torch.nn.parallel.DistributedDataParallel(
-                net.to(self.rank),
+                net,
                 device_ids=[self.rank],
                 process_group=group_to_use,
             )
@@ -8547,9 +8550,12 @@ class DistributedTest:
             torch.cuda.set_device(self.rank)
 
             # Create a valid model. The constructor initializes the logger that we use later.
-            net = EmbeddingNetDifferentParams(0)
+            net = EmbeddingNetDifferentParams(0).to(self.rank)
+            # Device context creation can take seconds on one rank, so line the
+            # ranks up before DDP runs its first collective on the 5s group.
+            dist.barrier(group_gloo)
             net = torch.nn.parallel.DistributedDataParallel(
-                net.to(self.rank),
+                net,
                 device_ids=[self.rank],
                 process_group=group_to_use,
             )
