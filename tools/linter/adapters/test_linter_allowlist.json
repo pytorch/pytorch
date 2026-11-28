@@ -425,7 +425,6 @@
   "test/inductor/test_origami.py",
   "test/inductor/test_pad_as_cat.py",
   "test/inductor/test_pad_mm.py",
-  "test/inductor/test_padding.py",
   "test/inductor/test_pallas.py",
   "test/inductor/test_pattern_matcher.py",
   "test/inductor/test_perf.py",
