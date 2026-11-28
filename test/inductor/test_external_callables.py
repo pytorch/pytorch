@@ -1,12 +1,10 @@
 # Owner(s): ["module: inductor"]
-import unittest
-
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import HAS_TRITON
+from torch.testing._internal.inductor_utils import requires_triton
 
 
 class MatMulModule(torch.nn.Module):
@@ -85,7 +83,7 @@ class TestInductorExternalCallableAccelerator(TestCase):
         super().tearDown()
         config.load_config(self._saved_config)
 
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @requires_triton()
     def test_matmul_accelerator(self, device):
         x = (torch.eye(128, 128) * 2).to(device=device)
         opt_fn = torch.compile(
