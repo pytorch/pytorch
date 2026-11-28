@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTIO
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
+    onlyOn,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -2482,26 +2483,6 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertGreater(len(torch.cuda.memory.memory_snapshot(pool.id)), 0)
         self.assertEqual(pool.use_count(), 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_mem_pool_id(self):
-        def fn(pool):
-            return pool.id
-
-        pool = torch.cuda.MemPool()
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(pool), pool.id)
-
-    @unittest.skipIf(not torch.xpu.is_available(), "requires xpu")
-    def test_xpu_mem_pool_id(self):
-        # Exercise the XPU arm of builder's MemPool wrapping; runs in the
-        # ciflow/xpu jobs.
-        def fn(pool):
-            return pool.id
-
-        pool = torch.xpu.MemPool()
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(pool), pool.id)
-
     # NOTE: torch.xpu.use_mem_pool is not yet traceable under torch.compile
     # (inductor support deferred to a follow-up PR); its compile-path tests
     # land together with that support.
@@ -2526,6 +2507,28 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             r"torch.cuda.use_mem_pool\(\) got a torch.xpu.MemPool argument",
         ):
             opt_fn(xpu_pool)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_use_mem_pool_device_type_mismatch_on_single_device(self):
+        # The mismatch branch compares the wrapped pool's device type against
+        # the entry point's: patch pool_device_type to type a CUDA pool as
+        # XPU so the branch runs without dual hardware.
+        pool = torch.cuda.MemPool()
+
+        def fn(pool):
+            with torch.cuda.use_mem_pool(pool):
+                return torch.ones(16, device="cuda") + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with mock.patch(
+            "torch._dynamo.variables.builder.pool_device_type",
+            return_value="xpu",
+        ):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                r"torch.cuda.use_mem_pool\(\) got a torch.xpu.MemPool argument",
+            ):
+                opt_fn(pool)
 
     @requires_cuda_and_triton
     def test_cuda_use_mem_pool_context_manager_inductor(self):
@@ -4161,6 +4164,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertTrue(res[0].dtype == torch.float16)
         self.assertTrue(res[1].dtype == torch.float16)
 
+    @onlyOn(["cuda", "xpu"])
     def test_mempool_begin_end_through_device_interface(self, device):
         # Drive mempool::begin/mempool::end directly, without Dynamo's
         # use_mem_pool wrapper.
@@ -4198,6 +4202,19 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
             device_module.synchronize()
         # end must release the reference begin took (use_count back to 1).
         self.assertEqual(pool.use_count(), 1)
+
+    @onlyOn(["cuda", "xpu"])
+    def test_mem_pool_id(self, device):
+        # Exercise builder's MemPool wrapping for each registered backend;
+        # the XPU arm runs in the ciflow/xpu jobs.
+        device_module = torch.get_device_module(torch.device(device).type)
+
+        def fn(pool):
+            return pool.id
+
+        pool = device_module.MemPool()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(pool), pool.id)
 
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
