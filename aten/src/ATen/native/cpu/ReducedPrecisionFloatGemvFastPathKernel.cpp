@@ -257,7 +257,28 @@ vec::Vectorized<float> fmadd(vec::Vectorized<float> a, vec::Vectorized<Half> b, 
   const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
   return fmadd(a_float_high, b_float_high, fmadd(a_float_low, b_float_low, acc));
 }
+
+// fp32 operands are loaded as VectorizedN<float, 2>, which covers the same
+// elements as one Vectorized<Half> widened into (low, high).
+std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
+    const vec::VectorizedN<float, 2>& a,
+    const vec::VectorizedN<float, 2>& b,
+    const vec::Vectorized<float>& acc_low,
+    const vec::Vectorized<float>& acc_high) {
+  return std::make_pair(vec::fmadd(a[0], b[0], acc_low), vec::fmadd(a[1], b[1], acc_high));
+}
+
+vec::Vectorized<float> fmadd(
+    const vec::Vectorized<float>& acc,
+    const vec::VectorizedN<float, 2>& a,
+    const vec::VectorizedN<float, 2>& b) {
+  return vec::fmadd(a[1], b[1], vec::fmadd(a[0], b[0], acc));
+}
 } // namespace
+
+template <typename T>
+using RegisterPairVec = std::conditional_t<std::is_same_v<T, float>, vec::VectorizedN<float, 2>, vec::Vectorized<T>>;
+static_assert(RegisterPairVec<float>::size() == vec::Vectorized<Half>::size());
 
 template <typename T>
 C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
@@ -265,9 +286,9 @@ C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
   const T* vec2,
   vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
   int registerPairIndex) {
-  static_assert(std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>);
-  const auto temp_vec1 = vec::Vectorized<T>::loadu(&vec1[registerPairIndex * vec::Vectorized<T>::size()]);
-  const auto temp_vec2 = vec::Vectorized<T>::loadu(&vec2[registerPairIndex * vec::Vectorized<T>::size()]);
+  static_assert(std::is_same_v<T, Half> || std::is_same_v<T, BFloat16> || std::is_same_v<T, float>);
+  const auto temp_vec1 = RegisterPairVec<T>::loadu(&vec1[registerPairIndex * RegisterPairVec<T>::size()]);
+  const auto temp_vec2 = RegisterPairVec<T>::loadu(&vec2[registerPairIndex * RegisterPairVec<T>::size()]);
 
   const auto [result_low, result_high] = fmadd(temp_vec1, temp_vec2, sum[2 * registerPairIndex], sum[2 * registerPairIndex + 1]);
   sum[2 * registerPairIndex] = result_low;
@@ -280,8 +301,8 @@ C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
     const T* vec2,
     vec::Vectorized<float>* tail_sum,
     int idx) {
-  const auto temp_vec1 = vec::Vectorized<T>::loadu(&vec1[idx]);
-  const auto temp_vec2 = vec::Vectorized<T>::loadu(&vec2[idx]);
+  const auto temp_vec1 = RegisterPairVec<T>::loadu(&vec1[idx]);
+  const auto temp_vec2 = RegisterPairVec<T>::loadu(&vec2[idx]);
   *tail_sum = fmadd(*tail_sum, temp_vec1, temp_vec2);
 }
 
@@ -389,6 +410,12 @@ dot_with_fp32_arith_no_bfdot(const T* vec1, const T* vec2, int64_t len) {
 #undef DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY
 
 float fp16_dot_with_fp32_arith(const Half* vec1, const Half* vec2, int64_t len) {
+  return dot_with_fp32_arith_no_bfdot(vec1, vec2, len);
+}
+
+// Bit-identical to fp16_dot_with_fp32_arith on the same values widened to fp32:
+// the reduction order is shared and products of fp16 values are exact in fp32.
+float fp32_dot_with_fp32_arith(const float* vec1, const float* vec2, int64_t len) {
   return dot_with_fp32_arith_no_bfdot(vec1, vec2, len);
 }
 

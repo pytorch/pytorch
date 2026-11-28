@@ -4,8 +4,21 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
+#include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
+
+#include <algorithm>
+#include <array>
+
+// The x86 fallback widens fp16 operands separately from its fp32 FMAs.
+#if defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))
+#define ATEN_GEMM_PREWIDEN_FP16
+#define ATEN_GEMM_PREWIDEN_MIN_M 64
+#define ATEN_GEMM_PREWIDEN_MIN_N 16
+#define ATEN_GEMM_PREWIDEN_MIN_K 32
+#define ATEN_GEMM_PREWIDEN_MAX_K 512
+#endif
 
 #if !defined(C10_MOBILE)
 namespace at::native::blas_impl {
@@ -374,6 +387,61 @@ float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
       a, b, len);
 }
 
+#if defined(ATEN_GEMM_PREWIDEN_FP16)
+void widen_fp16(const at::Half* src, float* dst, int64_t len) {
+  using HalfVec = vec::Vectorized<at::Half>;
+  static_assert(HalfVec::size() == 2 * vec::Vectorized<float>::size());
+  int64_t l = 0;
+  for (; l + HalfVec::size() <= len; l += HalfVec::size()) {
+    const auto [lo, hi] = vec::convert_half_float(HalfVec::loadu(src + l));
+    lo.store(dst + l);
+    hi.store(dst + l + vec::Vectorized<float>::size());
+  }
+  for (; l < len; ++l) {
+    dst[l] = float(src[l]);
+  }
+}
+
+// Without a widening fp16 FMA, converting rows of A and columns of B to fp32
+// once instead of once per dot is faster when they are reused enough and a
+// widened row plus column still fit in L1. Bit-identical to compute_dot. Each
+// chunk widens B in column tiles small enough to stay in L2.
+void gemm_transa_fp16_widened(
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const at::Half *a, int64_t lda,
+    const at::Half *b, int64_t ldb,
+    float beta,
+    at::Half *c, int64_t ldc) {
+  constexpr int64_t kBTileBytes = 256 * 1024;
+  const int64_t tile_n = std::clamp<int64_t>(
+      kBTileBytes / (std::max<int64_t>(k, 1) * static_cast<int64_t>(sizeof(float))), 1, n);
+  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
+    alignas(64) std::array<float, ATEN_GEMM_PREWIDEN_MAX_K> a_fp32;
+    auto b_fp32 = std::make_unique_for_overwrite<float[]>(tile_n * k);
+    for (int64_t j0 = 0; j0 < n; j0 += tile_n) {
+      const int64_t j1 = std::min(n, j0 + tile_n);
+      for (const auto j : c10::irange(j0, j1)) {
+        widen_fp16(b + j * ldb, b_fp32.get() + (j - j0) * k, k);
+      }
+      for (const auto i : c10::irange(begin, end)) {
+        widen_fp16(a + i * lda, a_fp32.data(), k);
+        const float *b_ = b_fp32.get();
+        for (const auto j : c10::irange(j0, j1)) {
+          const auto dot = at::native::CPU_CAPABILITY::fp32_dot_with_fp32_arith(a_fp32.data(), b_, k);
+          b_ += k;
+          if (beta == 0) {
+            c[j*ldc+i] = alpha*dot;
+          } else {
+            c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+          }
+        }
+      }
+    }
+  });
+}
+#endif // defined(ATEN_GEMM_PREWIDEN_FP16)
+
 template <>
 void gemm_transa_(
     TransposeType transa,
@@ -388,6 +456,14 @@ void gemm_transa_(
     at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, a, lda, b, 1, beta, c, 1);
     return;
   }
+#if defined(ATEN_GEMM_PREWIDEN_FP16)
+  if (m >= ATEN_GEMM_PREWIDEN_MIN_M && n >= ATEN_GEMM_PREWIDEN_MIN_N &&
+      k >= ATEN_GEMM_PREWIDEN_MIN_K && k <= ATEN_GEMM_PREWIDEN_MAX_K &&
+      (at::in_parallel_region() || at::get_num_threads() == 1)) {
+    gemm_transa_fp16_widened(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+    return;
+  }
+#endif
   parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
     const auto *a_ = a + begin * lda;
     for (const auto i : c10::irange(begin, end)) {
