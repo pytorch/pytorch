@@ -5555,12 +5555,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         def copy_with_state(inp):
             od = collections.OrderedDict(a=1) if local else inp
-            view = od.values()
             if via_dict:
                 od.__dict__["tag"] = value
             else:
                 od.tag = value
-            return view, od, copier(od)
+            return od.values(), od, copier(od)
 
         value = [42]
         x = torch.tensor(10)
@@ -5570,8 +5569,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 torch.compile(fn, backend="eager", fullgraph=True)(x, inp)
         counter = CompileCounter()
         compiled = torch.compile(fn, backend=counter)
-        for original in (inp, collections.OrderedDict(a=1)):
-            result, od, copied = compiled(x, original)
+        for i, original in enumerate((inp, collections.OrderedDict(a=1))):
+            with torch.compiler.set_stance("fail_on_recompile" if i else "default"):
+                result, od, copied = compiled(x, original)
             self.assertEqual((result, copied, copied.tag), (x + 1, od, value))
             self.assertEqual(copied.tag is od.tag, copier is copy.copy)
             self.assertIs(od.tag, value)
