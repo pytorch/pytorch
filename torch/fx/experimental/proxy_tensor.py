@@ -15,7 +15,7 @@ import operator
 import threading
 import typing
 import typing_extensions
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass, field
@@ -2655,32 +2655,37 @@ class _ModuleStackTracer(PythonKeyTracer):
         scope_root: Module,
         *,
         autowrap_modules: tuple[types.ModuleType, ...] = (),
+        parent: _ModuleStackTracer | None = None,
     ) -> None:
         super().__init__(autowrap_modules=autowrap_modules)
         self.record_stack_traces = not fx.config.do_not_emit_stack_traces
         self._record_forward_stack_traces_only = True
         self.scope_root = scope_root
-        self.enable_attr_proxy = False
-        self.submodule_paths = {}
-        for name, m in self.scope_root.named_modules(remove_duplicate=False):
-            if m in self.submodule_paths:
-                log.info(
-                    "Shared module found between %s and %s, AttrProxy is enabled.",
-                    self.submodule_paths[m],
-                    name,
-                )
-                self.enable_attr_proxy = True
-            else:
-                self.submodule_paths[m] = name
-
         self.proxy_paths: WeakKeyDictionary[_AttrProxy, str] = WeakKeyDictionary()
         self.attr_proxy_map: WeakKeyDictionary[Module, _AttrProxy] = WeakKeyDictionary()
         self.proxy_modules: WeakKeyDictionary[_AttrProxy, Module] = WeakKeyDictionary()
         self.counter = 0
 
-        self.module_id_cache = defaultdict(list)
-        for name, mod in self.scope_root.named_modules(remove_duplicate=False):
-            self.module_id_cache[id(mod)].append(name)
+        if parent is not None:
+            # HOP sub-tracers are created while the parent is mid-trace, so its maps
+            # are still set and describe the same scope_root.
+            if parent.scope_root is not scope_root:
+                raise AssertionError("sub-tracer must share its parent's scope_root")
+            self.enable_attr_proxy = parent.enable_attr_proxy
+            self.submodule_paths = parent.submodule_paths
+        else:
+            self.enable_attr_proxy = False
+            self.submodule_paths = {}
+            for name, m in self.scope_root.named_modules(remove_duplicate=False):
+                if m in self.submodule_paths:
+                    log.info(
+                        "Shared module found between %s and %s, AttrProxy is enabled.",
+                        self.submodule_paths[m],
+                        name,
+                    )
+                    self.enable_attr_proxy = True
+                else:
+                    self.submodule_paths[m] = name
 
         # Build a wrapper around _AttrProxy to provide the tracer. We can't
         # store it on _AttrProxy itself because we mimic the underlying class
@@ -3218,7 +3223,9 @@ class _MakefxTracer:
                 if type(parent_tracer) is PythonKeyTracer:
                     return PythonKeyTracer()
                 elif type(parent_tracer) is _ModuleStackTracer:
-                    return _ModuleStackTracer(parent_tracer.scope_root)
+                    return _ModuleStackTracer(
+                        parent_tracer.scope_root, parent=parent_tracer
+                    )
                 else:
                     raise RuntimeError(
                         f"Unexpected tracer type: {type(parent_tracer)}."
