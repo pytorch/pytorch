@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Gradient Descent optimizer."""
 
+import math
 from typing import cast
 
 import torch
@@ -40,6 +41,7 @@ class SGD(Optimizer):
         foreach: bool | None = None,
         differentiable: bool = False,
         fused: bool | None = None,
+        max_grad_norm: float | None = None,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -52,6 +54,12 @@ class SGD(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
+        if max_grad_norm is not None:
+            if not (math.isfinite(max_grad_norm) and max_grad_norm >= 0):
+                raise ValueError(f"Invalid max_grad_norm value: {max_grad_norm}")
+            if differentiable:
+                raise ValueError("max_grad_norm does not support differentiable SGD")
+
         defaults = {
             "lr": lr,
             "momentum": momentum,
@@ -62,6 +70,7 @@ class SGD(Optimizer):
             "foreach": foreach,
             "differentiable": differentiable,
             "fused": fused,
+            "max_grad_norm": max_grad_norm,
         }
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
@@ -83,6 +92,7 @@ class SGD(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("differentiable", False)
             group.setdefault("fused", False)
+            group.setdefault("max_grad_norm", None)
 
     def _init_group(self, group, params, grads, momentum_buffer_list):
         has_sparse_grad = False
@@ -118,6 +128,34 @@ class SGD(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
+        max_grad_norm = self.param_groups[0].get("max_grad_norm")
+        if any(g.get("max_grad_norm") != max_grad_norm for g in self.param_groups):
+            raise ValueError("max_grad_norm must be the same for all parameter groups")
+        grad_clip_coef = None
+        if max_grad_norm is not None:
+            if not (math.isfinite(max_grad_norm) and max_grad_norm >= 0):
+                raise ValueError(f"Invalid max_grad_norm value: {max_grad_norm}")
+            if any(g["differentiable"] for g in self.param_groups):
+                raise ValueError("max_grad_norm does not support differentiable SGD")
+            if getattr(self, "grad_scale", None) is not None:
+                raise RuntimeError(
+                    "Call GradScaler.unscale_(optimizer) before step() with max_grad_norm"
+                )
+            all_grads = [
+                p.grad
+                for group in self.param_groups
+                for p in group["params"]
+                if p.grad is not None
+            ]
+            if any(
+                type(g) is not Tensor or g.is_sparse or g.is_complex()
+                for g in all_grads
+            ):
+                raise RuntimeError("max_grad_norm requires dense native real tensors")
+            if all_grads:
+                total_norm = torch.nn.utils.get_total_norm(all_grads)
+                grad_clip_coef = (max_grad_norm / (total_norm + 1e-6)).clamp(max=1.0)
+
         for group in self.param_groups:
             params: list[Tensor] = []
             grads: list[Tensor] = []
@@ -142,6 +180,7 @@ class SGD(Optimizer):
                 fused=group["fused"],
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
+                grad_clip_coef=grad_clip_coef,
             )
 
             if group["momentum"] != 0:
@@ -204,6 +243,14 @@ SGD.__doc__ = (
         {_foreach_doc}
         {_differentiable_doc}
         {_fused_doc}
+        max_grad_norm (float, optional): maximum L2 norm across gradients in all
+            parameter groups. When set, clips gradients used by the update without
+            modifying ``.grad``. With fused CUDA SGD, clipping is applied inside
+            the update kernel. Other implementations use temporary scaled gradients.
+            All groups must use the same nonnegative finite threshold. Supports dense
+            native real tensors and requires ``differentiable=False``. For AMP, call
+            ``scaler.unscale_(optimizer)`` before ``step()``. Distributed frameworks
+            must compute the appropriate global norm separately. (default: None)
     """
     + r"""
 
@@ -263,6 +310,7 @@ def sgd(
     fused: bool | None = None,
     grad_scale: Tensor | None = None,
     found_inf: Tensor | None = None,
+    grad_clip_coef: Tensor | None = None,
     *,
     weight_decay: float,
     momentum: float,
@@ -315,6 +363,7 @@ def sgd(
         maximize=maximize,
         grad_scale=grad_scale,
         found_inf=found_inf,
+        grad_clip_coef=grad_clip_coef,
     )
 
 
@@ -327,6 +376,7 @@ def _single_tensor_sgd(
     momentum_buffer_list: list[Tensor | None],
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
+    grad_clip_coef: Tensor | None,
     *,
     weight_decay: float,
     momentum: float,
@@ -343,7 +393,11 @@ def _single_tensor_sgd(
         lr = _to_scalar(lr)
 
     for i, param in enumerate(params):
-        grad = grads[i] if not maximize else -grads[i]
+        grad = grads[i]
+        if grad_clip_coef is not None:
+            grad = grad * grad_clip_coef.to(grad.device)
+        if maximize:
+            grad = -grad
 
         if weight_decay != 0:
             # Nested if is necessary to bypass jitscript rules
@@ -387,6 +441,7 @@ def _multi_tensor_sgd(
     momentum_buffer_list: list[Tensor | None],
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
+    grad_clip_coef: Tensor | None,
     *,
     weight_decay: float,
     momentum: float,
@@ -419,6 +474,13 @@ def _multi_tensor_sgd(
         device_has_sparse_grad = has_sparse_grad and any(
             grad.is_sparse for grad in device_grads
         )
+
+        if grad_clip_coef is not None:
+            device_grads = list(
+                torch._foreach_mul(
+                    device_grads, grad_clip_coef.to(device_grads[0].device)
+                )
+            )
 
         if maximize:
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
@@ -484,6 +546,7 @@ def _fused_sgd(
     momentum_buffer_list: list[Tensor | None],
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
+    grad_clip_coef: Tensor | None,
     *,
     weight_decay: float,
     momentum: float,
@@ -522,12 +585,25 @@ def _fused_sgd(
         device_params: list[Tensor] = cast(list[Tensor], device_params_)
         device_grads: list[Tensor] = cast(list[Tensor], device_grads_)
         device_grad_scale, device_found_inf = None, None
+        device_grad_clip_coef = None
+        if grad_clip_coef is not None:
+            if device_grads[0].device.type == "cuda":
+                device_grad_clip_coef = grad_clip_coef.to(
+                    device=device, dtype=torch.float64
+                )
+            else:
+                device_grads = list(
+                    torch._foreach_mul(device_grads, grad_clip_coef.to(device))
+                )
         if grad_scale is not None:
             device_grad_scale = grad_scale_dict.setdefault(
                 device, grad_scale.to(device)
             )
         if found_inf_dict is not None and found_inf is not None:
             device_found_inf = found_inf_dict.setdefault(device, found_inf.to(device))
+        grad_clip_kwargs = {}
+        if device_grad_clip_coef is not None:
+            grad_clip_kwargs["grad_clip_coef"] = device_grad_clip_coef
         torch._fused_sgd_(
             device_params,
             device_grads,
@@ -543,4 +619,5 @@ def _fused_sgd(
             is_first_step=is_first_step,
             grad_scale=device_grad_scale,
             found_inf=device_found_inf,
+            **grad_clip_kwargs,
         )
