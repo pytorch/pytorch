@@ -73,7 +73,9 @@ from ..source import (
     ClosureSource,
     ConstantSource,
     DefaultsSource,
+    DictGetItemSource,
     GetItemSource,
+    GlobalSource,
     ImportSource,
     TypeSource,
 )
@@ -2452,13 +2454,33 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         c = self.closure
         return c if c is not None else ConstantVariable.create(None)
 
+    def _get_module(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        pending = load_pending_mutation(tx, self, "__module__")
+        if pending is not None:
+            return pending
+        name = "__name__"
+        globals_name = tx.output.install_global_by_id(
+            "__nested_function_globals", self.f_globals
+        )
+        source = GlobalSource(globals_name)
+        present = name in self.f_globals
+        guard = (
+            GuardBuilder.DICT_CONTAINS if present else GuardBuilder.DICT_NOT_CONTAINS
+        )
+        install_guard(source.make_guard(functools.partial(guard, key=name)))
+        if present:
+            return VariableTracker.build(
+                tx, self.f_globals[name], DictGetItemSource(source, name)
+            )
+        return ConstantVariable.create(None)
+
     tp_members = {
         "__doc__": Member(
             getset_load_or_build(lambda vt: vt.get_doc(), "__doc__"),
             getset_set("__doc__"),
         ),
         "__module__": Member(
-            getset_load_or_build(lambda vt: vt.get_module(), "__module__"),
+            _get_module,
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),

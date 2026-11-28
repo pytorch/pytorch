@@ -1422,6 +1422,16 @@
       ]
     }
   ],
+  "GB7109": [
+    {
+      "Gb_type": "Unsupported staticmethod instance dictionary",
+      "Context": "str(self)",
+      "Explanation": "Dynamo cannot track this staticmethod instance dictionary.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9193": [
     {
       "Gb_type": "Call to a time function",

@@ -2871,6 +2871,9 @@ def object_generic_setattr_str(
         if result is not None:
             return result
 
+    if isinstance(obj, variables.StaticMethodVariable):
+        return obj.set_instance_attribute(tx, name, value)
+
     has_dict = py_type.__dictoffset__ != 0 or isinstance(
         getattr(obj, "value", None), threading.local
     )

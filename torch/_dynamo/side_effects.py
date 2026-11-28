@@ -1266,6 +1266,18 @@ class SideEffects:
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                     hints=[],
                 )
+            elif isinstance(var, variables.StaticMethodVariable):
+                var.reconstruct(cg)
+                cg.add_cache(var)
+                cg.clear_tos()
+                var.source = TempLocalSource(cg.tempvars[var])
+                if var.instance_dict is not None:
+                    attrs = var.instance_dict
+                    cg(var.source)
+                    cg.append_output(cg.create_load_attr("__dict__"))
+                    cg.add_cache(attrs)
+                    cg.clear_tos()
+                    attrs.source = TempLocalSource(cg.tempvars[attrs])
             elif isinstance(var, variables.ExceptionVariable):
                 # Exceptions cannot be built via object.__new__ (CPython rejects
                 # it), so reconstruct() constructs by calling the type. Cache
@@ -2000,6 +2012,15 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     var = ctx.var
     side_effects = ctx.side_effects
     if _skip_attribute_mutation_replay(var):
+        return
+
+    if (
+        isinstance(var, variables.StaticMethodVariable)
+        and var.instance_dict is not None
+    ):
+        _codegen_const_dict_or_set_mutation(
+            dataclasses.replace(ctx, var=var.instance_dict)
+        )
         return
 
     # Dict content-modification is self-contained (items vs. original_items),

@@ -247,6 +247,7 @@ from .descriptors import (
     MethodDescriptorVariable,
     MethodWrapperVariable,
     PropertyVariable,
+    StaticMethodVariable,
     WrapperDescriptorVariable,
 )
 from .dicts import (
@@ -1645,6 +1646,9 @@ class VariableBuilder:
                 )
 
             return self.tx.output.side_effects.track_mutable(value, result)
+        elif type(value) is staticmethod:
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return StaticMethodVariable.from_descriptor(self.tx, value, self.source)
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals

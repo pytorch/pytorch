@@ -2465,6 +2465,15 @@ class BuiltinVariable(TypeVariable):
     def call_dir(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
+        if isinstance(arg, variables.StaticMethodVariable):
+            names = dict.fromkeys(dir(staticmethod))
+            names.update(
+                dict.fromkeys(arg.get_instance_dict(tx).keys_as_python_constant())
+            )
+            try:
+                return VariableTracker.build(tx, sorted(names))
+            except TypeError as exc:
+                raise_observed_exception(TypeError, tx, args=list(exc.args))
         if isinstance(arg, variables.UserDefinedClassVariable):
             return VariableTracker.build(tx, dir(arg.value))
         if isinstance(arg, BuiltinVariable):
@@ -2841,7 +2850,7 @@ class BuiltinVariable(TypeVariable):
     def call_staticmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker
     ) -> VariableTracker:
-        return variables.StaticMethodVariable.create(func)
+        return variables.StaticMethodVariable.create(tx, func)
 
     def call_next(
         self,

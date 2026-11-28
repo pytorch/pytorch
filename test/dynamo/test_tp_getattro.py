@@ -877,6 +877,153 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(result, staticmethod)
         self.assertEqual(result.__func__(), 1)
 
+    def test_staticmethod_instance_dict_escapes(self):
+        def fn(x):
+            def wrapped(value):
+                "Original docstring."
+                return value + x
+
+            sm = staticmethod(wrapped)
+            attrs = sm.__dict__
+            object.__setattr__(sm, "tag", x)
+            attrs["alias"] = sm
+            attrs["dict_alias"] = attrs
+            del sm.__doc__
+            del attrs["__name__"]
+            sm.__name__ = "renamed"
+            return sm, attrs, tuple(attrs), sm(x)
+
+        x = torch.randn(2)
+        _, _, keys, result = fn(x)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        sm, attrs, traced_keys, value = compiled(x)
+        self.assertIs(attrs, sm.__dict__)
+        self.assertIs(attrs["alias"], sm)
+        self.assertIs(attrs["dict_alias"], attrs)
+        self.assertEqual(sm.tag, x)
+        self.assertNotIn("__doc__", attrs)
+        self.assertEqual(sm.__name__, "renamed")
+        self.assertEqual(tuple(attrs), keys)
+        self.assertEqual(traced_keys, keys)
+        self.assertEqual(value, result)
+
+    def test_staticmethod_instance_dict_only_escape(self):
+        def fn(x):
+            sm = staticmethod(len)
+            sm.tag = x
+            attrs = sm.__dict__
+            copied = attrs.copy()
+            attrs["other"] = 1
+            mapped = torch.utils._pytree.tree_map_only(torch.Tensor, torch.neg, attrs)
+            return attrs, copied, mapped, x + 1
+
+        x = torch.zeros(1)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, fn(x))
+
+    def test_staticmethod_instance_dict_noncallable(self):
+        def fn(x):
+            sm = staticmethod(None)
+            before = sm.__dict__.copy()
+            sm.tag = x
+            value = sm.tag
+            del sm.tag
+            try:
+                sm()
+            except TypeError:
+                return value + 1, before, sm.__dict__, hasattr(sm, "tag")
+            return value - 1, before, sm.__dict__, hasattr(sm, "tag")
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_staticmethod_nested_function_without_module_name(self):
+        namespace = {}
+        exec(
+            "def fn(x):\n"
+            "    def wrapped(value):\n"
+            "        return value + x\n"
+            "    sm = staticmethod(wrapped)\n"
+            "    return sm.__dict__['__module__'], sm, sm(x)\n",
+            namespace,
+        )
+        fn = namespace["fn"]
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for name in (None, "first", "second", None):
+            if name is None:
+                namespace.pop("__name__", None)
+            else:
+                namespace["__name__"] = name
+            expected_module, _, expected = fn(x)
+            module, sm, result = compiled(x)
+            self.assertEqual(module, expected_module)
+            self.assertEqual(sm.__dict__["__module__"], expected_module)
+            self.assertEqual(result, expected)
+
+    @unittest.skipIf(sys.version_info < (3, 14), "Requires lazy descriptor annotations")
+    def test_staticmethod_instance_dict_lazy_annotations(self):
+        def fn(x):
+            def wrapped(value: int) -> int:
+                return value
+
+            sm = staticmethod(wrapped)
+            attrs = sm.__dict__
+            before = "__annotations__" in attrs
+            annotations = sm.__annotations__
+            return x + 1, before, annotations, annotations is attrs["__annotations__"]
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("operation", ["delete", "pop", "clear", "popitem"])
+    def test_staticmethod_input_instance_dict_cache(self, operation):
+        def fn(sm, x):
+            attrs = sm.__dict__
+            try:
+                if operation == "delete":
+                    del sm.tag
+                elif operation == "pop":
+                    attrs.pop("tag")
+                elif operation == "clear":
+                    attrs.clear()
+                else:
+                    key, _ = attrs.popitem()
+                    return x + 1, key
+            except AttributeError:
+                return x - 1, None
+            except KeyError:
+                return x - 2, None
+            return x + 1, None
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.zeros(1)
+        for keys in (("tag", "other"), ("tag", "other"), ("other", "tag"), ()):
+            eager, traced = staticmethod(len), staticmethod(len)
+            for sm in (eager, traced):
+                sm.__dict__ = dict.fromkeys(keys, 1)
+            attrs = traced.__dict__
+            self.assertEqual(compiled(traced, x), fn(eager, x))
+            self.assertIs(traced.__dict__, attrs)
+            self.assertEqual(list(attrs.items()), list(eager.__dict__.items()))
+        self.assertEqual(counter.frame_count, 3)
+
+    def test_staticmethod_readonly_member_precedes_instance_dict(self):
+        def fn(sm, x):
+            sm.__dict__["__func__"] = x
+            try:
+                del sm.__func__
+            except AttributeError:
+                return sm.__func__ is len, x + 1
+            return False, x - 1
+
+        sm = staticmethod(len)
+        x = torch.zeros(1)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(sm, x)
+        self.assertEqual(result, fn(staticmethod(len), x))
+        self.assertEqual(sm.__dict__["__func__"], x)
+
     def test_classmethod_constructor_reconstruct(self):
         """The descriptor must survive being returned out of the graph."""
 
