@@ -17,6 +17,10 @@
 #include <ATen/cuda/cub.cuh>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <c10/util/CallOnce.h>
+
+#include <array>
 
 #if defined(USE_ROCM)
 #include <rocprim/block/block_scan.hpp>
@@ -25,6 +29,18 @@
 using namespace at::native;
 
 namespace at::native {
+
+#ifdef USE_ROCM
+static bool is_gfx1250_device(c10::DeviceIndex device_index) {
+  TORCH_INTERNAL_ASSERT(device_index >= 0 && device_index < C10_COMPILE_TIME_MAX_GPUS);
+  static std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> once_flags;
+  static std::array<bool, C10_COMPILE_TIME_MAX_GPUS> results{};
+  c10::call_once(once_flags[device_index], [device_index] {
+    results[device_index] = at::detail::getCUDAHooks().isGPUArch({"gfx1250"}, device_index);
+  });
+  return results[device_index];
+}
+#endif
 
 namespace sbtopk { // single_block_topk
 
@@ -667,10 +683,70 @@ void launch(
 namespace warptopk {
 
 constexpr int MAX_WARP_TOPK_SLICE = 512;
+// Largest slice that should_use_warp_topk sends to the warp sort on every ROCm
+// GPU. Larger slices, up to MAX_WARP_TOPK_SLICE, take it only on gfx1250 and
+// only in place of mbtopk.
+constexpr int DEFAULT_MAX_WARP_TOPK_SLICE = 256;
+
+// Orders values by their radix key (TopKTypeConfig::convert), the order sbtopk
+// and mbtopk select in: unlike GTOp/LTOp it puts +0 above -0. The
+// sort_size > DEFAULT_MAX_WARP_TOPK_SLICE instantiations, which replace mbtopk
+// on gfx1250, sort with it so that they select the same elements.
+template <typename scalar_t, bool is_descending>
+struct RadixKeyOrder {
+  __device__ bool operator()(const scalar_t& lhs, const scalar_t& rhs) const {
+    const auto l = TopKTypeConfig<scalar_t>::convert(lhs);
+    const auto r = TopKTypeConfig<scalar_t>::convert(rhs);
+    return is_descending ? l > r : l < r;
+  }
+};
+
+// Writes the top-k of one slice in the order that sbtopk/mbtopk's gather
+// produces for an unsorted topk, which slices above
+// DEFAULT_MAX_WARP_TOPK_SLICE take on other GPUs: first the values that sort
+// strictly before the k-th value, by increasing index, then the lowest indices
+// of values equal to it. These are exactly the elements the stable sort
+// selected. Called by the single warp of the block that owns the slice.
+template <typename scalar_t, typename IndexType, bool is_descending, int WARP_SIZE, typename Scan,
+          typename InputIt, typename ValuesIt, typename IndicesIt>
+__device__ __forceinline__ void storeTopKInGatherOrder(
+    typename Scan::TempStorage& scan_storage,
+    scalar_t kth,
+    InputIt input,
+    IndexType slice_size,
+    IndexType k,
+    ValuesIt values,
+    IndicesIt indices) {
+  const RadixKeyOrder<scalar_t, is_descending> sorts_before;
+  IndexType written = 0;
+  // Pass 0 writes the values that sort before the k-th, pass 1 the ties with it.
+  for (int pass = 0; pass < 2; ++pass) {
+    const bool ties = pass == 1;
+    for (IndexType base = 0; base < slice_size && written < k; base += WARP_SIZE) {
+      const IndexType idx = base + threadIdx.x;
+      scalar_t v{};
+      bool take = false;
+      if (idx < slice_size) {
+        v = input[idx];
+        take = ties ? !sorts_before(v, kth) && !sorts_before(kth, v) : sorts_before(v, kth);
+      }
+      int offset, total;
+      Scan(scan_storage).ExclusiveSum(take ? 1 : 0, offset, total);
+      // WARP_SYNC() is a no-op on ROCm; the block is a single warp, so a block
+      // barrier orders the reuse of the scan's temp storage.
+      __syncthreads();
+      if (take && written + offset < k) {
+        values[written + offset] = v;
+        indices[written + offset] = idx;
+      }
+      written += total;
+    }
+  }
+}
 
 // Comparator for sorting with TopK semantics
-// Note: For WarpMergeSort (comparison-based sorting), we use simple comparison operators
-// GTOp/LTOp instead of bitwise conversion. Bitwise conversion is only needed for radix sorting.
+// Note: The WarpMergeSort instantiations up to DEFAULT_MAX_WARP_TOPK_SLICE sort with
+// the comparison operators GTOp/LTOp; the larger ones sort with RadixKeyOrder.
 
 // Kernel using WarpMergeSort for small topK operations
 // See Note [warp merge sort WARP_SIZE template param]
@@ -686,6 +762,14 @@ __global__ void warpMergeSortTopK(
     IndexType topKWithinSliceStride,
     at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
     IndexType indicesWithinSliceStride) {
+
+#if !(defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__SPIRV__))
+  if constexpr (sort_size > DEFAULT_MAX_WARP_TOPK_SLICE) {
+    // should_use_warp_topk sends slices above DEFAULT_MAX_WARP_TOPK_SLICE here on gfx1250 only.
+    CUDA_KERNEL_ASSERT(false && "warpMergeSortTopK above DEFAULT_MAX_WARP_TOPK_SLICE is gfx1250-only");
+    return;
+  }
+#endif
 
   // Find the slice this warp is working on
   const IndexType blockIndex = getLinearBlockId<IndexType>();
@@ -723,13 +807,16 @@ __global__ void warpMergeSortTopK(
   using Sort = cub::WarpMergeSort<scalar_t, items_per_thread, WARP_SIZE, int64_t>;
   using StoreKeys = cub::WarpStore<scalar_t, items_per_thread, cub::WARP_STORE_TRANSPOSE>;
   using StoreIndices = cub::WarpStore<int64_t, items_per_thread, cub::WARP_STORE_TRANSPOSE>;
+  using Scan = cub::WarpScan<int, WARP_SIZE>;
 
   __shared__ union {
     typename LoadKeys::TempStorage load_keys;
     typename Sort::TempStorage sort;
     typename StoreKeys::TempStorage store_keys;
     typename StoreIndices::TempStorage store_indices;
+    typename Scan::TempStorage scan;
   } tmp_storage[max_block_dim_y];
+  __shared__ scalar_t kth_value[max_block_dim_y];
 
   auto& warp_storage = tmp_storage[threadIdx.y];
 
@@ -748,13 +835,19 @@ __global__ void warpMergeSortTopK(
   //
   // Use has_infinity to pick a true "sorts-to-the-end" sentinel for each type:
   // infinity() for floats, lowest()/max() for integer types.
+  //
+  // The radix-key sort of the larger instantiations needs the padding to sort
+  // last by radix key: NaN, not infinity, has the largest key.
+  constexpr bool kRadixKeySort = sort_size > DEFAULT_MAX_WARP_TOPK_SLICE;
   const scalar_t invalid_value = is_descending
       ? (std::numeric_limits<scalar_t>::has_infinity
              ? -std::numeric_limits<scalar_t>::infinity()
              : std::numeric_limits<scalar_t>::lowest())
-      : (std::numeric_limits<scalar_t>::has_infinity
-             ? std::numeric_limits<scalar_t>::infinity()
-             : std::numeric_limits<scalar_t>::max());
+      : (kRadixKeySort && std::numeric_limits<scalar_t>::has_quiet_NaN
+             ? std::numeric_limits<scalar_t>::quiet_NaN()
+             : (std::numeric_limits<scalar_t>::has_infinity
+                    ? std::numeric_limits<scalar_t>::infinity()
+                    : std::numeric_limits<scalar_t>::max()));
 
   // Initialize indices for this slice in blocked arrangement
   // WARP_LOAD_TRANSPOSE uses blocked layout: thread t gets items [t*items_per_thread, t*items_per_thread+items_per_thread-1]
@@ -767,20 +860,41 @@ __global__ void warpMergeSortTopK(
   LoadKeys(warp_storage.load_keys).Load(input_iter, local_values, inputSliceSize, invalid_value);
   WARP_SYNC();
 
-  // Sort values with their indices using comparison-based sort
-  // For largest=true (descending), use GTOp to get larger values first
-  // For largest=false (ascending), use LTOp to get smaller values first
-  if constexpr (is_descending) {
+  // Sort values with their indices: by radix key above DEFAULT_MAX_WARP_TOPK_SLICE,
+  // otherwise GTOp (largest=true, larger values first) or LTOp (smaller first)
+  if constexpr (kRadixKeySort) {
+    Sort(warp_storage.sort).StableSort(
+        local_values, local_indices, RadixKeyOrder<scalar_t, is_descending>(), inputSliceSize, invalid_value);
+  } else if constexpr (is_descending) {
     Sort(warp_storage.sort).StableSort(local_values, local_indices, GTOp<scalar_t, true>(), inputSliceSize, invalid_value);
   } else {
     Sort(warp_storage.sort).StableSort(local_values, local_indices, LTOp<scalar_t, true>(), inputSliceSize, invalid_value);
   }
   WARP_SYNC();
 
-  // Store top-k results
-  StoreKeys(warp_storage.store_keys).Store(topK_iter, local_values, k);
-  WARP_SYNC();
-  StoreIndices(warp_storage.store_indices).Store(indices_iter, local_indices, k);
+  if constexpr (sort_size <= DEFAULT_MAX_WARP_TOPK_SLICE) {
+    // Store top-k results
+    StoreKeys(warp_storage.store_keys).Store(topK_iter, local_values, k);
+    WARP_SYNC();
+    StoreIndices(warp_storage.store_indices).Store(indices_iter, local_indices, k);
+  } else {
+    // storeTopKInGatherOrder's barriers run a slice-dependent number of times,
+    // which is safe only with one warp per block.
+    static_assert(max_block_dim_y == 1, "the gather-order store needs one warp per block");
+    // Broadcast the k-th value of the stable sort (blocked layout: thread t
+    // holds sorted positions [t * items_per_thread, (t + 1) * items_per_thread)).
+    #pragma unroll
+    for (int i = 0; i < items_per_thread; ++i) {
+      if (local_indices[i] < inputSliceSize && static_cast<IndexType>(threadIdx.x * items_per_thread + i) == k - 1) {
+        kth_value[threadIdx.y] = local_values[i];
+      }
+    }
+    // WARP_SYNC() is a no-op on ROCm; the block is a single warp, so a block
+    // barrier orders the LDS broadcast.
+    __syncthreads();
+    storeTopKInGatherOrder<scalar_t, IndexType, is_descending, WARP_SIZE, Scan>(
+        warp_storage.scan, kth_value[threadIdx.y], input_iter, inputSliceSize, k, topK_iter, indices_iter);
+  }
 }
 
 template <typename scalar_t, typename IndexType, int Dim>
@@ -866,6 +980,232 @@ void launch(
 }
 
 } // namespace warptopk
+
+// Top-k of many short slices with a small k on gfx1250: one wave per slice,
+// each lane keeps the best K of the elements it reads in registers, and the
+// wave merges the lanes' lists with shuffles. It reads every element once and
+// needs no LDS, no atomics and no block barriers, which bound sbtopk, mbtopk
+// and the warp sort on these shapes.
+//
+// It selects exactly what the path it replaces selects. Elements are ranked
+// by key, then by lower index. Slices up to warptopk::DEFAULT_MAX_WARP_TOPK_SLICE
+// replace the warp sort: keys follow GTOp/LTOp (the radix key of the value
+// with -0 read as +0, so NaNs compare equal and above everything), and the
+// output is sorted. Longer slices replace sbtopk/mbtopk: keys are the radix
+// keys, and the output is in their gather order (the elements ranked strictly
+// above the k-th, by index, then the ones equal to it, by index).
+namespace waveselect {
+
+// gfx1250 wave size; the path runs on gfx1250 only. A constant rather than
+// C10_WARP_SIZE, which is not constexpr under __SPIRV__: the host routes only
+// gfx1250 (wave32) devices here, SPIR-V code objects included.
+constexpr int kLanes = 32;
+// Slices per 256-thread block, one per wave.
+constexpr int kSlicesPerBlock = 8;
+// Largest k: the merge gives each of the first k lanes one result, and the
+// per-lane lists are instantiated for K = 2, 4, 8 and 16.
+constexpr int kMaxK = 16;
+
+// Compares with == like GTOp/LTOp, so it also maps the values that the
+// build's float compares flush to zero.
+template <typename scalar_t>
+__device__ __forceinline__ scalar_t zeroAsPositive(scalar_t v) {
+  if constexpr (std::is_floating_point_v<scalar_t> || std::is_same_v<scalar_t, at::Half> ||
+                std::is_same_v<scalar_t, at::BFloat16>) {
+    return v == scalar_t(0) ? scalar_t(0) : v;
+  } else {
+    return v;
+  }
+}
+
+template <typename Key>
+__device__ __forceinline__ bool ranksAbove(Key key, uint32_t idx, Key other_key, uint32_t other_idx) {
+  return key > other_key || (key == other_key && idx < other_idx);
+}
+
+template <typename T, typename IndexType, int K, bool kSortedOutput>
+C10_LAUNCH_BOUNDS_1(kLanes * kSlicesPerBlock)
+__global__ void waveSelectTopK(
+    at::cuda::detail::TensorInfo<const T, IndexType> input,
+    IndexType inputSliceSize,
+    IndexType k,
+    bool largest,
+    IndexType numInputSlices,
+    IndexType inputWithinSliceStride,
+    at::cuda::detail::TensorInfo<T, IndexType> topK,
+    IndexType topKWithinSliceStride,
+    at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
+    IndexType indicesWithinSliceStride) {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__SPIRV__)
+  using Bitwise = typename TopKTypeConfig<T>::RadixType;
+  // Shuffles move 32- or 64-bit values.
+  using Key = std::conditional_t<sizeof(Bitwise) <= sizeof(uint32_t), uint32_t, uint64_t>;
+  constexpr uint32_t kNoIndex = std::numeric_limits<uint32_t>::max();
+
+  const IndexType slice = getLinearBlockId<IndexType>() * kSlicesPerBlock + threadIdx.x / kLanes;
+  if (slice >= numInputSlices) {
+    return;
+  }
+  const uint32_t lane = threadIdx.x % kLanes;
+  const uint32_t slice_size = static_cast<uint32_t>(inputSliceSize);
+  const T* in = &input.data[at::cuda::detail::IndexToOffset<const T, IndexType, -1>::get(slice, input)];
+
+  // Larger key ranks higher in both directions.
+  auto rank_key = [&](T v) -> Key {
+    const Key key = TopKTypeConfig<T>::convert(kSortedOutput ? zeroAsPositive(v) : v);
+    return largest ? key : static_cast<Key>(static_cast<Bitwise>(~key));
+  };
+
+  // Per-lane best K, best first. (0, kNoIndex) ranks below every element.
+  Key keys[K];
+  uint32_t idxs[K];
+#pragma unroll
+  for (int j = 0; j < K; ++j) {
+    keys[j] = 0;
+    idxs[j] = kNoIndex;
+  }
+  auto insert = [&](Key key, uint32_t idx) {
+    // A lane reads increasing indices, so an equal key ranks below the list.
+    if (ranksAbove(key, idx, keys[K - 1], idxs[K - 1])) {
+      keys[K - 1] = key;
+      idxs[K - 1] = idx;
+#pragma unroll
+      for (int j = K - 1; j > 0; --j) {
+        if (ranksAbove(keys[j], idxs[j], keys[j - 1], idxs[j - 1])) {
+          const Key tk = keys[j];
+          keys[j] = keys[j - 1];
+          keys[j - 1] = tk;
+          const uint32_t ti = idxs[j];
+          idxs[j] = idxs[j - 1];
+          idxs[j - 1] = ti;
+        }
+      }
+    }
+  };
+
+  constexpr uint32_t kBatch = 4;
+  uint32_t i = lane;
+  for (; i + (kBatch - 1) * kLanes < slice_size; i += kBatch * kLanes) {
+    T v[kBatch];
+#pragma unroll
+    for (uint32_t u = 0; u < kBatch; ++u) {
+      v[u] = doLdg(&in[static_cast<IndexType>(i + u * kLanes) * inputWithinSliceStride]);
+    }
+#pragma unroll
+    for (uint32_t u = 0; u < kBatch; ++u) {
+      insert(rank_key(v[u]), i + u * kLanes);
+    }
+  }
+  for (; i < slice_size; i += kLanes) {
+    insert(rank_key(doLdg(&in[static_cast<IndexType>(i) * inputWithinSliceStride])), i);
+  }
+
+  // Merge: round r moves the wave's best remaining element to lane r.
+  const uint32_t num_out = static_cast<uint32_t>(k);
+  Key out_key = 0;
+  uint32_t out_idx = kNoIndex;
+  for (uint32_t r = 0; r < num_out; ++r) {
+    Key best_key = keys[0];
+    uint32_t best_idx = idxs[0];
+#pragma unroll
+    for (int offset = kLanes / 2; offset > 0; offset /= 2) {
+      const Key other_key = WARP_SHFL_XOR(best_key, offset);
+      const uint32_t other_idx = WARP_SHFL_XOR(best_idx, offset);
+      if (ranksAbove(other_key, other_idx, best_key, best_idx)) {
+        best_key = other_key;
+        best_idx = other_idx;
+      }
+    }
+    if (lane == r) {
+      out_key = best_key;
+      out_idx = best_idx;
+    }
+    // Indices are unique, so exactly one lane owns the best element.
+    if (idxs[0] == best_idx) {
+#pragma unroll
+      for (int j = 0; j < K - 1; ++j) {
+        keys[j] = keys[j + 1];
+        idxs[j] = idxs[j + 1];
+      }
+      keys[K - 1] = 0;
+      idxs[K - 1] = kNoIndex;
+    }
+  }
+
+  // Output position of lane r's element.
+  uint32_t pos = lane;
+  if constexpr (!kSortedOutput) {
+    const Key kth_key = WARP_SHFL(out_key, num_out - 1);
+    const bool tie = out_key == kth_key;
+    uint32_t above = 0;
+    uint32_t before = 0;
+    for (uint32_t j = 0; j < num_out; ++j) {
+      const Key other_key = WARP_SHFL(out_key, j);
+      const uint32_t other_idx = WARP_SHFL(out_idx, j);
+      const bool other_tie = other_key == kth_key;
+      above += other_tie ? 0 : 1;
+      before += (other_tie == tie && other_idx < out_idx) ? 1 : 0;
+    }
+    pos = (tie ? above : 0) + before;
+  }
+  if (lane < num_out) {
+    T* out_values = &topK.data[at::cuda::detail::IndexToOffset<T, IndexType, -1>::get(slice, topK)];
+    int64_t* out_indices =
+        &indices.data[at::cuda::detail::IndexToOffset<int64_t, IndexType, -1>::get(slice, indices)];
+    out_values[static_cast<IndexType>(pos) * topKWithinSliceStride] =
+        doLdg(&in[static_cast<IndexType>(out_idx) * inputWithinSliceStride]);
+    out_indices[static_cast<IndexType>(pos) * indicesWithinSliceStride] = out_idx;
+  }
+#else
+  CUDA_KERNEL_ASSERT(false && "waveSelectTopK is gfx1250-only");
+#endif
+}
+
+template <typename scalar_t, typename IndexType, int Dim>
+void launch(
+    at::cuda::detail::TensorInfo<const scalar_t, IndexType> input,
+    IndexType inputSliceSize,
+    IndexType k,
+    bool largest,
+    IndexType numInputSlices,
+    IndexType inputWithinSliceStride,
+    at::cuda::detail::TensorInfo<scalar_t, IndexType> topK,
+    IndexType topKWithinSliceStride,
+    at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
+    IndexType indicesWithinSliceStride) {
+  TORCH_INTERNAL_ASSERT(k > 0 && k <= kMaxK, "wave select topk requires 0 < k <= ", kMaxK);
+  dim3 grid;
+  TORCH_INTERNAL_ASSERT(getGridFromTiles(at::ceil_div(numInputSlices, static_cast<IndexType>(kSlicesPerBlock)), grid),
+                        "Too many slices for wave select topk");
+  dim3 block(kLanes * kSlicesPerBlock);
+  const auto stream = c10::cuda::getCurrentCUDAStream();
+  // Slices the warp sort handles everywhere get its semantics and sorted output.
+  const bool sorted_output = inputSliceSize <= warptopk::DEFAULT_MAX_WARP_TOPK_SLICE;
+#define LAUNCH_WAVE_SELECT(K, SORTED)                                                   \
+  waveSelectTopK<scalar_t, IndexType, K, SORTED><<<grid, block, 0, stream>>>(           \
+      input, inputSliceSize, k, largest, numInputSlices, inputWithinSliceStride,        \
+      topK, topKWithinSliceStride, indices, indicesWithinSliceStride)
+#define LAUNCH_WAVE_SELECT_K(SORTED) \
+  if (k <= 2) {                      \
+    LAUNCH_WAVE_SELECT(2, SORTED);   \
+  } else if (k <= 4) {               \
+    LAUNCH_WAVE_SELECT(4, SORTED);   \
+  } else if (k <= 8) {               \
+    LAUNCH_WAVE_SELECT(8, SORTED);   \
+  } else {                           \
+    LAUNCH_WAVE_SELECT(16, SORTED);  \
+  }
+  if (sorted_output) {
+    LAUNCH_WAVE_SELECT_K(true);
+  } else {
+    LAUNCH_WAVE_SELECT_K(false);
+  }
+#undef LAUNCH_WAVE_SELECT_K
+#undef LAUNCH_WAVE_SELECT
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+} // namespace waveselect
 #endif // defined(USE_ROCM) && HAS_WARP_MERGE_SORT()
 
 namespace mbtopk { // multi_block_topk
@@ -980,6 +1320,107 @@ __global__ void computeBlockDigitCounts(
     counts[block_idx * RADIX_DIGITS + tidx] = digit_count;
   }
 }
+
+#if defined(USE_ROCM)
+// computeBlockDigitCountsLanePrivate, used on gfx1250 only. The values come
+// from a sweep on gfx1250 of 4, 8, 16 and 32 copies, 4, 8 and 16 loads in
+// flight, and 4, 8 and 16 minimum items per thread.
+//
+// One histogram copy per lane of a wave32 wave, so no two lanes of a wave
+// increment the same LDS counter (fastest of the four copy counts).
+constexpr int kLanePrivateCopies = 32;
+// Global loads in flight per thread; 4, 8 and 16 are within 2% of each other.
+constexpr int kLanePrivateLoadBatch = 8;
+// Fewest items counted per thread that take the lane-private counts. 4, 8 and
+// 16 time the same on long slices, and 4 is also faster on many slices of
+// 4 to 7 * BLOCK_THREADS elements.
+constexpr int kLanePrivateMinItemsPerThread = 4;
+
+// computeBlockDigitCounts with kLanePrivateCopies copies of the histogram, so
+// that the lanes of a wave, whose keys share their high bits, do not serialize
+// on the same LDS counters, and with kLanePrivateLoadBatch global loads in
+// flight per thread.
+template <typename T, typename IndexType, typename Bitwise, int Dim>
+C10_LAUNCH_BOUNDS_1(BLOCK_THREADS)
+__global__ void computeBlockDigitCountsLanePrivate(
+    at::cuda::detail::TensorInfo<const T, IndexType> input,
+    uint32_t slice_size,
+    uint32_t* ks_to_find,  // size: num_slices, unused arg but for mysterious reasons perf is better when it's present
+    uint32_t num_slices,
+    IndexType withinSliceStride,
+    int current_bit,
+    int items_per_thread,
+    uint32_t blocks_per_slice,
+    Bitwise desiredMask,
+    Bitwise* desires,      // size: num_slices
+    short* counts         // size: num_slices * blocks_per_slice * radix_digits
+  ) {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__SPIRV__)
+  int items_per_block = items_per_thread * BLOCK_THREADS;
+  int tidx = threadIdx.x;
+  uint32_t block_idx = getLinearBlockId<uint32_t>();
+  uint32_t slice_idx = block_idx / blocks_per_slice;
+  uint32_t blk_idx_in_slice = block_idx % blocks_per_slice;
+  if (slice_idx >= num_slices) {
+    return;
+  }
+
+  Bitwise desired = desires[slice_idx];
+  IndexType slice_start_index = at::cuda::detail::IndexToOffset<const T, IndexType, Dim>::get(slice_idx, input);
+  const T* data = &input.data[slice_start_index];
+
+  static_assert(MAX_ITEMS_PER_THREAD * BLOCK_THREADS < std::numeric_limits<short>::max(),
+    "blockwise counter too large");
+  // Interleaved histogram copies, [digit][copy]; thread i updates copy
+  // i % kLanePrivateCopies.
+  __shared__ uint32_t digit_counters[RADIX_DIGITS * kLanePrivateCopies];
+  for (int i = tidx; i < RADIX_DIGITS * kLanePrivateCopies; i += BLOCK_THREADS) {
+    digit_counters[i] = 0;
+  }
+  __syncthreads();
+
+  items_per_thread = (blk_idx_in_slice + 1 < blocks_per_slice)
+      ? items_per_thread
+      : at::ceil_div((int64_t)(slice_size - blk_idx_in_slice * items_per_block), (int64_t)BLOCK_THREADS);
+
+  const int copy = tidx % kLanePrivateCopies;
+  for (int i0 = 0; i0 < items_per_thread; i0 += kLanePrivateLoadBatch) {
+    T vals[kLanePrivateLoadBatch];
+    bool valid[kLanePrivateLoadBatch];
+#pragma unroll
+    for (int u = 0; u < kLanePrivateLoadBatch; ++u) {
+      IndexType idx = blk_idx_in_slice * items_per_block + (i0 + u) * BLOCK_THREADS + tidx;
+      valid[u] = (i0 + u < items_per_thread) && idx < slice_size;
+      if (valid[u]) {
+        vals[u] = doLdg(&data[idx * withinSliceStride]);
+      }
+    }
+#pragma unroll
+    for (int u = 0; u < kLanePrivateLoadBatch; ++u) {
+      if (valid[u]) {
+        Bitwise val = TopKTypeConfig<T>::convert(vals[u]);
+        if ((val & desiredMask) == (desired & desiredMask)) {
+          Bitwise digit = at::cuda::Bitfield<Bitwise>::getBitfield(val, current_bit, RADIX_BITS);
+          atomicAdd(&digit_counters[digit * kLanePrivateCopies + copy], 1);
+        }
+      }
+    }
+  }
+  __syncthreads();
+
+  if (tidx < RADIX_DIGITS) {
+    uint32_t digit_count = 0;
+    // Rotate the start copy per thread so the reads spread over LDS banks.
+    for (int j = 0; j < kLanePrivateCopies; ++j) {
+      digit_count += digit_counters[tidx * kLanePrivateCopies + (j + tidx) % kLanePrivateCopies];
+    }
+    counts[block_idx * RADIX_DIGITS + tidx] = digit_count;
+  }
+#else
+  CUDA_KERNEL_ASSERT(false && "computeBlockDigitCountsLanePrivate is gfx1250-only");
+#endif
+}
+#endif
 
 #ifndef USE_ROCM
 // CUDA path: compute global histogram and cumsum for each row
@@ -1313,6 +1754,95 @@ __global__ void computeBlockwiseWithinKCounts(
   }
 }
 
+// computeBlockwiseWithinKCounts with one block per slice instead of one per
+// counting block, used on gfx1250. The per-block kernel sums the digit counts
+// of all blocks of the slice in every block, blocks_per_slice times the same
+// work, and on gfx1250 its many small blocks are bound by their own latency
+// (one BlockScan and its barriers per block). Here each block sums its slice's
+// counts once, picks the digit, and its waves then compute the within-k count
+// (and on the last pass the k-th value count) of the slice's blocks in turn.
+// The results are the same integers.
+template <typename Bitwise, typename T>
+C10_LAUNCH_BOUNDS_1(RADIX_DIGITS)  // one thread per digit
+__global__ void computeSliceWithinKCounts(
+  Bitwise* desires_in,          // size: num_slices
+  short* counts,                // size: num_slices * blocks_per_slice * radix_digits
+  uint32_t* ks_to_find_in,      // size: num_slices
+  uint32_t blocks_per_slice,
+  int current_bit,
+  bool largest,
+  // outputs:
+  uint32_t* withinKCounts,      // size: num_slices * blocks_per_slice == num_blocks
+  T* kthValues,                 // size: num_slices, only write when current_bit reaches 0
+  uint32_t* ks_to_find_out,
+  Bitwise* desires_out,
+  uint32_t* kthCounts,
+  uint32_t num_slices
+) {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__SPIRV__)
+  const int tidx = threadIdx.x;
+  const uint32_t slice_idx = getLinearBlockId<uint32_t>();
+  if (slice_idx >= num_slices) {
+    return;
+  }
+  const uint32_t k_to_find = ks_to_find_in[slice_idx];
+  const short* slice_counts = counts + static_cast<size_t>(slice_idx) * blocks_per_slice * RADIX_DIGITS;
+
+  typedef ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<uint32_t, RADIX_DIGITS> BlockScan;
+  __shared__ typename BlockScan::TempStorage scan_storage;
+  __shared__ uint32_t digit_totals[RADIX_DIGITS];
+  __shared__ Bitwise desired;
+
+  uint32_t sum = 0;
+  for (uint32_t blk = 0; blk < blocks_per_slice; ++blk) {
+    sum += slice_counts[blk * RADIX_DIGITS + tidx];
+  }
+  uint32_t digit_count_cumsum;
+  BlockScan(scan_storage).InclusiveSum(sum, digit_count_cumsum);
+  digit_totals[tidx] = digit_count_cumsum;
+  __syncthreads();
+  const uint32_t digit_count_cumsum_left = (tidx == 0) ? 0 : digit_totals[tidx - 1];
+  if (digit_count_cumsum_left < k_to_find && k_to_find <= digit_count_cumsum) {
+    Bitwise d = at::cuda::Bitfield<Bitwise>::setBitfield(desires_in[slice_idx], tidx, current_bit, RADIX_BITS);
+    desired = d;
+    desires_out[slice_idx] = d;
+    if (current_bit > 0) {
+      ks_to_find_out[slice_idx] = k_to_find - digit_count_cumsum_left;
+    } else {
+      kthValues[slice_idx] = TopKTypeConfig<T>::deconvert(d);
+    }
+  }
+  __syncthreads();
+
+  const int desired_digit = at::cuda::Bitfield<Bitwise>::getBitfield(desired, current_bit, RADIX_BITS);
+  const int desired_digit0 = at::cuda::Bitfield<Bitwise>::getBitfield(desired, 0, RADIX_BITS);
+  const int lane = tidx % C10_WARP_SIZE;
+  const int warp = tidx / C10_WARP_SIZE;
+  const int num_warps = RADIX_DIGITS / C10_WARP_SIZE;
+  for (uint32_t blk = warp; blk < blocks_per_slice; blk += num_warps) {
+    const short* block_counts = slice_counts + blk * RADIX_DIGITS;
+    uint32_t count = 0;
+    for (int digit = lane; digit < RADIX_DIGITS; digit += C10_WARP_SIZE) {
+      if (largest ? digit > desired_digit : digit < desired_digit) {
+        count += block_counts[digit];
+      }
+    }
+    for (int offset = C10_WARP_SIZE / 2; offset > 0; offset /= 2) {
+      count += WARP_SHFL_DOWN(count, offset);
+    }
+    if (lane == 0) {
+      const uint32_t block_idx = slice_idx * blocks_per_slice + blk;
+      withinKCounts[block_idx] += count;
+      if (current_bit == 0) {
+        kthCounts[block_idx] = block_counts[desired_digit0];
+      }
+    }
+  }
+#else
+  CUDA_KERNEL_ASSERT(false && "computeSliceWithinKCounts is gfx1250-only");
+#endif
+}
+
 #endif // USE_ROCM
 
 template <typename T, typename IndexType, int Dim>
@@ -1491,6 +2021,202 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   }
 }
 
+#if defined(USE_ROCM)
+// gatherTopK for gfx1250: places each item at the same offset (its rank in
+// index order plus the per-block bases), but ranks kWaveBallotRows rows of
+// BLOCK_THREADS items per barrier instead of one block-wide scan per row. Each
+// wave counts its items of each row with ballots, one barrier exchanges the
+// per-wave counts, and every wave scans them to find where its items go. The
+// earlier blocks' counts are summed by all threads.
+//
+// Rows loaded and ranked per barrier, the same batch as the lane-private digit
+// counts, which load one item per lane per row too. Swept on gfx1250 with 4, 8
+// and 16 rows: 4 and 8 are within 2% of each other, 16 is slower.
+constexpr int kWaveBallotRows = kLanePrivateLoadBatch;
+// A wave's counts of one row packed in one word: within-k items in the low half,
+// k-th value items in the high half. Sums over an exchange must fit a half.
+constexpr int kCountBits = std::numeric_limits<uint32_t>::digits / 2;
+constexpr uint32_t kCountMask = (1u << kCountBits) - 1;
+static_assert(kWaveBallotRows * BLOCK_THREADS <= kCountMask, "the counts of an exchange must fit in a half word");
+
+template <typename T, typename IndexType, int Dim>
+C10_LAUNCH_BOUNDS_1(BLOCK_THREADS)
+__global__ void gatherTopKWaveBallot(at::cuda::detail::TensorInfo<const T, IndexType> input,
+                                     IndexType inputSliceSize,
+                                     IndexType outputSliceSize, // aka `k`
+                                     bool largest,
+
+                                     uint32_t numInputSlices,
+                                     IndexType inputWithinSliceStride,
+
+                                     at::cuda::detail::TensorInfo<T, IndexType> topK,
+                                     IndexType topKWithinSliceStride,
+
+                                     at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
+                                     IndexType indicesWithinSliceStride,
+
+                                     uint32_t items_per_thread,
+                                     uint32_t blocks_per_slice,
+
+                                     T *kthValues,
+                                     uint32_t* withinKCounts,
+                                     uint32_t* kthCounts,
+                                     uint32_t num_blocks) {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__SPIRV__)
+  constexpr int kMaxWaves = BLOCK_THREADS / C10_WARP_SIZE_LOWER_BOUND;
+  // (row, wave) counts per exchange, and how many of them each lane scans.
+  constexpr int kEntries = kWaveBallotRows * kMaxWaves;
+  constexpr int kEntriesPerLane = (kEntries + C10_WARP_SIZE_LOWER_BOUND - 1) / C10_WARP_SIZE_LOWER_BOUND;
+  const uint32_t block_idx = getLinearBlockId<uint32_t>();
+  if (block_idx >= num_blocks) {
+    return;
+  }
+  const uint32_t tidx = threadIdx.x;
+  const uint32_t wave = tidx / C10_WARP_SIZE;
+  const uint32_t lane = tidx % C10_WARP_SIZE;
+  const uint32_t num_waves = BLOCK_THREADS / C10_WARP_SIZE;
+  const uint32_t slice_idx = block_idx / blocks_per_slice;
+  const uint32_t blk_idx_in_slice = block_idx % blocks_per_slice;
+  const uint32_t items_per_block = items_per_thread * BLOCK_THREADS;
+
+  // Within-k and k-th value counts of the earlier blocks of the slice, and the
+  // slice's total within-k count, summed per wave here and over waves below.
+  const uint32_t slice_offset = slice_idx * blocks_per_slice;
+  uint32_t earlier_within = 0;
+  uint32_t earlier_kth = 0;
+  uint32_t slice_within = 0;
+  for (uint32_t blk = tidx; blk < blocks_per_slice; blk += BLOCK_THREADS) {
+    const uint32_t within = withinKCounts[slice_offset + blk];
+    slice_within += within;
+    if (blk < blk_idx_in_slice) {
+      earlier_within += within;
+      earlier_kth += kthCounts[slice_offset + blk];
+    }
+  }
+  for (int offset = C10_WARP_SIZE / 2; offset > 0; offset /= 2) {
+    earlier_within += WARP_SHFL_DOWN(earlier_within, offset);
+    earlier_kth += WARP_SHFL_DOWN(earlier_kth, offset);
+    slice_within += WARP_SHFL_DOWN(slice_within, offset);
+  }
+  __shared__ uint32_t earlier_within_counts[kMaxWaves];
+  __shared__ uint32_t earlier_kth_counts[kMaxWaves];
+  __shared__ uint32_t slice_within_counts[kMaxWaves];
+  if (lane == 0) {
+    earlier_within_counts[wave] = earlier_within;
+    earlier_kth_counts[wave] = earlier_kth;
+    slice_within_counts[wave] = slice_within;
+  }
+
+  items_per_thread = (blk_idx_in_slice + 1 < blocks_per_slice)
+      ? items_per_thread
+      : at::ceil_div((int64_t)(inputSliceSize - blk_idx_in_slice * items_per_block), (int64_t)BLOCK_THREADS);
+
+  const T* inputSliceStart =
+      &input.data[at::cuda::detail::IndexToOffset<const T, IndexType, Dim>::get(slice_idx, input)];
+  T* topKSliceStart = &topK.data[at::cuda::detail::IndexToOffset<T, IndexType, Dim>::get(slice_idx, topK)];
+  int64_t* indicesSliceStart =
+      &indices.data[at::cuda::detail::IndexToOffset<int64_t, IndexType, Dim>::get(slice_idx, indices)];
+  const auto kthValueConverted = at::native::TopKTypeConfig<T>::convert(kthValues[slice_idx]);
+  const auto lanes_before = at::cuda::getLaneMaskLt();
+
+  // Double-buffered so that one barrier per exchange suffices.
+  __shared__ uint32_t row_counts[2][kEntries];
+  uint32_t start_within = 0;
+  uint32_t start_kth = 0;
+  for (uint32_t row0 = 0, exchange = 0; row0 < items_per_thread; row0 += kWaveBallotRows, ++exchange) {
+    uint32_t* counts = row_counts[exchange % 2];
+    // Zero-initialized: the ballots below also convert the invalid slots.
+    T vals[kWaveBallotRows]{};
+    bool valid[kWaveBallotRows];
+#pragma unroll
+    for (int u = 0; u < kWaveBallotRows; ++u) {
+      const IndexType idx = blk_idx_in_slice * items_per_block + (row0 + u) * BLOCK_THREADS + tidx;
+      valid[u] = row0 + u < items_per_thread && idx < inputSliceSize;
+      if (valid[u]) {
+        vals[u] = doLdg(inputSliceStart + idx * inputWithinSliceStride);
+      }
+    }
+    bool within[kWaveBallotRows];
+    bool kth[kWaveBallotRows];
+    decltype(WARP_BALLOT(0)) within_mask[kWaveBallotRows];
+    decltype(WARP_BALLOT(0)) kth_mask[kWaveBallotRows];
+#pragma unroll
+    for (int u = 0; u < kWaveBallotRows; ++u) {
+      const auto valConverted = at::native::TopKTypeConfig<T>::convert(vals[u]);
+      within[u] = valid[u] && (largest ? valConverted > kthValueConverted : valConverted < kthValueConverted);
+      kth[u] = valid[u] && valConverted == kthValueConverted;
+      within_mask[u] = WARP_BALLOT(within[u]);
+      kth_mask[u] = WARP_BALLOT(kth[u]);
+      if (lane == 0) {
+        counts[u * num_waves + wave] = __popcll(within_mask[u]) | (__popcll(kth_mask[u]) << kCountBits);
+      }
+    }
+    __syncthreads();
+
+    if (exchange == 0) {
+      for (uint32_t w = 0; w < num_waves; ++w) {
+        start_within += earlier_within_counts[w];
+        start_kth += slice_within_counts[w] + earlier_kth_counts[w];
+      }
+    }
+
+    // Exclusive scan of the (row, wave) counts in index order: entry u * num_waves + w
+    // counts the items of wave w in row row0 + u.
+    uint32_t entry_before[kEntriesPerLane];
+    uint32_t lane_sum = 0;
+#pragma unroll
+    for (int p = 0; p < kEntriesPerLane; ++p) {
+      const uint32_t e = lane * kEntriesPerLane + p;
+      entry_before[p] = lane_sum;
+      lane_sum += e < kWaveBallotRows * num_waves ? counts[e] : 0;
+    }
+    uint32_t lane_inclusive = lane_sum;
+    for (int offset = 1; offset < C10_WARP_SIZE; offset *= 2) {
+      const uint32_t v = WARP_SHFL_UP(lane_inclusive, offset);
+      if (lane >= (uint32_t)offset) {
+        lane_inclusive += v;
+      }
+    }
+#pragma unroll
+    for (int p = 0; p < kEntriesPerLane; ++p) {
+      entry_before[p] += lane_inclusive - lane_sum;
+    }
+    const uint32_t exchange_total = WARP_SHFL(lane_inclusive, C10_WARP_SIZE - 1);
+
+#pragma unroll
+    for (int u = 0; u < kWaveBallotRows; ++u) {
+      const uint32_t e = u * num_waves + wave;
+      uint32_t before = entry_before[0];
+#pragma unroll
+      for (int p = 1; p < kEntriesPerLane; ++p) {
+        if (e % kEntriesPerLane == (uint32_t)p) {
+          before = entry_before[p];
+        }
+      }
+      before = WARP_SHFL(before, e / kEntriesPerLane);
+      const IndexType idx = blk_idx_in_slice * items_per_block + (row0 + u) * BLOCK_THREADS + tidx;
+      if (within[u]) {
+        const uint32_t offset = start_within + (before & kCountMask) + __popcll(within_mask[u] & lanes_before);
+        topKSliceStart[offset * topKWithinSliceStride] = vals[u];
+        indicesSliceStart[offset * indicesWithinSliceStride] = idx;
+      }
+      if (kth[u]) {
+        const uint32_t offset = start_kth + (before >> kCountBits) + __popcll(kth_mask[u] & lanes_before);
+        if (offset < outputSliceSize) {
+          topKSliceStart[offset * topKWithinSliceStride] = vals[u];
+          indicesSliceStart[offset * indicesWithinSliceStride] = idx;
+        }
+      }
+    }
+    start_within += exchange_total & kCountMask;
+    start_kth += exchange_total >> kCountBits;
+  }
+#else
+  CUDA_KERNEL_ASSERT(false && "gatherTopKWaveBallot is gfx1250-only");
+#endif
+}
+#endif
+
 int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
   // Occupancy of this kernel is limited by registers per thread
   // Platform-specific tuning for optimal register pressure
@@ -1550,6 +2276,20 @@ public:
   }
 };
 
+#if defined(USE_ROCM)
+// Fewest slices that take computeSliceWithinKCounts: with fewer, the per-slice
+// kernel runs too few blocks to be faster.
+constexpr uint32_t kSliceWithinKCountsMinSlices = 65;
+
+static inline bool can_use_lane_private_digit_counts(c10::DeviceIndex device_index, int items_per_thread, int64_t slice_size) {
+  if (!is_gfx1250_device(device_index)) {
+    return false;
+  }
+  const int64_t counted_per_thread = std::min<int64_t>(items_per_thread, at::ceil_div(slice_size, (int64_t)BLOCK_THREADS));
+  return counted_per_thread >= kLanePrivateMinItemsPerThread;
+}
+#endif
+
 template <typename T, typename IndexType, int Dim>
 void launch(
     at::cuda::detail::TensorInfo<const T, IndexType> input,
@@ -1570,6 +2310,14 @@ void launch(
   // configure items_per_thread based on device architecture and input size
   int items_per_thread = get_items_per_thread(numInputSlices, inputSliceSize);
   int items_per_block = items_per_thread * BLOCK_THREADS;
+#if defined(USE_ROCM)
+  // The gfx1250 kernels compile their bodies for gfx1250 and SPIR-V only
+  // (__gfx1250__, __gfx1250_strict__ or __SPIRV__); elsewhere they assert.
+  const bool lane_private_digit_counts =
+      can_use_lane_private_digit_counts(stream.device_index(), items_per_thread, inputSliceSize);
+  const bool wave_ballot_gather = is_gfx1250_device(stream.device_index());
+  const bool slice_within_k_counts = wave_ballot_gather && numInputSlices >= kSliceWithinKCountsMinSlices;
+#endif
 
   using Bitwise = typename TopKTypeConfig<T>::RadixType;
   uint32_t blocks_per_slice = at::ceil_div((int64_t)inputSliceSize, (int64_t)items_per_block);
@@ -1619,6 +2367,10 @@ void launch(
   dim3 grid;
   TORCH_INTERNAL_ASSERT(getGridFromTiles(num_blocks, grid), "Too many slices for topk");
   dim3 block(BLOCK_THREADS);
+#if defined(USE_ROCM)
+  dim3 slice_grid;
+  TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, slice_grid), "Too many slices for topk");
+#endif
 
   uint32_t * ks_to_find_in = ks_to_find;
   uint32_t * ks_to_find_out = ks_to_find + numInputSlices;
@@ -1627,6 +2379,22 @@ void launch(
 
   // iterate radix bits for multiple passes
   for (int current_bit = sizeof(T) * 8 - RADIX_BITS; current_bit >= 0; current_bit -= RADIX_BITS) {
+#if defined(USE_ROCM)
+    if (lane_private_digit_counts) {
+      computeBlockDigitCountsLanePrivate<T, IndexType, Bitwise, Dim><<<grid, block, 0, stream>>>(
+          input,
+          inputSliceSize,
+          ks_to_find_in, // unused arg
+          numInputSlices,
+          inputWithinSliceStride,
+          current_bit,
+          items_per_thread,
+          blocks_per_slice,
+          desiredMask,
+          desired_in,
+          counts);
+    } else
+#endif
     computeBlockDigitCounts<T, IndexType, Bitwise, Dim><<<grid, block, 0, stream>>>(
         input,
         inputSliceSize,
@@ -1655,9 +2423,15 @@ void launch(
     // ROCm path: Fused version (no digit_cum_sum kernel, includes kthCounts)
     // we unconditionally call this kernel to update desired/ks_to_find/kthValues
     // if cub supports scan_by_key we additionally do k counts
-    computeBlockwiseWithinKCounts<Bitwise, T><<<grid, RADIX_DIGITS, 0, stream>>>(
-      desired_in, counts, ks_to_find_in, blocks_per_slice, current_bit, largest,
-      withinKCounts, kthValues, ks_to_find_out, desired_out, kthCounts, num_blocks);
+    if (slice_within_k_counts) {
+      computeSliceWithinKCounts<Bitwise, T><<<slice_grid, RADIX_DIGITS, 0, stream>>>(
+        desired_in, counts, ks_to_find_in, blocks_per_slice, current_bit, largest,
+        withinKCounts, kthValues, ks_to_find_out, desired_out, kthCounts, numInputSlices);
+    } else {
+      computeBlockwiseWithinKCounts<Bitwise, T><<<grid, RADIX_DIGITS, 0, stream>>>(
+        desired_in, counts, ks_to_find_in, blocks_per_slice, current_bit, largest,
+        withinKCounts, kthValues, ks_to_find_out, desired_out, kthCounts, num_blocks);
+    }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 #endif
     // swap desired/ks_to_find in and out for next iter
@@ -1689,6 +2463,14 @@ void launch(
 #endif
 
   // copy topk values to output tensor
+#if defined(USE_ROCM)
+  if (wave_ballot_gather) {
+    gatherTopKWaveBallot<T, IndexType, Dim><<<grid, block, 0, stream>>>(
+      input, inputSliceSize, outputSliceSize, largest, numInputSlices, inputWithinSliceStride,
+      topK, topKWithinSliceStride, indices, indicesWithinSliceStride, items_per_thread,
+      blocks_per_slice, kthValues, withinKCounts, kthCounts, num_blocks);
+  } else
+#endif
   gatherTopK<T, IndexType, Dim><<<grid, block, 0, stream>>>(
     input, inputSliceSize, outputSliceSize, largest, numInputSlices, inputWithinSliceStride,
     topK, topKWithinSliceStride, indices, indicesWithinSliceStride, items_per_thread,
@@ -1711,19 +2493,42 @@ bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
       (num_slices > 4000 && slice_size >= 400);
 }
 
-bool should_use_warp_topk(int64_t slice_size, int64_t k) {
+bool should_use_warp_topk(c10::DeviceIndex device_index, int64_t num_slices, int64_t slice_size, int64_t k) {
 #if !defined(USE_ROCM) || !HAS_WARP_MERGE_SORT()
   return false;
 #else
   if (slice_size <= 0 || k <= 0 || slice_size > warptopk::MAX_WARP_TOPK_SLICE) {
     return false;
   }
+  // On gfx1250 the multi-block radix select (mbtopk) is bound by same-address
+  // LDS atomics, and the warp sort is faster than it for every slice up to
+  // MAX_WARP_TOPK_SLICE, but not faster than the single-block sbtopk. So there
+  // the warp sort replaces mbtopk only. The warpMergeSortTopK instantiations
+  // above DEFAULT_MAX_WARP_TOPK_SLICE compile their bodies for gfx1250 and
+  // SPIR-V only; elsewhere they assert.
+  if (is_gfx1250_device(device_index) && should_use_multiblock(num_slices, slice_size)) {
+    return true;
+  }
   // Use WarpMergeSort for small slices
   // WarpMergeSort has O(n log n) complexity and is efficient for small sizes
   // Conservative threshold: slice_size <= 256 shows consistent improvements
-  return slice_size <= 256;
+  return slice_size <= warptopk::DEFAULT_MAX_WARP_TOPK_SLICE;
 #endif
 }
+
+#if defined(USE_ROCM) && HAS_WARP_MERGE_SORT()
+// One wave reads each slice, so the wave select needs many slices to fill the
+// GPU, and its time per wave grows with the slice length.
+constexpr int64_t kWaveSelectMinSlices = 512;
+constexpr int64_t kWaveSelectMaxSlice = 4096;
+
+// Must agree with the device gate of waveselect::waveSelectTopK (__gfx1250__,
+// __gfx1250_strict__ or __SPIRV__); a mismatch asserts.
+bool should_use_wave_select(c10::DeviceIndex device_index, int64_t num_slices, int64_t slice_size, int64_t k) {
+  return k > 0 && k <= waveselect::kMaxK && slice_size >= k && slice_size <= kWaveSelectMaxSlice &&
+      num_slices >= kWaveSelectMinSlices && is_gfx1250_device(device_index);
+}
+#endif
 
 void launch_gather_topk_kernel(
     const TensorBase& self, int64_t k, int64_t dim, bool largest,
@@ -1753,7 +2558,9 @@ void launch_gather_topk_kernel(
 
 #if defined(USE_ROCM) && HAS_WARP_MERGE_SORT()
 #define RUN_MB(INDEX_T, DIM)                                              \
-  if (should_use_warp_topk(sliceSize, k)) {                               \
+  if (should_use_wave_select(self.device().index(), numInputSlices, sliceSize, k)) { \
+    RUN_K(INDEX_T, DIM, waveselect::launch);                              \
+  } else if (should_use_warp_topk(self.device().index(), numInputSlices, sliceSize, k)) { \
     RUN_K(INDEX_T, DIM, warptopk::launch);                                \
   } else if (should_use_multiblock(numInputSlices, sliceSize)) {          \
     RUN_K(INDEX_T, DIM, mbtopk::launch);                                  \
