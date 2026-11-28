@@ -856,9 +856,12 @@ def load_state_dict_from_url(
             digits of the SHA256 hash of the contents of the file. The hash is used to
             ensure unique names and to verify the contents of the file.
             Default: False
-        file_name (str, optional): name for the downloaded file. Filename from ``url`` will be used if not set.
+        file_name (str, optional): name for the downloaded file. Filename from ``url`` will be used if not set. The name must resolve to a location inside ``model_dir``.
         weights_only(bool, optional): If True, only weights will be loaded and no complex pickled objects.
             Recommended for untrusted sources. See :func:`~torch.load` for more details.
+
+    Raises:
+        ValueError: If ``file_name`` would place the downloaded file outside of ``model_dir``.
 
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
@@ -885,6 +888,15 @@ def load_state_dict_from_url(
     if file_name is not None:
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
+    # A caller-supplied file_name must not be able to place the downloaded
+    # file outside of model_dir (e.g. "../escaped.pth" or an absolute path).
+    root = Path(model_dir).resolve()
+    target = (root / filename).resolve()
+    if not target.is_relative_to(root) or target == root:
+        raise ValueError(
+            f"file_name '{filename}' would place the downloaded file "
+            f"outside of model_dir '{model_dir}'"
+        )
     if not os.path.exists(cached_file):
         sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
         hash_prefix = None
