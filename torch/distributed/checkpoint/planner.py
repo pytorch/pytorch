@@ -329,6 +329,9 @@ class LoadPlanner:
         ``supports_batched_resolve`` is ``True``, a reader may resolve a batch
         of tensors before copying and committing them.
 
+    6) finish_load - called on all ranks after storage reads complete.
+        This gives planners a synchronized post-read phase for globally planned work.
+
     Users are recommended to extend DefaultLoadPlanner instead of this interface directly as
     most changes can be expressed by changes in a single method.
 
@@ -452,3 +455,6 @@ class LoadPlanner:
 
         The contents of tensor will follow its device synchronization model.
         """
+
+    def finish_load(self) -> None:
+        """Run planner work that requires all storage reads to be complete."""

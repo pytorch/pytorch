@@ -1,5 +1,6 @@
 from . import _extension
 from .api import CheckpointException
+from .cooperative_planner import CooperativeLoadPlanner
 from .default_planner import DefaultLoadPlanner, DefaultSavePlanner
 from .filesystem import FileSystemReader, FileSystemWriter
 from .fsspec_filesystem import FsspecReader, FsspecWriter
