@@ -30,9 +30,10 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import requires_triton
 
 
+@requires_triton()
 class PadMMTest(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -41,7 +42,6 @@ class PadMMTest(TestCase):
         if not is_big_gpu(torch.device(self.device_type, 0)):
             self.skipTest("Need a big GPU to run max_autotune=True")
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
@@ -75,7 +75,6 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
@@ -113,7 +112,6 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
@@ -143,7 +141,6 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
@@ -176,7 +173,6 @@ class PadMMTest(TestCase):
             FileCheck().check(f"M = {aligned_m}").run(code)
         self.assertEqual(res1, res2)
 
-    @unittest.skipUnless(has_triton(), "require triton")
     def test_pad_mm_dyn_mnk(self, device):
         M = 20
         K = 81
@@ -204,7 +200,6 @@ class PadMMTest(TestCase):
             res2, (_,) = run_and_get_code(compiled_fn, a, b)
         self.assertEqual(res1, res2)
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(force_shape_pad=True)
     def test_zero_dim(self, device):
         def addmm(x, a, b):
@@ -215,7 +210,6 @@ class PadMMTest(TestCase):
         b = torch.randn(10, 100).to(device)
         self.assertEqual(torch.compile(addmm)(x, a, b), addmm(x, a, b))
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
@@ -247,7 +241,6 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
@@ -279,7 +272,6 @@ class PadMMTest(TestCase):
             FileCheck().check(f"N = {aligned_n}").run(code)
         self.assertEqual(res1, res2)
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
@@ -312,7 +304,6 @@ class PadMMTest(TestCase):
             FileCheck().check(f"N = {aligned_n}").run(code)
         self.assertEqual(res1, res2)
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
@@ -344,7 +335,6 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
@@ -378,7 +368,6 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {K}").run(code)
         self.assertEqual(res1, res2)
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(force_shape_pad=True)
     def test_pad_single_cat(self, device):
         @torch.compile()
@@ -389,7 +378,6 @@ class PadMMTest(TestCase):
         out = foo(*inps)
         self.assertEqual(out, inps[0] @ inps[1])
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(force_shape_pad=True)
     @fresh_cache()
     def test_pad_addmm_2d_bias(self, device):
@@ -418,7 +406,6 @@ class PadMMTest(TestCase):
             out_eager = torch.ops.aten.addmm(*inps)
             self.assertEqual(out, out_eager)
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(force_shape_pad=True)
     def test_pad_batch(self, device):
         m = 6
@@ -449,7 +436,6 @@ class PadMMTest(TestCase):
         if not torch.allclose(res2, bmm_expected_result):
             raise AssertionError("BMM results are not identical")
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @fresh_cache()
     def test_exclude_padding(self, device):
         def bench(fn):
@@ -496,7 +482,6 @@ class PadMMTest(TestCase):
                 repr(local_cache)
             )
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @fresh_cache()
     @inductor_config.patch(max_pointwise_cat_inputs=2)
     def test_exclude_cat_padding(self, device):
@@ -519,7 +504,6 @@ class PadMMTest(TestCase):
             repr(get_pad_cache().get_local_cache())
         )
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @fresh_cache()
     @inductor_config.patch(
         post_grad_fusion_options={"pad_aten_mm_pass": {"k_threshold_to_pad": 8388608}}
@@ -559,7 +543,6 @@ class PadMMTest(TestCase):
         if not torch.allclose(res2, mm_expected_result):
             raise AssertionError("MM results are not identical")
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @fresh_cache()
     @inductor_config.patch(
         {
@@ -595,7 +578,6 @@ class PadMMTest(TestCase):
         # Its name should contain `mm` because `mm` was the original aten op where the mm came from.
         FileCheck().check("def triton_tem_fused_mm").run(code[0])
 
-    @unittest.skipUnless(has_triton(), "require triton")
     def test_no_autocast_in_pad_bmm_joint_graph_pass(self, device):
         # Track bmm dtypes before and after joint graph passes
         bmm_dtypes_pre = {}
@@ -706,7 +688,6 @@ class PadMMTest(TestCase):
         torch.manual_seed(42)
         test_masked_mha(B, H, S, D, device, dtype)
 
-    @unittest.skipUnless(has_triton(), "require triton")
     @inductor_config.patch(force_shape_pad=True, strict_output_strides=True)
     def test_pad_mm_output_strides_preserved(self, device):
         """Regression test: pad_mm creates views with padded strides.
@@ -725,11 +706,11 @@ class PadMMTest(TestCase):
         self.assertEqual(compiled.stride(), expected.stride())
 
 
+@requires_triton()
 class PadMMTestOnlyCuda(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
-    @unittest.skipUnless(has_triton(), "require triton")
     @fresh_cache()
     @inductor_config.patch(shape_padding=True)
     def test_addmm_beta_zero_mismatched_bias_skips_padding(self):
