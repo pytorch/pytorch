@@ -10,7 +10,11 @@
 // one threadgroup of 1024 threads.
 // DecodeAttention.h instantiates the kernels for each of 32, 64, 96, 128, 256
 // and 512 (kDecodeTiles).
+// sdpa_vector_wide takes up to 16 (kWideDecodeMaxKeys) keys: each key gets one
+// lane of a simdgroup for the softmax and kDecodeSimdgroups / keys simdgroups
+// for its QK dot product, two at 16 keys.
 C10_METAL_CONSTEXPR int kDecodeMaxQueries = 8;
+C10_METAL_CONSTEXPR int kWideDecodeMaxKeys = 16;
 C10_METAL_CONSTEXPR int kTwoPassMinKeys = 1024;
 C10_METAL_CONSTEXPR int kDecodeSimdgroups = 32;
 C10_METAL_CONSTEXPR int kDecodeBlocks = 32;
@@ -23,6 +27,10 @@ static_assert(
         kDecodeBlocks * ::c10::metal::simdgroup_size <=
             ::c10::metal::max_threadgroup_size,
     "exceeds the Metal threadgroup size limit");
+static_assert(
+    kWideDecodeMaxKeys <= kDecodeSimdgroups &&
+        kWideDecodeMaxKeys <= static_cast<int>(::c10::metal::simdgroup_size),
+    "sdpa_vector_wide needs a simdgroup and a simdgroup lane per key");
 
 // Prefill tiles (padded head dims); PrefillAttention.h and MppAttention.h
 // instantiate the kernels for each. Head dims above the widest tile run on
@@ -65,7 +73,7 @@ struct PrefillAttnParams {
   int kL; // key sequence length
   int gqa_factor; // num_q_heads / num_kv_heads
   float scale;
-  int Dv; // V/O columns per slab, <= the tile width
+  int Dv; // V/O columns assigned to this threadgroup
   // Strides (B, H, L) - element stride in last dim is assumed to be 1.
   // 64-bit: a batch/head stride is a product of the other dimensions and
   // overflows 32 bits on large inputs, and the mask qL stride is multiplied
