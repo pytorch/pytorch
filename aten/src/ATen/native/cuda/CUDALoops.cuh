@@ -33,12 +33,14 @@
 #include <tuple>
 #include <type_traits>
 
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/core/DynamicCast.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/TypeCast.h>
 
 #ifdef __NVCC__
@@ -473,6 +475,253 @@ static inline void launch_vectorized_kernel(
 }
 
 #ifdef USE_ROCM
+// Vectorized kernel for 2-D elementwise iterations in which the output is
+// contiguous along the inner dim and every input is either contiguous or
+// broadcast (stride 0) along it, e.g. a bias add `[N] + [M, N]` or
+// `where(cond[M, 1], x, y)`. gpu_kernel_impl_nocast uses it only on gfx1250
+// (wave32), where the per-element OffsetCalculator kernel's narrow scalar
+// accesses are limited by the memory instruction rate.
+//
+// Launch geometry: the output is split into vectors of
+// kInnerBroadcastVectorBytes (inner_broadcast_vec_size elements of the widest
+// operand; 8 bytes for 1-byte operands whose rows do not allow 16). Each of
+// the num_threads() threads of a block handles thread_work_size() vectors, so
+//   block = num_threads(), grid = ceil(numel / vec / block_work_size()).
+// One IntDivider divmod turns a vector index into (row, vector within the row);
+// a contiguous operand loads one vector, a broadcast operand loads one scalar.
+
+// Bytes per vectorized load and store, the widest memory::aligned_vector access.
+constexpr int kInnerBroadcastVectorBytes = 16;
+
+// Elements per vector: kInnerBroadcastVectorBytes over the widest operand (1 if
+// it is that wide).
+template <typename func_t>
+constexpr int inner_broadcast_vec_size() {
+  using traits = function_traits<func_t>;
+  using args_t = typename traits::ArgsTuple;
+  constexpr size_t widest = std::max(
+      sizeof(typename traits::result_type),
+      max_of_sizes(args_t{}, std::make_index_sequence<std::tuple_size_v<args_t>>{}));
+  return widest >= kInnerBroadcastVectorBytes ? 1 : static_cast<int>(kInnerBroadcastVectorBytes / widest);
+}
+
+template <int vec, typename traits, size_t I, typename args_t>
+__device__ __forceinline__ void inner_broadcast_load_arg(args_t (&args)[vec], const char* row_base, bool broadcast, uint32_t vec_in_row) {
+  using arg_t = std::tuple_element_t<I, typename traits::ArgsTuple>;
+  if (broadcast) {
+    const arg_t s = c10::load<arg_t>(reinterpret_cast<const arg_t*>(row_base));
+#pragma unroll
+    for (int j = 0; j < vec; j++) {
+      std::get<I>(args[j]) = s;
+    }
+  } else {
+    const auto v = memory::load_vector<vec>(reinterpret_cast<const arg_t*>(row_base), vec_in_row);
+#pragma unroll
+    for (int j = 0; j < vec; j++) {
+      std::get<I>(args[j]) = v.val[j];
+    }
+  }
+}
+
+template <int vec, typename traits, typename args_t, typename array_t, size_t N, size_t... I>
+__device__ __forceinline__ void inner_broadcast_load_args(args_t (&args)[vec], const array_t& data, const std::array<uint32_t, N>& row_strides, uint32_t broadcast_mask, uint32_t row, uint32_t vec_in_row, std::index_sequence<I...>) {
+  (inner_broadcast_load_arg<vec, traits, I>(args, data[I + 1] + row * row_strides[I + 1], (broadcast_mask >> I) & 1u, vec_in_row), ...);
+}
+
+// data[0] is the output; bit i of broadcast_mask marks input i (data[i + 1]) as
+// broadcast along the inner dim; row_strides are in bytes.
+template <int vec, typename func_t, typename array_t, size_t N>
+C10_LAUNCH_BOUNDS_1(num_threads())
+__global__ void inner_broadcast_vectorized_elementwise_kernel(uint32_t num_vectors, at::cuda::detail::IntDivider<uint32_t> vecs_per_row, func_t f, array_t data, std::array<uint32_t, N> row_strides, uint32_t broadcast_mask) {
+  // Launched only on gfx1250.
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__SPIRV__)
+  using traits = function_traits<func_t>;
+  using args_t = typename traits::ArgsTuple;
+  using out_t = typename traits::result_type;
+  uint32_t vec_idx = blockIdx.x * block_work_size() + threadIdx.x;
+#pragma unroll
+  for (int i = 0; i < thread_work_size(); i++, vec_idx += num_threads()) {
+    if (vec_idx >= num_vectors) {
+      return;
+    }
+    const auto pos = vecs_per_row.divmod(vec_idx);
+    args_t args[vec];
+    inner_broadcast_load_args<vec, traits>(args, data, row_strides, broadcast_mask, pos.div, pos.mod, std::make_index_sequence<traits::arity>{});
+    memory::aligned_vector<out_t, vec> out;
+#pragma unroll
+    for (int j = 0; j < vec; j++) {
+      out.val[j] = c10::guts::apply(f, args[j]);
+    }
+    reinterpret_cast<memory::aligned_vector<out_t, vec>*>(data[0] + pos.div * row_strides[0])[pos.mod] = out;
+  }
+#else
+  CUDA_KERNEL_ASSERT(false && "inner_broadcast_vectorized_elementwise_kernel is gfx1250-only");
+#endif
+}
+
+// True if the iteration is 2-D and non-empty with the inner size a multiple of
+// the vector size, every row stride fits in 32 bits, and the output and every
+// non-broadcast input are contiguous along the inner dim with base pointer and
+// row stride multiples of the vector size in bytes.
+template <typename func_t, int vec = inner_broadcast_vec_size<func_t>(), typename array_t>
+static inline bool can_use_inner_broadcast_vectorized(const TensorIteratorBase& iter, const array_t& data) {
+  using traits = function_traits<func_t>;
+  static_assert(traits::arity > 0 && vec >= 2);
+  if (iter.ndim() != 2 || iter.numel() == 0 || iter.shape()[0] % vec != 0) {
+    return false;
+  }
+  for (int i = 0; i < traits::arity + 1; i++) {
+    const int64_t elem_size = iter.element_size(i);
+    const int64_t inner_stride = iter.strides(i)[0];
+    const int64_t row_stride = iter.strides(i)[1];
+    if (row_stride < 0 || row_stride > std::numeric_limits<uint32_t>::max()) {
+      return false;
+    }
+    const bool broadcast_input = i > 0 && inner_stride == 0;
+    const int64_t vector_bytes = vec * elem_size;
+    if (!broadcast_input && (inner_stride != elem_size || row_stride % vector_bytes != 0 || reinterpret_cast<uintptr_t>(data[i]) % vector_bytes != 0)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Requires can_use_inner_broadcast_vectorized(iter, data).
+template <typename func_t, int vec = inner_broadcast_vec_size<func_t>(), typename array_t>
+static inline void launch_inner_broadcast_vectorized_kernel(const TensorIteratorBase& iter, const func_t& f, const array_t& data) {
+  using traits = function_traits<func_t>;
+  static_assert(traits::arity > 0 && vec >= 2);
+  constexpr int ntensors = traits::arity + 1;
+  uint32_t broadcast_mask = 0;
+  std::array<uint32_t, ntensors> row_strides;
+  for (int i = 0; i < ntensors; i++) {
+    row_strides[i] = static_cast<uint32_t>(iter.strides(i)[1]);
+    if (i > 0 && iter.strides(i)[0] == 0) {
+      broadcast_mask |= 1u << (i - 1);
+    }
+  }
+  const int64_t num_vectors = iter.numel() / vec;
+  const int64_t grid = at::ceil_div(num_vectors, static_cast<int64_t>(block_work_size()));
+  auto stream = at::cuda::getCurrentCUDAStream();
+  inner_broadcast_vectorized_elementwise_kernel<vec, func_t, array_t, ntensors><<<grid, num_threads(), 0, stream>>>(
+      static_cast<uint32_t>(num_vectors), at::cuda::detail::IntDivider<uint32_t>(static_cast<uint32_t>(iter.shape()[0] / vec)), f, data, row_strides, broadcast_mask);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+// N-D variant for iterations with more than two dims after coalescing, e.g. a
+// condition broadcast along a middle dim or `[M, 4, 4, 1] * [M, 1, 4, C]`.
+// Same operand rules, vector size and launch geometry as the 2-D kernel; the
+// iterator's OffsetCalculator with dim 0 counted in vectors turns a vector
+// index into per-tensor byte offsets, one divmod chain per vector.
+template <int vec, typename traits, typename args_t, typename array_t, typename offsets_t, size_t... I>
+__device__ __forceinline__ void inner_broadcast_nd_load_args(args_t (&args)[vec], const array_t& data, const offsets_t& offsets, uint32_t broadcast_mask, std::index_sequence<I...>) {
+  (inner_broadcast_load_arg<vec, traits, I>(args, data[I + 1] + offsets[I + 1], (broadcast_mask >> I) & 1u, 0), ...);
+}
+
+// data[0] is the output; bit i of broadcast_mask marks input i (data[i + 1]) as
+// broadcast along the inner dim.
+template <int vec, typename func_t, typename array_t, typename offset_calc_t>
+C10_LAUNCH_BOUNDS_1(num_threads())
+__global__ void inner_broadcast_vectorized_nd_elementwise_kernel(uint32_t num_vectors, func_t f, array_t data, offset_calc_t offset_calc, uint32_t broadcast_mask) {
+  // Launched only on gfx1250.
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__SPIRV__)
+  using traits = function_traits<func_t>;
+  using args_t = typename traits::ArgsTuple;
+  using out_t = typename traits::result_type;
+  uint32_t vec_idx = blockIdx.x * block_work_size() + threadIdx.x;
+#pragma unroll
+  for (int i = 0; i < thread_work_size(); i++, vec_idx += num_threads()) {
+    if (vec_idx >= num_vectors) {
+      return;
+    }
+    const auto offsets = offset_calc.get(vec_idx);
+    args_t args[vec];
+    inner_broadcast_nd_load_args<vec, traits>(args, data, offsets, broadcast_mask, std::make_index_sequence<traits::arity>{});
+    memory::aligned_vector<out_t, vec> out;
+#pragma unroll
+    for (int j = 0; j < vec; j++) {
+      out.val[j] = c10::guts::apply(f, args[j]);
+    }
+    *reinterpret_cast<memory::aligned_vector<out_t, vec>*>(data[0] + offsets[0]) = out;
+  }
+#else
+  CUDA_KERNEL_ASSERT(false && "inner_broadcast_vectorized_nd_elementwise_kernel is gfx1250-only");
+#endif
+}
+
+// True if the iteration is more than 2-D and non-empty with the inner size a
+// multiple of the vector size, the output and every non-broadcast input are
+// contiguous along the inner dim with base pointer and every outer stride (of
+// dims with size > 1) multiples of the tensor's vector bytes, and every other
+// input is broadcast (stride 0) along the inner dim. The caller guarantees
+// 32-bit indexing (gpu_kernel_impl_nocast asserts it).
+template <typename func_t, int vec = inner_broadcast_vec_size<func_t>(), typename array_t>
+static inline bool can_use_inner_broadcast_vectorized_nd(const TensorIteratorBase& iter, const array_t& data) {
+  using traits = function_traits<func_t>;
+  static_assert(traits::arity > 0 && vec >= 2);
+  const int ndim = iter.ndim();
+  if (ndim <= 2 || iter.numel() == 0 || iter.shape()[0] % vec != 0) {
+    return false;
+  }
+  for (int i = 0; i < traits::arity + 1; i++) {
+    const int64_t elem_size = iter.element_size(i);
+    const int64_t inner_stride = iter.strides(i)[0];
+    if (i > 0 && inner_stride == 0) {
+      continue;
+    }
+    const int64_t vector_bytes = vec * elem_size;
+    if (inner_stride != elem_size || reinterpret_cast<uintptr_t>(data[i]) % vector_bytes != 0) {
+      return false;
+    }
+    for (int d = 1; d < ndim; d++) {
+      if (iter.shape()[d] > 1 && iter.strides(i)[d] % vector_bytes != 0) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// Requires can_use_inner_broadcast_vectorized_nd(iter, data).
+template <typename func_t, int vec = inner_broadcast_vec_size<func_t>(), typename array_t>
+static inline void launch_inner_broadcast_vectorized_nd_kernel(const TensorIteratorBase& iter, const func_t& f, const array_t& data) {
+  using traits = function_traits<func_t>;
+  static_assert(traits::arity > 0 && vec >= 2);
+  constexpr int ntensors = traits::arity + 1;
+  uint32_t broadcast_mask = 0;
+  for (int i = 1; i < ntensors; i++) {
+    if (iter.strides(i)[0] == 0) {
+      broadcast_mask |= 1u << (i - 1);
+    }
+  }
+  // The iterator's byte offsets, except dim 0 counts vectors instead of elements.
+  auto offset_calc = ::make_offset_calculator<ntensors>(iter);
+  offset_calc.sizes_[0] = at::cuda::detail::IntDivider<uint32_t>(static_cast<uint32_t>(iter.shape()[0] / vec));
+  for (int i = 0; i < ntensors; i++) {
+    offset_calc.strides_[0][i] = static_cast<uint32_t>(vec * iter.strides(i)[0]);
+  }
+  const int64_t num_vectors = iter.numel() / vec;
+  const int64_t grid = at::ceil_div(num_vectors, static_cast<int64_t>(block_work_size()));
+  auto stream = at::cuda::getCurrentCUDAStream();
+  inner_broadcast_vectorized_nd_elementwise_kernel<vec><<<grid, num_threads(), 0, stream>>>(static_cast<uint32_t>(num_vectors), f, data, offset_calc, broadcast_mask);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+// Whether gpu_kernel_impl_nocast may use the inner-broadcast kernels on this
+// device. Non-template, so one cache serves every functor.
+inline bool inner_broadcast_is_gfx1250(c10::DeviceIndex device) {
+  TORCH_INTERNAL_ASSERT(device >= 0 && device < C10_COMPILE_TIME_MAX_GPUS);
+  static std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> once_flags;
+  static std::array<bool, C10_COMPILE_TIME_MAX_GPUS> results{};
+  c10::call_once(once_flags[device], [device] {
+    results[device] =
+        at::detail::getCUDAHooks().isGPUArch({"gfx1250"}, device);
+  });
+  return results[device];
+}
+#endif
+
+#ifdef USE_ROCM
 template <
     int vec_size,
     typename func_t,
@@ -740,6 +989,32 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   if (contiguous) {
     return launch_vectorized_kernel(numel, f, data);
   }
+#ifdef USE_ROCM
+  // Unary and complex128 functors keep the OffsetCalculator kernel, which
+  // keeps the inner-broadcast kernels out of most instantiations.
+  if constexpr (traits::arity >= 2 && inner_broadcast_vec_size<func_t>() >= 2) {
+    // Must agree with the inner-broadcast kernels' device gate (__gfx1250__,
+    // __gfx1250_strict__ or __SPIRV__); a mismatch asserts.
+    if (inner_broadcast_is_gfx1250(iter.device(0).index())) {
+      if (can_use_inner_broadcast_vectorized<func_t>(iter, data)) {
+        return launch_inner_broadcast_vectorized_kernel(iter, f, data);
+      }
+      if (can_use_inner_broadcast_vectorized_nd<func_t>(iter, data)) {
+        return launch_inner_broadcast_vectorized_nd_kernel(iter, f, data);
+      }
+      // 1-byte operands whose inner size or strides are multiples of 8 but not of
+      // 16 bytes (e.g. 5000-element rows) take 8-byte vectors.
+      if constexpr (inner_broadcast_vec_size<func_t>() == 16) {
+        if (can_use_inner_broadcast_vectorized<func_t, 8>(iter, data)) {
+          return launch_inner_broadcast_vectorized_kernel<func_t, 8>(iter, f, data);
+        }
+        if (can_use_inner_broadcast_vectorized_nd<func_t, 8>(iter, data)) {
+          return launch_inner_broadcast_vectorized_nd_kernel<func_t, 8>(iter, f, data);
+        }
+      }
+    }
+  }
+#endif
   auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
 #ifndef USE_ROCM
   constexpr int unroll_factor = sizeof(arg0_t) >= 4 ? 2 : 4;

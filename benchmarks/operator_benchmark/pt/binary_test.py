@@ -30,6 +30,38 @@ binary_configs_broadcast = op_bench.config_list(
     tags=["short"],
 )
 
+# Inner-dim broadcast on CUDA: bias adds [N] + [M, N] and a column broadcast
+# [B, R, 1] + [B, R, N], at shapes from a recommendation model.
+binary_configs_inner_broadcast = op_bench.config_list(
+    attr_names=["in_one", "in_two"],
+    attrs=[
+        [[8192], [17750, 8192]],
+        [[3072], [17750, 3072]],
+        [[1536], [17750, 1536]],
+        [[8192], [28160, 8192]],
+        [[71, 250, 1], [71, 250, 8192]],
+    ],
+    cross_product_configs={
+        "device": ["cuda"],
+        "dtype": [torch.bfloat16],
+    },
+    tags=["inner_broadcast"],
+)
+
+# Inner-dim broadcast that stays N-D after coalescing, at a recommendation
+# model's shape.
+binary_configs_inner_broadcast_nd = op_bench.config_list(
+    attr_names=["in_one", "in_two"],
+    attrs=[
+        [[4096, 4, 4, 1], [4096, 1, 4, 1024]],
+    ],
+    cross_product_configs={
+        "device": ["cuda"],
+        "dtype": [torch.bfloat16],
+    },
+    tags=["inner_broadcast_nd"],
+)
+
 
 class BinaryOpBcastBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_one, in_two, dtype, device, op_func):
@@ -44,7 +76,11 @@ class BinaryOpBcastBenchmark(op_bench.TorchBenchmarkBase):
 
 
 op_bench.generate_pt_tests_from_op_list(
-    binary_ops_bcast_list, binary_configs_broadcast, BinaryOpBcastBenchmark
+    binary_ops_bcast_list,
+    binary_configs_broadcast
+    + binary_configs_inner_broadcast
+    + binary_configs_inner_broadcast_nd,
+    BinaryOpBcastBenchmark,
 )
 
 
@@ -148,6 +184,56 @@ class BinaryOpBcastBenchmark(op_bench.TorchBenchmarkBase):
 
 op_bench.generate_pt_tests_from_op_list(
     binary_ops_bcast_list, binary_configs_broadcast, BinaryOpBcastBenchmark
+)
+
+# Row mask broadcast along the inner dim on CUDA, at a recommendation model's shape.
+binary_ops_bool_inner_broadcast_list = op_bench.op_list(
+    attr_names=["op_name", "op_func"],
+    attrs=[["bitwise_or", torch.bitwise_or]],
+)
+
+binary_configs_bool_inner_broadcast = op_bench.config_list(
+    attr_names=["in_one", "in_two"],
+    attrs=[
+        [[28160, 8192], [28160, 1]],
+    ],
+    cross_product_configs={
+        "device": ["cuda"],
+        "dtype": [torch.bool],
+    },
+    tags=["inner_broadcast"],
+)
+
+op_bench.generate_pt_tests_from_op_list(
+    binary_ops_bool_inner_broadcast_list,
+    binary_configs_bool_inner_broadcast,
+    BinaryOpBcastBenchmark,
+)
+
+# Outer-product broadcast of bool masks on CUDA (rows of 5000, a multiple of 8
+# but not 16 bytes), at a recommendation model's shapes.
+binary_ops_bool_outer_broadcast_list = op_bench.op_list(
+    attr_names=["op_name", "op_func"],
+    attrs=[["logical_and", torch.logical_and]],
+)
+
+binary_configs_bool_outer_broadcast = op_bench.config_list(
+    attr_names=["in_one", "in_two"],
+    attrs=[
+        [[17, 5000, 1], [17, 1, 5000]],
+        [[17, 1, 5000, 5000], [17, 1, 1, 5000]],
+    ],
+    cross_product_configs={
+        "device": ["cuda"],
+        "dtype": [torch.bool],
+    },
+    tags=["inner_broadcast_nd"],
+)
+
+op_bench.generate_pt_tests_from_op_list(
+    binary_ops_bool_outer_broadcast_list,
+    binary_configs_bool_outer_broadcast,
+    BinaryOpBcastBenchmark,
 )
 
 

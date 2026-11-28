@@ -27,6 +27,26 @@ configs_long = op_bench.cross_product_configs(
     tags=["long"],
 )
 
+# Row condition broadcast along the inner dim on CUDA, at a recommendation model's shape.
+configs_inner_broadcast = op_bench.config_list(
+    attr_names=["cond_shape", "input_shape", "other_shape"],
+    attrs=[
+        [(64, 1), (64, 1966080), (64, 1966080)],
+    ],
+    cross_product_configs={"device": ["cuda"], "dtype": [torch.bfloat16]},
+    tags=["inner_broadcast"],
+)
+
+# Condition broadcast along a middle dim on CUDA, at a recommendation model's shape.
+configs_inner_broadcast_nd = op_bench.config_list(
+    attr_names=["cond_shape", "input_shape", "other_shape"],
+    attrs=[
+        [(17, 1, 5000, 5000), (17, 2, 5000, 5000), (1,)],
+    ],
+    cross_product_configs={"device": ["cuda"], "dtype": [torch.bfloat16]},
+    tags=["inner_broadcast_nd"],
+)
+
 
 class WhereBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, cond_shape, input_shape, other_shape, dtype, device):
@@ -44,7 +64,8 @@ class WhereBenchmark(op_bench.TorchBenchmarkBase):
         return torch.where(condition, input, other)
 
 
-op_bench.generate_pt_test(configs_short + configs_long, WhereBenchmark)
+configs_cuda = configs_inner_broadcast + configs_inner_broadcast_nd
+op_bench.generate_pt_test(configs_short + configs_long + configs_cuda, WhereBenchmark)
 
 
 if __name__ == "__main__":
