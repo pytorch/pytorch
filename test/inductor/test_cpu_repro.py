@@ -3753,6 +3753,20 @@ class CPUReproTests(TestCase):
                     torch.allclose(output_eager, output_compiled, atol=1e-4, rtol=1e-4)
                 )
 
+    def test_var_empty_masked_select(self):
+        # https://github.com/pytorch/pytorch/issues/206927
+        # var(correction=-1) over an empty masked_select must be NaN, not 0.
+        def variance(x, mask):
+            return torch.masked_select(x, mask).var(correction=-1)
+
+        x = torch.arange(8, dtype=torch.float32)
+        with torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True):
+            torch._dynamo.reset()
+            compiled = torch.compile(variance, fullgraph=True)
+            for count in (3, 0, 5, 0):
+                mask = x < count
+                self.assertEqual(variance(x, mask), compiled(x, mask))
+
     @parametrize("enabled", (False, True))
     def test_force_inline_welford(self, enabled):
         # use_two_step_variance keeps Welford for a single row. The flag only

@@ -8068,7 +8068,12 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
         c = get_constant_or_index_expr(correction, dtype)
         N = get_constant_or_index_expr(rnumel, dtype)
         zero = ops.constant(0, dtype)
-        return data / ops.maximum(zero, N - c)
+        # An empty reduction has a zero second moment. With a negative
+        # correction, max(N - correction, 0) is positive, so the variance
+        # would wrongly be 0 instead of NaN. Force a zero divisor for
+        # empty reductions so 0 / 0 is NaN, matching eager.
+        denom = ops.where(ops.eq(N, zero), zero, ops.maximum(zero, N - c))
+        return data / denom
 
     var = make_pointwise(scale_fn)(m2)
 
