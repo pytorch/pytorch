@@ -598,6 +598,21 @@ instantiate_device_type_tests(TestTesting, globals())
 
 
 class TestFrameworkUtils(TestCase):
+    @unittest.skipUnless(IS_WINDOWS, "Windows DLL layout")
+    def test_find_library_in_build_bin(self):
+        from torch.testing._internal import common_utils
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            dll = root / "build" / "bin" / "test_lookup.dll"
+            dll.parent.mkdir(parents=True)
+            dll.touch()
+            module = root / "torch" / "testing" / "_internal" / "common_utils.py"
+            with (
+                unittest.mock.patch.object(torch, "__file__", str(root / "torch" / "__init__.py")),
+                unittest.mock.patch.object(common_utils, "__file__", str(module)),
+            ):
+                self.assertEqual(common_utils.find_library_location(dll.name), dll)
 
     def test_rocm_version_uses_sdk_version(self):
         with (
