@@ -92,6 +92,21 @@ def vt_identity_compare(
     if left is right:
         return ConstantVariable.create(True)
 
+    from .functions import BoundBuiltinCallableMethodVariable
+
+    if isinstance(left, BoundBuiltinCallableMethodVariable) and isinstance(
+        right, BoundBuiltinCallableMethodVariable
+    ):
+        left, right = left.realize(), right.realize()
+        if left is right:
+            return ConstantVariable.create(True)
+        if left.source is not None and right.source is not None:
+            # Distinct sourced methods can alias on a later call.
+            for source in (left.source, right.source):
+                if not is_constant_source(source):
+                    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+        return ConstantVariable.create(False)
+
     left_val = left.get_real_python_backed_value()
     right_val = right.get_real_python_backed_value()
     left_known = left_val is not NO_SUCH_SUBOBJ
@@ -119,7 +134,7 @@ def vt_identity_compare(
     from .exception import ExceptionVariable, TracebackVariable
     from .functions import (
         _WrappedSkipFunctionMethodDescriptorCommonVariable,
-        UserMethodVariable,
+        MethodTypeVariableMixin,
     )
     from .lists import ListVariable
     from .sets import (
@@ -148,7 +163,7 @@ def vt_identity_compare(
         OrderedSetVariable,
         TracebackVariable,
         ExceptionVariable,
-        UserMethodVariable,
+        MethodTypeVariableMixin,
         _WrappedSkipFunctionMethodDescriptorCommonVariable,
         CurrentDeviceVariable,
     )

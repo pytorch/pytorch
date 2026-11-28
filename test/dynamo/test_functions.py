@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa: E731, C405, F811, C418, C417
+import abc
 import cmath
 import collections
 import collections.abc
@@ -219,6 +220,9 @@ def deque_length_hints():
             pass
         hints.append(operator.length_hint(it))
     return tuple(hints)
+
+
+_BUILTIN_METHOD_TYPE_TEST_GLOBAL = types.MethodType(len, (1, 2))
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
@@ -6820,6 +6824,191 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
+    def test_builtin_callable_method_type(self):
+        class Receiver:
+            pass
+
+        receiver = Receiver()
+
+        def fn(x):
+            method = types.MethodType(id, receiver)
+            try:
+                method.missing_attribute
+            except AttributeError as error:
+                missing_args = error.args
+            return (
+                method(),
+                method.__func__ is id,
+                method.__self__ is receiver,
+                hasattr(method, "__get__"),
+                method.__name__,
+                method.__qualname__,
+                method.__module__,
+                method.__doc__,
+                missing_args,
+                x + 1,
+            )
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_builtin_callable_method_type_richcompare_and_hash(self):
+        class Unhashable:
+            __hash__ = None
+
+        a, b = Unhashable(), Unhashable()
+
+        def fn(x):
+            m1 = types.MethodType(id, a)
+            m2 = types.MethodType(id, a)
+            m3 = types.MethodType(id, b)
+            other = object()
+            return (
+                m1 == m2,
+                m1 != m3,
+                m1 is m2,
+                m2 in {m1},
+                m2 in {m1: True},
+                m1 == other,
+                m1 != other,
+                x + 1,
+            )
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual[:-1], (True, True, False, True, True, False, True))
+
+    def test_builtin_callable_method_type_hash_with_local_list(self):
+        def fn(x):
+            receiver = [1, 2]
+            method = types.MethodType(len, receiver)
+            equivalent = types.MethodType(len, receiver)
+            return method(), equivalent in {method}, equivalent in {method: 1}, x + 1
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize(
+        "name,value,delete",
+        (
+            ("__func__", None, False),
+            ("__self__", None, True),
+            ("__doc__", None, False),
+            ("__doc__", None, True),
+            ("missing_attribute", None, False),
+            ("missing_attribute", None, True),
+            ("__repr__", None, False),
+            ("__class__", None, False),
+            ("__class__", int, False),
+            ("__class__", None, True),
+            ("__class__", abc.ABC, False),
+        ),
+    )
+    def test_builtin_callable_method_type_attribute_errors(self, name, value, delete):
+        def fn(name, value, delete):
+            method = types.MethodType(id, object())
+            try:
+                if delete:
+                    delattr(method, name)
+                else:
+                    setattr(method, name, value)
+            except (AttributeError, TypeError) as error:
+                return type(error).__name__, error.args
+            return "no error", ()
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(name, value, delete), fn(name, value, delete))
+
+    def test_builtin_callable_method_type_rejects_none_receiver(self):
+        def fn():
+            try:
+                types.MethodType(id, None)
+            except TypeError as error:
+                return type(error).__name__, error.args
+            return "no error", ()
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(),
+            fn(),
+        )
+
+    def test_sourced_builtin_callable_method_type(self):
+        receiver = [1, 2]
+        method = types.MethodType(len, receiver)
+
+        def fn(x, obj):
+            rebuilt = types.MethodType(len, obj)
+            return (
+                method.__func__ is len,
+                method.__self__ is obj,
+                method(),
+                method == rebuilt,
+                rebuilt in {method},
+                method in {rebuilt},
+                x + 1,
+            )
+
+        x = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        other = [1, 2]
+        self.assertEqual(compiled(x, other), fn(x, other))
+        self.assertEqual(compiled(x, receiver), fn(x, receiver))
+
+    def test_sourced_builtin_callable_method_type_hash_and_identity(self):
+        def fn(x, method, other):
+            return hash(method), method is other, x + 1
+
+        x = torch.randn(2)
+        first = types.MethodType(len, [1, 2])
+        second = types.MethodType(len, [1, 2])
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, first, second), fn(x, first, second))
+        self.assertEqual(compiled(x, second, second), fn(x, second, second))
+
+    def test_sourced_builtin_callable_method_type_global_alias(self):
+        def fn(x, method):
+            return _BUILTIN_METHOD_TYPE_TEST_GLOBAL is method, x + 1
+
+        x = torch.randn(2)
+        method = _BUILTIN_METHOD_TYPE_TEST_GLOBAL
+        other = types.MethodType(len, method.__self__)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, method), fn(x, method))
+        self.assertEqual(compiled(x, other), fn(x, other))
+
+    def test_sourceless_builder_builtin_callable_method_type(self):
+        from torch._dynamo.variables.builder import SourcelessBuilder
+        from torch._dynamo.variables.functions import BoundBuiltinCallableMethodVariable
+
+        receiver = [1, 2]
+        method = types.MethodType(len, receiver)
+        untracked = types.MethodType(len, [1, 2])
+
+        def check(ctx):
+            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+            obj = ctx.get_local("obj")
+            tracked = obj._i_will_not_complain_if_bc_breaks_VariableTracker()
+            built = SourcelessBuilder.create(tx, method)
+            self.assertIsInstance(built, BoundBuiltinCallableMethodVariable)
+            self.assertIsNone(built.source)
+            self.assertIs(built.tp_getattro_impl(tx, "__self__"), tracked.realize())
+            func = built.tp_getattro_impl(tx, "__func__")
+            self.assertIs(func.as_python_constant(), len)
+            self.assertEqual(built.call_function(tx, [], {}).as_python_constant(), 2)
+            with self.assertRaisesRegex(Unsupported, "without tracked receiver"):
+                SourcelessBuilder.create(tx, untracked)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, obj):
+            size = len(obj)
+            comptime(check)
+            return x + size
+
+        x = torch.randn(2)
+        self.assertEqual(fn(x, receiver), x + 2)
+
     def test_method_still_inlines_after_vt_split(self):
         """Method calls, attribute access and reconstruction survive the split."""
 
@@ -6835,13 +7024,21 @@ class GraphModule(torch.nn.Module):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             m = obj.add
-            return m(x), m.__name__, isinstance(m, types.MethodType)
+            return (
+                m(x),
+                m.__name__,
+                isinstance(m, types.MethodType),
+                m.__func__ is Counter.add,
+                m.__self__ is obj,
+            )
 
         x = torch.ones(3)
-        out, name, is_method = fn(x)
+        out, name, is_method, same_func, same_self = fn(x)
         self.assertEqual(out, x + 3)
         self.assertEqual(name, "add")
         self.assertTrue(is_method)
+        self.assertTrue(same_func)
+        self.assertTrue(same_self)
 
     def test_disable_on_method_still_graph_breaks(self):
         """`torch.compiler.disable` on a method must keep skipping inlining.

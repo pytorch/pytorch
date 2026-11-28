@@ -258,6 +258,7 @@ from .dicts import (
 from .distributed import WorldMetaClassVariable
 from .exception import FrameSummaryVariable
 from .functions import (
+    BoundBuiltinCallableMethodVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
@@ -1256,7 +1257,8 @@ class VariableBuilder:
             if dup_guard is not None:
                 self.install_guards(dup_guard)
             elif (
-                is_from_attr_proxy_source(self.source)
+                isinstance(result, BoundBuiltinCallableMethodVariable)
+                or is_from_attr_proxy_source(self.source)
                 or isinstance(self.source, MappingProxyMappingSource)
                 or (
                     result.source is not None
@@ -1270,12 +1272,10 @@ class VariableBuilder:
                     raise AssertionError("Tracked alias must have a source")
                 # make_dupe_guard cannot relate local and global sources. Reusing
                 # the tracker still requires both sources to resolve to the same
-                # object (a base module, or the mapping behind a mappingproxy), so
-                # pin each source to its compile-time object.
-                install_guard(
-                    self.source.make_guard(GuardBuilder.ID_MATCH),
-                    result.source.make_guard(GuardBuilder.ID_MATCH),
-                )
+                # object, so pin each source to its compile-time object.
+                for source in (self.source, result.source):
+                    if not is_constant_source(source):
+                        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
         if (
             isinstance(value, torch.nn.Module)
@@ -1305,6 +1305,7 @@ class VariableBuilder:
             UserFunctionVariable,
             SkipFunctionVariable,
             PolyfilledFunctionVariable,
+            BoundBuiltinCallableMethodVariable,
         }
 
     def get_source(self) -> Source:
@@ -1909,6 +1910,21 @@ class VariableBuilder:
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
             return GetAttrVariable(obj_vt, value.__name__, py_type=type(value))
+        elif (
+            istype(value, types.MethodType)
+            and trace_rules.is_builtin_callable(value.__func__)
+            and trace_rules.lookup_callable(value.__func__) is BuiltinVariable
+        ):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            func_vt = BuiltinVariable.create_with_source(
+                value.__func__, source=AttrSource(self.source, "__func__")
+            )
+            obj_vt = VariableTracker.build(
+                self.tx, value.__self__, AttrSource(self.source, "__self__")
+            )
+            return BoundBuiltinCallableMethodVariable(
+                func_vt, obj_vt, source=self.source
+            )
         elif (
             isinstance(value, types.BuiltinMethodType)
             and isinstance(value.__self__, random.Random)
@@ -5956,6 +5972,25 @@ class SourcelessBuilder:
             return MethodWrapperVariable(
                 descriptor, SourcelessBuilder.create(tx, value.__self__)
             )
+        elif (
+            isinstance(value, types.MethodType)
+            and trace_rules.is_builtin_callable(value.__func__)
+            and trace_rules.lookup_callable(value.__func__) is BuiltinVariable
+        ):
+            func_vt = BuiltinVariable(value.__func__)
+            if isinstance(value.__self__, type):
+                obj_vt = SourcelessBuilder.create(tx, value.__self__)
+            else:
+                obj_vt = lookup_tracked_variable(tx, value.__self__)
+            if obj_vt is None:
+                unimplemented(
+                    gb_type="sourceless builtin MethodType without tracked receiver",
+                    context=f"method={value}",
+                    explanation="Dynamo cannot reconstruct a builtin-backed "
+                    "MethodType unless its receiver is already tracked.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            return BoundBuiltinCallableMethodVariable(func_vt, obj_vt)
         elif isinstance(value, types.MethodType):
             if isinstance(value.__self__, (type, abc.ABCMeta)):
                 # value is a classmethod
