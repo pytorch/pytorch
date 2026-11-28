@@ -131,6 +131,10 @@ class StaticallyLaunchedTritonKernel:
         raise NotImplementedError
 
     supports_global_scratch = False
+    # When set, `shared` is allocated statically in the kernel binary, so launches
+    # request no dynamic shared memory. `shared` still holds the full allocation,
+    # which load_kernel checks against the device limit.
+    uses_static_lds = False
 
     @staticmethod
     def supports_launch_pdl(target: Any) -> bool:
@@ -539,7 +543,7 @@ class StaticallyLaunchedTritonKernel:
             grid_y,
             grid_z,
             self.num_warps,
-            self.shared,
+            0 if self.uses_static_lds else self.shared,
             arg_tys,
             args,
             stream,
@@ -567,6 +571,9 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
         if "hsaco" in kernel.asm:
             # pyrefly: ignore [missing-attribute]
             self.cubin_raw = kernel.asm["hsaco"]
+            # AMD LDS is allocated statically since Triton 3.10:
+            # https://github.com/triton-lang/triton/pull/12715
+            self.uses_static_lds = get_triton_version() >= (3, 10)
 
         # pyrefly: ignore [missing-attribute]
         elif "cubin" in kernel.asm:
