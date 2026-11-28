@@ -153,9 +153,8 @@ def _pin_device_index(device: torch.device) -> torch.device:
     compare or key on a device has to pin it first, or two calls made under
     different current devices look identical when they are not.
 
-    Deliberately does not initialize the device context the way
-    FakeTensor._normalize_fake_device does around it: callers include cache-key
-    construction, which must not allocate.
+    Deliberately does not initialize the device context: callers include
+    cache-key construction, which must not allocate.
     """
     if device.index is not None or not _is_indexed_device_type(device.type):
         return device
@@ -1719,17 +1718,6 @@ def _validate_and_convert_non_fake_tensors(
     return validated_args, flat_arg_fake_tensors
 
 
-@functools.cache
-def init_gpu_context(device: torch.device) -> None:
-    # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
-    if torch.accelerator.current_accelerator(True) == device.type:
-        (
-            torch.empty(1, device=device)
-            if torch.version.hip is None
-            else torch.zeros(1, device=device)
-        )
-
-
 # Replaces mock.patch.object(mode, "allow_non_fake_inputs", True). On exit,
 # mock.patch.object restores an attribute missing from the instance __dict__ by
 # deleting it, which raises for CppFakeTensorMode's allow_non_fake_inputs
@@ -2050,10 +2038,12 @@ class FakeTensor(Tensor):
 
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
-        """Normalize device by initializing GPU context and setting device index."""
-        if device.type in ("cuda", "xpu"):
-            init_gpu_context(device)
+        """Normalize device by setting the device index.
 
+        Kept as the Python counterpart of C++ normalizeFakeDevice
+        (aten/src/ATen/FakeTensor.cpp), which serves the same role for
+        FakeTensorImpl construction.
+        """
         return _pin_device_index(device)
 
     @staticmethod
