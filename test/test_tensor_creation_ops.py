@@ -6,6 +6,7 @@ import numpy as np
 
 import sys
 import math
+import subprocess
 import warnings
 import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
@@ -39,6 +40,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
     skipIfTorchDynamo,
+    skipIfFreeThreaded,
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast,
@@ -4457,7 +4459,7 @@ class TestFromBlob(TestCase):
 #   Constructs tensors from a Python object that has one of the following
 #   characteristics:
 #       1. is a Tensor
-#       2. is a DLPack capsule
+#       2. is a DLPack capsule or implements __dlpack__
 #       3. implements the Python Buffer protocol
 #       4. is an arbitrary list
 #   The implementation itself is based on the Python Array API:
@@ -4478,6 +4480,89 @@ def to_numpy(tensor):
     return tensor.numpy()
 def to_memview(tensor):
     return memoryview(to_numpy(tensor))
+
+class _DLPackWrapper:
+    """Exposes ``__dlpack__``/``__dlpack_device__`` delegating to a tensor,
+    without being a tensor, numpy array, raw DLPack capsule, or buffer.
+    """
+    def __init__(self, tensor):
+        self._tensor = tensor
+
+    def __dlpack__(self, *args, **kwargs):
+        return self._tensor.__dlpack__(*args, **kwargs)
+
+    def __dlpack_device__(self):
+        return self._tensor.__dlpack_device__()
+
+class _DLPackBuffer(_DLPackWrapper, bytearray):
+    """A _DLPackWrapper that is also a buffer holding a flat host copy of the tensor's bytes."""
+    def __init__(self, tensor):
+        bytearray.__init__(self, tensor.cpu().reshape(-1).view(torch.uint8).numpy().tobytes())
+        self._tensor = tensor
+
+class _DLPackAndCAI(_DLPackWrapper):
+    """A _DLPackWrapper that also exposes __cuda_array_interface__, like CuPy 10.0 to 13.4."""
+    def __init__(self, tensor):
+        super().__init__(tensor)
+        self.cai_reads = 0
+
+    @property
+    def __cuda_array_interface__(self):
+        self.cai_reads += 1
+        return self._tensor.__cuda_array_interface__
+
+class _FailingDLPack:
+    """Reports a CPU device (as plain ints, like NumPy) but fails to export."""
+    def __dlpack__(self, *args, **kwargs):
+        raise RuntimeError("dlpack export failed")
+
+    def __dlpack_device__(self):
+        return (1, 0)
+
+class _FailingDLPackBuffer(_FailingDLPack, bytearray):
+    pass
+
+class _FailingDLPackSequence(_FailingDLPack):
+    def __len__(self):
+        return 3
+
+    def __getitem__(self, index):
+        return (1.0, 2.0, 3.0)[index]
+
+class _CopyingDLPack(_DLPackWrapper):
+    """A producer that can't share its memory: it exports a copy, or refuses to."""
+    def __dlpack__(self, *args, copy=None, **kwargs):
+        if copy is False:
+            raise BufferError("export needs a copy")
+        return self._tensor.clone().__dlpack__(*args, **kwargs)
+
+class _CopyingDLPackBuffer(_CopyingDLPack, _DLPackBuffer):
+    pass
+
+# Copies a bytearray with asarray while another thread resizes it.
+_RESIZE_DURING_COPY = """
+import threading
+import torch
+
+size = 4 << 20
+buffer = bytearray(size)
+stop = False
+
+def resize():
+    # Nonzero, so a copy that reads freed memory sees these bytes or crashes.
+    while not stop:
+        buffer.extend(b"\\x01" * (2 * size))
+        del buffer[size:]
+
+thread = threading.Thread(target=resize)
+thread.start()
+try:
+    for _ in range(20):
+        assert not torch.asarray(buffer, copy=True)[:size].any()
+finally:
+    stop = True
+    thread.join()
+"""
 
 # This base class holds shared helpers only; test methods must be defined on the concrete subclasses.
 class _TestAsArrayBase(TestCase):
@@ -4600,6 +4685,11 @@ class TestAsArray(_TestAsArrayBase):
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_alias_from_dlpack_method(self, device, dtype):
+        self._test_alias_with_cvt(_DLPackWrapper, device, dtype)
+
+    @skipMeta
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_copy_tensor(self, device, dtype):
         self._test_copy_with_cvt(identity, device, dtype)
 
@@ -4607,6 +4697,11 @@ class TestAsArray(_TestAsArrayBase):
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_copy_from_dlpack(self, device, dtype):
         self._test_copy_with_cvt(to_dlpack, device, dtype)
+
+    @skipMeta
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_copy_from_dlpack_method(self, device, dtype):
+        self._test_copy_with_cvt(_DLPackWrapper, device, dtype)
 
     def _test_copy_mult_devices(self, devices, dtype, cvt):
         dev1 = devices[0]
@@ -4631,6 +4726,13 @@ class TestAsArray(_TestAsArrayBase):
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_copy_from_dlpack_mult_devices(self, devices, dtype):
         self._test_copy_mult_devices(devices, dtype, to_dlpack)
+
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_copy_from_dlpack_method_mult_devices(self, devices, dtype):
+        # __cuda_array_interface__ would label the same pointer with the other device.
+        self._test_copy_mult_devices(devices, dtype, _DLPackAndCAI)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_copy_list(self, device, dtype):
@@ -4669,9 +4771,10 @@ class TestAsArray(_TestAsArrayBase):
     def test_unsupported_alias_mult_devices(self, devices, dtype):
         dev1, dev2 = devices[:2]
         original = make_tensor((5, 5), dtype=dtype, device=dev1)
-        with self.assertRaisesRegex(ValueError,
-                                    f"from device '{dev1}' to '{dev2}'"):
-            torch.asarray(original, device=dev2, copy=False)
+        for cvt in (identity, _DLPackWrapper, _DLPackAndCAI):
+            with self.assertRaisesRegex(ValueError,
+                                        f"from device '{dev1}' to '{dev2}'"):
+                torch.asarray(cvt(original), device=dev2, copy=False)
 
     @dtypes(torch.float32, torch.complex64)
     def test_retain_autograd_history(self, device, dtype):
@@ -4725,6 +4828,104 @@ class TestAsArray(_TestAsArrayBase):
         tensor = torch.asarray(original, copy=True, device=device)
         # The storage pointers should not be equal
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
+
+
+    @skipMeta
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    def test_asarray_prefers_dlpack_over_buffer(self, device, dtype):
+        # Read through DLPack, not the buffer: the result keeps the producer's
+        # shape, device and memory, and dtype= converts the values.
+        original = make_tensor((2, 3), dtype=dtype, device=device)
+        result = torch.asarray(_DLPackBuffer(original))
+        self.assertEqual(result.device, original.device)
+        self.assertEqual(result, original)
+        self.assertEqual(result.data_ptr(), original.data_ptr())
+        target = torch.complex128 if dtype.is_complex else torch.float64
+        self.assertEqual(torch.asarray(_DLPackBuffer(original), dtype=target), original.to(target))
+        alias = torch.asarray(_DLPackBuffer(original), copy=False)
+        self.assertEqual(alias.data_ptr(), original.data_ptr())
+        copied = torch.asarray(_DLPackBuffer(original), copy=True)
+        self.assertNotEqual(copied.data_ptr(), original.data_ptr())
+        self.assertEqual(copied, original)
+
+    @skipMeta
+    @parametrize("shape", [(), (0,), (2, 0, 3), (4, 3)], name_fn=lambda shape: "x".join(map(str, shape)) or "scalar")
+    def test_asarray_dlpack_buffer_keeps_shape_and_strides(self, device, shape):
+        # Read through DLPack, so 0-d, empty and transposed arrays keep their layout.
+        original = make_tensor(shape, dtype=torch.int32, device=device)
+        if original.dim() == 2:
+            original = original.mT
+        result = torch.asarray(_DLPackBuffer(original))
+        self.assertEqual(result, original)
+        self.assertEqual(result.shape, original.shape)
+        self.assertEqual(result.stride(), original.stride())
+        self.assertEqual(result.device, original.device)
+
+    @skipMeta
+    @parametrize("cvt", [_DLPackWrapper, _DLPackBuffer], name_fn=lambda cvt: cvt.__name__)
+    def test_asarray_dlpack_wrong_device_and_dtype(self, device, cvt):
+        original = make_tensor((2, 3), dtype=torch.int32, device=device)
+        with self.assertRaisesRegex(ValueError, "with dtype '.*' into dtype '.*'"):
+            torch.asarray(cvt(original), dtype=torch.float64, copy=False)
+
+        other_device = get_another_device(device)
+        if other_device is not None:
+            with self.assertRaisesRegex(ValueError, f"from device '{device}' to '{other_device}'"):
+                torch.asarray(cvt(original), device=other_device, copy=False)
+            result = torch.asarray(cvt(original), device=other_device)
+            self.assertEqual(result.device.type, other_device)
+            self.assertEqual(result, original, exact_device=False)
+
+    @skipMeta
+    @parametrize("cvt", [_CopyingDLPack, _CopyingDLPackBuffer], name_fn=lambda cvt: cvt.__name__)
+    def test_asarray_dlpack_forwards_copy_false(self, device, cvt):
+        original = make_tensor((2, 3), dtype=torch.float32, device=device)
+        result = torch.asarray(cvt(original))
+        self.assertEqual(result, original)
+        self.assertNotEqual(result.data_ptr(), original.data_ptr())
+        # A buffer can be aliased, but it doesn't hold the producer's array.
+        with self.assertRaisesRegex(ValueError, f"'{cvt.__name__}' into a tensor, because reading it through DLPack raised a BufferError") as ctx:
+            torch.asarray(cvt(original), copy=False)
+        self.assertIsInstance(ctx.exception.__cause__, BufferError)
+
+    @skipMeta
+    def test_asarray_dlpack_copy_true_copies_the_export(self, device):
+        # Like CuPy for device memory, a producer may refuse copy=True.
+        class _RefusesCopy(_DLPackWrapper):
+            def __dlpack__(self, *args, copy=None, **kwargs):
+                if copy:
+                    raise BufferError("copy=True only supported for copy to CPU.")
+                return self._tensor.__dlpack__(*args, copy=copy, **kwargs)
+
+        original = make_tensor((2, 3), dtype=torch.float32, device=device)
+        result = torch.asarray(_RefusesCopy(original), copy=True)
+        self.assertNotEqual(result.data_ptr(), original.data_ptr())
+        self.assertEqual(result, original)
+
+    @skipMeta
+    def test_asarray_dlpack_without_copy_argument(self, device):
+        # A producer that predates DLPack 1.0 can't be asked not to copy, so
+        # copy=False trusts its export, as torch.from_dlpack does.
+        class _Legacy(_DLPackWrapper):
+            def __dlpack__(self, stream=None):
+                return self._tensor.__dlpack__(stream=stream)
+
+        original = torch.arange(3.0, device=device)
+        result = torch.asarray(_Legacy(original), copy=False)
+        self.assertEqual(result.data_ptr(), original.data_ptr())
+
+    @skipMeta
+    @parametrize("cvt", [_DLPackWrapper, _DLPackBuffer], name_fn=lambda cvt: cvt.__name__)
+    def test_asarray_dlpack_is_traced(self, device, cvt):
+        # As for a sequence, a traced factory call makes the result, so a trace
+        # that returns it passes the data-dependence check.
+        original = torch.arange(3.0, device=device)
+        obj = cvt(original)
+        example = torch.ones(3, device=device)
+        traced = torch.jit.trace(lambda x: torch.asarray(obj), (example,), check_trace=False)
+        self.assertIn("aten::to", str(traced.graph))
+        self.assertEqual(traced(example), original)
+
 
 
 class TestAsArrayCpuOnly(_TestAsArrayBase):
@@ -4793,6 +4994,148 @@ class TestAsArrayCpuOnly(_TestAsArrayBase):
         self.assertEqual(tensor.item(), zerodim_arr.item())
         self.assertEqual(tensor.dtype, torch.int32)
 
+    @parametrize("base", [_FailingDLPack, _FailingDLPackSequence, _FailingDLPackBuffer],
+                 name_fn=lambda base: base.__name__)
+    @parametrize("copy", [None, False])
+    def test_asarray_dlpack_failure_raises(self, device, base, copy):
+        # Like torch.tensor, report the producer's error instead of reading a
+        # sequence or buffer, without trying the export a second time.
+        calls = []
+
+        class _Counting(base):
+            def __dlpack__(self, *args, **kwargs):
+                calls.append(kwargs)
+                return super().__dlpack__(*args, **kwargs)
+
+        # Not a BufferError, so copy=False doesn't turn it into a ValueError either.
+        with self.assertRaisesRegex(RuntimeError, "dlpack export failed"):
+            torch.asarray(_Counting(), copy=copy)
+        self.assertEqual(len(calls), 1)
+
+    def test_asarray_dlpack_buffer_error_without_copy_false(self, device):
+        # Only for copy=False does a BufferError mean the export needs a copy.
+        class _Unexportable(_FailingDLPack):
+            def __dlpack__(self, *args, **kwargs):
+                raise BufferError("can't export")
+
+        for copy in (None, True):
+            with self.assertRaisesRegex(BufferError, "can't export"):
+                torch.asarray(_Unexportable(), copy=copy)
+
+    def test_asarray_dlpack_interrupt_propagates(self, device):
+        # A KeyboardInterrupt is neither turned into copy=False's ValueError nor,
+        # as with hasattr, taken to mean __dlpack__ is missing.
+        class _InExport(_FailingDLPack):
+            def __dlpack__(self, *args, **kwargs):
+                raise KeyboardInterrupt("interrupted")
+
+        class _InLookup:
+            def __getattr__(self, name):
+                raise KeyboardInterrupt("interrupted")
+
+        for obj in (_InExport(), _InLookup()):
+            with self.assertRaisesRegex(KeyboardInterrupt, "interrupted"):
+                torch.asarray(obj, copy=False)
+
+    @skipIfTorchDynamo("the check runs in a subprocess, so a Dynamo run would only repeat it")
+    @skipIfFreeThreaded("needs the GIL")
+    def test_asarray_buffer_copy_keeps_gil(self, device):
+        # tensor_frombuffer doesn't hold the buffer's export, so if the copy ran
+        # without the GIL, the other thread's resize could free it mid-copy. The
+        # race is probabilistic, so this can miss such a regression.
+        subprocess.check_call([sys.executable, "-c", _RESIZE_DURING_COPY], timeout=300)
+
+
+class TestAsArrayCudaOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_asarray_prefers_dlpack_over_cuda_array_interface(self, device):
+        original = torch.arange(5, device=device)
+        obj = _DLPackAndCAI(original)
+        alias = torch.asarray(obj, copy=False)
+        self.assertEqual(alias.data_ptr(), original.data_ptr())
+        copied = torch.asarray(obj, copy=True)
+        self.assertNotEqual(copied.data_ptr(), original.data_ptr())
+        self.assertEqual(copied, original)
+        self.assertEqual(obj.cai_reads, 0)
+
+    def test_asarray_dlpack_passes_current_stream(self, device):
+        streams = []
+
+        class _RecordsStream(_DLPackWrapper):
+            def __dlpack__(self, *args, **kwargs):
+                streams.append(kwargs.get("stream"))
+                return super().__dlpack__(*args, **kwargs)
+
+            @property
+            def __cuda_array_interface__(self):
+                return self._tensor.__cuda_array_interface__
+
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            torch.asarray(_RecordsStream(torch.arange(5, device=device)))
+        self.assertEqual(streams, [stream.cuda_stream])
+
+    def test_asarray_dlpack_initializes_device(self, device):
+        code = """
+import sys
+import torch
+
+source = torch.arange(3.0)
+Wrapper = type("Wrapper", (), {"__dlpack__": lambda self, *a, **k: source.__dlpack__(*a, **k),
+                               "__dlpack_device__": lambda self: source.__dlpack_device__()})
+torch.asarray(Wrapper(), device=sys.argv[1])
+print(torch.cuda.is_initialized())
+"""
+        output = subprocess.check_output([sys.executable, "-c", code, device], text=True, timeout=300)
+        self.assertEqual(output.strip(), "True")
+
+    def test_asarray_buffer_copy_to_device_runs_no_python(self, device):
+        # No Python code may run between tensor_frombuffer taking the buffer's
+        # pointer and the copy: here, the device's lazy initialization frees it.
+        code = """
+import sys
+import torch
+
+buffer = bytearray(4 << 20)
+torch.cuda._lazy_call(buffer.clear)
+try:
+    copied = torch.asarray(buffer, device=sys.argv[1])
+except ValueError:
+    # The device was initialized, emptying the buffer, before it was read.
+    assert len(buffer) == 0
+else:
+    assert copied.numel() == 4 << 20 and not copied.any()
+"""
+        subprocess.check_call([sys.executable, "-c", code, device], timeout=300)
+
+
+class TestAsArrayMpsOnly(TestCase):
+    hw_classification = HardwareClassification.MPS
+
+    def test_asarray_dlpack_buffer(self, device):
+        # Like an MLX array on Apple silicon: a buffer whose __dlpack__ exports MPS memory.
+        original = make_tensor((2, 3), dtype=torch.float32, device=device)
+        alias = torch.asarray(_DLPackBuffer(original), device="mps:0", copy=False)
+        self.assertEqual(alias.data_ptr(), original.data_ptr())
+        self.assertEqual(alias, original)
+        copied = torch.asarray(_DLPackBuffer(original), copy=True)
+        self.assertNotEqual(copied.data_ptr(), original.data_ptr())
+        self.assertEqual(copied, original)
+        # As for an MPS tensor, aliasing compares the device index too.
+        with self.assertRaisesRegex(ValueError, "from device 'mps:0' to 'mps'"):
+            torch.asarray(_DLPackBuffer(original), device="mps", copy=False)
+
+        on_cpu = torch.asarray(_DLPackBuffer(original), device="cpu")
+        self.assertEqual(on_cpu.device, torch.device("cpu"))
+        self.assertEqual(on_cpu, original.cpu())
+        with self.assertRaisesRegex(ValueError, "from device 'mps:0' to 'cpu'"):
+            torch.asarray(_DLPackBuffer(original), device="cpu", copy=False)
+
+        # MPS has no float64, so the docs convert after reading on the CPU.
+        with self.assertRaisesRegex(TypeError, "MPS framework doesn't support float64"):
+            torch.asarray(_DLPackBuffer(original), dtype=torch.float64)
+        self.assertEqual(torch.asarray(_DLPackBuffer(original), device="cpu").double(), original.cpu().double())
 
 instantiate_device_type_tests(TestTensorCreation, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTensorCreationCudaOnly, globals(), only_for="cuda")
@@ -4803,6 +5146,8 @@ instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
 instantiate_device_type_tests(TestAsArray, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestAsArrayCpuOnly, globals(), only_for="cpu")
+instantiate_device_type_tests(TestAsArrayCudaOnly, globals(), only_for="cuda")
+instantiate_device_type_tests(TestAsArrayMpsOnly, globals(), allow_mps=True, only_for="mps")
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

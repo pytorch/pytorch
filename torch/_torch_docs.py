@@ -1402,15 +1402,16 @@ Converts :attr:`obj` to a tensor.
 
 1. a tensor
 2. a NumPy array or a NumPy scalar
-3. a DLPack capsule
+3. an object with DLPack support, i.e. it implements the ``__dlpack__`` protocol or is a DLPack capsule
 4. an object that implements Python's buffer protocol
 5. a scalar
 6. a sequence of scalars
 
-When :attr:`obj` is a tensor, NumPy array, or DLPack capsule the returned tensor will,
-by default, have the same requires_grad as :attr:`obj` (defaulting to False), have the
-same datatype, be on the same device, and share memory with it. These properties can be
-controlled with the :attr:`dtype`, :attr:`device`, :attr:`copy`, and
+When :attr:`obj` is a tensor, NumPy array, or object with DLPack support the returned
+tensor will, by default, have the same requires_grad as :attr:`obj` (defaulting to False),
+have the same datatype, be on the same device, and share memory with it, unless an object
+with a ``__dlpack__`` method exports a copy, as described below. These properties
+can be controlled with the :attr:`dtype`, :attr:`device`, :attr:`copy`, and
 :attr:`requires_grad` keyword arguments. If the returned tensor is of a different
 datatype, on a different device, or a copy is requested then it will not share its
 memory with :attr:`obj`. If :attr:`requires_grad` is ``True`` (or ``None``, and
@@ -1418,13 +1419,32 @@ memory with :attr:`obj`. If :attr:`requires_grad` is ``True`` (or ``None``, and
 a gradient, and if :attr:`obj` is also a tensor with an autograd history then the
 returned tensor will have the same history.
 
-When :attr:`obj` is not a tensor, NumPy array, or DLPack capsule but implements Python's
-buffer protocol then the buffer is interpreted as an array of bytes grouped according to
-the size of the datatype passed to the :attr:`dtype` keyword argument. If no :attr:`dtype`
-is passed then it is inferred from the buffer's format, and an error is raised if the
-format cannot be mapped to a PyTorch datatype, in which case :attr:`dtype` must be passed
-explicitly. The returned tensor will have the specified (or inferred) datatype and, by
-default, be on the CPU device and share memory with the buffer.
+An object that has a ``__dlpack__`` method but isn't a tensor or NumPy array is read
+through DLPack, even if it also implements Python's buffer protocol or
+``__cuda_array_interface__``. By default it may export a copy when it cannot share its
+memory. With ``copy=False`` it is asked not to, and a ``BufferError`` from reading it,
+raised for example when it can't, becomes a ``ValueError`` raised from it. Any other error
+reading :attr:`obj` through DLPack is propagated.
+
+.. versionchanged:: 2.16
+    An object with a ``__dlpack__`` method is read through DLPack rather than its buffer
+    protocol or ``__cuda_array_interface__``, so the result keeps its shape and the device
+    that ``__dlpack_device__`` reports, and :attr:`dtype` converts its values instead of
+    reinterpreting its bytes. With ``copy=False``, passing a :attr:`dtype` or :attr:`device`
+    other than the object's now raises. If reading it through DLPack fails, the error
+    propagates; the buffer or ``__cuda_array_interface__`` isn't read instead. Use
+    :func:`torch.frombuffer` to reinterpret the bytes of a buffer. For a :attr:`dtype` the
+    object's device doesn't support, read it with ``device="cpu"`` and convert afterwards:
+    for example, an MLX array on Apple silicon is read as an MPS tensor, so use
+    ``torch.asarray(a, device="cpu").double()`` to get ``torch.float64``.
+
+When :attr:`obj` is not a tensor, NumPy array, or object with DLPack support but implements
+Python's buffer protocol then the buffer is interpreted as an array of bytes grouped
+according to the size of the datatype passed to the :attr:`dtype` keyword argument. If no
+:attr:`dtype` is passed then it is inferred from the buffer's format, and an error is
+raised if the format cannot be mapped to a PyTorch datatype, in which case :attr:`dtype`
+must be passed explicitly. The returned tensor will have the specified (or inferred)
+datatype and, by default, be on the CPU device and share memory with the buffer.
 
 When :attr:`obj` is a NumPy scalar, the returned tensor will be a 0-dimensional tensor on
 the CPU and that doesn't share its memory (i.e. ``copy=True``). By default datatype will
@@ -1440,12 +1460,13 @@ current default device, and not share its memory.
     :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
     :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
     implement the buffer protocol.
-    :func:`torch.from_dlpack` creates a tensor that always shares memory from
-    DLPack capsules.
+    :func:`torch.from_dlpack` creates a tensor that shares memory with an object with
+    DLPack support, unless the object exports a copy.
 
 Args:
-    obj (object): a tensor, NumPy array, DLPack Capsule, object that implements Python's
-           buffer protocol, scalar, or sequence of scalars.
+    obj (object): a tensor, NumPy array, an object with DLPack support (a ``__dlpack__``
+           method or a DLPack capsule), an object that implements Python's buffer protocol,
+           scalar, or sequence of scalars.
 
 Keyword args:
     dtype (:class:`torch.dtype`, optional): the datatype of the returned tensor.
@@ -1455,7 +1476,9 @@ Keyword args:
            Default: ``None``, which causes the returned tensor to share memory with :attr:`obj`
            whenever possible. If ``True`` then the returned tensor does not share its memory.
            If ``False`` then the returned tensor shares its memory with :attr:`obj` and an
-           error is thrown if it cannot.
+           error is thrown if it cannot. An object read through DLPack whose ``__dlpack__``
+           doesn't accept a ``copy`` argument is trusted to share its memory, as with
+           :func:`torch.from_dlpack`.
     device (:class:`torch.device`, optional): the device of the returned tensor.
            Default: ``None``, which causes the device of :attr:`obj` to be used. Or, if
            :attr:`obj` is a Python sequence, the current default device will be used.
