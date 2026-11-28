@@ -6065,6 +6065,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # the reduction() branches that follow.
         return not isinstance(value, tuple) and self.use_scalar_accumulators
 
+    def _emit_reduction_broadcast(
+        self, v: CSEVariable, dense_size_str: str, value_shape: tuple[str, ...]
+    ) -> str:
+        return f"tl.broadcast_to({v}, {dense_size_str})"
+
     def reduction(
         self,
         dtype: torch.dtype,
@@ -6150,7 +6155,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         value = self._map_tuple_or_scalar(
             lambda v: self.cse.generate(
                 self.compute,
-                f"tl.broadcast_to({v}, {dense_size_str})",
+                self._emit_reduction_broadcast(v, dense_size_str, value_shape),
                 dtype=v.dtype,
                 shape=value_shape,
             ),
