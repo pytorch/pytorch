@@ -419,6 +419,29 @@ IDX_T threadgroup_argmin(
   return idx_data[0];
 }
 
+// For bfloat the combine returns one of its inputs instead of calling
+// c10::metal::max/min, which round a float max/min back to bfloat on every
+// step of the reduction loop. Same result: NaN propagates, ties return a.
+template <typename T>
+inline T combine_max(T a, T b) {
+  return c10::metal::max(a, b);
+}
+
+inline bfloat combine_max(bfloat a, bfloat b) {
+  const float fa = float(a), fb = float(b);
+  return ::metal::isunordered(fa, fb) ? bfloat(NAN) : (fb > fa ? b : a);
+}
+
+template <typename T>
+inline T combine_min(T a, T b) {
+  return c10::metal::min(a, b);
+}
+
+inline bfloat combine_min(bfloat a, bfloat b) {
+  const float fa = float(a), fb = float(b);
+  return ::metal::isunordered(fa, fb) ? bfloat(NAN) : (fb < fa ? b : a);
+}
+
 // Reduction op functors bundling identity, replace predicate, and the value
 // reduction helpers (combine / simd_reduce / threadgroup_reduce) used by both
 // value and arg reductions. NaN handling: for floats, isnan-propagating
@@ -457,7 +480,7 @@ struct MaxOp {
   }
 
   static inline T combine(T a, T b) {
-    return c10::metal::max(a, b);
+    return combine_max(a, b);
   }
   static inline T simd_reduce(T val) {
     return c10::metal::simd_max(val);
@@ -492,7 +515,7 @@ struct MinOp {
   }
 
   static inline T combine(T a, T b) {
-    return c10::metal::min(a, b);
+    return combine_min(a, b);
   }
   static inline T simd_reduce(T val) {
     return c10::metal::simd_min(val);
