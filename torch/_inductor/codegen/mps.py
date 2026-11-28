@@ -178,6 +178,8 @@ class MetalExprPrinter(ExprPrinter_):
         x, y = map(self.doprint, expr.args)
         return f"metal::precise::pow(static_cast<float>({x}), static_cast<float>({y}))"
 
+    _print_FloatPow = _print_PowByNatural
+
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")

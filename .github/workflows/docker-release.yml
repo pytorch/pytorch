@@ -179,6 +179,35 @@ jobs:
               -t "${PREFIX}:latest" \
               "${PREFIX}:${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}"
           fi
+      - name: Login to Hugging Face Container Registry
+        if: ${{ github.event.ref == 'refs/heads/nightly' }}
+        continue-on-error: true
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: cr.hf.co
+          # Ignored by cr.hf.co, the token identifies the user
+          username: pytorch
+          password: ${{ secrets.HF_TOKEN }}
+      - name: Mirror nightly image to Hugging Face (experimental)
+        # Registry-side copy, no docker daemon needed.
+        if: ${{ github.event.ref == 'refs/heads/nightly' }}
+        continue-on-error: true
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -eo pipefail
+          if [[ "${CUDA_VERSION_SHORT}" == "cpu" ]]; then
+            TAG="${PYTORCH_VERSION}-runtime"
+          else
+            TAG="${PYTORCH_VERSION}-cuda${CUDA_VERSION_SHORT}-cudnn${CUDNN_VERSION}-${BUILD_IMAGE_TYPE}"
+          fi
+          # Pushes don't create the repo. This fails harmlessly if it already exists.
+          curl -sf -X POST "https://huggingface.co/api/containers/${DOCKER_ORG}/${DOCKER_IMAGE}" \
+            -H "Authorization: Bearer ${HF_TOKEN}" -H "Content-Type: application/json" \
+            -d '{"private": false}' >/dev/null || true
+          docker buildx imagetools create \
+            -t "cr.hf.co/${DOCKER_ORG}/${DOCKER_IMAGE}:${TAG}" \
+            "${DOCKER_REGISTRY}/${DOCKER_ORG}/${DOCKER_IMAGE}:${TAG}"
 
   validate:
     needs: build
