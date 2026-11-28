@@ -9301,6 +9301,31 @@ for dtype in (torch.int32, torch.int64):
         x = torch.rand([4, 8], dtype=torch.float32, device=self.device)
         self.common(fn, (x,))
 
+    def test_scatter_empty_index_scalar(self):
+        def fn(x, idx, src, x_int, idx_int, src_int):
+            return (
+                x.scatter(0, idx, src),
+                x.scatter(0, idx, 3.14),
+                x.scatter(0, idx, src, reduce="add"),
+                x.scatter(0, idx, src, reduce="multiply"),
+                x.scatter_add(0, idx, src),
+                x.scatter_reduce(0, idx, src, "sum"),
+                x.scatter_reduce(0, idx, src, "prod"),
+                x.scatter_reduce(0, idx, src, "mean"),
+                x.scatter_reduce(0, idx, src, "amax"),
+                x.scatter_reduce(0, idx, src, "amin"),
+                x.scatter_reduce(0, idx, src, "sum", include_self=False),
+                x_int.scatter(0, idx_int, src_int),
+            )
+
+        x = torch.tensor(1.0, device=self.device)
+        idx = torch.tensor([], dtype=torch.int64, device=self.device)
+        src = torch.tensor([], device=self.device)
+        x_int = torch.tensor(1, dtype=torch.int64, device=self.device)
+        idx_int = torch.tensor([], dtype=torch.int64, device=self.device)
+        src_int = torch.tensor([], dtype=torch.int64, device=self.device)
+        self.common(fn, (x, idx, src, x_int, idx_int, src_int))
+
     def test_fill1(self):
         def fn(x):
             tmp = torch.ones_like(x)
@@ -9527,6 +9552,15 @@ for dtype in (torch.int32, torch.int64):
             fn,
             (torch.randn(4, 1, 8), torch.randn(4, 6, 8), torch.randn(4, 6, 8)),
         )
+
+    @config.patch(force_pointwise_cat=True)
+    def test_cat_clamped_relative_position(self):
+        def fn(emb, x):
+            pos = torch.arange(x.shape[0], device=x.device)
+            bias = emb[(pos[:, None] - pos[None, :]).clamp(-4, 4) + 4]
+            return torch.cat([bias, x.new_zeros(x.shape[0], 1, emb.shape[1])], 1)
+
+        self.common(fn, (torch.randn(9, 8), torch.randn(32, 8)))
 
     def test_cat_uint8(self):
         def fn(x):
@@ -14290,7 +14324,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_mps  # Small tolerances bug
     @skip_if_gpu_halide  # slow
     def test_max_pool2d_with_indices_backward2(self):
         def fn(a, b, c):
@@ -14409,7 +14442,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, [torch.randn_like(result), x, indices])
 
     # From https://github.com/pytorch/torchdynamo/issues/1352
-    @xfail_if_mps  # Small tolerances bug
     @skip_if_halide  # hangs forever
     def test_max_pool2d_with_indices_backward4(self):
         def fn(a, b, c):

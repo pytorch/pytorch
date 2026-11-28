@@ -4821,7 +4821,7 @@ class SIMDScheduling(BaseScheduling):
         persistent or cooperative reduction choices, and so keep different stored
         buffers (must_keep_buffers) and remove the others. Every version must write
         the same buffers. If they remove different ones, return every buffer some
-        version keeps, to rebuild all versions keeping it; else None."""
+        version keeps, to rebuild the versions that remove one of them; else None."""
         first = kernels[0]
         if all(
             k.removed_buffers == first.removed_buffers
@@ -4854,12 +4854,10 @@ class SIMDScheduling(BaseScheduling):
                 if getattr(kernel, attr) != getattr(kernels[0], attr):
                     raise AssertionError(f"kernel versions differ in {attr}")
 
-    def _should_build_int32_and_int64(
-        self, kernel_features: SIMDKernelFeatures
-    ) -> bool:
-        """Whether config.dual_index_dtype_kernels applies to this kernel: build an
-        int32 and an int64 variant and launch the int32 one only when the sizes fit,
-        instead of a single kernel with a size guard."""
+    def _should_build_int32_and_int64(self) -> bool:
+        """Whether config.dual_index_dtype_kernels applies to this backend's kernels in
+        this graph: build an int32 and an int64 variant of each and launch the int32
+        one only when the sizes fit, instead of a single kernel with a size guard."""
         from .triton import TritonScheduling
 
         if not config.dual_index_dtype_kernels:
@@ -4914,7 +4912,7 @@ class SIMDScheduling(BaseScheduling):
         final_kernel: SIMDKernel | MultiKernelBase
         # Empty or None conditions: select_index_dtype picks int32 or int64 without a
         # guard, so a single kernel suffices.
-        if self._should_build_int32_and_int64(kernel_features) and (
+        if self._should_build_int32_and_int64() and (
             int32_conditions := kernel_features.int32_index_conditions()
         ):
             int64_hints = _int64_kernel_hint_overrides(int32_conditions)

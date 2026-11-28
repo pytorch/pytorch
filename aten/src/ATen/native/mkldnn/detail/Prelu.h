@@ -9,18 +9,18 @@ namespace at::native::mkldnn {
 
 // Ported from ideep::prelu_forward::compute.
 void prelu_forward(
-    const ideep::tensor& src,
-    const ideep::tensor& weight,
-    ideep::tensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weight,
+    MkldnnMemory& dst,
     dnnl::prop_kind prop_kind = dnnl::prop_kind::forward);
 
 // Ported from ideep::prelu_backward::compute.
 void prelu_backward(
-    const ideep::tensor& src,
-    const ideep::tensor& weight,
-    const ideep::tensor& diff_dst,
-    ideep::tensor& diff_src,
-    ideep::tensor& diff_weight);
+    const MkldnnMemory& src,
+    const MkldnnMemory& weight,
+    const MkldnnMemory& diff_dst,
+    MkldnnMemory& diff_src,
+    MkldnnMemory& diff_weight);
 
 } // namespace at::native::mkldnn
 
