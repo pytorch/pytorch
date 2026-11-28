@@ -5,7 +5,10 @@ from functools import cache, partial
 from collections import namedtuple
 import os
 import pickle
+import re
+import subprocess
 import sys
+import textwrap
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -62,6 +65,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     skipIfMPS,
     HardwareClassification,
+    TestCase,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -3572,6 +3576,141 @@ class TestSDPACPU(NNTestCase):
         with sdpa_kernel(backends=[kernel]):
             sdp_math = torch.nn.functional.scaled_dot_product_attention(x, x, x, scale=-1.0 / 0.0001)
         self.assertEqual(ref_result, sdp_math)
+
+@unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN attention is not supported")
+class TestSDPACuDNNCache(TestCase):
+    # The cache limit is read once per process, so each test runs in a subprocess.
+    hw_classification = HardwareClassification.CUDA
+
+    def _run_cache_test(self, device, code, limit, **env_overrides):
+        env = dict(os.environ, TORCH_CUDNN_SDPA_CACHE_DEBUG="1", **env_overrides)
+        env.pop("TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT", None)
+        if limit is not None:
+            env["TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT"] = limit
+        preamble = f"""
+import os
+import warnings
+
+import torch
+import torch.nn.functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
+from torch.testing._internal.common_utils import TestCase
+
+check = TestCase()
+device = {device!r}
+torch.cuda.set_device(device)
+torch.manual_seed(17)
+warnings.simplefilter("always")
+
+def make_inputs(length, *, training=True):
+    return tuple(
+        torch.randn(1, 12, length, 64, device=device, dtype=torch.bfloat16, requires_grad=training)
+        for _ in range(3)
+    )
+
+def run(tensors, grad=None):
+    with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+        out = F.scaled_dot_product_attention(*tensors, is_causal=True)
+    return (out,) if grad is None else (out, *torch.autograd.grad(out, tensors, grad))
+
+def check_run(tensors, grad, actual):
+    refs = tuple(t.detach().float().cpu().requires_grad_(grad is not None) for t in tensors)
+    out = F.scaled_dot_product_attention(*refs, is_causal=True)
+    expected = (out,) if grad is None else (out, *torch.autograd.grad(out, refs, grad.float().cpu()))
+    for result, reference in zip(actual, expected, strict=True):
+        check.assertEqual(result.float().cpu(), reference, atol=3e-2, rtol=3e-2)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", textwrap.dedent(preamble) + textwrap.dedent(code)],
+            env=env, capture_output=True, text=True, timeout=180,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        matches = re.findall(
+            r"cuDNN SDPA cache: (forward|backward) size=(\d+) hits=(\d+) misses=(\d+) evictions=(\d+)",
+            result.stderr,
+        )
+        self.assertTrue(matches, result.stderr)
+        stats = {"forward": [], "backward": []}
+        for direction, *counts in matches:
+            stats[direction].append(tuple(map(int, counts)))
+        return stats, result.stderr
+
+    @parametrize("limit", [None, "1", "2", "-1", "2junk"])
+    def test_cudnn_sdpa_cache_limit(self, device, limit):
+        stats, stderr = self._run_cache_test(device, """
+            later_limit = "0" if os.environ.get("TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT") == "-1" else "-1"
+            for index, length in enumerate((128, 129, 128, 130, 128, 129)):
+                tensors = make_inputs(length)
+                run(tensors, torch.randn_like(tensors[0]))
+                # Changing the limit after first use must have no effect.
+                if index == 0:
+                    os.environ["TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT"] = later_limit
+        """, limit)
+        expected = {
+            "1": (1, 0, 6, 5),
+            "2": (2, 2, 4, 2),
+            "-1": (0, 0, 6, 0),
+        }.get(limit, (3, 3, 3, 0))
+        for direction in ("forward", "backward"):
+            self.assertEqual(len(stats[direction]), 6)
+            self.assertEqual(stats[direction][-1], expected)
+        warning = "Invalid TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT; using the default (unlimited) cache."
+        self.assertEqual(stderr.count(warning), int(limit == "2junk"))
+
+    @parametrize("limit", ["1", "-1"])
+    def test_cudnn_sdpa_cache_capture(self, device, limit):
+        # Replays CUDA graphs after their plans were evicted and released by the cache.
+        # cuDNN >= 9.27 also retains runtime-compiled kernels in the graph itself, so
+        # dropping PyTorch's retention only breaks replay on older cuDNN.
+        stats, _ = self._run_cache_test(device, """
+            inputs = [make_inputs(length) for length in (128, 256)]
+            grads = [torch.randn_like(tensors[0]) for tensors in inputs]
+            churn = [make_inputs(length) for length in (193, 257, 385)]
+            stream = torch.cuda.Stream(device=device)
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                for _ in range(3):
+                    for tensors, grad in zip(inputs, grads):
+                        run(tensors, grad)
+            stream.synchronize()
+
+            for _ in range(2):
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph, stream=stream):
+                    captured = [run(tensors, grad) for tensors, grad in zip(inputs, grads)]
+                with torch.cuda.stream(stream):
+                    for tensors in churn:
+                        run(tensors, torch.randn_like(tensors[0]))
+                    with torch.no_grad():
+                        for tensors, grad, outputs in zip(inputs, grads, captured):
+                            for tensor in (*tensors, grad):
+                                tensor.copy_(torch.randn_like(tensor))
+                            for output in outputs:
+                                output.fill_(float("nan"))
+                    graph.replay()
+                stream.synchronize()
+                for tensors, grad, outputs in zip(inputs, grads, captured):
+                    check_run(tensors, grad, outputs)
+                graph.reset()
+        """, limit, CUDNN_ENABLE_DEFAULT_KERNEL_CACHE="0")
+        for direction in ("forward", "backward"):
+            self.assertTrue(stats[direction])
+            self.assertTrue(all(size <= max(int(limit), 0) for size, *_ in stats[direction]))
+
+    def test_cudnn_sdpa_cache_multiple_devices(self, device):
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+        # Plans evicted on one device are released while another device is current.
+        stats, _ = self._run_cache_test(device, """
+            for index, length in enumerate((128, 129, 130)):
+                device = f"cuda:{index % 2}"
+                torch.cuda.set_device(device)
+                tensors = make_inputs(length, training=False)
+                check_run(tensors, None, run(tensors))
+        """, "1")
+        self.assertEqual(stats["forward"], [(1, 0, count, count - 1) for count in (1, 2, 3)])
+        self.assertEqual(stats["backward"], [])
+
 
 class TestSDPAAccelerator(NNTestCase):
     """ Used to test GPU only functionality of scaled_dot_product_attention.
@@ -8089,6 +8228,7 @@ instantiate_device_type_tests(TestTransformersAccelerator, globals(), only_for=d
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAGeneric, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAAccelerator, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(TestSDPACuDNNCache, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestSDPACPU, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)

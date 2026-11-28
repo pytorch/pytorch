@@ -1,5 +1,9 @@
 # Owner(s): ["module: sdpa"]
 import math
+import os
+import re
+import subprocess
+import sys
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
@@ -1927,6 +1931,59 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
     # (_cudnn_attention_forward/_backward) and it is only ever selected for a
     # CUDA query, so these tests cannot be shared with other backends.
     hw_classification = HardwareClassification.CUDA
+
+    @skipIfRocm
+    @parametrize("limit", ["2", "-1"])
+    @_skip_cudnn_varlen_unsupported
+    def test_cudnn_varlen_cache_limit(self, device, limit):
+        _check_cudnn_varlen_supported(device)
+        code = f"""
+import warnings
+
+import torch
+from torch.nn.attention import SDPBackend, sdpa_kernel
+from torch.nn.attention.varlen import varlen_attn
+
+device = {device!r}
+torch.cuda.set_device(device)
+warnings.simplefilter("always")
+for length in (193, 201, 193, 209, 193, 201):
+    q_lens, k_lens = [length, length - 17], [length + 8, length - 9]
+    q, k, v = (
+        torch.randn(sum(lens), 4, 64, device=device, dtype=torch.bfloat16, requires_grad=True)
+        for lens in (q_lens, k_lens, k_lens)
+    )
+    cu_q, cu_k = (torch.tensor([0, lens[0], sum(lens)], device=device, dtype=torch.int32) for lens in (q_lens, k_lens))
+    with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+        out = varlen_attn(q, k, v, cu_q, cu_k, max(q_lens), max(k_lens))
+    out.sum().backward()
+"""
+        env = dict(
+            os.environ,
+            TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT=limit,
+            TORCH_CUDNN_SDPA_CACHE_DEBUG="1",
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        matches = re.findall(
+            r"cuDNN SDPA cache: (forward|backward) size=(\d+) hits=(\d+) misses=(\d+) evictions=(\d+)",
+            result.stderr,
+        )
+        expected = (2, 2, 4, 2) if limit == "2" else (0, 0, 6, 0)
+        for direction in ("forward", "backward"):
+            stats = [
+                tuple(map(int, counts))
+                for name, *counts in matches
+                if name == direction
+            ]
+            self.assertEqual(len(stats), 6, result.stderr)
+            self.assertEqual(stats[-1], expected)
 
     @skipIfRocm
     @setSdpaBackendsToDefaultFinally
