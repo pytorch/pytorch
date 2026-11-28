@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import base64
 import binascii
+import copy
 import functools
 import operator
 import os
@@ -1826,6 +1827,28 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 fn(B),
                 torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(B),
             )
+
+    @parametrize(
+        "value",
+        [{"a": 1}, [1, 2], 3, range(3)],
+        name_fn=lambda v: type(v).__name__,
+    )
+    def test_assume_constant_result_attribute_reads(self, value):
+        # Guards on sources built on a ConstantSource raise NotImplementedError.
+        # type(v) is a plain BuiltinVariable only for range.
+        @torch._dynamo.assume_constant_result
+        def get_value():
+            return value
+
+        def fn(x):
+            v = get_value()
+            attrs = hasattr(v, "a"), hasattr(v, "__class__"), getattr(v, "a", 0)
+            return x + 1, attrs, type(v).__name__, copy.copy(v)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend=cnt, fullgraph=True)(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_assume_constant_result_on_computation_with_graph_input(self):
         @torch._dynamo.assume_constant_result
