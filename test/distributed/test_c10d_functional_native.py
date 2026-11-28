@@ -38,16 +38,19 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 def load_test_module(name):
+    import importlib.util
     import sys
-    from importlib.machinery import SourceFileLoader
     from pathlib import Path
     from unittest import mock
 
     testdir = Path(__file__).absolute().parent.parent
+    path = testdir / f"{name.replace('.', '/')}.py"
     with mock.patch("sys.path", [*sys.path, str(testdir)]):
-        return SourceFileLoader(
-            name, str(testdir / f"{name.replace('.', '/')}.py")
-        ).load_module()
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        return module
 
 
 AOTIRunnerUtil = load_test_module("inductor.test_aot_inductor_utils").AOTIRunnerUtil
