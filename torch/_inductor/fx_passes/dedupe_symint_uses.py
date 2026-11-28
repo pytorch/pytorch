@@ -22,7 +22,13 @@ class _SymExprHash:
     def __eq__(self, value) -> bool:
         if not isinstance(value, _SymExprHash):
             return False
-        return self.sym_obj.node.expr == value.sym_obj.node.expr
+        # Keep equality consistent with __hash__, which keys on the proxy
+        # type as well: a SymInt and a SymFloat may share the same sympy
+        # expression but are not interchangeable reuse targets.
+        return (
+            type(self.sym_obj) is type(value.sym_obj)
+            and self.sym_obj.node.expr == value.sym_obj.node.expr
+        )
 
 
 class _SymHashingDict:
