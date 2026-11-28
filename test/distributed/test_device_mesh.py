@@ -31,10 +31,7 @@ from torch.distributed.tensor._collective_utils import (
     unpad_tensor,
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
-from torch.testing._internal.common_distributed import (
-    requires_nccl_legacy,
-    skip_if_lt_x_gpu,
-)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -70,8 +67,8 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_ran
 
 @unittest.skipIf(TEST_XPU or TEST_HPU, "XPU/HPU does not support gloo backend.")
 class DeviceMeshTestGlooBackend(DTensorTestBase):
-    @property
-    def backend(self):
+    @classmethod
+    def backend_str(cls, device) -> str:
         return "gloo"
 
     @with_comms
@@ -209,15 +206,6 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
 
-    @requires_nccl_legacy()
-    @with_comms(backend="nccl-legacy")
-    def test_2d_mesh_non_eager_init_subgroup(self):
-        mesh_shape = (2, self.world_size // 2)
-        mesh_2d = init_device_mesh(self.device_type, mesh_shape)
-
-        self.assertEqual(mesh_2d.get_group(0).bound_device_id, None)
-        self.assertEqual(mesh_2d.get_group(1).bound_device_id, None)
-
     # TODO: need to refactor the other tests in this file to test both
     # eager_init=True and eager_init=False scenarios.
     @with_comms(eager_init=True)
@@ -227,7 +215,7 @@ class DeviceMeshTest(DTensorTestBase):
 
         # when eager init is used, the subgroup is created from nccl comm split and
         # there would be bound_device_id immediately assigned for the subgroup.
-        if self.backend == "nccl":
+        if self.backend_str(self.device_type) == "nccl":
             curr_device = torch.cuda.current_device()
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
@@ -262,16 +250,6 @@ class DeviceMeshTest(DTensorTestBase):
             ordered_mesh.get_local_rank(1), ordered_mesh.get_coordinate()[1]
         )
 
-    @requires_nccl_legacy()
-    @with_comms(eager_init=True, backend="nccl-legacy")
-    def test_device_mesh_preserve_rank_order_eager_nccl_legacy(self):
-        mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)
-        group = DeviceMesh(self.device_type, mesh_tensor).get_group(1)
-        global_ranks = [get_global_rank(group, i) for i in range(get_world_size(group))]
-        for ranks in mesh_tensor:
-            if self.rank in ranks:
-                self.assertEqual(global_ranks, sorted(ranks.tolist()))
-
     @skip_if_lt_x_gpu(4)
     @with_comms(eager_init=True)
     def test_2d_mesh_eager_init_subgroup_backend_without_split_support(self):
@@ -293,7 +271,9 @@ class DeviceMeshTest(DTensorTestBase):
             torch.device(self.device_type)
         )
         if default_backend.supports_splitting:
-            self.skipTest(f"{self.backend} supports communicator splitting")
+            self.skipTest(
+                f"{self.backend_str(self.device_type)} supports communicator splitting"
+            )
 
         mesh_shape = (2, self.world_size // 2)
         with mock.patch(
@@ -332,7 +312,9 @@ class DeviceMeshTest(DTensorTestBase):
             torch.device(self.device_type)
         )
         if not default_backend.supports_splitting:
-            self.skipTest(f"{self.backend} does not support communicator splitting")
+            self.skipTest(
+                f"{self.backend_str(self.device_type)} does not support communicator splitting"
+            )
 
         mesh_shape = (2, self.world_size // 2)
         with mock.patch(

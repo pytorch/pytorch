@@ -285,10 +285,9 @@ class AOTInductorModelContainer {
                           // borrowed
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    run_on_available_model(
-        stream, proxy_executor, [&](AOTInductorModel* model) {
-          model->run(input_handles, output_handles, stream, proxy_executor);
-        });
+    run_on_available_model(stream, proxy_executor, [&](const auto& lease) {
+      lease->run(input_handles, output_handles, stream, proxy_executor);
+    });
   }
 
 #ifdef USE_CUDA
@@ -309,27 +308,26 @@ class AOTInductorModelContainer {
     AOTI_RUNTIME_CHECK(
         !is_stream_capturing(stream),
         "run_with_lazy_cuda_graphs can't run inside a CUDA graph capture");
-    run_on_available_model(
-        stream, proxy_executor, [&](AOTInductorModel* model) {
-          // Set even if the call fails, as long as a graph was captured.
-          auto mark_captured = [&] {
-            if (model->has_cuda_graphs()) {
-              captured_cuda_graphs_ = true;
-            }
-          };
-          try {
-            model->run_with_lazy_cuda_graphs(
-                input_handles,
-                output_handles,
-                stream,
-                proxy_executor,
-                max_graphs_env_.value);
-          } catch (...) {
-            mark_captured();
-            throw;
-          }
-          mark_captured();
-        });
+    run_on_available_model(stream, proxy_executor, [&](const auto& lease) {
+      // Set even if the call fails, as long as a graph was captured.
+      auto mark_captured = [&] {
+        if (lease->has_cuda_graphs()) {
+          captured_cuda_graphs_ = true;
+        }
+      };
+      try {
+        lease->run_with_lazy_cuda_graphs(
+            input_handles,
+            output_handles,
+            stream,
+            proxy_executor,
+            max_graphs_env_.value);
+      } catch (...) {
+        mark_captured();
+        throw;
+      }
+      mark_captured();
+    });
   }
 #endif // USE_CUDA
 
@@ -474,7 +472,6 @@ class AOTInductorModelContainer {
       bool inactive_buffer,
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    AOTInductorModel* model;
     auto& const_folded =
         inactive_buffer ? inactive().fold_state : active().fold_state;
     if (!inactive_buffer) {
@@ -483,23 +480,18 @@ class AOTInductorModelContainer {
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       // Checked under the lock, which keeps graphs from being captured.
       check_no_cuda_graphs();
-      model = pool_.get_available_model();
-      try {
-        auto folded_const_map = model->run_const_fold(stream, proxy_executor);
-        update_constant_buffer(
-            std::move(folded_const_map),
-            /* use_inactive = */ false,
-            /* validate_full_update = */ false);
-        const_folded = ConstantState::FOLDED;
-      } catch (...) {
-        pool_.return_model_to_available(model);
-        throw;
-      }
-      pool_.return_model_to_in_flight(model);
+      auto lease = pool_.checkout();
+      auto folded_const_map = lease->run_const_fold(stream, proxy_executor);
+      update_constant_buffer(
+          std::move(folded_const_map),
+          /* use_inactive = */ false,
+          /* validate_full_update = */ false);
+      const_folded = ConstantState::FOLDED;
+      lease.mark_in_flight();
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
       [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
-      model = pool_.get_available_model(stream);
+      auto lease = pool_.checkout(stream);
 
       // We swap the constant mapping to the inactive buffer in the model to run
       // const run.
@@ -509,16 +501,16 @@ class AOTInductorModelContainer {
       auto use_active_constants = [&] {
         auto active_map = active().map;
         auto active_array = active().array;
-        model->update_constants_map(
+        lease->update_constants_map(
             active_map, /* remap_constants_array= */ false);
-        model->update_constants_array(active_array);
+        lease->update_constants_array(active_array);
       };
       try {
-        model->update_constants_map(
+        lease->update_constants_map(
             inactive_map, /* remap_constants_array= */ false);
-        model->update_constants_array(inactive_array);
+        lease->update_constants_array(inactive_array);
 
-        auto folded_const_map = model->run_const_fold(stream, proxy_executor);
+        auto folded_const_map = lease->run_const_fold(stream, proxy_executor);
         update_constant_buffer(
             std::move(folded_const_map),
             /* use_inactive = */ true,
@@ -529,11 +521,10 @@ class AOTInductorModelContainer {
       } catch (...) {
         // Otherwise the model would keep running with the inactive constants.
         use_active_constants();
-        pool_.return_model_to_available(model);
         throw;
       }
 
-      pool_.return_model_to_in_flight(model);
+      lease.mark_in_flight();
     }
   }
 
@@ -1084,7 +1075,8 @@ class AOTInductorModelContainer {
   // fn on a model instance checked out of the pool, holding model_exec_mutex_
   // shared and the stream lock. fn must record the instance's run_finished_
   // event after the work it enqueues, as AOTInductorModel::run() does: the
-  // pool reclaims an in-flight instance only through that event. If fn throws,
+  // pool reclaims an in-flight instance only through that event. fn receives
+  // the instance's lease as const, so it can't end or move it; if fn throws,
   // the instance goes back to the pool without waiting for that work.
   template <typename Fn>
   void run_on_available_model(
@@ -1095,9 +1087,9 @@ class AOTInductorModelContainer {
 
     auto& const_folded = active().fold_state;
     if (const_folded == ConstantState::INITIALIZED) {
-      // Do NOT call get_available_model() before upgrading to exclusive lock.
-      // Holding a model across the upgrade causes a deadlock when another
-      // thread holds a shared lock and waits for the model.
+      // Do NOT check out a model before upgrading to exclusive lock. Holding a
+      // model across the upgrade causes a deadlock when another thread holds a
+      // shared lock and waits for the model.
       model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       // Double locking to make sure constant folding is only ran once.
@@ -1105,20 +1097,15 @@ class AOTInductorModelContainer {
         // A racing active update can pass its own check while a graph is
         // captured; refolding would free the constants the graph reads.
         check_no_cuda_graphs();
-        auto* model = pool_.get_available_model();
-        try {
-          auto folded_const_map = model->run_const_fold(
-              stream, proxy_executor, /* initialization = */ true);
-          update_constant_buffer(
-              std::move(folded_const_map),
-              /* use_inactive = */ false,
-              /* validate_full_update = */ false);
-          const_folded = ConstantState::FOLDED;
-        } catch (...) {
-          pool_.return_model_to_available(model);
-          throw;
-        }
-        pool_.return_model_to_in_flight(model);
+        auto lease = pool_.checkout();
+        auto folded_const_map = lease->run_const_fold(
+            stream, proxy_executor, /* initialization = */ true);
+        update_constant_buffer(
+            std::move(folded_const_map),
+            /* use_inactive = */ false,
+            /* validate_full_update = */ false);
+        const_folded = ConstantState::FOLDED;
+        lease.mark_in_flight();
       }
       constants_folding_lk.unlock();
       model_lk.lock();
@@ -1129,16 +1116,9 @@ class AOTInductorModelContainer {
     }
 
     [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
-    auto* model = pool_.get_available_model(stream);
-
-    try {
-      std::forward<Fn>(fn)(model);
-    } catch (...) {
-      pool_.return_model_to_available(model);
-      throw;
-    }
-
-    pool_.return_model_to_in_flight(model);
+    auto lease = pool_.checkout(stream);
+    std::forward<Fn>(fn)(std::as_const(lease));
+    lease.mark_in_flight();
   }
 
   // This mutex is used to protect execution of model.
@@ -1153,7 +1133,7 @@ class AOTInductorModelContainer {
   // soon as a swap or fold is waiting. Waiting for threads that already hold
   // it is fine. run_on_available_model() and the inactive-buffer branch of
   // run_const_fold() rely on this when they block in
-  // pool_.get_available_model() for a model another holder has checked out.
+  // pool_.checkout() for a model another holder has checked out.
   WritePrioritySharedMutex model_exec_mutex_;
 };
 

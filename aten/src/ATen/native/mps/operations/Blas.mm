@@ -5,6 +5,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/ReduceOps.h>
+#include <ATen/native/mps/operations/MatmulUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -119,6 +120,9 @@ TORCH_IMPL_FUNC(addmv_out_mps)
  const Scalar& beta_,
  const Scalar& alpha_,
  const Tensor& result) {
+  if (result.numel() != 0 && mat.size(1) != 0) {
+    mps::check_matmul_dtype(mat.scalar_type(), "addmv");
+  }
   auto out = result.unsqueeze(1);
   at::addmm_out(out, self.expand({mat.size(0)}).unsqueeze(1), mat, vec.unsqueeze(1), beta_, alpha_);
 }

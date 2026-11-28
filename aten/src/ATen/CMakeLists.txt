@@ -138,7 +138,7 @@ file(GLOB mkldnn_xpu_cpp CONFIGURE_DEPENDS "native/mkldnn/xpu/*.cpp" "native/mkl
 
 file(GLOB native_cpp CONFIGURE_DEPENDS "native/*.cpp")
 file(GLOB native_mkl_cpp CONFIGURE_DEPENDS "native/mkl/*.cpp")
-file(GLOB native_mkldnn_cpp CONFIGURE_DEPENDS "native/mkldnn/*.cpp")
+file(GLOB native_mkldnn_cpp CONFIGURE_DEPENDS "native/mkldnn/*.cpp" "native/mkldnn/detail/*.cpp")
 file(GLOB vulkan_cpp CONFIGURE_DEPENDS "vulkan/*.cpp")
 
 file(GLOB native_eigen_cpp CONFIGURE_DEPENDS "native/sparse/eigen/*.cpp")
