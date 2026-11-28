@@ -3,7 +3,9 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 
-#ifdef __aarch64__
+#if defined(_M_ARM64) && !defined(__aarch64__)
+#include <ATen/cpu/vec/vec128/vec128_float_neon.h>
+#elif defined(__aarch64__)
 #if !defined(CPU_CAPABILITY_SVE256)
 #include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_double_neon.h>

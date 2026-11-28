@@ -1,6 +1,13 @@
 #include <ATen/test/vec_test_all_types.h>
 #include <c10/util/irange.h>
+#include <type_traits>
 namespace {
+#if defined(_MSC_VER) && defined(_M_ARM64)
+    TEST(NeonTests, FloatVectorUsesNeon) {
+        EXPECT_EQ(vfloat::size(), 4);
+        EXPECT_TRUE((std::is_convertible_v<vfloat, float32x4_t>));
+    }
+#endif
 #if GTEST_HAS_TYPED_TEST
     template <typename T>
     class Memory : public ::testing::Test {};
@@ -1413,7 +1420,7 @@ namespace {
         if (AssertVectorized<vec>(std::string(NAME_INFO(test_set)) + count_str, expected, actual).check()) {
           return;
         }
-        test_set<vec, VT>(expected_val, a, b, (count == 0 ? -1 : count / 2));
+        test_set<vec, VT>(expected_val, a, b, count - 1);
     }
     TYPED_TEST(BitwiseFloatsAdditional2, Set) {
         using vec = TypeParam;
