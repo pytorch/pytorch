@@ -720,7 +720,8 @@ TORCH_MODULE(NLLLoss);
 /// Creates a criterion that computes cross entropy loss between input and
 /// target. See
 /// https://pytorch.org/docs/main/nn.html#torch.nn.CrossEntropyLoss to learn
-/// about the exact behavior of this module.
+/// about the exact behavior of this module. Unlike in Python, there is no `dim`
+/// argument: the classes are always at dimension 1 (0 for unbatched input).
 ///
 /// See the documentation for `torch::nn::CrossEntropyLossOptions` class to
 /// learn what constructor arguments are supported for this module.

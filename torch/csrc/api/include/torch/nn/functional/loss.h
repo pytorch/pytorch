@@ -958,7 +958,9 @@ inline Tensor cross_entropy(
 
 /// See
 /// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.cross_entropy
-/// about the exact behavior of this functional.
+/// about the exact behavior of this functional. Unlike in Python, there is no
+/// `dim` argument: the classes are always at dimension 1 (0 for unbatched
+/// input).
 ///
 /// See the documentation for `torch::nn::functional::CrossEntropyFuncOptions`
 /// class to learn what optional arguments are supported for this functional.
