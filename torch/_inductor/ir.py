@@ -146,6 +146,7 @@ if TYPE_CHECKING:
     from torch.fx.node import Argument
     from torch.types import IntLikeType
 
+    from .codegen.cpp_template import CppTemplate
     from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
@@ -7127,13 +7128,15 @@ class CppTemplateBuffer(TemplateBuffer):
         layout: Layout,
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[_P, _T],
-        template: CUTLASSTemplate,
+        template: CppTemplate,
         choice: Any,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
         self.template = template
         self.choice = choice
         self.outputs: list[Buffer] | None = None
+        if not template.supports_epilogue_fusion:
+            self.allow_epilogue_fusion = False
 
     def get_layout(self) -> Layout:
         if isinstance(self.layout, MultiOutputLayout):
