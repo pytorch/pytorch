@@ -45,6 +45,7 @@ out = checkpointed_fn(*args, **kwargs)
 .. autofunction:: checkpoint
 .. autofunction:: checkpoint_sequential
 .. autofunction:: set_checkpoint_debug_enabled
+.. autofunction:: register_determinism_check
 .. autoclass:: CheckpointPolicy
 .. autoclass:: SelectiveCheckpointContext
 .. autofunction:: create_selective_checkpoint_contexts
