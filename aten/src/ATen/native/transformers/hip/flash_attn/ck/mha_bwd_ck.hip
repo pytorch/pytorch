@@ -346,7 +346,8 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
            int window_size_right,
            const bool deterministic,
            const at::Tensor philox_seed,
-           const at::Tensor philox_offset)
+           const at::Tensor philox_offset,
+           const bool causal_top_left)
 {
 #ifdef FLASHATTENTION_DISABLE_BACKWARD
     TORCH_CHECK(false, "This flash attention build does not support backward.");
@@ -404,7 +405,7 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
 
     mask_info mask;
     if (is_causal) {
-        std::string mask_identify = "b:" + std::to_string(window_size_left) + "," + "0";
+        std::string mask_identify = (causal_top_left ? "t:" : "b:") + std::to_string(window_size_left) + "," + "0";
         mask = mask_info::decode(mask_identify, seqlen_q, seqlen_k); // casual
     }
     else if (window_size_left == -1 && window_size_right == -1) {

@@ -91,7 +91,7 @@ if(USE_XPU)
 endif()
 
 # ---[ Custom Protobuf
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
+if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
 endif()
 
@@ -154,13 +154,6 @@ else()
       "Cannot find threading library. PyTorch requires Threads to compile.")
 endif()
 
-# ---[ protobuf
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if(USE_LITE_PROTO)
-    set(CAFFE2_USE_LITE_PROTO 1)
-  endif()
-endif()
-
 # ---[ BLAS
 
 set(AT_MKLDNN_ACL_ENABLED 0)
@@ -169,13 +162,7 @@ set(AT_MKL_ENABLED 0)
 set(AT_KLEIDIAI_ENABLED 0)
 set(AT_USE_EIGEN_SPARSE 0)
 # setting default preferred BLAS options if not already present.
-if(NOT INTERN_BUILD_MOBILE)
-  set(BLAS "MKL" CACHE STRING "Selected BLAS library")
-else()
-  set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
-  set(AT_MKLDNN_ENABLED 0)
-  set(AT_MKL_ENABLED 0)
-endif()
+set(BLAS "MKL" CACHE STRING "Selected BLAS library")
 set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib;APL")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 set(BLAS_CHECK_F2C 0)
@@ -291,28 +278,21 @@ if(USE_EIGEN_SPARSE)
   set(AT_USE_EIGEN_SPARSE 1)
 endif()
 
-if(NOT INTERN_BUILD_MOBILE)
-  set(AT_MKL_SEQUENTIAL 0)
-  set(USE_BLAS 1)
-  if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND OR APL_FOUND))
-    message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
-    find_package(BLAS)
-    if(NOT BLAS_FOUND)
-      set(USE_BLAS 0)
-    endif()
+set(AT_MKL_SEQUENTIAL 0)
+set(USE_BLAS 1)
+if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND OR APL_FOUND))
+  message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
+  find_package(BLAS)
+  if(NOT BLAS_FOUND)
+    set(USE_BLAS 0)
   endif()
+endif()
 
-  if(MKL_FOUND)
-    if("${MKL_THREADING}" STREQUAL "SEQ")
-      set(AT_MKL_SEQUENTIAL 1)
-    endif()
-    set(AT_MKL_ENABLED 1)
+if(MKL_FOUND)
+  if("${MKL_THREADING}" STREQUAL "SEQ")
+    set(AT_MKL_SEQUENTIAL 1)
   endif()
-elseif(INTERN_USE_EIGEN_BLAS)
-  # Eigen BLAS for Mobile
-  set(USE_BLAS 1)
-  include(${CMAKE_CURRENT_LIST_DIR}/External/EigenBLAS.cmake)
-  list(APPEND Caffe2_DEPENDENCY_LIBS eigen_blas)
+  set(AT_MKL_ENABLED 1)
 endif()
 
 # --- [ PocketFFT
@@ -412,9 +392,9 @@ set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
   CACHE PATH "Confu-style dependencies binary directory")
 
 # ---[ pthreadpool
-# Only add a dependency on pthreadpool if we are on a mobile build
-# or are building any of the libraries in the {Q/X}NNPACK family.
-if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
+# Only add a dependency on pthreadpool if we are building any of the
+# libraries in the {Q/X}NNPACK family.
+if(NOT DISABLE_NNPACK_AND_FAMILY)
   set(USE_PTHREADPOOL ON CACHE BOOL "" FORCE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PTHREADPOOL")
 
@@ -589,17 +569,6 @@ elseif(NOT TARGET XNNPACK AND USE_SYSTEM_XNNPACK)
   list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK microkernels-prod)
 endif()
 
-# ---[ Vulkan deps
-if(USE_VULKAN)
-  set(Vulkan_DEFINES)
-  set(Vulkan_INCLUDES)
-  set(Vulkan_LIBS)
-  include(${CMAKE_CURRENT_LIST_DIR}/VulkanDependencies.cmake)
-  string(APPEND CMAKE_CXX_FLAGS ${Vulkan_DEFINES})
-  include_directories(SYSTEM ${Vulkan_INCLUDES})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${Vulkan_LIBS})
-endif()
-
 # ---[ gflags
 if(USE_GFLAGS)
   include(${CMAKE_CURRENT_LIST_DIR}/public/gflags.cmake)
@@ -628,7 +597,7 @@ endif()
 
 
 # ---[ Googletest and benchmark
-if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
+if(BUILD_TEST)
   # Preserve build options.
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 
@@ -753,7 +722,6 @@ if(USE_ITT)
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ITT_LIBRARIES})
   else()
     message(WARNING "Not compiling with ITT. Suppress this warning with -DUSE_ITT=OFF")
-    set(USE_ITT OFF CACHE BOOL "" FORCE)
     caffe2_update_option(USE_ITT OFF)
   endif()
 endif()
@@ -1473,14 +1441,13 @@ if(USE_GLOO)
 endif()
 
 # ---[ Onnx
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
+if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
   endif()
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
   set(BUILD_SHARED_LIBS OFF)
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-  set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
   # If linking local protobuf, make sure ONNX has the same protobuf
   # patches as Caffe2 and Caffe proto. This forces some functions to
   # not be inline and instead route back to the statically-linked protobuf.
@@ -1529,206 +1496,199 @@ endif()
 # --[ ATen checks
 set(USE_LAPACK 0)
 
-# we need to build all targets to be linked with PIC
-if(USE_KINETO AND INTERN_BUILD_MOBILE AND USE_LITE_INTERPRETER_PROFILER)
-  set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
+set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
+string(APPEND CMAKE_CUDA_FLAGS " $ENV{TORCH_NVCC_FLAGS}")
+set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
+
+# Top-level build config
+############################################
+# Flags
+# When using MSVC
+# Detect CUDA architecture and get best NVCC flags
+# finding cuda must be first because other things depend on the result
+#
+# NB: We MUST NOT run this find_package if NOT USE_CUDA is set, because upstream
+# FindCUDA has a bug where it will still attempt to make use of NOTFOUND
+# compiler variables to run various probe tests.  We could try to fix
+# this, but since FindCUDA upstream is subsumed by first-class support
+# for CUDA language, it seemed not worth fixing.
+
+if(MSVC)
+  # we want to respect the standard, and we are bored of those **** .
+  add_compile_definitions(_CRT_SECURE_NO_DEPRECATE=1)
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
+else()
+  if(WERROR)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13)
+      string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-dangling-reference ")
+    endif()
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 12)
+      # Match the C++ host-compiler setting without changing public type layouts.
+      string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-interference-size ")
+    endif()
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+      string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
+      string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
+      # third_party/cutlass is included as a plain (non-SYSTEM) include dir
+      # for torch_cuda (caffe2/CMakeLists.txt), so -Wunused-function fires on
+      # cutlass header-only helpers (e.g. cutlassGetStatusString, cute's
+      # prefetch) that a given translation unit's CUDA-version-gated
+      # instantiation path happens not to reference.
+      string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=unused-function ")
+    endif()
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
+      string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")
+    endif()
+  endif()
 endif()
 
-if(NOT INTERN_BUILD_MOBILE)
-  set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
-  string(APPEND CMAKE_CUDA_FLAGS " $ENV{TORCH_NVCC_FLAGS}")
-  set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
+string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
 
-  # Top-level build config
-  ############################################
-  # Flags
-  # When using MSVC
-  # Detect CUDA architecture and get best NVCC flags
-  # finding cuda must be first because other things depend on the result
-  #
-  # NB: We MUST NOT run this find_package if NOT USE_CUDA is set, because upstream
-  # FindCUDA has a bug where it will still attempt to make use of NOTFOUND
-  # compiler variables to run various probe tests.  We could try to fix
-  # this, but since FindCUDA upstream is subsumed by first-class support
-  # for CUDA language, it seemed not worth fixing.
+# use cub in a safe manner, see:
+# https://github.com/pytorch/pytorch/pull/55292
+string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
 
-  if(MSVC)
-    # we want to respect the standard, and we are bored of those **** .
-    add_compile_definitions(_CRT_SECURE_NO_DEPRECATE=1)
-    string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
+# Suppress cusparse warnings
+string(APPEND CMAKE_CUDA_FLAGS " -DDISABLE_CUSPARSE_DEPRECATED")
+
+message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
+string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
+                               " -D__CUDA_NO_HALF_OPERATORS__"
+                               " -D__CUDA_NO_HALF_CONVERSIONS__"
+                               " -D__CUDA_NO_HALF2_OPERATORS__"
+                               " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
+
+string(APPEND CMAKE_C_FLAGS_RELEASE " -DNDEBUG")
+string(APPEND CMAKE_CXX_FLAGS_RELEASE " -DNDEBUG")
+if(NOT GENERATOR_IS_MULTI_CONFIG)
+  if(${CMAKE_BUILD_TYPE} STREQUAL "Release")
+    message(STATUS "Adding -DNDEBUG to compile flags")
+    string(APPEND CMAKE_C_FLAGS " -DNDEBUG")
+    string(APPEND CMAKE_CXX_FLAGS " -DNDEBUG")
   else()
-    if(WERROR)
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13)
-        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-dangling-reference ")
-      endif()
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 12)
-        # Match the C++ host-compiler setting without changing public type layouts.
-        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-interference-size ")
-      endif()
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
-        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
-        # third_party/cutlass is included as a plain (non-SYSTEM) include dir
-        # for torch_cuda (caffe2/CMakeLists.txt), so -Wunused-function fires on
-        # cutlass header-only helpers (e.g. cutlassGetStatusString, cute's
-        # prefetch) that a given translation unit's CUDA-version-gated
-        # instantiation path happens not to reference.
-        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=unused-function ")
-      endif()
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
-        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")
-      endif()
-    endif()
+    message(STATUS "Removing -DNDEBUG from compile flags")
+    string(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
+    string(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
   endif()
+endif()
+string(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
+string(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
 
-  string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
+set(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
-  # use cub in a safe manner, see:
-  # https://github.com/pytorch/pytorch/pull/55292
-  string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
-
-  # Suppress cusparse warnings
-  string(APPEND CMAKE_CUDA_FLAGS " -DDISABLE_CUSPARSE_DEPRECATED")
-
-  message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
-  string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
-                                 " -D__CUDA_NO_HALF_OPERATORS__"
-                                 " -D__CUDA_NO_HALF_CONVERSIONS__"
-                                 " -D__CUDA_NO_HALF2_OPERATORS__"
-                                 " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
-
-  string(APPEND CMAKE_C_FLAGS_RELEASE " -DNDEBUG")
-  string(APPEND CMAKE_CXX_FLAGS_RELEASE " -DNDEBUG")
-  if(NOT GENERATOR_IS_MULTI_CONFIG)
-    if(${CMAKE_BUILD_TYPE} STREQUAL "Release")
-      message(STATUS "Adding -DNDEBUG to compile flags")
-      string(APPEND CMAKE_C_FLAGS " -DNDEBUG")
-      string(APPEND CMAKE_CXX_FLAGS " -DNDEBUG")
+if(USE_CUDA OR USE_ROCM)
+  if(USE_MAGMA)
+    find_package(MAGMA)
+    if(MAGMA_FOUND)
+      message(STATUS "Compiling with MAGMA support")
+      message(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
+      message(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
+      message(STATUS "MAGMA V2 check: ${MAGMA_V2}")
     else()
-      message(STATUS "Removing -DNDEBUG from compile flags")
-      string(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
-      string(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
+      message(STATUS "MAGMA not found. Compiling without MAGMA support")
+      caffe2_update_option(USE_MAGMA OFF)
     endif()
   endif()
-  string(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
-  string(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
+elseif(USE_MAGMA)
+  message(WARNING
+    "Not compiling with MAGMA. Suppress this warning with "
+    "-DUSE_MAGMA=OFF.")
+  caffe2_update_option(USE_MAGMA OFF)
+endif()
 
-  set(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
+find_package(LAPACK)
+if(LAPACK_FOUND)
+  set(USE_LAPACK 1)
+  list(APPEND Caffe2_PRIVATE_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
+endif()
 
-  if(USE_CUDA OR USE_ROCM)
-    if(USE_MAGMA)
-      find_package(MAGMA)
-      if(MAGMA_FOUND)
-        message(STATUS "Compiling with MAGMA support")
-        message(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
-        message(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
-        message(STATUS "MAGMA V2 check: ${MAGMA_V2}")
-      else()
-        message(STATUS "MAGMA not found. Compiling without MAGMA support")
-        caffe2_update_option(USE_MAGMA OFF)
-      endif()
-    endif()
-  elseif(USE_MAGMA)
+if(NOT USE_ROCM)
+  message("disabling ROCM because NOT USE_ROCM is set")
+  message(STATUS "MIOpen not found. Compiling without MIOpen support")
+  set(AT_ROCM_ENABLED 0)
+else()
+  include_directories(BEFORE ${MIOPEN_INCLUDE_DIRS})
+  set(AT_ROCM_ENABLED 1)
+endif()
+
+if(USE_MKLDNN)
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(WARNING
-      "Not compiling with MAGMA. Suppress this warning with "
-      "-DUSE_MAGMA=OFF.")
-    caffe2_update_option(USE_MAGMA OFF)
+      "x64 operating system is required for MKLDNN. "
+      "Not compiling with MKLDNN. "
+      "Turn this warning off by USE_MKLDNN=OFF.")
+    set(USE_MKLDNN OFF)
   endif()
-
-  find_package(LAPACK)
-  if(LAPACK_FOUND)
-    set(USE_LAPACK 1)
-    list(APPEND Caffe2_PRIVATE_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
+  if(USE_MKLDNN_ACL)
+    set(AT_MKLDNN_ACL_ENABLED 1)
   endif()
-
-  if(NOT USE_ROCM)
-    message("disabling ROCM because NOT USE_ROCM is set")
-    message(STATUS "MIOpen not found. Compiling without MIOpen support")
-    set(AT_ROCM_ENABLED 0)
-  else()
-    include_directories(BEFORE ${MIOPEN_INCLUDE_DIRS})
-    set(AT_ROCM_ENABLED 1)
-  endif()
-
-  if(USE_MKLDNN)
-    if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-      message(WARNING
-        "x64 operating system is required for MKLDNN. "
-        "Not compiling with MKLDNN. "
-        "Turn this warning off by USE_MKLDNN=OFF.")
-      set(USE_MKLDNN OFF)
-    endif()
-    if(USE_MKLDNN_ACL)
-      set(AT_MKLDNN_ACL_ENABLED 1)
-    endif()
-  endif()
-  if(USE_MKLDNN)
-    include(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
-    if(MKLDNN_FOUND)
-      set(AT_MKLDNN_ENABLED 1)
-      include_directories(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
-    else()
-      message(WARNING "MKLDNN could not be found.")
-      caffe2_update_option(USE_MKLDNN OFF)
-    endif()
-  else()
-    message("disabling MKLDNN because USE_MKLDNN is not set")
-  endif()
-
-  if(USE_KLEIDIAI)
-    set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
-    set(AT_KLEIDIAI_ENABLED 1)
-    set(KLEIDIAI_BUILD_TESTS OFF) # Disable building KLEIDIAI tests
-    set(KLEIDIAI_SRC "${PROJECT_SOURCE_DIR}/third_party/kleidiai")
-    add_subdirectory(${KLEIDIAI_SRC})
-    list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
-    # Recover build options.
-    set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
-  endif()
-
-  if(UNIX AND NOT APPLE)
-     include(CheckLibraryExists)
-     # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
-     CHECK_LIBRARY_EXISTS(rt clock_gettime "time.h" NEED_LIBRT)
-     if(NEED_LIBRT)
-       list(APPEND Caffe2_DEPENDENCY_LIBS rt)
-       set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} rt)
-     endif(NEED_LIBRT)
-  endif(UNIX AND NOT APPLE)
-
-  if(UNIX)
-    set(CMAKE_EXTRA_INCLUDE_FILES "sys/mman.h")
-    CHECK_FUNCTION_EXISTS(mmap HAVE_MMAP)
-    if(HAVE_MMAP)
-      add_compile_definitions(HAVE_MMAP=1)
-    endif(HAVE_MMAP)
-    # done for lseek: https://www.gnu.org/software/libc/manual/html_node/File-Position-Primitive.html
-    add_compile_definitions(_FILE_OFFSET_BITS=64)
-    CHECK_FUNCTION_EXISTS(shm_open HAVE_SHM_OPEN)
-    if(HAVE_SHM_OPEN)
-      add_compile_definitions(HAVE_SHM_OPEN=1)
-    endif(HAVE_SHM_OPEN)
-    CHECK_FUNCTION_EXISTS(shm_unlink HAVE_SHM_UNLINK)
-    if(HAVE_SHM_UNLINK)
-      add_compile_definitions(HAVE_SHM_UNLINK=1)
-    endif(HAVE_SHM_UNLINK)
-    CHECK_FUNCTION_EXISTS(malloc_usable_size HAVE_MALLOC_USABLE_SIZE)
-    if(HAVE_MALLOC_USABLE_SIZE)
-      add_compile_definitions(HAVE_MALLOC_USABLE_SIZE=1)
-    endif(HAVE_MALLOC_USABLE_SIZE)
-    set(CMAKE_EXTRA_INCLUDE_FILES "fcntl.h")
-    CHECK_FUNCTION_EXISTS(posix_fallocate HAVE_POSIX_FALLOCATE)
-    if(HAVE_POSIX_FALLOCATE)
-      add_compile_definitions(HAVE_POSIX_FALLOCATE=1)
-    endif(HAVE_POSIX_FALLOCATE)
-  endif(UNIX)
-
-  add_compile_definitions(USE_EXTERNAL_MZCRC)
-  add_compile_definitions(MINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
-
-  find_package(ZVECTOR) # s390x simd support
 endif()
+if(USE_MKLDNN)
+  include(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
+  if(MKLDNN_FOUND)
+    set(AT_MKLDNN_ENABLED 1)
+    include_directories(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
+  else()
+    message(WARNING "MKLDNN could not be found.")
+    caffe2_update_option(USE_MKLDNN OFF)
+  endif()
+else()
+  message("disabling MKLDNN because USE_MKLDNN is not set")
+endif()
+
+if(USE_KLEIDIAI)
+  set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+  set(AT_KLEIDIAI_ENABLED 1)
+  set(KLEIDIAI_BUILD_TESTS OFF) # Disable building KLEIDIAI tests
+  set(KLEIDIAI_SRC "${PROJECT_SOURCE_DIR}/third_party/kleidiai")
+  add_subdirectory(${KLEIDIAI_SRC})
+  list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
+  # Recover build options.
+  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+endif()
+
+if(UNIX AND NOT APPLE)
+   include(CheckLibraryExists)
+   # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
+   CHECK_LIBRARY_EXISTS(rt clock_gettime "time.h" NEED_LIBRT)
+   if(NEED_LIBRT)
+     list(APPEND Caffe2_DEPENDENCY_LIBS rt)
+     set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} rt)
+   endif(NEED_LIBRT)
+endif(UNIX AND NOT APPLE)
+
+if(UNIX)
+  set(CMAKE_EXTRA_INCLUDE_FILES "sys/mman.h")
+  CHECK_FUNCTION_EXISTS(mmap HAVE_MMAP)
+  if(HAVE_MMAP)
+    add_compile_definitions(HAVE_MMAP=1)
+  endif(HAVE_MMAP)
+  # done for lseek: https://www.gnu.org/software/libc/manual/html_node/File-Position-Primitive.html
+  add_compile_definitions(_FILE_OFFSET_BITS=64)
+  CHECK_FUNCTION_EXISTS(shm_open HAVE_SHM_OPEN)
+  if(HAVE_SHM_OPEN)
+    add_compile_definitions(HAVE_SHM_OPEN=1)
+  endif(HAVE_SHM_OPEN)
+  CHECK_FUNCTION_EXISTS(shm_unlink HAVE_SHM_UNLINK)
+  if(HAVE_SHM_UNLINK)
+    add_compile_definitions(HAVE_SHM_UNLINK=1)
+  endif(HAVE_SHM_UNLINK)
+  CHECK_FUNCTION_EXISTS(malloc_usable_size HAVE_MALLOC_USABLE_SIZE)
+  if(HAVE_MALLOC_USABLE_SIZE)
+    add_compile_definitions(HAVE_MALLOC_USABLE_SIZE=1)
+  endif(HAVE_MALLOC_USABLE_SIZE)
+  set(CMAKE_EXTRA_INCLUDE_FILES "fcntl.h")
+  CHECK_FUNCTION_EXISTS(posix_fallocate HAVE_POSIX_FALLOCATE)
+  if(HAVE_POSIX_FALLOCATE)
+    add_compile_definitions(HAVE_POSIX_FALLOCATE=1)
+  endif(HAVE_POSIX_FALLOCATE)
+endif(UNIX)
+
+add_compile_definitions(USE_EXTERNAL_MZCRC)
+add_compile_definitions(MINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
+
+find_package(ZVECTOR) # s390x simd support
 
 #
 # End ATen checks
@@ -1767,17 +1727,6 @@ list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 
 # ---[ Kineto
-# edge profiler depends on KinetoProfiler but it only does cpu
-# profiling. Thus we dont need USE_CUDA/USE_ROCM
-if(USE_KINETO AND INTERN_BUILD_MOBILE AND NOT (BUILD_LITE_INTERPRETER AND USE_LITE_INTERPRETER_PROFILER))
-  message(STATUS "Not using libkineto in a mobile build.")
-  set(USE_KINETO OFF)
-endif()
-
-if(USE_KINETO AND INTERN_BUILD_MOBILE AND USE_LITE_INTERPRETER_PROFILER AND (USE_CUDA OR USE_ROCM))
-  message(FATAL_ERROR "Mobile build with profiler does not support CUDA or ROCM")
-endif()
-
 if(USE_KINETO)
   if(USE_CUDA)
     set(KINETO_BACKEND "cuda" CACHE STRING "" FORCE)

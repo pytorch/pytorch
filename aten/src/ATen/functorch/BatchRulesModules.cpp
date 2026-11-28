@@ -378,6 +378,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   EXISTING_BDIM(upsample_trilinear3d);
   EXISTING_BDIM(_upsample_bilinear2d_aa);
   EXISTING_BDIM(_upsample_bicubic2d_aa);
+  EXISTING_BDIM(_upsample_inter_area2d);
 
   UPSAMPLE_BACKWARD(upsample_bicubic2d_backward);
   UPSAMPLE_BACKWARD(upsample_bilinear2d_backward);

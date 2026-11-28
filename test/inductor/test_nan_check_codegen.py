@@ -1,63 +1,40 @@
 # Owner(s): ["module: inductor"]
 
-from types import SimpleNamespace
-
-import sympy
-
 import torch
-from torch._inductor.codegen.common import SizeArg, TensorArg
-from torch._inductor.codegen.triton import TritonKernel
+from torch._inductor import config
 from torch._inductor.test_case import TestCase
-from torch._inductor.virtualized import V
+from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
 )
+from torch.testing._internal.inductor_utils import requires_gpu
 
 
-@instantiate_parametrized_tests
+@requires_gpu()
 class TestNanCheckCodegen(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    @parametrize("cpp_wrapper", [False, True])
-    def test_nan_checks_identify_kernel_and_buffer(self, cpp_wrapper):
-        lines = []
-        kernel = SimpleNamespace(
-            kernel_name="triton_poi_fused_div_7",
-            args=SimpleNamespace(
-                python_argdefs=lambda: (
-                    [],
-                    ["arg0_1", "buf0", "s0"],
-                    [
-                        TensorArg("in_ptr0", "arg0_1", torch.float32),
-                        TensorArg("out_ptr0", "buf0", torch.float32),
-                        SizeArg("ks0", sympy.Symbol("s0")),
-                    ],
-                    [],
-                )
-            ),
-        )
-        graph = SimpleNamespace(
-            cpp_wrapper=cpp_wrapper,
-            wrapper_code=SimpleNamespace(writeline=lines.append),
-        )
-        with V.set_graph_handler(graph):
-            TritonKernel.codegen_nan_check(kernel)
-        if cpp_wrapper:
-            expected = [
-                f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("triton_poi_fused_div_7: {name}", {name}));'
-                for name in ["arg0_1", "buf0"]
-            ]
-        else:
-            expected = [
-                f"assert not {name}.{check}().any().item(), 'triton_poi_fused_div_7: {name} contains {issue}'"
-                for name in ["arg0_1", "buf0"]
-                for check, issue in [("isnan", "NaN"), ("isinf", "Inf")]
-            ]
-        self.assertEqual(lines, expected)
+    @parametrize("cpp_wrapper", (False, True))
+    def test_nan_checks_identify_kernel_and_buffer(self, device, cpp_wrapper):
+        x = torch.ones(8, device=device)
+        y = torch.ones(8, device=device)
+        with config.patch(nan_asserts=True, cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(lambda x, y: x / y)
+            result, code = run_and_get_code(compiled, x, y)
+        self.assertEqual(result, x / y)
+        self.assertRegex("\n".join(code), r"triton_poi_fused_div_\d+: buf\d+")
+        with self.assertRaisesRegex(
+            (AssertionError, RuntimeError), r"triton_poi_fused_div_\d+: buf\d+"
+        ):
+            compiled(x, torch.zeros_like(y))
 
+
+instantiate_device_type_tests(
+    TestNanCheckCodegen, globals(), allow_xpu=True, except_for="cpu"
+)
 
 if __name__ == "__main__":
     run_tests()

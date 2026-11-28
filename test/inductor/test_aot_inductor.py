@@ -108,6 +108,7 @@ from torch.testing._internal.common_utils import (
     runOnRocm,
     set_cwd,
     skipIfCachingAllocatorDisabled,
+    skipIfCppFakeTensor,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -4081,6 +4082,53 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @common_utils.parametrize("view_kind", ["repeat", "dtype", "slice"])
+    @common_utils.parametrize("iterations", [0, 1, 3])
+    def test_while_loop_captured_view_handle_lifetime(self, view_kind, iterations):
+        # A no-op or dtype view creates an owning handle expression before the
+        # loop. Condition/body binding must borrow it across all iterations.
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                if view_kind == "repeat":
+                    y = y.repeat_interleave(1, 0)
+                elif view_kind == "dtype":
+                    y = y.view(torch.int32)
+                else:
+                    y = y[1:]
+                return torch.while_loop(
+                    lambda i, x: i < iterations,
+                    lambda i, x: (i + 1, x + y),
+                    (torch.zeros((), dtype=torch.int64, device=x.device), x),
+                )
+
+        def inputs():
+            if view_kind == "dtype":
+                x = torch.randint(0, 10, (4,), device=self.device, dtype=torch.int32)
+                # Small integer bit patterns avoid overflow after viewing y back
+                # as int32, without doing floating-point arithmetic on its data.
+                y = torch.randint(0, 10, (4,), device=self.device, dtype=torch.int32)
+                y = y.view(torch.float32)
+            else:
+                x = torch.randn(4, device=self.device)
+                y = torch.randn(5 if view_kind == "slice" else 4, device=self.device)
+            return x, y
+
+        model = Model()
+        example_inputs = inputs()
+        with config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ):
+            package_path = torch._inductor.aoti_compile_and_package(
+                torch.export.export(model, example_inputs)
+            )
+        compiled = AOTIRunnerUtil.load_package(package_path)
+        for _ in range(3):
+            args = inputs()
+            self.assertEqual(compiled(*args), model(*args))
+
     def test_while_loop_nested(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -7608,17 +7656,22 @@ class AOTInductorTestsTemplate:
             package_path: str = AOTIRunnerUtil.compile(
                 model, (x,), dynamic_shapes=dynamic_shapes
             )
-        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
+        aot_inductor_module = torch._inductor.aoti_load_package(
+            package_path, num_runners=1
+        )
         # dynamic dim works fine
         _ = aot_inductor_module(y0)
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaisesRegex(Exception, "unmatched dim value at 1"):
             aot_inductor_module(y1)
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaisesRegex(Exception, "unmatched stride value at 1"):
             aot_inductor_module(y2)
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaisesRegex(Exception, "dim value is too large at 0"):
             aot_inductor_module(y3)
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaisesRegex(Exception, "dim value is too large at 0"):
             aot_inductor_module(y4)
+        # The package runs one model instance, so each rejected call must have
+        # returned it to the pool for this call to run.
+        self.assertEqual(aot_inductor_module(y0), y0)
 
     @skip_if_device(
         lambda device: device != GPU_TYPE or device == "mps",
@@ -7720,6 +7773,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 3, device=self.device), [3, 4])
         self.check_model(Model(), example_inputs)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_tensor_from_jagged(self):
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -10360,6 +10414,54 @@ class AOTInductorTestsTemplate:
         del runner
         for name, tensor in external_weights.items():
             self.assertEqual(tensor._use_count(), external_weight_use_counts[name])
+
+    @skip_if_device(lambda device: device != "cuda", "requires CUDA")
+    def test_run_single_threaded_after_constant_fold(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(8, 16, device=device))
+                self.b = torch.nn.Parameter(torch.randn(8, device=device))
+
+            def forward(self, x):
+                return x @ torch.relu(self.w.t()) + self.b
+
+        model = Model(self.device)
+        x = torch.randn(4, 16, device=self.device)
+        with config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.use_runtime_constant_folding": True,
+            }
+        ):
+            so_path = AOTIRunnerUtil.legacy_compile(model, (x,))
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(
+            so_path, 1, self.device, "", True
+        )
+        params = dict(model.named_parameters())
+        new_weights = {
+            name: params[fqn].detach() + 1
+            for name, fqn in runner.get_constant_names_to_original_fqns().items()
+            if fqn in params
+        }
+        # What AOTInductorModelContainerCreateWithExternalConstants does, and
+        # it leaves the only model in flight.
+        runner.update_constant_buffer(new_weights, False, False, True)
+        runner.run_const_fold(False)
+        with torch.no_grad():
+            for param in params.values():
+                param.add_(1)
+        self.assertEqual(runner.run([x])[0], model(x))
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            (out,) = runner.run([x])
+        x.copy_(torch.randn_like(x))
+        graph.replay()
+        self.assertEqual(out, model(x))
 
     def test_user_managed_buffer_tensor_handle_lifetime(self):
         class Model(torch.nn.Module):

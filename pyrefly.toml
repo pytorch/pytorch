@@ -105,6 +105,7 @@ ignore-missing-imports = [
     "flydsl.*",
     # cuda-python ships with cutlass but is absent from the linter image.
     "cuda.bindings.*",
+    "cuda.pathfinder",
     "deeplearning.*",
     "einops.*",
     "libfb.*",

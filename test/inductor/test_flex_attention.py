@@ -29,9 +29,10 @@ from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import config, metrics
 from torch._inductor.exc import InductorError
+from torch._inductor.runtime.hints import DeviceProperties, get_warp_size
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
@@ -84,6 +85,7 @@ from torch.testing._internal.common_utils import (
     isRocmArchAnyOf,
     MI200_ARCH,
     serialTest,
+    skipIfCppFakeTensor,
     skipIfRocm,
     skipIfRocmArch,
     TEST_MULTIACCELERATOR,
@@ -235,6 +237,11 @@ def expected_not_implemented_on_mps(test_func):
         self.fail("expected NotImplementedError on MPS but test passed")
 
     return wrapper
+
+
+def _assert_xcc_remapped(code, num_xccs):
+    checker = FileCheck().check(f"NUM_XCCS : tl.constexpr = {num_xccs}")
+    checker.check("tl.program_id(0) % NUM_XCCS").run(code)
 
 
 def rmse(ref, res):
@@ -5568,6 +5575,213 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap(self, device):
+        # 2 * 5 * cdiv(448, BLOCK_M) programs is not a multiple of 3 for any
+        # power-of-two BLOCK_M in 16..128, so some XCCs get one program fewer.
+        q, k, v = (torch.randn(2, 5, 448, 64, device=device) for _ in range(3))
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 448, 448, device=device
+        )
+
+        def run(num_xccs):
+            compiled = torch.compile(flex_attention, fullgraph=True)
+            options = {"NUM_XCCS": num_xccs}
+            return run_and_get_code(
+                compiled, q, k, v, block_mask=block_mask, kernel_options=options
+            )
+
+        out, code = run(3)
+        _assert_xcc_remapped(code[0], 3)
+        ref, code = run(0)
+        FileCheck().check_not("NUM_XCCS : tl.constexpr").run(code[0])
+        self.assertEqual(out, ref)
+        # The decode kernel has no remap and must not receive NUM_XCCS.
+        compiled = torch.compile(flex_attention, fullgraph=True)
+        options = {"NUM_XCCS": 3}
+        _, code = run_and_get_code(compiled, q[:, :, :1], k, v, kernel_options=options)
+        FileCheck().check("SPLIT_KV : tl.constexpr").run(code[0])
+        FileCheck().check_not("NUM_XCCS : tl.constexpr").run(code[0])
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap_backward(self, device):
+        # With batch 5, 2 kv heads and GQA 2, 5 * 2 * (2 * cdiv(400, BLOCK_M2) +
+        # cdiv(272, BLOCK_N1)) programs is not a multiple of 3 for any
+        # power-of-two block sizes in 16..128. Batch != kv heads, so a decode
+        # that confuses the batch and head counts is caught.
+        q = torch.randn(5, 4, 400, 64, device=device, requires_grad=True)
+        k, v = (
+            torch.randn(5, 2, 272, 64, device=device, requires_grad=True)
+            for _ in range(2)
+        )
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 400, 272, device=device
+        )
+
+        def run(num_xccs):
+            compiled = torch.compile(flex_attention, fullgraph=True)
+            options = {"NUM_XCCS": num_xccs}
+
+            def fwd_bwd():
+                kwargs = {"enable_gqa": True, "kernel_options": options}
+                out = compiled(q, k, v, block_mask=block_mask, **kwargs)
+                return torch.autograd.grad(out.sum(), (q, k, v))
+
+            return run_and_get_code(fwd_bwd)
+
+        grads, code = run(3)
+        self.assertEqual(len(code), 2)
+        for c in code:
+            _assert_xcc_remapped(c, 3)
+        ref, code = run(0)
+        FileCheck().check_not("NUM_XCCS : tl.constexpr").run("\n".join(code))
+        self.assertEqual(grads, ref)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap_dynamic_batch(self, device):
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 448, 448, device=device
+        )
+
+        def make_inputs(batch):
+            inputs = [
+                torch.randn(batch, 4, 448, 64, device=device, requires_grad=True)
+                for _ in range(3)
+            ]
+            for t in inputs:
+                torch._dynamo.mark_dynamic(t, 0)
+            return inputs
+
+        def fwd_bwd(fn, num_xccs, q, k, v):
+            options = {"NUM_XCCS": num_xccs}
+            out = fn(q, k, v, block_mask=block_mask, kernel_options=options)
+            return out, torch.autograd.grad(out.sum(), (q, k, v))
+
+        remapped = torch.compile(flex_attention, fullgraph=True)
+        small, large = make_inputs(2), make_inputs(5)
+        res_small, code = run_and_get_code(fwd_bwd, remapped, 3, *small)
+        self.assertEqual(len(code), 2)
+        for c in code:
+            _assert_xcc_remapped(c, 3)
+        # Batch 5 reuses the batch-2 graphs: the grid-size guard does not force
+        # a recompile on the batch.
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            res_large = fwd_bwd(remapped, 3, *large)
+
+        reference = torch.compile(flex_attention, fullgraph=True)
+        self.assertEqual(res_small, fwd_bwd(reference, 0, *small))
+        self.assertEqual(res_large, fwd_bwd(reference, 0, *large))
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap_grid_limit_guard(self, device):
+        from torch._inductor.kernel.flex import flex_attention as flex_lowering
+
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 448, 448, device=device
+        )
+        options = {"NUM_XCCS": 3, "BLOCK_M": 64, "BLOCK_N": 64, "num_warps": 4}
+
+        def make_inputs(batch):
+            inputs = [torch.randn(batch, 4, 448, 64, device=device) for _ in range(3)]
+            for t in inputs:
+                torch._dynamo.mark_dynamic(t, 0)
+            return inputs
+
+        def run(fn, batch):
+            inputs = make_inputs(batch)
+            return fn(*inputs, block_mask=block_mask, kernel_options=options)
+
+        # cdiv(448, 64) * 4 heads programs of 4 warps per batch element. A limit
+        # between batch 2 and batch 5 remaps batch 2, and the guard on the
+        # flattened grid must then recompile batch 5 rather than reuse it.
+        limit = 3 * 7 * 4 * 4 * get_warp_size(torch.device(device))
+        compiled = torch.compile(flex_attention, fullgraph=True)
+        with mock.patch.object(flex_lowering, "_MAX_GRID_WORK_ITEMS", limit):
+            _, code = run_and_get_code(run, compiled, 2)
+            _assert_xcc_remapped(code[0], 3)
+            with torch._dynamo.config.patch(error_on_recompile=True):
+                with self.assertRaises(torch._dynamo.exc.RecompileError):
+                    run(compiled, 5)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap_default(self, device):
+        from torch._inductor.kernel.flex import flex_attention as flex_lowering
+
+        q, k, v = (
+            torch.randn(2, 4, 256, 64, device=device, requires_grad=True)
+            for _ in range(3)
+        )
+
+        def fwd_bwd():
+            out = torch.compile(flex_attention, fullgraph=True)(q, k, v)
+            return torch.autograd.grad(out.sum(), (q, k, v))
+
+        remap_by_default = False
+        xcc_count = None
+        if torch.version.hip is not None and torch.device(device).type == "cuda":
+            props = torch.cuda.get_device_properties(device)
+            remap_by_default = props.gcnArchName.split(":")[0] in ("gfx942", "gfx950")
+            xcc_count = props.xcc_count
+
+        # A stubbed count shows the default is read from the device, not assumed.
+        class ThreeXccs:
+            @staticmethod
+            def create(device):
+                return DeviceProperties.create(device)._replace(xcc_count=3)
+
+        for count, props_cls in ((xcc_count, DeviceProperties), (3, ThreeXccs)):
+            patched = mock.patch.object(flex_lowering, "DeviceProperties", props_cls)
+            with fresh_cache(), patched:
+                _, code = run_and_get_code(fwd_bwd)
+            self.assertEqual(len(code), 2)
+            for c in code:
+                if remap_by_default and count is not None and count > 1:
+                    _assert_xcc_remapped(c, count)
+                else:
+                    FileCheck().check_not("NUM_XCCS : tl.constexpr").run(c)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # asserts Triton "NUM_XCCS : tl.constexpr" in generated code
+    def test_xcc_remap_fewer_programs_than_xccs(self, device):
+        # 2 forward and 2 + 2 backward programs, fewer than NUM_XCCS=8.
+        q, k, v = (
+            torch.randn(1, 1, 128, 64, device=device, requires_grad=True)
+            for _ in range(3)
+        )
+        blocks = {"fwd_BLOCK_M": 64, "fwd_BLOCK_N": 64, "bwd_BLOCK_M1": 32}
+        blocks |= {"bwd_BLOCK_N1": 64, "bwd_BLOCK_M2": 64, "bwd_BLOCK_N2": 32}
+
+        def run(num_xccs):
+            compiled = torch.compile(flex_attention, fullgraph=True)
+
+            def fwd_bwd():
+                options = {**blocks, "NUM_XCCS": num_xccs}
+                out = compiled(q, k, v, kernel_options=options)
+                return torch.autograd.grad(out.sum(), (q, k, v))
+
+            return run_and_get_code(fwd_bwd)
+
+        grads, code = run(8)
+        self.assertEqual(len(code), 2)
+        for c in code:
+            _assert_xcc_remapped(c, 8)
+        ref, _ = run(0)
+        self.assertEqual(grads, ref)
+        # One XCC needs no remap.
+        _, code = run(1)
+        FileCheck().check_not("NUM_XCCS : tl.constexpr").run("\n".join(code))
+
+    @supported_platform
+    @skip_on_cpu
     @skip_on_mps
     @skip_on_xpu
     def test_backward_kernel_options_filtering(self, device):
@@ -6180,6 +6394,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 return_lse=True,
                 kernel_options={"BACKEND": "INVALID"},
             )
+
+    @supported_platform
+    def test_num_xccs_rejects_invalid(self, device):
+        q, k, v = (torch.randn(1, 1, 4, 8, device=device) for _ in range(3))
+        for name in ("NUM_XCCS", "fwd_NUM_XCCS", "bwd_NUM_XCCS"):
+            _apply_kernel_options(q, k, v, False, {name: 8})
+            for value in (-1, True, 2.0, "8"):
+                with self.assertRaisesRegex(
+                    ValueError, f"^{name} must be a non-negative int"
+                ):
+                    _apply_kernel_options(q, k, v, False, {name: value})
+        # Rejected before lowering, also on paths that don't use NUM_XCCS.
+        compiled = torch.compile(flex_attention)
+        with self.assertRaisesRegex(ValueError, "^bwd_NUM_XCCS must be"):
+            compiled(q, k, v, kernel_options={"bwd_NUM_XCCS": -1})
 
     @supported_platform
     @skip_on_cpu
@@ -7915,6 +8144,7 @@ class GraphModule(torch.nn.Module):
         ):
             attention(query, key, value, return_lse=True)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @supported_platform
     @skip_on_cpu
     @skip_on_xpu

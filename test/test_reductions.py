@@ -1828,6 +1828,37 @@ class TestReductionsDevice(TestCase):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
 
+    # inf + -inf is NaN, and nansum keeps it at any thread count, as np.nansum
+    # does. At 4 threads, inf and -inf land in the same thread's chunk.
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_nansum_keeps_inf_minus_inf(self, device, dtype):
+        x = torch.ones(2**16, dtype=dtype, device=device)
+        x[:2] = torch.tensor([math.inf, -math.inf])
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                self.assertEqual(torch.nansum(x), np.nansum(x.numpy()), msg=f"threads={threads}")
+        finally:
+            torch.set_num_threads(num_threads)
+
+    # Above GRAIN_SIZE, so at 4 threads a full nansum is split across threads. The
+    # elements are small integers and every partial sum is exact in each dtype.
+    @onlyCPU
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_nansum_nan_multithreaded(self, device, dtype):
+        x = torch.arange(2**16, dtype=torch.double).remainder(9).sub(4)
+        x[::7] = math.nan
+        expected = torch.tensor(np.nansum(x.numpy()), dtype=dtype)
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                self.assertEqual(torch.nansum(x.to(dtype)), expected, atol=0, rtol=0, msg=f"threads={threads}")
+        finally:
+            torch.set_num_threads(num_threads)
+
     @dtypes(*all_types_and(torch.half))
     @skipIfMPS
     def test_nansum_out_dtype(self, device, dtype):
@@ -4246,6 +4277,10 @@ class TestReductionsOnCPU(TestCase):
             values = make_tensor((), dtype=torch.float32, device="cpu")
             torch.histogram(values, -1)
 
+        with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
+            values = make_tensor((), dtype=torch.float32, device="cpu")
+            torch.histogram(values, torch.tensor([0.], dtype=torch.float32))
+
         with self.assertRaisesRegex(RuntimeError, 'if weight tensor is provided it should have the same shape \
 as the input tensor excluding its innermost dimension'):
             values = make_tensor((2, 2), dtype=torch.float32, device="cpu")
@@ -4264,6 +4299,59 @@ as the input tensor excluding its innermost dimension'):
         with self.assertRaisesRegex(RuntimeError, r'range \[nan, nan\] is not finite'):
             values = torch.tensor([float("nan")], device="cpu", dtype=torch.float32)
             torch.histogram(values, 2)
+
+    def test_histogram_meta_validation(self):
+        for dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            values = torch.empty((2,), dtype=dtype, device="meta")
+            bins = torch.empty((2,), dtype=dtype, device="meta")
+            hist, edges = torch.histogram(values, bins)
+            self.assertEqual(hist.dtype, dtype)
+            self.assertEqual(edges.dtype, dtype)
+
+        integer_values = torch.empty((2,), dtype=torch.int64, device="meta")
+        integer_bins = torch.empty((2,), dtype=torch.int64, device="meta")
+        one_edge_integer_bins = torch.empty((1,), dtype=torch.int64, device="meta")
+        integer_output = torch.empty(0, dtype=torch.int64, device="meta")
+        integer_edges = torch.empty(0, dtype=torch.int64, device="meta")
+        with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
+            torch.histogram(integer_values, one_edge_integer_bins)
+
+        for input_bins in (4, integer_bins):
+            for use_out in (False, True):
+                with self.assertRaisesRegex(
+                    NotImplementedError, "not implemented for 'Long'"
+                ):
+                    if use_out:
+                        torch.histogram(
+                            integer_values, input_bins, out=(integer_output, integer_edges)
+                        )
+                    else:
+                        torch.histogram(integer_values, input_bins)
+
+        values = torch.empty((2,), dtype=torch.float32, device="meta")
+        invalid_bins = (
+            (torch.empty((), dtype=torch.float32, device="meta"), 'bins tensor should have one dimension'),
+            (torch.empty((0,), dtype=torch.float32, device="meta"), 'bins tensor should have at least 1 element'),
+            (torch.empty((1,), dtype=torch.float32, device="meta"), 'bins must be > 0'),
+        )
+        weight = torch.empty((1,), dtype=torch.float32, device="meta")
+        with self.assertRaisesRegex(RuntimeError, 'same shape as the input tensor'):
+            torch.histogram(values, 4, weight=weight)
+
+        for bins, message in invalid_bins:
+            with self.assertRaisesRegex(RuntimeError, message):
+                torch.histogram(values, bins)
+            output = torch.empty(0, dtype=torch.float32, device="meta")
+            edges = torch.empty(0, dtype=torch.float32, device="meta")
+            with self.assertRaisesRegex(RuntimeError, message):
+                torch.histogram(values, bins, out=(output, edges))
+
+        for bin_count in (-1, 0):
+            with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
+                torch.histogram(values, bin_count)
+
+        with self.assertRaisesRegex(RuntimeError, 'min should not exceed max'):
+            torch.histogram(values, 2, range=(1., 0.))
 
 instantiate_device_type_tests(TestReductionsDevice, globals(), allow_xpu=True, allow_mps=True)
 
