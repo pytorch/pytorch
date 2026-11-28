@@ -29,7 +29,9 @@ from torch._inductor.utils import (
     run_and_get_triton_code,
 )
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_MACOS,
     IS_WINDOWS,
@@ -39,7 +41,8 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
-    HAS_GPU,
+    HAS_TRITON,
+    requires_triton,
 )
 from torch.utils._sympy.functions import (
     FloorDiv,
@@ -66,6 +69,8 @@ REDUCTION_DEPENDENT_LOAD = r"tl\.load\([^\n]*r0_"
 
 @instantiate_parametrized_tests
 class TestIndexingSimplification(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_simplify_index_in_vec_range(self):
         i = sympy.Symbol("i", integer=True, nonnegative=True)
 
@@ -567,8 +572,12 @@ class TestIndexingSimplification(InductorTestCase):
         expr = s * x + FloorDiv(y, 3)
         self.assertFalse(sizevars.expand_floor_div(expr, (x,)))
 
-    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
-    def test_int8_unpack(self):
+
+class TestIndexingSimplificationAccelerator(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_triton()
+    def test_int8_unpack(self, device):
         @torch.compile
         def f(x):
             first_elements = x >> 4
@@ -578,7 +587,7 @@ class TestIndexingSimplification(InductorTestCase):
             )
             return unpacked * 2
 
-        x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device=GPU_TYPE)
+        x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device=device)
 
         triton_code = run_and_get_triton_code(f, x)
         # Make sure the 2 load uses simplified indexing rather than something like
@@ -588,8 +597,8 @@ class TestIndexingSimplification(InductorTestCase):
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
 
-    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
-    def test_int8_unpack_dynamic_shape(self):
+    @requires_triton()
+    def test_int8_unpack_dynamic_shape(self, device):
         @torch.compile(dynamic=True)
         def f(x):
             first_elements = x >> 4
@@ -599,15 +608,15 @@ class TestIndexingSimplification(InductorTestCase):
             )
             return unpacked * 2
 
-        x = torch.randint(0, 255, (2, 16, 32), dtype=torch.uint8, device=GPU_TYPE)
+        x = torch.randint(0, 255, (2, 16, 32), dtype=torch.uint8, device=device)
 
         triton_code = run_and_get_triton_code(f, x)
         # Dynamic shape coefficients should still be coalesced through the
         # pointwise-cat view instead of loading from s*x1 + x0//2.
         self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
 
-    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
-    def test_floordiv_div_sympy_is_integer_bug(self):
+    @requires_triton()
+    def test_floordiv_div_sympy_is_integer_bug(self, device):
         def foo(arg0, arg1, arg2, arg3, arg4, sentinel):
             t0 = arg0
             t1 = t0.reshape((28, 24, 3, 127))
@@ -627,24 +636,28 @@ class TestIndexingSimplification(InductorTestCase):
             return output
 
         arg0 = torch.rand(
-            [36, 7112, 1, 1], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            [36, 7112, 1, 1], dtype=torch.bfloat16, device=device, requires_grad=True
         )
-        arg1 = torch.randint(0, 512, [30, 24], dtype=torch.int64, device=GPU_TYPE)
+        arg1 = torch.randint(0, 512, [30, 24], dtype=torch.int64, device=device)
         arg2 = torch.rand(
-            [512, 127], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            [512, 127], dtype=torch.bfloat16, device=device, requires_grad=True
         )
         arg3 = torch.rand(
-            [30, 24, 15], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            [30, 24, 15], dtype=torch.bfloat16, device=device, requires_grad=True
         )
         arg4 = torch.rand(
-            [30, 4, 16, 127], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            [30, 4, 16, 127], dtype=torch.bfloat16, device=device, requires_grad=True
         )
         sentinel = torch.tensor(
-            0.0, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            0.0, dtype=torch.bfloat16, device=device, requires_grad=True
         )
         compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
         out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, sentinel)
         out_compiled.sum().backward()
+
+
+class TestIndexingSimplificationCpu(InductorTestCase):
+    hw_classification = HardwareClassification.CPU
 
     @unittest.skipUnless(HAS_CPU, "requires CPU")
     def test_bool_minimum_maximum_index_propagation(self):
@@ -665,6 +678,8 @@ class TestIndexingSimplification(InductorTestCase):
 
 
 class ExprPrinterTests(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_print_pow(self):
         s1 = sympy.Symbol("foo", integer=True)
         s2 = sympy.Symbol("bar", integer=True)
@@ -891,6 +906,8 @@ class TestIndexConstOverflowInt32(InductorTestCase):
     ``SIMDKernelFeatures.any_index_expr_overflows_int32`` (index evaluated at
     the origin)."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def make_feats(self, indices):
         # Bypass __init__ (needs V.graph) and shadow scheduler_nodes().
         deps = [MemoryDep(f"buf{i}", idx, (), ()) for i, idx in enumerate(indices)]
@@ -942,6 +959,8 @@ class TestIndexExprUpperBounds(InductorTestCase):
     ``SIMDKernelFeatures.any_index_expr_overflows_int32``, which bounds the
     addressing expression over each loop variable's iteration range (catching
     fused `V * x0` terms while letting a stride on a size-1 dim drop out)."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def make_feats(self, deps):
         node = types.SimpleNamespace(
@@ -999,6 +1018,8 @@ class TestIndexExprUpperBounds(InductorTestCase):
 
 
 class TestEvaluateMinMax(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_evaluate_min_multiple(self):
         """min(u0, k*u0) resolves via GCD: gcd(u0, k*u0)=u0.
         UNSOUND: if u0 < 0 (e.g. u0=-1) true min is 10*u0=-10, not -1."""
@@ -1047,6 +1068,8 @@ class TestEvaluateMinMax(InductorTestCase):
 
 class TestPrecomputedSizeHinting(InductorTestCase):
     """Tests for optimization_hint and guarding_hint_or_throw with PRECOMPUTED_SIZE symbols."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_optimization_hint_with_precomputed_size(self):
         """Test that optimization_hint correctly resolves PRECOMPUTED_SIZE symbols.
@@ -1120,6 +1143,8 @@ class TestPrecomputedSizeHinting(InductorTestCase):
 class TestHintDisproves(InductorTestCase):
     """Tests for hint-disproves fast-path in statically_known_true."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_hint_disproves_false_claim(self):
         """If the hint says the expression is False, statically_known_true
         should return False without expensive sympy reasoning."""
@@ -1157,6 +1182,8 @@ class TestHintDisproves(InductorTestCase):
 class TestWideExpressionThresholds(InductorTestCase):
     """Verify that safe_gcd / free-symbols thresholds only affect WIDE
     expressions.  Small expressions must still get full simplification."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_safe_gcd_small_expressions(self):
         from torch.utils._sympy.functions import safe_gcd
@@ -1248,6 +1275,8 @@ class TestWideExpressionThresholds(InductorTestCase):
 class TestOptimizationHintZeroDivision(InductorTestCase):
     """Test that optimization_hint handles ZeroDivisionError from ModularIndexing with zero-valued unbacked symbols."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_modular_indexing_with_zero_divisor(self):
         sizevars = SizeVarAllocator()
         u0 = sizevars.shape_env.create_unbacked_symint().node.expr
@@ -1288,6 +1317,8 @@ class TestOptimizationHintZeroDivision(InductorTestCase):
 
 class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
     """Tests for bounded unbacked replacement canonicalization in optimization_hint."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_expression_replacements_still_apply_for_small_expr(self):
         sizevars = SizeVarAllocator()
@@ -1358,6 +1389,8 @@ class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
 
 @instantiate_parametrized_tests
 class ReductionInvariantIndexingTests(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     @parametrize("persistent_reductions", [False, True])
     def test_reduction_invariant_masked_index_load(self, persistent_reductions):
@@ -1895,6 +1928,8 @@ class ReductionInvariantIndexingTests(InductorTestCase):
 class TestOptimizationHintIdentityExpansion(InductorTestCase):
     """Test that optimization_hint expands Identity wrappers after _sub_unbacked_exprs."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_identity_wrapped_expr_resolves_to_int(self):
         """An expression containing Identity-wrapped constants and an unbacked
         symbol should resolve to a concrete int after substitution."""
@@ -1908,8 +1943,12 @@ class TestOptimizationHintIdentityExpansion(InductorTestCase):
         self.assertEqual(hint, 42)
 
 
+instantiate_device_type_tests(
+    TestIndexingSimplificationAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_TRITON:
         run_tests("sympy")
