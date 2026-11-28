@@ -36,7 +36,9 @@
 
 #include <fcntl.h>
 #include <fmt/format.h>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 namespace libkineto {
@@ -212,21 +214,43 @@ std::string getThreadName() {
 // the 16 character limit that /proc/pid/status and /prod/pid/comm has.
 std::string processName([[maybe_unused]] int32_t pid) {
 #ifdef __linux__
-  FILE* cmdfile = fopen(fmt::format("/proc/{}/cmdline", pid).c_str(), "r");
-  if (cmdfile != nullptr) {
-    char* command = nullptr;
-    // %m is a POSIX extension that makes fscanf allocate the buffer, avoiding
-    // fixed-size buffer risks. Suppress -Wformat since it's not ISO C++.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat"
-    int scanned = fscanf(cmdfile, "%ms", &command);
-#pragma GCC diagnostic pop
-    fclose(cmdfile);
-    if (scanned > 0 && command) {
-      std::string ret(basename(command));
-      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-      free(command);
-      return ret;
+  std::ifstream cmdfile(fmt::format("/proc/{}/cmdline", pid));
+  std::string command;
+  // Rewritten process titles may include arguments in the first cmdline field.
+  if (cmdfile >> command) {
+    return basename(command.c_str());
+  }
+  // NOLINTNEXTLINE(performance-avoid-endl)
+  std::cerr << "Failed to read process name for pid " << pid << std::endl;
+#elif defined(_WIN32)
+  constexpr BOOL inherit_handle =
+      FALSE; // FALSE means the handle cannot be inherited by child processes
+  const HANDLE process = OpenProcess(
+      PROCESS_QUERY_LIMITED_INFORMATION,
+      inherit_handle,
+      static_cast<DWORD>(pid));
+  if (process != nullptr) {
+    std::wstring path(MAX_PATH, L'\0');
+    DWORD size = 0;
+    BOOL ok = FALSE;
+    constexpr DWORD use_win32_path_format =
+        0; // 0 means use the Win32 path format 1 means PROCESS_NAME_NATIVE
+    while (true) {
+      size = static_cast<DWORD>(path.size());
+      ok = QueryFullProcessImageNameW(
+          process, use_win32_path_format, path.data(), &size);
+      if (ok || GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        break;
+      }
+      path.resize(path.size() * 2);
+    }
+    CloseHandle(process);
+    if (ok && size > 0) {
+      path.resize(size);
+      std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv;
+      const std::string ret = conv.to_bytes(path);
+      const auto sep = ret.find_last_of("\\/");
+      return sep == std::string::npos ? ret : ret.substr(sep + 1);
     }
   }
   // NOLINTNEXTLINE(performance-avoid-endl)
@@ -242,31 +266,34 @@ constexpr int kMaxParentPids = 10;
 static std::pair<int32_t, std::string> parentPidAndCommand(
     [[maybe_unused]] int32_t pid) {
 #ifdef __linux__
-  FILE* statfile = fopen(fmt::format("/proc/{}/stat", pid).c_str(), "r");
-  if (statfile == nullptr) {
+  std::ifstream statfile(fmt::format("/proc/{}/stat", pid));
+  if (!statfile.is_open()) {
     return std::make_pair(0, "");
   }
-  int32_t parent_pid = 0;
-  char* command = nullptr;
-  // %m is a POSIX extension that makes fscanf allocate the buffer, avoiding
-  // fixed-size buffer risks. Suppress -Wformat since it's not ISO C++.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat"
-  int scanned = fscanf(statfile, "%*d (%m[^)]) %*c %d", &command, &parent_pid);
-#pragma GCC diagnostic pop
-  fclose(statfile);
-  std::pair<int32_t, std::string> ret;
-  if (scanned == 2) {
-    ret = std::make_pair(parent_pid, std::string(command));
-  } else {
-    // NOLINTNEXTLINE(performance-avoid-endl)
-    std::cerr << "Failed to parse /proc/" << pid << "/stat" << std::endl;
-    ret = std::make_pair(0, "");
+  std::string line;
+  std::getline(statfile, line);
+  // "<pid> (<comm>) <state> <ppid> ..."; comm may itself contain parentheses.
+  const auto start_bracket_pos = line.find('(');
+  const auto end_bracket_pos = line.rfind(')');
+  const bool in_brackets = start_bracket_pos != std::string::npos &&
+      end_bracket_pos != std::string::npos &&
+      start_bracket_pos < end_bracket_pos;
+  if (in_brackets) {
+    char state = 0;
+    int32_t parent_pid = 0;
+    const bool parent_pid_parsed = static_cast<bool>(
+        std::istringstream(line.substr(end_bracket_pos + 1)) >> state >>
+        parent_pid);
+    if (parent_pid_parsed) {
+      return std::make_pair(
+          parent_pid,
+          line.substr(
+              start_bracket_pos + 1, end_bracket_pos - start_bracket_pos - 1));
+    }
   }
-
-  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-  free(command);
-  return ret;
+  // NOLINTNEXTLINE(performance-avoid-endl)
+  std::cerr << "Failed to parse /proc/" << pid << "/stat" << std::endl;
+  return std::make_pair(0, "");
 #else
   return std::make_pair(0, "");
 #endif

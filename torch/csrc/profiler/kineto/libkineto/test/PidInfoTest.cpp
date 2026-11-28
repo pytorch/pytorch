@@ -14,6 +14,16 @@
 
 using namespace KINETO_NAMESPACE;
 
+TEST(ProcessNameTest, currentProcess) {
+#ifdef _WIN32
+  EXPECT_EQ(processName(processId()), "PidInfoTest.exe");
+#elif defined(__linux__)
+  EXPECT_EQ(processName(processId()), "PidInfoTest");
+#else
+  GTEST_SKIP() << "Process names are only supported on Linux and Windows";
+#endif
+}
+
 TEST(ThreadNameTest, setAndGet) {
   setThreadName("ThreadNameTest");
   EXPECT_EQ(getThreadName(), "ThreadNameTest");
