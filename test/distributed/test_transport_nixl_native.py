@@ -91,6 +91,59 @@ def _native_worker(rank, connection):
     connection.close()
 
 
+def _mixed_device_worker(rank, connection, dtype):
+    device = torch.device("cpu" if rank == 0 else "cuda:0")
+    if device.type == "cuda":
+        torch.cuda.set_device(device)
+    payload = torch.arange(257, dtype=dtype)
+    expected_source = torch.full((265,), -1, dtype=dtype)
+    expected_source[3:260] = payload + rank
+    source = expected_source.to(device, copy=True)
+    target = torch.full((269,), -2, dtype=dtype, device=device)
+    expected_target = torch.full((269,), -2, dtype=dtype)
+    expected_target[5:262] = payload + 1 - rank
+    itemsize = source.element_size()
+    length = payload.numel() * itemsize
+    with new_transport("nixl", device, timeout=5) as transport:
+        connection.send_bytes(transport.bind())
+        transport.connect(_receive(connection))
+        source_memory = transport.register_memory(source)
+        target_memory = transport.register_memory(target)
+        for memory, offset in ((source_memory, 3), (target_memory, 5)):
+            remote = memory.to_remote_buffer()
+            connection.send_bytes(remote.slice(offset * itemsize, length).serialize())
+        remote_source, remote_target = (
+            NIXLRemoteBuffer.deserialize(_receive(connection)) for _ in range(2)
+        )
+        for operation in ("write", "read"):
+            target.fill_(-2)
+            # Ordinary transfers require the caller to finish CUDA producers.
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            connection.send_bytes(b"ready")
+            if _receive(connection) != b"ready":
+                raise AssertionError("unexpected control-plane message")
+            if operation == "write":
+                work = transport.write(
+                    source_memory.to_view(3 * itemsize, length),
+                    remote_target,
+                    async_op=True,
+                )
+            else:
+                work = transport.read(
+                    target_memory.to_mutable_view(5 * itemsize, length),
+                    remote_source,
+                    async_op=True,
+                )
+            work.wait()
+            connection.send_bytes(b"finished")
+            if _receive(connection) != b"finished":
+                raise AssertionError("unexpected control-plane message")
+            torch.testing.assert_close(target.cpu(), expected_target, rtol=0, atol=0)
+            torch.testing.assert_close(source.cpu(), expected_source, rtol=0, atol=0)
+    connection.close()
+
+
 def _multi_peer_worker(rank, connections):
     # Rank 0 reads from ranks 1 and 2 through one endpoint.
     with new_transport("nixl", "cpu", timeout=5) as transport:
@@ -248,6 +301,16 @@ class TestNIXLNative(TestCase):
         self._spawn(
             _notification_worker,
             [(connection, progress_thread) for connection in connections],
+            connections,
+        )
+
+    @unittest.skipUnless(torch.cuda.is_available(), "requires one CUDA device")
+    @parametrize("dtype", [torch.float32, torch.int64])
+    def test_two_process_mixed_device_transfers(self, dtype):
+        connections = multiprocessing.Pipe()
+        self._spawn(
+            _mixed_device_worker,
+            [(connection, dtype) for connection in connections],
             connections,
         )
 
