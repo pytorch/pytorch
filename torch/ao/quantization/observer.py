@@ -1566,8 +1566,6 @@ class RecordingObserver(ObserverBase):
 
     Args:
         dtype: Quantized data type
-        qscheme: Quantization scheme to be used
-        reduce_range: Reduces the range of the quantized data type by 1 bit
     """
 
     __annotations__ = {"tensor_val": list[torch.Tensor | None]}
