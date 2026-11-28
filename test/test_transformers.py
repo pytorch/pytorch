@@ -3955,6 +3955,42 @@ class TestSDPAAccelerator(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    @parametrize("layout", ["dense", "nested"])
+    def test_cudnn_attention_backward_determinism(self, device, layout):
+        # scaled_dot_product_attention never selects cuDNN in deterministic mode, so call the ops directly
+        num_heads, head_dim = 16, 128
+        make = partial(torch.randn, device=device, dtype=torch.bfloat16)
+        if layout == "dense":
+            shapes = [(2, num_heads, 4096, head_dim)]
+        else:
+            shapes = [(num_heads, n, head_dim) for n in (1024, 3072, 2048, 2048)]
+
+        def make_input():
+            if layout == "dense":
+                return make(*shapes[0])
+            return torch.nested.nested_tensor([make(*s) for s in shapes])
+
+        def flatten(t):
+            return torch.cat([x.reshape(-1) for x in t.unbind()]) if t.is_nested else t
+
+        query, key, value, grad_out = (make_input() for _ in range(4))
+
+        def grads():
+            out, lse, cum_q, cum_k, max_q, max_k, seed, offset, _ = torch.ops.aten._scaled_dot_product_cudnn_attention(
+                query, key, value, None, True, 0.0, False, False)
+            return [flatten(g) for g in torch.ops.aten._scaled_dot_product_cudnn_attention_backward(
+                grad_out, query, key, value, out, lse, seed, offset, None, cum_q, cum_k, max_q, max_k, 0.0, False)]
+
+        # Build the backward graph in non-deterministic mode first so that the deterministic runs
+        # below also check that the graph cache key tells the two modes apart.
+        grads()
+        with use_deterministic_algorithims(True, warn_only=False):
+            expected = grads()
+            for _ in range(10):
+                self.assertEqual(grads(), expected, atol=0, rtol=0)
+
     @tf32_off()
     @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")

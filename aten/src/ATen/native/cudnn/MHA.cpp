@@ -353,6 +353,7 @@ struct MHAParams {
   bool use_ragged;
   bool is_paged;
   bool is_nested;
+  bool deterministic;
   SequenceLengthMode sequence_length_mode;
 };
 
@@ -416,6 +417,12 @@ void setMHAParamLayout(
   std::copy(tensor.strides().begin(), tensor.strides().end(), stride.begin());
 }
 
+bool use_deterministic_sdpa_backward() {
+  const auto& ctx = at::globalContext();
+  return ctx.deterministicAlgorithms() &&
+      !ctx.deterministicAlgorithmsWarnOnly();
+}
+
 } // namespace
 
 void setMHAParams(
@@ -438,7 +445,8 @@ void setMHAParams(
     bool return_softmaxstats,
     bool is_nested,
     const std::optional<Tensor>& page_table,
-    SequenceLengthMode sequence_length_mode) {
+    SequenceLengthMode sequence_length_mode,
+    bool deterministic) {
   memset(&params, 0, sizeof(MHAParams));
   params.device_id = at::cuda::current_device();
   params.dataType = fe::DataType_t::HALF;
@@ -457,6 +465,7 @@ void setMHAParams(
   params.has_attn_bias = attn_bias.has_value();
   params.is_paged = page_table.has_value();
   params.is_nested = is_nested;
+  params.deterministic = deterministic;
   params.sequence_length_mode = sequence_length_mode;
   // Paged K/V remain 4D page pools in the nested path.
   const uint8_t q_rank = (uint8_t)(MAX_MHA_DIM - (uint8_t)is_nested);
@@ -545,7 +554,8 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
       bool is_nested,
       const std::optional<Tensor>& page_table = std::nullopt,
       SequenceLengthMode sequence_length_mode =
-          SequenceLengthMode::PER_SEQUENCE) {
+          SequenceLengthMode::PER_SEQUENCE,
+      bool deterministic = false) {
     setMHAParams(
         this->pod,
         b,
@@ -566,7 +576,8 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
         return_softmaxstats,
         is_nested,
         page_table,
-        sequence_length_mode);
+        sequence_length_mode,
+        deterministic);
   }
 };
 
@@ -1162,6 +1173,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset,
+    bool deterministic,
     cudnnHandle_t& handle) {
   auto dtype = fe::DataType_t::HALF;
   if (q.scalar_type() == kBFloat16) {
@@ -1185,6 +1197,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward(
   auto sdpa_backward_options = fe::graph::SDPA_backward_attributes()
                                    .set_name("CUDNN_SDPA_BACKWARD")
                                    .set_causal_mask(is_causal)
+                                   .set_deterministic_algorithm(deterministic)
                                    .set_attn_scale(attn_scale);
   if (use_ragged_in_dense(q, k, v, o, attn_bias.has_value())) {
     auto SEQ_LEN_Q_ =
@@ -1379,6 +1392,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset,
+    bool deterministic,
     cudnnHandle_t& handle) {
   auto dtype = fe::DataType_t::HALF;
   if (q.scalar_type() == kBFloat16) {
@@ -1417,6 +1431,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
   auto sdpa_backward_options = fe::graph::SDPA_backward_attributes()
                                    .set_name("CUDNN_SDPA_NESTEDTENSOR_BACKWARD")
                                    .set_causal_mask(is_causal)
+                                   .set_deterministic_algorithm(deterministic)
                                    .set_attn_scale(attn_scale)
                                    .set_seq_len_q(SEQ_LEN_Q_)
                                    .set_seq_len_kv(SEQ_LEN_KV_)
@@ -2046,6 +2061,7 @@ void run_cudnn_SDP_bprop(
   }
 
   cudnnHandle_t handle = getCudnnHandle();
+  const bool deterministic = use_deterministic_sdpa_backward();
   MHACacheKeyWrapper key(
       b,
       h,
@@ -2063,7 +2079,10 @@ void run_cudnn_SDP_bprop(
       dropout_probability,
       is_causal ? CausalMask::TOP_LEFT : CausalMask::NONE,
       true,
-      false);
+      false,
+      std::nullopt,
+      SequenceLengthMode::PER_SEQUENCE,
+      deterministic);
   auto [cache_it, not_found] =
       getMHAGraphBackwardCache_().try_emplace(key, nullptr);
   if (not_found) {
@@ -2089,6 +2108,7 @@ void run_cudnn_SDP_bprop(
         dV,
         _dropoutseed,
         _dropoutoffset,
+        deterministic,
         handle);
   }
   const fe::graph::Graph& mha_graph = *cache_it->second;
@@ -2230,6 +2250,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   }
 
   cudnnHandle_t handle = getCudnnHandle();
+  const bool deterministic = use_deterministic_sdpa_backward();
 
   MHACacheKeyWrapper key(
       b,
@@ -2248,7 +2269,10 @@ void run_cudnn_SDP_bprop_nestedtensor(
       dropout_probability,
       is_causal ? CausalMask::TOP_LEFT : CausalMask::NONE,
       true,
-      true);
+      true,
+      std::nullopt,
+      SequenceLengthMode::PER_SEQUENCE,
+      deterministic);
 
   MHAGraphCache& cache = getMHAGraphBackwardCache_();
   auto cache_it = cache.find(key);
@@ -2279,6 +2303,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
         dV,
         dropoutseed,
         dropoutoffset,
+        deterministic,
         handle);
     cache_it = cache.try_emplace(key, std::move(graph)).first;
   }
