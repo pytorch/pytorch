@@ -20064,7 +20064,8 @@ class TestExportAccelerator(TorchTestCase):
             ep.module()(torch.randn(64))
 
 
-class TestExportRNN(TestCase):
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportRNN(TorchTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_export_lstm(self, device):
@@ -20134,7 +20135,8 @@ class TestExportRNN(TestCase):
         self.assertEqual(eager_out, export_out)
 
 
-class TestExportAutocastException(TestCase):
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportAutocastException(TorchTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_exception(self, device):
