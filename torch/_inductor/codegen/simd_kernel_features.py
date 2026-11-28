@@ -240,14 +240,58 @@ class SIMDKernelFeatures:
 
         from .simd import SIMDScheduling
 
-        buffers = self._index_dtype_buffers()
-        if SIMDScheduling.can_use_32bit_indexing(total_numel, buffers):
-            # Fused address expressions can overflow int32 even when
-            # numel/storage_size are within range, so check them directly.
-            if self.any_index_expr_overflows_int32():
-                return torch.int64
+        # Fused address expressions can overflow int32 even when numel/storage_size
+        # are within range. Check them first: can_use_32bit_indexing installs a size
+        # guard when it says yes, which is useless if int64 is needed anyway.
+        if self.any_index_expr_overflows_int32():
+            return torch.int64
+        if SIMDScheduling.can_use_32bit_indexing(
+            total_numel, self._index_dtype_buffers()
+        ):
             return torch.int32
         return torch.int64
+
+    @cache_on_self
+    def int32_index_conditions(self) -> list[sympy.Expr] | None:
+        """Conditions under which int32 indexing is valid for this kernel, without
+        installing guards. Empty if int32 is provably valid; None if a fused index
+        expression may overflow it, or a size provably or by its current hint
+        exceeds it. In both cases select_index_dtype picks the same dtype without a
+        guard, so a single kernel suffices."""
+        from .simd import SIMDScheduling
+
+        if self.any_index_expr_overflows_int32():
+            return None
+        int_max = torch.iinfo(torch.int32).max
+        sizevars = V.graph.sizevars
+        sizes = SIMDScheduling.indexing_sizes(
+            self._index_dtype_numel(), self._index_dtype_buffers()
+        )
+        unproven: list[sympy.Expr] = []
+        for size in OrderedSet(sizevars.simplify(size) for size in sizes):
+            if sizevars.statically_known_true(size <= int_max):
+                continue
+            if sizevars.statically_known_true(size > int_max):
+                return None
+            if (
+                sizevars.shape_env.has_guarding_hint(size)
+                and sizevars.guarding_hint_or_throw(size) > int_max
+            ):
+                return None
+            unproven.append(size)
+        # Drop sizes bounded by another one, e.g. a row count by the full numel. Of
+        # sizes provably equal to each other, keep the first.
+        largest = [
+            size
+            for i, size in enumerate(unproven)
+            if not any(
+                j != i
+                and sizevars.statically_known_leq(size, other)
+                and (j < i or not sizevars.statically_known_leq(other, size))
+                for j, other in enumerate(unproven)
+            )
+        ]
+        return [sympy.Le(size, int_max) for size in largest]
 
     @cache_on_self
     def any_index_expr_overflows_int32(self) -> bool:

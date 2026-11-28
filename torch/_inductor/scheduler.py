@@ -13396,16 +13396,17 @@ class Scheduler:
                 V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
-                from .codegen.multi_kernel import MultiKernel
+                from .codegen.multi_kernel import leaf_kernels
                 from .codegen.triton import TritonKernel
 
                 waited = isinstance(kernel, TritonKernel) and kernel._pdl_has_wait
                 if self.previous_nodes is None or waited:
                     previous_nodes_by_stream[stream_key] = []
                 previous_nodes_by_stream[stream_key].append(node)
-                if isinstance(kernel, MultiKernel):
-                    kernel = kernel.kernels[0]
-                if isinstance(kernel, TritonKernel) and kernel.args.workspace_args:
+                if any(
+                    isinstance(k, TritonKernel) and k.args.workspace_args
+                    for k in leaf_kernels(kernel)
+                ):
                     previous_nodes_by_stream.pop(stream_key, None)
             else:
                 previous_nodes_by_stream.pop(stream_key, None)

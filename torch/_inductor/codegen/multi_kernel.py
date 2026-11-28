@@ -6,6 +6,8 @@ import os
 import pathlib
 from typing import Any
 
+import sympy
+
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
@@ -108,6 +110,11 @@ class MultiKernelState:
         return multi_kernel_name
 
 
+def leaf_kernels(kernel: Any) -> list[Any]:
+    """The compiled kernels behind kernel: itself, or a multi-kernel's sub-kernels."""
+    return kernel.leaf_kernels() if isinstance(kernel, MultiKernelBase) else [kernel]
+
+
 class MultiKernelBase:
     """
     This class maintains the compile time state for multi kernels.
@@ -125,6 +132,8 @@ class MultiKernelBase:
     Subclasses decide how the launched sub-kernel is picked: MultiKernel and
     SizeHintMultiKernel are DispatchedMultiKernels, picked at run time by
     MultiKernelCall / SizeHintMultiKernelCall.
+    ConditionalMultiKernel checks a size condition on every launch, inline in
+    the wrapper.
     """
 
     kernels: list[Any]
@@ -136,6 +145,10 @@ class MultiKernelBase:
     @property
     def kernel_name(self) -> str:
         raise NotImplementedError
+
+    def leaf_kernels(self) -> list[Any]:
+        """The compiled kernels, with nested multi-kernels expanded."""
+        return [leaf for kernel in self.kernels for leaf in leaf_kernels(kernel)]
 
     @staticmethod
     def _merge_workspace_args(left: list[WorkspaceArg], right: list[WorkspaceArg]):
@@ -167,7 +180,7 @@ class MultiKernelBase:
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
         seen: OrderedSet[str] = OrderedSet()
-        for k in self.kernels:
+        for k in self.leaf_kernels():
             _, call_args, precompile_args, _ = k.args.python_argdefs()
             for arg, precompile_arg in zip(call_args, precompile_args):
                 if arg in seen:
@@ -312,6 +325,8 @@ class DispatchedMultiKernel(MultiKernelBase):
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
 
 
+# TODO: rename to BenchmarkedMultiKernel (keeping a MultiKernel alias): it benchmarks
+# the sub-kernels once and keeps the fastest, unlike ConditionalMultiKernel.
 class MultiKernel(DispatchedMultiKernel):
     """Benchmarks the sub-kernels on the first call and keeps the fastest."""
 
@@ -612,6 +627,77 @@ class SizeHintMultiKernel(DispatchedMultiKernel):
             for shape_key, kernel_name in zip(self.kernel_shape_keys, kernel_names):
                 buf.writeline(f"{shape_key}: {kernel_name},")
         buf.writeline("}, arg_index=arg_index)")
+
+
+class ConditionalMultiKernel(MultiKernelBase):
+    """
+    Launches the first sub-kernel whose condition holds.
+
+    Unlike MultiKernel, the sub-kernels are not interchangeable: each one is only
+    correct when its condition holds, so the wrapper checks the conditions on every
+    launch instead of benchmarking once. Every input must match some condition: the
+    last condition is True, or the conditions together must be provably exhaustive,
+    in which case the last one is not checked at runtime. A sub-kernel can itself be
+    a multi-kernel; each emits its own launch inside its branch.
+    """
+
+    def __init__(self, choices: list[tuple[sympy.Basic, Any]]):
+        if len(choices) < 2:
+            raise AssertionError(f"expected at least 2 choices, got {choices}")
+        if choices[-1][0] is not sympy.true:
+            if not V.graph.sizevars.statically_known_true(
+                sympy.Or(*[cond for cond, _ in choices])
+            ):
+                raise AssertionError(
+                    f"conditions must cover every input; add a True fallback: {choices}"
+                )
+            choices = [*choices[:-1], (sympy.true, choices[-1][1])]
+        self.choices = choices
+        self.kernels = [kernel for _, kernel in choices]
+
+    @property
+    def kernel_name(self) -> str:
+        # There is no dispatcher object to name, so this names the first
+        # (highest-priority) choice; the wrapper comment and profiling scope use it,
+        # and _record_other_choices_provenance records the other choices.
+        return self.kernels[0].kernel_name
+
+    def warn_mix_layout(self, kernel_name: str):
+        # Every leaf reads the same buffers, so warn once.
+        self.leaf_kernels()[0].warn_mix_layout(kernel_name)
+
+    def call_kernel(self, kernel_name):
+        """Codegen the launch of this kernel into the wrapper: one
+        ConditionalKernelDispatchLine whose branches hold each sub-kernel's own launch.
+
+        Each sub-kernel's call_kernel runs under capture_lines(), which collects the
+        lines it writes (numel arguments and the launch) for its branch instead of
+        adding them to the wrapper. capture_lines() also leaves out the workspace
+        allocation, so the shared workspaces are allocated before the dispatch line
+        and freed after it, here.
+        """
+        from .wrapper import ConditionalKernelDispatchLine
+
+        if kernel_name != self.kernel_name:
+            raise AssertionError(f"expected {self.kernel_name}, got {kernel_name}")
+        wrapper = V.graph.wrapper_code
+        leaves = self.leaf_kernels()
+        workspaces = leaves[0].args.workspace_args
+        if any(k.args.workspace_args != workspaces for k in leaves):
+            raise AssertionError("expected the sub-kernels to share merged workspaces")
+        for ws in workspaces:
+            wrapper.generate_workspace_allocation(ws)
+        branches = []
+        for cond, kernel in self.choices:
+            with wrapper.capture_lines() as lines:
+                kernel.call_kernel(kernel.kernel_name)
+            cond_str = (
+                None if cond is sympy.true else wrapper.codegen_python_sizevar(cond)
+            )
+            branches.append((cond_str, lines))
+        wrapper.writeline(ConditionalKernelDispatchLine(wrapper, branches))
+        for ws in reversed(workspaces):
+            wrapper.generate_workspace_deallocation(ws)
 
 
 class SizeHintMultiKernelCall(MultiKernelCall):

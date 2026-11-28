@@ -1973,9 +1973,10 @@ wrap_inductor_compiled_regions: bool = False
 assume_aligned_inputs: bool = False
 
 # assume_32bit_indexing means that we assume 32-bit indexing is always safe; we always
-# use 32-bit indices regardless of tensor sizes. If assume_32bit_indexing contradicts
-# with example inputs we throw. This is useful when all dynamic shapes are unbacked and
-# you know you only operate with 32-bit sizes.
+# use 32-bit indices regardless of tensor sizes, except in kernels whose fused index
+# expressions provably overflow int32, which use 64-bit indices. If
+# assume_32bit_indexing contradicts with example inputs we throw. This is useful when
+# all dynamic shapes are unbacked and you know you only operate with 32-bit sizes.
 assume_32bit_indexing: bool = False
 
 # By default, when a dynamic size cannot be proven to fit in int32, inductor reads its
@@ -1985,6 +1986,22 @@ assume_32bit_indexing: bool = False
 # cross. With avoid_32bit_indexing_guards, an unprovable size gets 64-bit indexing and
 # no guard: one variant that serves every size, at the cost of 64-bit index math.
 avoid_32bit_indexing_guards: bool = False
+
+# When the sizes of a kernel cannot be proven to fit in int32, compile it with both
+# 32-bit and 64-bit indexing and have the wrapper launch the 32-bit kernel whenever every
+# size fits, instead of guarding on the sizes. Costs a second compile of each covered
+# kernel (of every variant, with triton.multi_kernel). The 64-bit kernel is generated
+# with hints past int32 (codegen/simd.py _int64_kernel_hint_overrides): its size_hints,
+# from which its autotuning configs are generated, and the other hint-based choices
+# made while generating it. Choices made before that keep the example's hints, e.g.
+# Reduction.num_splits at lowering and the memory-coalescing analysis that ranks
+# tilings. If the example inputs already exceed int32, only the 64-bit kernel is built,
+# as without this flag.
+# So far covers Triton reduction kernels from the main SIMD codegen path.
+# Takes precedence over avoid_32bit_indexing_guards for the kernels it covers;
+# assume_32bit_indexing takes precedence over it. Not applied with the cpp or FX
+# wrapper or triton.autotune_at_compile_time.
+dual_index_dtype_kernels: bool = False
 
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
 # arguments passed to the @triton.autotune in the user's code; this is unsafe, as
