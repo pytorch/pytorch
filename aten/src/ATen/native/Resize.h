@@ -79,17 +79,6 @@ inline c10::SymInt maybe_convert_symint(c10::SymInt x) { return x; }
 template <>
 inline int64_t maybe_convert_symint(c10::SymInt x) { return x.guard_int(__FILE__, __LINE__); }
 
-// Sub-byte quantized dtypes (QUInt4x2, QUInt2x4) pack multiple logical
-// elements per storage byte. Itemsize is still 1, so the standard
-// element*itemsize formula over-counts; divide by this packing factor.
-inline int64_t subByteElementPerByte(const caffe2::TypeMeta& data_type) {
-  switch (c10::typeMetaToScalarType(data_type)) {
-    case c10::ScalarType::QUInt4x2: return 2;
-    case c10::ScalarType::QUInt2x4: return 4;
-    default: return 1;
-  }
-}
-
 template <typename T>
 inline void checkInBoundsForStorage(
     ArrayRef<T> size,

@@ -1459,6 +1459,44 @@ class TestQuantizedTensor(TestCase):
     def test_pickle_checkpoint_qtensor(self):
         self._test_pickle_checkpoint_qtensor('cpu')
 
+    def test_jit_serialization_buffer_size(self):
+        class QTensor(torch.jit.ScriptModule):
+            def __init__(self, numel, dtype, storage_nbytes):
+                super().__init__()
+                x = torch._empty_affine_quantized(
+                    [numel], scale=1.0, zero_point=0, dtype=dtype
+                )
+                x.untyped_storage().resize_(storage_nbytes)
+                self.x = torch.nn.Buffer(x)
+
+            @torch.jit._script.script_method
+            def forward(self):
+                return self.x
+
+        def run_test(numel, dtype, storage_nbytes):
+            m = QTensor(numel, dtype, storage_nbytes)
+            buf = io.BytesIO()
+            torch.jit._serialization.save(m, buf)
+            buf.seek(0)
+            # This checks the storage size
+            loaded = torch.jit._serialization.load(buf)
+            self.assertEqual(loaded(), m())
+
+        for dtype, element_per_byte in [(torch.quint8, 1), (torch.quint4x2, 2), (torch.quint2x4, 4)]:
+            for numel in [1, 2, 4, 5, 8, 12, 13, 15]:
+                required_bytes = math.ceil(numel / element_per_byte)
+
+                # Test exact storage size
+                run_test(numel, dtype, required_bytes)
+                # Test storage 1 byte larger (extra byte is harmless)
+                run_test(numel, dtype, required_bytes + 1)
+                # Test storage 1 byte too small
+                if required_bytes > 1:
+                    self.assertRaisesRegex(
+                        RuntimeError, f"require a storage of at least {required_bytes} bytes",
+                        run_test, numel, dtype, required_bytes - 1
+                    )
+
     def test_bfp16_quantize(self):
         X = torch.randn(5 , 10)
         quantized_X = X.to(torch.bfloat16)
