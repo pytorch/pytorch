@@ -416,13 +416,16 @@ def _create_cpu_state_dict(
         if len(obj.size()) == 0:
             return torch.tensor(0, dtype=obj.dtype)
 
-        # sometimes, a tensor might have non-zero size and 0 numel. In this case, pinning memory will fail
-        # so we take a best guess at how to replicate the tensor below to maintain symmetry in the returned
-        # state dict.
+        # 0-numel tensors (registering 0 bytes as pinned memory fails) and wrapper
+        # subclasses without storage of their own (e.g. TwoTensor) can't use the
+        # paths below. zeros_like keeps the subclass type and pin_memory()
+        # dispatches through it.
         if obj.numel() == 0 or not torch._C._has_storage_data(obj):
             t = torch.zeros_like(obj, device="cpu")
             if share_memory:
                 t = t.share_memory_()
+            elif pin_memory and obj.numel() > 0:
+                t = t.pin_memory()
             return t
 
         if share_memory:
