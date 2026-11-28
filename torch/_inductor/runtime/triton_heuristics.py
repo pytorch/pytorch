@@ -521,6 +521,8 @@ def check_autotune_cache(
                     best_config
                 )
                 autotune_cache_info["autotune_cache_state"] = "hit"
+                if getattr(best_config, "found_by_coordesc", False):
+                    autotune_cache_info["found_by_coordesc"] = True
 
             else:
                 autotune_cache_info["autotune_cache_state"] = "miss"
@@ -930,9 +932,13 @@ class CachingAutotuner(KernelInterface):
             dynamic_scale_rblock_eligible=self._could_rblock_scale,
         )
         self.autotune_cache_info = autotune_cache_info
-        # I.e. there was an autotune cache hit
-        if len(cached_configs) == 1:
-            best_config = cached_configs[0]
+        # Only a hit changes the compile results. A miss returns the configs
+        # unchanged, so they keep the marks restored by __setstate__; gating on
+        # the state is defensive. An FX graph cache static autotuner that holds
+        # only the winner always misses, since [winner] does not hash like the
+        # configs the cache entry was saved under.
+        if autotune_cache_info.get("autotune_cache_state") == "hit":
+            (best_config,) = cached_configs
             found_by_coordesc = getattr(best_config, "found_by_coordesc", False)
             # Grab the best compiled config, if it's in the list of available ones
             best_config_hash = triton_config_to_hashable(best_config)
@@ -1234,6 +1240,14 @@ class CachingAutotuner(KernelInterface):
             and self.autotune_cache_info.get("autotune_cache_state") == "hit"
         ):
             return
+        # A cached coordesc winner on its own, e.g. an FX graph cache static
+        # autotuner whose recheck missed because [winner] does not hash like the
+        # configs the cache entry was saved under. Its halved-rblock copies are
+        # unmarked, so benchmarking them could make run() tune it again.
+        if len(self.compile_results) == 1 and getattr(
+            self.compile_results[0].config, "found_by_coordesc", False
+        ):
+            return
         if not self._could_rblock_scale:
             return
         for new_config in self._iter_rblock_scale_candidates():
@@ -1417,12 +1431,62 @@ class CachingAutotuner(KernelInterface):
             "lock": None,
             "_plugins": [],
             "fallback": None,
+            "_inductor_config_attrs": self._inductor_config_attrs(),
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
+        config_attrs = state.pop("_inductor_config_attrs", {})
         self.__dict__.update(state)
+        self._restore_inductor_config_attrs(config_attrs)
         self.lock = threading.Lock()
         self._plugins = get_caching_autotuner_plugins(self)
+
+    # Attributes Inductor sets on a triton.Config that triton.Config.__setstate__
+    # does not restore.
+    _INDUCTOR_CONFIG_ATTRS = (
+        "found_by_coordesc",
+        "found_by_combo_autotune",
+        "extra_options",
+    )
+
+    def _attr_carrying_configs(self) -> dict[str, list[Config]]:
+        return {
+            "configs": list(self.configs or ()),
+            "compile_results": [result.config for result in self.compile_results],
+        }
+
+    def _inductor_config_attrs(self) -> dict[str, dict[int, dict[str, Any]]]:
+        """The Inductor-set attributes of each config and compile result config.
+
+        triton.Config.__setstate__ restores only Triton's own fields, so these
+        are lost whenever a config is unpickled or deep-copied (compile
+        workers, FX graph cache static autotuners): run() would tune a cached
+        coordesc or combo winner again, and a config would lose the
+        ``extra_options`` that triton_config_to_hashable keys on.
+        __getstate__ records them and __setstate__ puts them back.
+        """
+        result: dict[str, dict[int, dict[str, Any]]] = {}
+        for key, configs in self._attr_carrying_configs().items():
+            per_config = {}
+            for i, cfg in enumerate(configs):
+                attrs = {
+                    name: getattr(cfg, name)
+                    for name in self._INDUCTOR_CONFIG_ATTRS
+                    if hasattr(cfg, name)
+                }
+                if attrs:
+                    per_config[i] = attrs
+            result[key] = per_config
+        return result
+
+    def _restore_inductor_config_attrs(
+        self, config_attrs: dict[str, dict[int, dict[str, Any]]]
+    ) -> None:
+        configs = self._attr_carrying_configs()
+        for key, per_config in config_attrs.items():
+            for i, attrs in per_config.items():
+                for name, value in attrs.items():
+                    setattr(configs[key][i], name, value)
 
     def get_device_interface(self):
         # this code cannot run in compile workers, because it imports from torch
