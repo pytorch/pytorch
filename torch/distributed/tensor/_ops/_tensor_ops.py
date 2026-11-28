@@ -47,6 +47,26 @@ _PARTIAL_PASS_THROUGH_REDUCE_OPS = ("sum", "avg", "min", "max")
 
 
 @register_single_dim_strategy(
+    aten.channel_shuffle.default,
+    allow_unbacked_sharding=True,
+    allow_uneven_sharding=True,
+)
+def channel_shuffle_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = cast(TensorMeta, args_schema[0])
+    # The local shuffle needs all channels, so channel shards must redistribute.
+    strategies: list[list[Placement | _ShardingPlaceholder]] = [
+        [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)]
+        for dim in range(len(input_meta.shape))
+        if dim != 1
+    ]
+    for reduce_op in _PARTIAL_PASS_THROUGH_REDUCE_OPS:
+        strategies.append([Partial(reduce_op), Partial(reduce_op)])
+    return strategies
+
+
+@register_single_dim_strategy(
     [
         aten.clone.default,
         aten.contiguous.default,

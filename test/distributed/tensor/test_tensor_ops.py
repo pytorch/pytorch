@@ -438,6 +438,56 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         zeros_expected = torch.zeros(dist_tensor.shape)
         self.assertEqual(zeros_expected, zeros_like_dt.full_tensor())
 
+    @parametrize(
+        "placement",
+        [
+            Partial("sum"),
+            Partial("avg"),
+            Partial("min"),
+            Partial("max"),
+            Shard(0),
+            Shard(2),
+            Shard(3),
+        ],
+    )
+    @parametrize("memory_format", [torch.contiguous_format, torch.channels_last])
+    def test_channel_shuffle_preserves_placement(self, placement, memory_format):
+        device_mesh = self.build_device_mesh()
+        local_tensor = torch.arange(
+            2 * 12 * 3 * 5, dtype=torch.float32, device=self.device_type
+        ).reshape(2, 12, 3, 5)
+        local_tensor = (local_tensor + self.rank).contiguous(
+            memory_format=memory_format
+        )
+        input_dt = DTensor.from_local(local_tensor, device_mesh, [placement])
+        expected = torch.channel_shuffle(local_tensor, 3)
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output_dt = torch.channel_shuffle(input_dt, 3)
+
+        self.assertEqual(output_dt.placements, (placement,))
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(output_dt.to_local(), expected)
+        self.assertEqual(output_dt.to_local().stride(), expected.stride())
+
+    @parametrize("shard_dim", [0, 2, 3])
+    def test_channel_shuffle_uneven_sharding(self, shard_dim):
+        device_mesh = self.build_device_mesh()
+        shape = [2, 12, 3, 5]
+        shape[shard_dim] = self.world_size - 1
+        input_tensor = torch.randn(shape, device=self.device_type)
+        input_dt = distribute_tensor(input_tensor, device_mesh, [Shard(shard_dim)])
+        expected = torch.channel_shuffle(input_dt.to_local(), 3)
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output_dt = torch.channel_shuffle(input_dt, 3)
+
+        self.assertEqual(output_dt.placements, input_dt.placements)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(output_dt.to_local(), expected)
+
     def test_zero_inplace(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]

@@ -10413,12 +10413,18 @@ def sample_inputs_channel_shuffle(op_info, device, dtype, requires_grad, **kwarg
         ((1, 4, 10, 10), 2),
         ((2, 6, 8, 8), 3),
         ((2, 8, 5, 5), 4),
+        ((2, 4, 2, 3, 5), 2),
+        ((2, 4, 3, 5), 1),
+        ((2, 4, 3, 5), 4),
     ]
 
-    yield from (
-        SampleInput(make_arg(shape), args=(groups,))
-        for shape, groups in shapes_groups
-    )
+    for shape, groups in shapes_groups:
+        yield SampleInput(make_arg(shape), args=(groups,))
+
+        memory_format = (
+            torch.channels_last if len(shape) == 4 else torch.channels_last_3d
+        )
+        yield SampleInput(make_arg(shape, memory_format=memory_format), args=(groups,))
 
 def sample_inputs_binary_cross_entropy(op_info, device, dtype, requires_grad, logits=False, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype)
