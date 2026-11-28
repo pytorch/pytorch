@@ -13,6 +13,7 @@ from torch._subclasses.fake_tensor import maybe_get_fake_constant
 
 from .. import variables
 from ..exc import raise_observed_exception
+from ..source import ConstDictKeySource
 from ..utils import guard_if_dyn, specialize_symnode
 from .base import VariableTracker
 
@@ -113,6 +114,7 @@ class HashableTracker:
             isinstance(vt, variables.LazyVariableTracker)
             and not vt.is_realized()
             and vt.is_hashable_lazy()
+            and isinstance(vt.source, ConstDictKeySource)
         ):
             self._hash = hash(vt.original_value())
             self._hash_is_identity = False
@@ -126,9 +128,15 @@ class HashableTracker:
         from .object_protocol import generic_hash_impl
 
         tx = InstructionTranslator.current_tx()
+        vt = vt.realize()
+        if type(vt) is variables.CallMethodVariable:
+            vt = vt.as_bound_builtin_method(tx) or vt
         # is_fake marks an identity-based hash (e.g. id(fake_tensor)); such VTs
         # have no python-constant value, so their key equality is identity.
-        self._hash, self._hash_is_identity = generic_hash_impl(tx, vt)
+        if isinstance(vt, variables.BoundBuiltinMethodVariable):
+            self._hash, self._hash_is_identity = vt.key_hash_impl(tx)
+        else:
+            self._hash, self._hash_is_identity = generic_hash_impl(tx, vt)
         self.vt = vt
 
     @classmethod

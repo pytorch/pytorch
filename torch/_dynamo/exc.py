@@ -836,12 +836,14 @@ def unimplemented(
     raise Unsupported(msg, gb_type, skip_frame, **options)
 
 
-def unimplemented_identity(context: str) -> NoReturn:
+def unimplemented_identity(context: str, *, skip_frame: bool = False) -> NoReturn:
     unimplemented(
         gb_type="Operation requires stable Python identity",
         context=context,
         explanation="Dynamo cannot preserve the object identity required by this operation.",
         hints=["Pass the computed result as an input to the compiled function."],
+        skip_frame=skip_frame,
+        preserve_skip_frame_after_inline=skip_frame,
     )
 
 

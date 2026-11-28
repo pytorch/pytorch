@@ -1686,13 +1686,21 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if isinstance(arg, variables.ConstDictVariable):
                     arg.install_dict_order_guard(tx)
             # constant fold
-            return VariableTracker.build(
+            result = VariableTracker.build(
                 tx,
                 self.as_python_constant()(  # type: ignore[operator]
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
             )
+            if (
+                isinstance(result, UserDefinedObjectVariable)
+                and isinstance(result.value, enum.Enum)
+                and type(result.value) is self.value
+                and result.cls_source is None
+            ):
+                result.cls_source = self.source
+            return result
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)
         elif self.value is contextlib.nullcontext:
@@ -2420,7 +2428,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value: object,
         *,
         value_type: type | None = None,
-        cls_source: TypeSource | None = None,
+        cls_source: Source | None = None,
         base_cls_vt: VariableTracker | None = None,
         init_args: list[VariableTracker] | None = None,
         **kwargs: Any,
@@ -2614,6 +2622,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
+        if id(type(self.value)) in tx.output.created_enum_classes:
+            variables.BuiltinVariable.check_format_slots(tx, self, ("__repr__",))
         # The type's tp_repr is its C base's or object_repr unless the class
         # defines __repr__, which installs slot_tp_repr.
         cls = type(self.value)
@@ -2632,6 +2642,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/typeobject.c#L9475
+        if id(type(self.value)) in tx.output.created_enum_classes:
+            slots = ("__str__", "__repr__")
+            variables.BuiltinVariable.check_format_slots(tx, self, slots)
         if type(self.value).__str__ is object.__str__ or self.inherits_base_slot(
             "__str__"
         ):
@@ -4543,7 +4556,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 from .constant import FakeIdVariable
 
                 if isinstance(result, FakeIdVariable):
-                    return result.as_python_constant(), True
+                    return result.value, True
                 if isinstance(result, variables.SymNodeVariable):
                     return _normalize_custom_hash(int(result.evaluate_expr())), False
                 # CPython's slot_tp_hash validates PyLong_Check(res):

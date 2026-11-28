@@ -4180,6 +4180,16 @@
       ]
     }
   ],
+  "GB7856": [
+    {
+      "Gb_type": "dict storage mutation on OrderedDict",
+      "Context": "dict.{name}",
+      "Explanation": "Base dict writes bypass OrderedDict's linked storage.",
+      "Hints": [
+        "Use OrderedDict methods to preserve its linked storage."
+      ]
+    }
+  ],
   "GB0217": [
     {
       "Gb_type": "unsupported hasattr operation",
@@ -7521,6 +7531,16 @@
       "Explanation": "Dynamo cannot safely replay global deletes for a frame whose globals dict is not the registered module __dict__.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3943": [
+    {
+      "Gb_type": "Unsupported user-defined formatting",
+      "Context": "{value.python_type_name()}, {detail}",
+      "Explanation": "Dynamo cannot safely specialize this object's formatting behavior.",
+      "Hints": [
+        "Format this value outside the compiled region."
       ]
     }
   ],

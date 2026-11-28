@@ -11,6 +11,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 import torch.autograd.forward_ad as fwAD
+from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -462,18 +463,25 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             def backward(ctx, grad_output):
                 return grad_output
 
-        class Holder:
-            pass
+        class Holder:  # spoofed metadata must not override the actual type
+            __class__, __name__, __self__ = types.BuiltinMethodType, "apply", Function
+            __eq__ = staticmethod(bool)
 
         holder = Holder()
         holder.target = Function.apply
 
-        def fn(x):
+        def fn(x, other=None):
+            if other is not None:
+                return x + 1, hash(holder.target), holder.target is other
             return holder.target(x)
 
         x = torch.randn(2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), x + 1)
+        self.assertEqual(opt_fn(x, holder.target), fn(x, holder.target))
+
+        exported = dynamo_graph_capture_for_export(fn)(x)
+        self.assertEqual(exported(x), fn(x))
 
         replacement = Function.__subclasshook__
         self.assertIs(replacement.__self__, Function)
@@ -483,6 +491,14 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.exc.RecompileError, "holder.*target"
             ):
                 opt_fn(x)
+
+    @torch._dynamo.config.patch(caching_precompile=True, error_on_recompile=True)
+    def test_cached_apply_checks_method(self):
+        fn = torch.compile(lambda x, method: method(x), backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(fn(x, CustomFunc1.apply), x + x)
+        with self.assertRaisesRegex(torch._dynamo.exc.RecompileError, "method"):
+            fn(x, CustomFunc1.__subclasshook__)
 
     def test_apply_uses_setup_context_identity(self):
         class EqualToEverything:
