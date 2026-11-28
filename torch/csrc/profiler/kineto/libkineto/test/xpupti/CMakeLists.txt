@@ -11,8 +11,6 @@ set(LINK_LIBRARIES
   kineto_base
   kineto_api
   $<BUILD_INTERFACE:fmt::fmt-header-only>
-  ${SYCL_LIBRARY}
-  ${PTI_LIBRARY}
 )
 
 # Pure host-code tests (no SYCL device code): ordinary executables.
