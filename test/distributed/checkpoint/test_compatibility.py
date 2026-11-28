@@ -21,9 +21,15 @@ from torch.distributed.checkpoint.metadata import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class _TensorLikeWithoutStride:

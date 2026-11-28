@@ -25,11 +25,16 @@ from c10d_backend_common import (
 
 from torch._C._distributed_c10d import NanCheckHook
 from torch.testing._internal.common_distributed import core_dumps_disabled
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, serialTestFile
 
 
 # Tests in which the check is expected to fire.
 DETECTING_TESTS = ("test_nan_in_input_detected", "test_env_var_auto_attach")
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class AbstractNanCheckHookTest(C10dBackendTest):

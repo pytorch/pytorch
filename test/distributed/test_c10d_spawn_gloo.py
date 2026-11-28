@@ -13,6 +13,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import requires_gloo, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -20,6 +21,11 @@ from torch.testing._internal.common_utils import (
 
 
 # Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class DistributedDataParallelSingleProcessTest(TestCase):

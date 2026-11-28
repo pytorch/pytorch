@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
 )
 
 
@@ -34,6 +35,11 @@ device_type = (
 )
 
 BFLOAT16_AVAILABLE = torch.cuda.is_bf16_supported() or torch.xpu.is_bf16_supported()
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class Net(nn.Module):

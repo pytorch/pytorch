@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     parametrize,
     run_tests,
+    serialTestFile,
     subtest,
     TEST_CUDA,
     TEST_CUDA_GRAPH_CONDITIONAL_NODES,
@@ -66,6 +67,11 @@ requires_nccl4py = unittest.skipUnless(TEST_NCCL4PY, "requires nccl4py 0.5+ and 
 requires_nccl4py_on_cuda = unittest.skipUnless(
     HAS_NCCL_COLL_CONFIG or torch.version.hip, "requires nccl4py 0.5+ on CUDA"
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def coll_config(**kwargs):

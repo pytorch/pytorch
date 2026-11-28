@@ -3,7 +3,12 @@
 import torch
 import torch.nn as nn
 from torch.distributed.tensor.debug._op_coverage import get_inductor_decomp_graphs
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class SimpleMLP(nn.Module):

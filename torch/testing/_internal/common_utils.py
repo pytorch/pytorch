@@ -2451,6 +2451,12 @@ def serialTest(condition=True):
         return fn
     return decorator
 
+def serialTestFile():
+    """
+    The value of `pytestmark` in a test file whose tests all run serially.  Requires pytest
+    """
+    return [pytest.mark.serial] if has_pytest else []
+
 def unMarkDynamoStrictTest(cls=None):
     def decorator(cls):
         cls.dynamo_strict = False

@@ -2,8 +2,7 @@
 name: Revert merged PR
 
 on:
-  repository_dispatch:
-    types: [try-revert]
+  workflow_dispatch:
 
 jobs:
   do_revert:

@@ -10,11 +10,17 @@ import torch.distributed.elastic.utils.logging as logging
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 
 
 log = logging.get_logger()
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class LoggingTest(TestCase):

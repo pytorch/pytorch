@@ -11,7 +11,7 @@ if not dist.is_available():
     sys.exit(0)
 
 import torch
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, serialTestFile
 from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
     TensorPipeRpcAgentTestFixture,
 )
@@ -20,6 +20,11 @@ from torch.testing._internal.distributed.rpc_utils import (
     GENERIC_CUDA_TESTS,
     TENSORPIPE_CUDA_TESTS,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 if torch.cuda.is_available():

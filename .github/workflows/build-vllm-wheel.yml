@@ -1,20 +1,7 @@
 name: Build vLLM wheels
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/build-vllm-wheel.yml
-      - .github/ci_commit_pins/vllm.txt
   workflow_dispatch:
-  pull_request:
-    paths:
-      - .github/workflows/build-vllm-wheel.yml
-      - .github/ci_commit_pins/vllm.txt
-  schedule:
-    # every morning at 01:30PM UTC, 9:30AM EST, 6:30AM PST
-    - cron: 30 13 * * *
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

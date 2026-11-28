@@ -3,20 +3,6 @@ name: Build almalinux docker images
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - release/*
-    tags:
-      # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
-      # Release candidate tags look like: v1.11.0-rc1
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-      # ciflow/docker: build + push the content-addressed image to ECR for PR testing
-      - ciflow/docker/*
-    paths:
-      - .ci/docker/**
-      - .github/workflows/build-almalinux-images.yml
-      - .github/actions/binary-docker-build/**
 
 env:
   DOCKER_BUILDKIT: 1

@@ -11,6 +11,7 @@ import torch.distributed.distributed_c10d as c10d
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 
@@ -24,6 +25,11 @@ _WORLD_ATTRS = (
     "tags_to_pg",
     "pg_coalesce_state",
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class _WorldStateTestCase(TestCase):

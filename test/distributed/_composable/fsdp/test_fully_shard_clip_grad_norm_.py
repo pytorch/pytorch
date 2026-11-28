@@ -14,6 +14,7 @@ from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLPStack
 from torch.testing._internal.common_utils import (
     MI350_ARCH,
     run_tests,
+    serialTestFile,
     skipIfRocmArch,
     TEST_XPU,
     xfailIf,
@@ -26,6 +27,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 device_type = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class _TestClipGradNormBase(FSDPTest):

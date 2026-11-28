@@ -9,8 +9,14 @@ from torch.distributed.checkpoint.planner_helpers import _create_write_item_for_
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def create_plan(second_fqn: str) -> SavePlan:

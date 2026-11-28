@@ -23,11 +23,16 @@ from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, serialTestFile
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 device_type = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class Mod(torch.nn.Module):

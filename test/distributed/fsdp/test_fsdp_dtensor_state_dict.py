@@ -15,7 +15,7 @@ from torch.distributed.fsdp.api import (
 from torch.distributed.tensor import DTensor, Shard
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import parametrize, run_tests
+from torch.testing._internal.common_utils import parametrize, run_tests, serialTestFile
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     skip_if_lt_x_gpu,
@@ -24,6 +24,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 device_type = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 # Simple and boring model to test interface and some corner cases that do not

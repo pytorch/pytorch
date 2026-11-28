@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_LINUX,
     parametrize,
     run_tests,
+    serialTestFile,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHINDUCTOR,
     TEST_XPU,
@@ -57,6 +58,11 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _make_post_grad_fx(f, *inps):

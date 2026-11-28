@@ -22,7 +22,16 @@ from c10d_backend_common import (
 
 from torch._C._distributed_c10d import WorkResult
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
+from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
+    run_tests,
+    serialTestFile,
+)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class AbstractProcessGroupTest(C10dBackendTestContinuous):

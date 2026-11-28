@@ -8,7 +8,7 @@ from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.distributed.tensor._redistribute import use_min_cost_redistribution_plan
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -18,6 +18,11 @@ c10d_ops = torch.ops.c10d
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestCommMode(TestCase):

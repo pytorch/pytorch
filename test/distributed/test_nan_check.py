@@ -11,13 +11,18 @@ if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
 
 
 HAS_ACCELERATOR = torch.accelerator.is_available()
 ACCELERATOR = (
     torch.accelerator.current_accelerator() if HAS_ACCELERATOR else torch.device("cpu")
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestNanCheck(TestCase):

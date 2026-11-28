@@ -5,10 +5,6 @@ name: dynamo-unittest
 
 on:
   workflow_call:
-  pull_request:
-    paths:
-      - .github/workflows/dynamo-unittest.yml
-      - .github/workflows/_dynamo-unittest-python.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-dynamo-unittest

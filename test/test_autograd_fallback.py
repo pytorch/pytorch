@@ -12,8 +12,14 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     TestCase,
 )
+
+
+# No other test runs beside those of this file, as in test/run_test.py: "temporarily
+# sets a global config".
+pytestmark = serialTestFile()
 
 
 @contextlib.contextmanager

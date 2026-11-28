@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     parametrize as parametrize_test,
     run_tests,
     serialTest,
+    serialTestFile,
     set_default_dtype,
     skipIfRocmArch,
     subtest,
@@ -69,6 +70,12 @@ from torch.testing._internal.common_utils import (
 
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
+
+
+# No other test runs beside those of this file, as in test/run_test.py: "Doesn't
+# respect set_per_process_memory_fraction, results in OOM for other tests in slow
+# gradcheck".
+pytestmark = serialTestFile()
 
 
 def _get_cudnn_version():

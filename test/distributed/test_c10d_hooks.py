@@ -11,11 +11,20 @@ from torch.distributed._hooks.collective_annotations import (
 )
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import HardwareClassification, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    serialTestFile,
+)
 
 
 # The annotation hooks only register on NCCL groups; let them hook these Gloo groups.
 _PGS_TO_ANNOTATE = "torch.distributed._hooks.collective_annotations._pgs_to_annotate"
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestProcessGroupHooks(MultiProcContinuousTest):

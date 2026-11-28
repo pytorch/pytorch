@@ -51,6 +51,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     run_tests,
+    serialTestFile,
     TEST_WITH_ROCM,
     TEST_XPU,
     xfailIf,
@@ -70,6 +71,11 @@ device_type = (
     else "cpu"
 )
 curr_backend = dist.get_default_backend_for_device(device_type)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class SimpleModel(nn.Module):

@@ -67,6 +67,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -101,6 +102,11 @@ STATE_DICT_MAPPING = {
 }
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class Model(Module):

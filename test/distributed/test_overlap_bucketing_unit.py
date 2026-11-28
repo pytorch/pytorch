@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -48,6 +49,11 @@ import torch._dynamo.test_case
 
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])

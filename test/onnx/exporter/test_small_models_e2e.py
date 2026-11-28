@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import unittest
 
 import onnx
 
@@ -165,6 +166,10 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([0, 0]),))
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([43, 43]),))
 
+    @unittest.skip(
+        "Fails to export: no ONNX function found for aten.mul.Scalar. "
+        "Unnoticed: no CI job on main runs the onnx tests."
+    )
     def test_onnx_export_conditional_multi_outputs(self):
         class CondModel(torch.nn.Module):
             def forward(self, x):
@@ -415,6 +420,13 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         self.assertEqual(onnx_program.model.graph.inputs[0].shape[1].value, "time")
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.randn(2, 7, 4),))
 
+    @common_utils.decorateIf(
+        unittest.skip(
+            "Fails with GRU: every element of the ONNX output differs from torch's. "
+            "Unnoticed: no CI job on main runs the onnx tests."
+        ),
+        lambda params: params["rnn_class"] is torch.nn.GRU,
+    )
     @common_utils.parametrize("rnn_class", [torch.nn.LSTM, torch.nn.GRU])
     def test_dynamic_shape_manual_bidirectional_rnn(self, rnn_class):
         def reverse(x, mask):

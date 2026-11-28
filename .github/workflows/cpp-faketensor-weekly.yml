@@ -2,11 +2,6 @@
 name: cpp-faketensor-weekly
 
 on:
-  schedule:
-    - cron: '17 8 * * 0'  # Sundays at 08:17 UTC.
-  push:
-    tags:
-      - ciflow/cpp-faketensor/*
   workflow_dispatch:
 
 concurrency:

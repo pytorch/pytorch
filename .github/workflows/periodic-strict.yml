@@ -2,18 +2,6 @@
 name: periodic-strict
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/periodic-strict.yml
-  schedule:
-    # Keep the daily-slot cron in sync with selected-test-configs in both build jobs.
-    - cron: 45 0 * * *
-    - cron: 45 4,8,12,16,20 * * *
-  push:
-    tags:
-      - ciflow/periodic-strict/*
-    branches:
-      - release/*
   workflow_dispatch:
     inputs:
       periodic-configs:

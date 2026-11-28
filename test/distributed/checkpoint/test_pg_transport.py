@@ -32,6 +32,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
     TestCase,
 )
@@ -40,6 +41,11 @@ from torch.testing._internal.common_utils import (
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 logger = logging.getLogger(__name__)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _create_sharded_tensor_state_dict(

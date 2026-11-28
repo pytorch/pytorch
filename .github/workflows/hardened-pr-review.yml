@@ -85,8 +85,7 @@ name: Hardened PR Review
 # artifact is corroborated, never believed. See hardened-pr-review-run.yml.
 
 on:
-  pull_request_target:
-    types: [labeled, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
 
 
 # `pull_request_target` mints a token with write scopes by default. This

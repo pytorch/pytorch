@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     requires_cuda_p2p_access,
     run_tests,
+    serialTestFile,
     skipIfRocmVersionLessThan,
     TEST_WITH_ROCM,
 )
@@ -35,6 +36,11 @@ _skip_unless_fabric_config = unittest.skipUnless(
     "and on ROCm; unconditionally skipped elsewhere (deadlocks on B200, see "
     "https://github.com/pytorch/pytorch/issues/189879)",
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _expandable_handle_type(tensor: torch.Tensor) -> int:

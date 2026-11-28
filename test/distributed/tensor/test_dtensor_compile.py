@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     run_tests,
+    serialTestFile,
     skipIfHpu,
     skipIfTorchDynamo,
     skipIfXpu,
@@ -75,6 +76,11 @@ from torch.utils.checkpoint import checkpoint
 
 
 dev_type = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class PytreeTuple(torch._custom_class_base.CustomClassBase):

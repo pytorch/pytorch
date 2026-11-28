@@ -8,12 +8,18 @@ import torch.distributed.checkpoint._traverse as _traverse
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 
 
 if TYPE_CHECKING:
     from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestTraverse(TestCase):

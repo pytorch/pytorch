@@ -89,6 +89,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     run_tests,
+    serialTestFile,
     skipIfCppFakeTensor,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -124,6 +125,10 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 # A conv with cpu inputs and xpu weights dispatches to aten::_slow_conv2d_forward, which
 # is unimplemented on XPU, so the expected device-mismatch error never surfaces.
 XPU_SLOW_CONV2D_SKIP = "XPU lacks aten::_slow_conv2d_forward for mixed cpu/xpu conv, see https://github.com/intel/torch-xpu-ops/issues/5125"
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 def expectedFailurePropagateRealTensors(fn):

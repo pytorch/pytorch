@@ -51,6 +51,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     retry_on_connect_failures,
     run_tests,
+    serialTestFile,
     skip_reason_at_collection,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -73,6 +74,11 @@ else:
 
 
 _PRIOR_FP32_PRECISION: tuple[str, ...] | None = None
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def setUpModule():

@@ -32,8 +32,13 @@ aten = torch.ops.aten
 import functools
 
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import serialTestFile, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_GPU
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def estimate_aten_runtime(fx_node, override_size=None, compute_multiplier=1.0):

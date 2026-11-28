@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     skipIfRocm,
     skipIfTorchInductor,
     TEST_CUDA_GRAPH,
@@ -91,6 +92,11 @@ from torch.testing._internal.common_fsdp import get_devtype
 
 
 device_type = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class _PersistentInputReduceScatter(ReduceScatter):

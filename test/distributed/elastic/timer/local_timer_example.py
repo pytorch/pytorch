@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -27,6 +28,11 @@ from torch.testing._internal.common_utils import (
 logging.basicConfig(
     level=logging.INFO, format="[%(levelname)s] %(asctime)s %(module)s: %(message)s"
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _happy_function(rank, mp_queue):

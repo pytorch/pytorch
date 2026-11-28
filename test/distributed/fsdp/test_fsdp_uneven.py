@@ -10,7 +10,11 @@ from torch.optim import SGD
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    run_tests,
+    serialTestFile,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 if not dist.is_available():
@@ -25,6 +29,11 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 device_type = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestUnevenParamShard(FSDPTestContinuous):

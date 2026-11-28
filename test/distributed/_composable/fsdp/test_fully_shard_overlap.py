@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
     run_tests,
+    serialTestFile,
     skipIfRocmVersionAtLeast,
     TEST_XPU,
     xfailIf,
@@ -43,6 +44,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 device = torch.device(get_devtype())
 device_module = torch.get_device_module(device)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _time_fn(fn: Callable):

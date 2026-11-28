@@ -2,9 +2,7 @@
 name: Check mergeability of ghstack PR
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-    branches-ignore: [main, 'release/**']
+  workflow_dispatch:
 
 jobs:
   ghstack-mergeability-check:

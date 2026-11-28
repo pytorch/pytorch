@@ -2,9 +2,6 @@
 name: riscv64
 
 on:
-  push:
-    tags:
-      - ciflow/riscv64/*
   workflow_dispatch:
 
 concurrency:

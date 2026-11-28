@@ -21,6 +21,7 @@ from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -29,6 +30,11 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 if dist._is_spmd_types_available():
     import spmd_types as spmd
     from spmd_types.checker import typecheck
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class SpmdLinear(nn.Module):

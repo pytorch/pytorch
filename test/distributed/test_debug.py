@@ -27,7 +27,7 @@ from torch.distributed.debug._frontend import (
     Response,
     Route,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
 
 
 try:
@@ -45,6 +45,11 @@ retry_strategy = Retry(total=5, backoff_factor=0.5)
 adapter = HTTPAdapter(max_retries=retry_strategy)
 session.mount("http://", adapter)
 session.mount("https://", adapter)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _reset_debug_server_state() -> None:

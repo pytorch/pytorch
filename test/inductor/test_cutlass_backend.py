@@ -95,6 +95,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    serialTestFile,
 )
 from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.inductor_utils import (
@@ -104,6 +105,11 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
 )
+
+
+# No other test runs beside those of this file, as in test/run_test.py: "slow due to
+# many nvcc compilation steps".
+pytestmark = serialTestFile()
 
 
 # We don't need triton in this test suite.

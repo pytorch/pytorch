@@ -29,25 +29,7 @@ name: In Progress PR Review Run
 # sanitizer and puts raw model output in logs anyone who can open a PR can read.
 
 on:
-  workflow_run:
-    # Matched by NAME, and a pull request can claim a name: a PR may add a
-    # second workflow called "Hardened PR Review" and complete it, firing this
-    # one with an artifact of its choosing. TWO conditions on `prepare` answer
-    # that, and the first is the strong one:
-    #
-    #   `workflow_run.event == 'pull_request_target'` - a PR-authored workflow
-    #   cannot produce that event. Since 2025-12-08 GitHub reads a
-    #   `pull_request_target` workflow from the repository's DEFAULT BRANCH,
-    #   whatever the pull request's base branch is, so claiming that event
-    #   takes write access to the default branch - not merely opening a pull
-    #   request, and not write access to some other branch either.
-    #
-    #   `github.event.workflow.path == ...` - which of the trusted workflows
-    #   it was. Kept as the second fence, and note it is NOT case-sensitive:
-    #   GitHub's `==` ignores case, so it separates honest files, not a
-    #   deliberate lookalike. That is why it is no longer the only control.
-    workflows: ["Hardened PR Review"]
-    types: [completed]
+  workflow_dispatch:
 
 permissions: {}
 

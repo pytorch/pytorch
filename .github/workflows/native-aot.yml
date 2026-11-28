@@ -7,29 +7,7 @@ name: CI for native-AOT embedded DSL kernels
 # Blackwell builds exercise plain and family-wide targets.
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/native-aot.yml
-      - tools/native_aot/**
-      - torch/_native/**
-      - torchgen/native_aot.py
-      - torchgen/native_aot_decl.py
-      - torchgen/native_aot_spec_grid.py
-      - test/python_native/**
-      # Stage 2 is reached from these shells, included by this CMake, and
-      # configured by this forwarding module.
-      - .ci/pytorch/build.sh
-      - .ci/pytorch/test.sh
-      - .ci/pytorch/common_utils.sh
-      - .ci/wheel/linux/build.sh
-      - caffe2/CMakeLists.txt
-      - cmake/EnvVarForwarding.cmake
   workflow_dispatch:
-  schedule:
-    - cron: 15 7 * * *  # about 12:15am PDT
-  push:
-    tags:
-      - ciflow/native-aot/*
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}

@@ -18,12 +18,18 @@ from torch.distributed.checkpoint.quantized_hf_storage import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 from torch.testing._internal.distributed.checkpoint_utils import (
     random_compressed_tensors_mxfp4,
     save_hf_checkpoint,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestQuantizedHfStorage(TestCase):

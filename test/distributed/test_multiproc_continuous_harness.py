@@ -8,7 +8,12 @@ import unittest
 from unittest.mock import patch
 
 import torch.testing._internal.common_distributed as cd
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 # Built in a function so unittest doesn't collect and spawn them.

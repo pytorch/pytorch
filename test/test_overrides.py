@@ -12,6 +12,7 @@ import unittest
 
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    serialTestFile,
     TestCase,
     run_tests,
     TEST_WITH_CROSSREF,
@@ -61,6 +62,10 @@ if torch.version.cuda and not torch.cuda.is_available():
 # future those examples might get reimplemented in C++ for speed. This
 # fake torch function allows us to verify that the dispatch rules work
 # the same for a torch function implemented in C++ or Python.
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 def foo(a, b, c=None):
     """A function multiple arguments and an optional argument"""

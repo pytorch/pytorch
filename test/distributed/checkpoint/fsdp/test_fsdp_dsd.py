@@ -27,12 +27,17 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, serialTestFile
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.utils._pytree import tree_all_only
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):

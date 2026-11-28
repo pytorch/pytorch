@@ -49,7 +49,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
     xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf,
     IS_MACOS, HardwareClassification, instantiate_parametrized_tests,
-    skipIfXpu,
+    skipIfXpu, serialTestFile,
 )
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
@@ -99,6 +99,10 @@ is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0)
 
 # Device types that are expected to raise/warn nondeterministic alerts.
 NONDETERMINISTIC_ALERT_DEVICES = ('cuda', 'xpu')
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 # FIXME: move to test_scatter_gather_ops

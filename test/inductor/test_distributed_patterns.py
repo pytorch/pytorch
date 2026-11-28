@@ -7,12 +7,17 @@ from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, serialTestFile
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_gpu
 
 
 # Fake distributed
 WORLD_SIZE = 2
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def init_fake_distributed(device="cpu"):

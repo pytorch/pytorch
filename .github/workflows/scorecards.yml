@@ -1,13 +1,7 @@
 # Owner(s): ["module: ci"]
 name: ossf-scorecard
 on:
-  # Only the default branch is supported.
-  branch_protection_rule:
   workflow_dispatch:
-  schedule:
-    - cron: '32 16 * * 3'
-  push:
-    branches: [ "main" ]
 
 # Declare default permissions as read only.
 permissions: read-all

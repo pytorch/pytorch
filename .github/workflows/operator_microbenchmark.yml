@@ -2,13 +2,7 @@ name: operator_microbenchmark
 # NOTE: When adding a new test, please update README: ../../benchmarks/operator_benchmark/README.md
 
 on:
-  push:
-    tags:
-      - ciflow/op-benchmark/*
   workflow_dispatch:
-  schedule:
-    # Run at 06:00 UTC everyday
-    - cron: 0 6 * * *
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}

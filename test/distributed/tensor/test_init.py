@@ -12,7 +12,7 @@ from torch.distributed.tensor import (
     Shard,
     zeros,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, serialTestFile
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
@@ -20,6 +20,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     NUM_DEVICES,
     with_comms,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class DTensorInitOpsTest(DTensorContinuousTestBase):

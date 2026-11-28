@@ -7,10 +7,16 @@ from torch.distributed._tools.mod_tracker import ModTracker
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
     xfailIfTorchDynamo,
 )
 from torch.utils.checkpoint import checkpoint
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestModTracker(TestCase):

@@ -32,11 +32,17 @@ from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    serialTestFile,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 device_type = get_devtype().type
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def get_snode_runtime_for_reorder_compute_test(snode):

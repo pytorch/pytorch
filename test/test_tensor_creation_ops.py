@@ -15,6 +15,7 @@ from typing import Any
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
+    serialTestFile,
     TestCase,
     run_tests,
     do_test_empty_full,
@@ -52,6 +53,10 @@ from torch.testing._internal.common_dtype import (
 )
 
 from torch.utils.dlpack import to_dlpack
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):

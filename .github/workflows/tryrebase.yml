@@ -2,8 +2,7 @@
 name: Rebase PR
 
 on:
-  repository_dispatch:
-    types: [try-rebase]
+  workflow_dispatch:
 
 jobs:
   do_rebase:

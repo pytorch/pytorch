@@ -73,12 +73,18 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    serialTestFile,
     skipIfXpu,
     TEST_XPU,
     xfailIf,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 # Opaque custom op so torch.compile traces the coalescing manager into the graph

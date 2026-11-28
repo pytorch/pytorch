@@ -104,6 +104,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     retry_on_connect_failures,
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
@@ -151,6 +152,11 @@ elif device_type == "xpu":
     BACKEND_ENV_PREFIX = "TORCH_XCCL"
     FR_ENV_PREFIX = "TORCH_FR"
     EVENT_CACHE_ENV = "TORCH_XCCL_XPU_EVENT_CACHE"
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _pg_options():

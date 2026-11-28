@@ -20,15 +20,7 @@
 name: B200 Smoke Tests
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/test-b200.yml
   workflow_dispatch:
-  schedule:
-    - cron: 0 */6 * * *  # every 6 hours
-  push:
-    tags:
-      - ciflow/b200/*
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}

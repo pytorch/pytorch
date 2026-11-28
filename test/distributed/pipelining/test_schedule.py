@@ -84,6 +84,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     subtest,
     TestCase,
 )
@@ -94,6 +95,11 @@ ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifa
 
 logger = logging.getLogger(__name__)
 torch.manual_seed(0)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class P2PInitializationTest(TestCase):

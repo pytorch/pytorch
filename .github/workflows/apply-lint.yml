@@ -1,8 +1,7 @@
 name: Apply lint patches
 
 on:
-  repository_dispatch:
-    types: [apply-lint]
+  workflow_dispatch:
 
 jobs:
   apply-lint:

@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
     run_tests,
+    serialTestFile,
     TEST_WITH_DEV_DBG_ASAN,
 )
 from torch.utils.checkpoint import checkpoint
@@ -41,6 +42,11 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 _save_on_cpu_called = False
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def get_patched_save_on_cpu():

@@ -4,20 +4,7 @@ name: CI for Cuspy tests on B200
 # The Cuspy tests need a CUDA >= 13.5 build and libcupti >= 13.5 (TEST_CUPTI_V13_5); the
 # HES and sm_100 kernel-launch tests also need Blackwell. Runs on PRs that touch Cuspy.
 on:
-  pull_request:
-    paths:
-      - .github/workflows/b200-cuspy.yml
-      - .ci/docker/common/install_cupti_python.sh
-      - test/profiler/test_cupti*.py
-      - test/profiler/test_cuspy*.py
-      - tools/gen_cupti_stubs.py
-      - tools/setup_helpers/cupti.py
-      - torch/csrc/profiler/cuspy/**
-      - torch/profiler/_cuspy/**
   workflow_dispatch:
-  push:
-    tags:
-      - ciflow/b200-cuspy/*
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

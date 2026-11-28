@@ -23,6 +23,7 @@ from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
+    serialTestFile,
     TEST_CUDA,
     TEST_HPU,
 )
@@ -34,6 +35,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 device_type = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestFullyShardMemory(FSDPTest):

@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
+    serialTestFile,
     set_default_dtype,
     slowTest,
     subtest,
@@ -52,6 +53,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_UBSAN,
     TestCase,
 )
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 class TestAvgPool(TestCase):

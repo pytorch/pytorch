@@ -11,15 +11,6 @@ name: docs-build
 # `needs:`.
 
 on:
-  pull_request:
-    branches-ignore:
-      - nightly
-  push:
-    branches:
-      - main
-      - release/*
-    tags:
-      - ciflow/pull/*
   workflow_dispatch:
 
 concurrency:

@@ -2,9 +2,6 @@
 name: inductor-perf-nightly-h100
 
 on:
-  schedule:
-    - cron: 15 0 * * 1-6
-    - cron: 0 7 * * 0
   workflow_dispatch:
     inputs:
       training:
@@ -67,11 +64,6 @@ on:
         required: false
         type: string
         default: inductor_huggingface_perf_cuda_h100,inductor_timm_perf_cuda_h100,inductor_torchbench_perf_cuda_h100
-  pull_request:
-    # Changing these files guarantees that this workflow needs to be run
-    paths:
-      - .github/workflows/inductor-perf-test-nightly-h100.yml
-      - .ci/docker/ci_commit_pins/huggingface-requirements.txt
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}

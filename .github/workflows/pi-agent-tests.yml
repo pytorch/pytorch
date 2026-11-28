@@ -2,15 +2,7 @@
 name: Pi agent tests
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/actions/pi-agent/**"
-      - ".github/workflows/pi-agent-tests.yml"
-  pull_request:
-    paths:
-      - ".github/actions/pi-agent/**"
-      - ".github/workflows/pi-agent-tests.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read

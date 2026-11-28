@@ -2,10 +2,7 @@
 name: Claude Code
 
 on:
-  issue_comment:
-    types: [created]
-  issues:
-    types: [opened]
+  workflow_dispatch:
 
 jobs:
   claude-code:

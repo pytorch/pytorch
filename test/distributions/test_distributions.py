@@ -127,6 +127,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     set_default_dtype,
     set_default_dtype_if_supported,
     set_rng_seed,
@@ -146,6 +147,10 @@ try:
     import scipy.stats
 except ImportError:
     TEST_NUMPY = False
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 def pairwise(Dist, *params):

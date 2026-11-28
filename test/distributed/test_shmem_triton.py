@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
     skipIfRocmVersionLessThan,
     TEST_WITH_ROCM,
@@ -43,6 +44,11 @@ from torch.testing._internal.inductor_utils import IS_H100, requires_triton
 
 
 shmem_backend = shmem_triton.get_shmem_backend_module()
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def requires_h100():

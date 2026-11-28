@@ -2,15 +2,7 @@
 name: Limited CI for symmetric memory tests on B200
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/b200-symm-mem.yml
   workflow_dispatch:
-  push:
-    tags:
-      - ciflow/b200-symm-mem/*
-  schedule:
-    - cron: 22 8 * * *  # about 1:22am PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}

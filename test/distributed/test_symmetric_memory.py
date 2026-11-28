@@ -88,6 +88,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     requires_cuda_python_bindings,
     run_tests,
+    serialTestFile,
     skipIfXpu,
     TEST_WITH_ROCM,
     TEST_XPU,
@@ -98,6 +99,11 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 test_contexts = [nullcontext, _test_mode]
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _mxfp8_quantize(t: torch.Tensor):

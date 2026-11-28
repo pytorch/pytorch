@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     np,
     run_tests,
     SEED,
+    serialTestFile,
     suppress_warnings,
     TEST_NUMPY,
     TestCase,
@@ -58,6 +59,11 @@ common_ops.L = 24
 common_ops.M = 12
 common_ops.S = 4
 common_ops.XS = 2
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def repurpose_ops(op_db, base_test_name, derived_test_name):

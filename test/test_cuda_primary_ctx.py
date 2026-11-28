@@ -12,6 +12,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_utils import (
     NoTest,
     run_tests,
+    serialTestFile,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -22,6 +23,10 @@ from torch.testing._internal.common_utils import (
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
     TestCase = NoTest
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest

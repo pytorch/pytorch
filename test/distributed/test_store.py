@@ -26,7 +26,10 @@ import torch.distributed.distributed_c10d as c10d
 import torch.distributed.rpc as rpc
 from torch.distributed import DistError, DistNetworkError, DistStoreError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    serialTestFile,
+)
 
 
 if not dist.is_available():
@@ -67,6 +70,11 @@ DEFAULT_HOSTNAME = "localhost"
 
 
 _PRIOR_FP32_PRECISION: tuple[str, ...] | None = None
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def setUpModule():

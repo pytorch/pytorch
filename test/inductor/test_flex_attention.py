@@ -85,6 +85,7 @@ from torch.testing._internal.common_utils import (
     isRocmArchAnyOf,
     MI200_ARCH,
     serialTest,
+    serialTestFile,
     skipIfCppFakeTensor,
     skipIfRocm,
     skipIfRocmArch,
@@ -114,6 +115,10 @@ Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 
 
 _PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 def setUpModule():

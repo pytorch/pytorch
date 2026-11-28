@@ -149,6 +149,14 @@ def pytest_addoption(parser: Parser) -> None:
         help="run only the tests whose node ids are listed, one per line, in this file",
     )
     parser.addoption(
+        "--except-nodeid-file",
+        action="store",
+        default=None,
+        dest="except_nodeid_file",
+        metavar="path",
+        help="run every test but those whose node ids are listed, one per line, in this file",
+    )
+    parser.addoption(
         "--serial-report-file",
         action="store",
         default=None,
@@ -161,20 +169,23 @@ def pytest_addoption(parser: Parser) -> None:
 
 
 class NodeidFilePlugin:
-    """Selects a fixed set of tests by node id (see --nodeid-file). run_test.py
-    uses it to rerun the failures of an xdist pass through its retries."""
+    """Selects a fixed set of tests by node id (see --nodeid-file), or every test
+    but those (see --except-nodeid-file). run_test.py uses the former to rerun the
+    failures of an xdist pass through its retries."""
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, listed: bool = True) -> None:
         with open(path) as f:
             self.nodeids = {line.strip() for line in f if line.strip()}
+        self.listed = listed
 
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
-        selected = [item for item in items if item.nodeid in self.nodeids]
+        keep = [(item.nodeid in self.nodeids) == self.listed for item in items]
+        selected = [item for item, kept in zip(items, keep) if kept]
         if not selected:
             # An empty selection would exit 5, which run_test.py treats as success.
-            raise pytest.UsageError("--nodeid-file selected no tests")
+            raise pytest.UsageError("the file of node ids selected no tests")
         config.hook.pytest_deselected(
-            items=[item for item in items if item.nodeid not in self.nodeids]
+            items=[item for item, kept in zip(items, keep) if not kept]
         )
         items[:] = selected
 
@@ -270,6 +281,9 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(
             NodeidFilePlugin(config.getoption("nodeid_file")), "nodeid_file_plugin"
         )
+    if config.getoption("except_nodeid_file"):
+        others = NodeidFilePlugin(config.getoption("except_nodeid_file"), listed=False)
+        config.pluginmanager.register(others, "except_nodeid_file_plugin")
     if config.getoption("hw_classification") or HW_CLASSIFICATION_EXCLUDE:
         config.pluginmanager.register(
             HardwareClassificationPytestPlugin(

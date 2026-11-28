@@ -11,11 +11,7 @@ name: Upload docs preview
 # `pull` workflow so the preview publishes as soon as the docs finish.
 
 on:
-  workflow_run:
-    workflows:
-      - docs-build
-    types:
-      - completed
+  workflow_dispatch:
 
 permissions:
   id-token: write

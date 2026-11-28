@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -144,6 +145,11 @@ if backend_supports_bf16:
 subtest_name = partial(subtest_name, test_name_mapping)
 
 _CURRENT_FULL_PRECISION_PARAM_DTYPE = None
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 @contextlib.contextmanager

@@ -17,7 +17,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
 from torch.utils.checkpoint import checkpoint
 
 
@@ -25,6 +25,11 @@ _SAVED_PREFIX = "_saved_"
 GRAD_FN_NEXT_FUNCTIONS = "next_functions"
 
 device = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class CheckpointWrapperTest(TestCase):

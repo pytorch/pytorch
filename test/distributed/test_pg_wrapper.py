@@ -29,6 +29,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    serialTestFile,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_XPU,
 )
@@ -36,6 +37,11 @@ from torch.testing._internal.common_utils import (
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = c10d.get_default_backend_for_device(device_type)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class AbstractProcessGroupWrapperTest(MultiProcessTestCase):

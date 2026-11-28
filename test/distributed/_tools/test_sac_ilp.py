@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -39,6 +40,11 @@ except ImportError:
     HAS_PULP = False
     get_optimal_checkpointing_policy_per_module = None  # type: ignore[assignment, misc]
     sac_milp = None  # type: ignore[assignment]
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 # TODO(multigpu-marker): These tests are single-process but their AC-decision

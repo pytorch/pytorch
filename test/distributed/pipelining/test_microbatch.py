@@ -20,12 +20,18 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 
 
 d_hid = 512
 torch.manual_seed(0)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class MicrobatchTests(TestCase):

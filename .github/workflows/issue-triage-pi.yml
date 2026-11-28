@@ -18,9 +18,6 @@ name: Issue Triage (pi)
 # See .github/actions/pi-agent/README.md.
 
 on:
-  workflow_run:
-    workflows: ["Issue Triage"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       issues:

@@ -11,7 +11,12 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.distributed.optim import _NamedOptimizer
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import HardwareClassification, serialTestFile
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _run_model_training(model_optim_lists):

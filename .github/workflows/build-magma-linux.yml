@@ -2,18 +2,7 @@
 name: build-linux-magma
 
 on:
-  push:
-    branches:
-      main
-    paths:
-      - .ci/magma/*
-      - .ci/magma/package_files/*
-      - .github/workflows/build-magma-linux.yml
-  pull_request:
-    paths:
-      - .ci/magma/*
-      - .ci/magma/package_files/*
-      - .github/workflows/build-magma-linux.yml
+  workflow_dispatch:
 
 defaults:
   run:

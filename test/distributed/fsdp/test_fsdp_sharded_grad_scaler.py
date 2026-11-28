@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_XPU,
@@ -80,6 +81,11 @@ test_name_mapping = {
 }
 
 subtest_name = functools.partial(subtest_name, test_name_mapping)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestShardGradScaler(TestCase):

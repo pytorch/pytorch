@@ -6,7 +6,7 @@ import yaml
 import textwrap
 import torch
 
-from torch.testing._internal.common_utils import TestCase, run_tests, HardwareClassification
+from torch.testing._internal.common_utils import TestCase, run_tests, HardwareClassification, serialTestFile
 from collections import namedtuple
 
 
@@ -32,6 +32,10 @@ all_operators_with_namedtuple_return_skip_list = {
     '_scaled_dot_product_efficient_attention',
     '_scaled_dot_product_cudnn_attention',
 }
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 class TestNamedTupleAPI(TestCase):

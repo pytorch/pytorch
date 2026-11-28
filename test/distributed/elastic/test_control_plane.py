@@ -21,8 +21,14 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     requires_cuda,
     run_tests,
+    serialTestFile,
     TestCase,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class UnixHTTPConnection(HTTPConnection):

@@ -9,11 +9,6 @@ on:
         required: false
         default: true
         type: boolean
-  schedule:
-    - cron: '0 0 1,15 * *'
-  pull_request:
-    paths:
-      - .github/workflows/_binary-build-flash-attention-wheel-windows.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

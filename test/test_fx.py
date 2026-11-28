@@ -90,6 +90,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_CPU_CAPABILITY_SVE256,
     IS_WINDOWS,
+    serialTestFile,
     TEST_WITH_CROSSREF,
     run_tests,
     skipIfTorchDynamo,
@@ -112,6 +113,11 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
+
+
+# No other test runs beside those of this file, as in test/run_test.py: "gets
+# SIGKILL".
+pytestmark = serialTestFile()
 
 
 class SimpleTest(torch.nn.Module):

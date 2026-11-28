@@ -16,10 +16,15 @@ from torch.distributed.optim import (
     _apply_optimizer_in_backward,
     _get_in_backward_optimizers,
 )
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import HardwareClassification, serialTestFile
 
 
 # TODO (rohan-varma): Add FSDP & DDP tests once supported
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _validate_params(params_list, fn):

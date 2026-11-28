@@ -16,10 +16,15 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
     run_tests,
+    serialTestFile,
     skipIfCppFakeTensor,
     TestCase,
 )
 from torch.nn.attention import SDPBackend
+
+
+# No other test runs beside those of this file, as in test/run_test.py: "OOM".
+pytestmark = serialTestFile()
 
 class TestMHADevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR

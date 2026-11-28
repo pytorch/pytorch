@@ -35,7 +35,17 @@ from torch.distributed.tensor._ops.strategy_validation import (
 )
 from torch.distributed.tensor.placement_types import Partial, Shard
 from torch.testing._internal.common_methods_invocations import SampleInput
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_SLOW, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    serialTestFile,
+    TEST_WITH_SLOW,
+    TestCase,
+)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestPlacementUtilities(TestCase):

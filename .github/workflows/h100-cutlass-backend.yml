@@ -2,18 +2,7 @@
 name: Limited CI for CUTLASS backend on H100
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/h100-cutlass-backend.yml
-      - torch/_inductor/codegen/cuda/**
-      - test/inductor/test_cutlass_backend.py
-      - test/inductor/test_cutlass_evt.py
   workflow_dispatch:
-  schedule:
-    - cron: 22 9,21 * * *  # every 12 hours
-  push:
-    tags:
-      - ciflow/h100-cutlass-backend/*
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}

@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -25,6 +26,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     NUM_DEVICES,
     with_comms,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 # shard function to do full sharding on all parameters of a module

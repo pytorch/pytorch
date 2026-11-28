@@ -7,6 +7,7 @@ import unittest
 import torch.distributed as dist
 from torch._dynamo.test_case import run_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import serialTestFile
 from torch.testing._internal.logging_utils import LoggingTestCase
 
 
@@ -19,6 +20,11 @@ from torch.testing._internal.common_fsdp import get_devtype
 
 
 device_type = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 @skip_if_lt_x_gpu(2)

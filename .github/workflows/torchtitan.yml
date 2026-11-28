@@ -2,12 +2,6 @@
 name: torchtitan-test
 
 on:
-  push:
-    branches:
-      - main
-      - release/*
-    tags:
-      - ciflow/torchtitan/*
   workflow_dispatch:
 
 concurrency:

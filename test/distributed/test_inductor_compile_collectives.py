@@ -19,6 +19,7 @@ from torch.fx.passes.regional_inductor import regional_inductor
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 
@@ -28,6 +29,11 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import requires_gloo
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _f(t):

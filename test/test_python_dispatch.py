@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     skipIfTorchDynamo,
     TEST_CUDA,
     TEST_WITH_ROCM,
@@ -64,6 +65,11 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_map, tree_map_only
+
+
+# No other test runs beside those of this file, as in test/run_test.py: "torch.library
+# creation and deletion must be serialized".
+pytestmark = serialTestFile()
 
 
 # used as DataLoader collate_fn below; named here to avoid trying to pickle a lambda

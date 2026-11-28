@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 
@@ -53,6 +54,11 @@ _CONFIG_COLLECTIVES = {
     "_reduce_scatter_base": "reduce_scatter_single",
     "all_to_all_single": "all_to_all_single",
 }
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _collective_inputs(name):

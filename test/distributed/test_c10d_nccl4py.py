@@ -13,7 +13,12 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    serialTestFile,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 
 
 try:
@@ -28,6 +33,11 @@ except ImportError:
 # nccl4py imports cleanly on ROCm but dlopens libnccl.so.2 on first use, which
 # only NVIDIA ships.
 HAS_CUDA = torch.cuda.is_available() and not TEST_WITH_ROCM
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def skip_unless_nccl4py(func):

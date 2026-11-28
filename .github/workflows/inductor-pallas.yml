@@ -2,12 +2,6 @@
 name: inductor-pallas
 
 on:
-  push:
-    branches:
-      - main
-      - release/*
-    tags:
-      - ciflow/inductor-pallas/*
   workflow_dispatch:
 
 concurrency:

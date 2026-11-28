@@ -2,16 +2,7 @@
 name: Build MAGMA for Windows
 
 on:
-  push:
-    branches:
-      main
-    paths:
-      - .github/scripts/windows/*
-      - .github/workflows/build-magma-windows.yml
-  pull_request:
-    paths:
-      - .github/scripts/windows/*
-      - .github/workflows/build-magma-windows.yml
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

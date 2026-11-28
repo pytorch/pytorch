@@ -25,6 +25,7 @@ from torch.distributed.checkpoint.utils import (
 from torch.distributed.distributed_c10d import _object_to_tensor, _tensor_to_object
 from torch.testing._internal.common_utils import (
     run_tests,
+    serialTestFile,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -42,6 +43,11 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def create_sharded_tensor(rank, world_size, shards_per_rank):

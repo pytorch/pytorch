@@ -7,17 +7,209 @@ on:
   pull_request:
     paths:
       - .github/workflows/experimental-unstable.yml
+  push:
+    branches:
+      - jathu/**
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 permissions:
+  id-token: write
   contents: read
 
+env:
+  # The compiler cache that the builds on main fill. The tests have it as on main, whose
+  # times the plan uses: those that compile C++ extensions do it through sccache.
+  SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+  SCCACHE_REGION: us-east-1
+
 jobs:
-  placeholder:
+  build:
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-24.04
+    name: build (${{ matrix.os }}, ${{ matrix.cpu_architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every environment, once. What is built: torch for each operating system and
+        # architecture. Under `tests`, what is tested against it: the collect job gets
+        # an entry for each, with the fields of the build, and the test job gets them
+        # from there.
+        include:
+          - os: linux
+            cpu_architecture: x86_64
+            # With CUDA: the tests of the CPU run against the same wheel. The tag ends
+            # in the hash of .ci/docker: git rev-parse HEAD:.ci/docker
+            image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-b49920099bc234f0197919581fdcdff8bcb37863
+            # Without a GPU: the build needs none.
+            builder: mt-l-x86iavx512-48-384
+            # For the bindings of CUPTI that the build generates.
+            packages: libclang
+            # What .ci/pytorch/build.sh sets for this build on main, with the 24
+            # FlashAttention compiles at a time that it has on this type of runner:
+            # with its default of 2 they take 8 of the build's 15 minutes.
+            flags: >-
+              TORCH_CUDA_ARCH_LIST="7.5 8.9" USE_FBGEMM=0 FLASH_ATTENTION_MAX_JOBS=24
+              MAX_JOBS=$(($(nproc) - 1)) LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+            # The tests of a device each, in the image of the build.
+            tests:
+              - device: cpu
+                # Where the tests are listed: a machine with many CPUs.
+                collector: mt-l-x86iavx512-48-384
+                # The type of runner whose test times the environment's file of
+                # tools/tci/times holds.
+                tester: mt-l-x86iavx512-16-128
+              - device: cuda
+                # The testers' type of GPU: a test file lists the tests that the GPU it
+                # sees can run, with their serial marks, and an L4 has tests that a T4
+                # lacks. The container gets the GPU without main's `--gpus all`, which
+                # these runners ignore.
+                collector: mt-l-x86aavx2-11-41-l4
+                tester: mt-l-x86aavx2-11-41-l4
+                # What .ci/pytorch/test.sh sets for its tests on main: one GPU, the
+                # tests of a device for CUDA only, and none of the classes that need no
+                # device (hw_classification GENERIC): the tests of the CPU have those.
+                variables: >-
+                  CUDA_VISIBLE_DEVICES=0 PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda
+                  PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION=GENERIC
+    runs-on: ${{ matrix.builder }}
+    outputs:
+      # The entries of the collect job. GitHub keeps the outputs of a matrix job by
+      # name: one for each of its entries, named by its position.
+      tests-0: ${{ steps.tests.outputs.tests-0 }}
+    container:
+      image: ${{ matrix.image }}
+    env:
+      # The compiler cache hits only with the compiler and flags of the builds on main.
+      CC: gcc
+      CXX: g++
+      CMAKE_PREFIX_PATH: /opt/python-3.11-venv
+      WERROR: 1
     steps:
-      - run: echo ok
+      # An entry of the collect job for each of `tests`: the fields of the build and its own.
+      - id: tests
+        env:
+          BUILD: ${{ toJSON(matrix) }}
+        run: |
+          entries=$(printf '%s' "$BUILD" | jq -r '[del(.tests) + .tests[] | tojson] | join(",")')
+          printf '%s\n' "tests-${{ strategy.job-index }}=$entries" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # One process per submodule, with the token that checkout left in .git/config.
+      - run: |
+          auth=$(git config --get http.https://github.com/.extraheader)
+          git submodule init -q
+          git submodule status | awk '{print $2}' |
+            xargs -P 8 -n 1 git -c "http.https://github.com/.extraheader=$auth" submodule update --init --depth=1 --recursive --
+      - run: python -m pip install numpy==2.0.2 ${{ matrix.packages }}
+      - run: env ${{ matrix.flags }} python -m build --wheel --no-isolation
+      - run: sccache --show-stats
+      - uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.cpu_architecture }}
+          path: dist/*.whl
+          s3-bucket: gha-artifacts
+          retention-days: 1
+          if-no-files-found: error
+
+  collect:
+    needs: build
+    name: collect (${{ matrix.os }}, ${{ matrix.cpu_architecture }}, ${{ matrix.device }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # An entry for each environment: the tests of a device against a build, with the
+        # fields of both. shard checks those that a report of its tests has too (os,
+        # cpu_architecture) against the machine.
+        include: ${{ fromJSON(format('[{0}]', needs.build.outputs.tests-0)) }}
+    runs-on: ${{ matrix.collector }}
+    outputs:
+      # The entries of the test job, one for each shard of the environment's plan. An
+      # output for each environment, named by its position as above.
+      shards-0: ${{ steps.plan.outputs.shards-0 }}
+      shards-1: ${{ steps.plan.outputs.shards-1 }}
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      # Without submodules: the tests are listed against the wheel.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: seemethere/download-artifact-s3@1da556a7aa0a088e3153970611f6c432d58e80e6 # v4.2.0
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.cpu_architecture }}
+          path: dist
+          s3-bucket: gha-artifacts
+      - run: python -m pip install dist/*.whl
+      # The tests of every test file, listed by forks of processes that share its imports.
+      - run: env ${{ matrix.variables }} python -m tools.tci collect --output tci-tests.json.gz
+      # Shards of about 20 minutes, from the times of the environment.
+      - id: plan
+        env:
+          FIELDS: ${{ toJSON(matrix) }}
+        run: >-
+          python -m tools.tci shard --tests tci-tests.json.gz
+          --times tools/tci/times/${{ matrix.os }}-${{ matrix.cpu_architecture }}-${{ matrix.device }}.json
+          --output tci-plan.json --matrix "$GITHUB_OUTPUT" shards-${{ strategy.job-index }} "$FIELDS"
+      - uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        with:
+          name: tci-${{ matrix.os }}-${{ matrix.cpu_architecture }}-${{ matrix.device }}
+          path: tci-*.json*
+          s3-bucket: gha-artifacts
+          retention-days: 1
+          if-no-files-found: error
+
+  test:
+    needs: collect
+    name: test (${{ matrix.os }}, ${{ matrix.cpu_architecture }}, ${{ matrix.device }}, shard ${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # A job for each shard of each environment: the entries its plan wrote, joined.
+        include: ${{ fromJSON(format('[{0},{1}]', needs.collect.outputs.shards-0, needs.collect.outputs.shards-1)) }}
+    runs-on: ${{ matrix.tester }}
+    # A shard is planned to take 20 minutes: a job that is not done after 30 fails.
+    timeout-minutes: 30
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: seemethere/download-artifact-s3@1da556a7aa0a088e3153970611f6c432d58e80e6 # v4.2.0
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.cpu_architecture }}
+          path: dist
+          s3-bucket: gha-artifacts
+      - uses: seemethere/download-artifact-s3@1da556a7aa0a088e3153970611f6c432d58e80e6 # v4.2.0
+        with:
+          name: tci-${{ matrix.os }}-${{ matrix.cpu_architecture }}-${{ matrix.device }}
+          s3-bucket: gha-artifacts
+      - run: python -m pip install dist/*.whl
+      # The job's id, by which the reports of the tests name the job. It is
+      # job.check_run_id, written so that the actionlint pinned here (1.7.7) accepts it.
+      - run: echo "JOB_ID=${{ fromJSON(toJSON(job)).check_run_id }}" >> "$GITHUB_ENV"
+      # The test files of this shard, three at a time. Each writes a report of its test
+      # runs to test/torchci-reports.
+      - run: env ${{ matrix.variables }} python -m tools.tci run --plan tci-plan.json --shard ${{ matrix.shard }}
+      # The reports, also of a shard that failed, under the key the test pages of the HUD
+      # are filled from: https://hud.pytorch.org/tests/pytorch/pytorch/commit/<sha>
+      - if: always()
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        with:
+          path: test/torchci-reports/*.report.jsonl
+          s3-bucket: gha-artifacts
+          s3-prefix: torchci-reports/${{ github.repository }}/${{ github.run_id }}/${{ env.JOB_ID }}
+          retention-days: 14
+          if-no-files-found: error

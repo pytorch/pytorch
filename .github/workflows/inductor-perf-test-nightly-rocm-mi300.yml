@@ -2,11 +2,6 @@
 name: inductor-perf-nightly-rocm-mi300
 
 on:
-  push:
-    tags:
-      - ciflow/inductor-perf-test-nightly-rocm-mi300/*
-  schedule:
-    - cron: 15 0 * * *
   workflow_dispatch:
     inputs:
       training:

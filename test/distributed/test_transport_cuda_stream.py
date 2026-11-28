@@ -12,7 +12,12 @@ from unittest.mock import patch
 import torch
 from torch.distributed._transport.nixl import NIXLTransport
 from torch.distributed._transport.nixl._memory import NIXLRemoteBuffer
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _worker(rank, pipe, capture=False):

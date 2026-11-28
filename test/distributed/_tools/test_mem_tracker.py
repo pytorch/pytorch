@@ -7,11 +7,17 @@ import torch.nn as nn
 from torch.distributed._tools.mem_tracker import MemTracker
 from torch.testing._internal.common_utils import (
     run_tests,
+    serialTestFile,
     TEST_CUDA,
     TEST_XPU,
     TestCase,
 )
 from torch.utils.checkpoint import checkpoint
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestMemTracker(TestCase):

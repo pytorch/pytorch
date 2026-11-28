@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     TEST_CUDA,
     TEST_XPU,
     TestCase,
@@ -57,6 +58,11 @@ from torch.utils._triton import has_triton_package
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestDebugModeLogSerialization(TestCase):

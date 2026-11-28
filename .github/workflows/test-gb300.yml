@@ -3,15 +3,7 @@
 name: GB300 Smoke Tests
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/test-gb300.yml
   workflow_dispatch:
-  schedule:
-    - cron: 18 6 * * *
-  push:
-    tags:
-      - ciflow/gb300/*
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}

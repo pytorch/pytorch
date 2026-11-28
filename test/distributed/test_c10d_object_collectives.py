@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     skipIfHpu,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -34,6 +35,11 @@ device_type = (
     else "cpu"
 )
 device_count = torch.accelerator.device_count()
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def with_comms(func=None):

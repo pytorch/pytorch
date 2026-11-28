@@ -5,7 +5,16 @@ import copy
 import torch.nn as nn
 from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
-from torch.testing._internal.common_utils import HardwareClassification, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    serialTestFile,
+)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestFullyShardState(FSDPTestMultiThread):

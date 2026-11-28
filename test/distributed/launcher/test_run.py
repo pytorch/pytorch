@@ -32,12 +32,18 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
     skipIfRocmVersionInRange,
     skipIfXpu,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def launch_in_proc(args):

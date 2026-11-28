@@ -2,9 +2,6 @@
 name: s390
 
 on:
-  push:
-    tags:
-      - ciflow/s390/*
   workflow_dispatch:
 
 concurrency:

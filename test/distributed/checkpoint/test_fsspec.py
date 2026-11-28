@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
@@ -54,6 +55,11 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 BACKEND = torch.distributed.get_default_backend_for_device(device_type)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class _AsyncMemoryFileSystem(fsspec.asyn.AsyncFileSystem):

@@ -28,6 +28,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
     TestCase,
 )
@@ -38,6 +39,11 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
     _chunk_sharding_specs_list_for_test,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestShardingSpec(TestCase):

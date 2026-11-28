@@ -2,14 +2,6 @@
 name: inductor-perf-nightly-x86-zen
 
 on:
-  push:
-    tags:
-      - ciflow/inductor-perf-test-nightly-x86-zen/*
-  schedule:
-    # - cron: 0 7 * * 1-6
-    # - cron: 0 7 * * 0
-    # Does not perform max_autotune on CPU, so skip the weekly run setup
-    - cron: 0 7 * * *
   # NB: GitHub has an upper limit of 10 inputs here
   workflow_dispatch:
     inputs:

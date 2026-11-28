@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_utils import (
     gradcheck,
     HardwareClassification,
+    serialTestFile,
     TEST_XPU,
 )
 from torch.utils.cpp_extension import (
@@ -49,6 +50,10 @@ IS_LINUX = sys.platform.startswith("linux")
 # /Brepro keeps MSVC from stamping the compile time into each .obj, so the tests
 # that compare a rebuilt object byte for byte do not depend on the clock.
 BASE_CFLAGS = COMMON_MSVC_FLAGS + ["/Brepro"] if IS_WINDOWS else []
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 class TestCppExtensionImport(common.TestCase):

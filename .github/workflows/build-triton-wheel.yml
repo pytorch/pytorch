@@ -2,36 +2,7 @@
 name: Build Triton wheels
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      # NOTE: Binary build pipelines should only get triggered on release candidate builds
-      # Release candidate tags look like: v1.11.0-rc1
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-      - 'ciflow/triton_binaries/*'
-    paths:
-      - .github/workflows/build-triton-wheel.yml
-      - .github/workflows/_build-triton-wheel-linux.yml
-      - .github/workflows/_build-triton-wheel-windows.yml
-      - .github/scripts/build_triton_wheel.py
-      - .github/ci_commit_pins/triton.txt
-      - .github/scripts/windows/install_vs2022.ps1
-      - .github/scripts/windows/build_triton.bat
-      - .ci/docker/ci_commit_pins/triton.txt
-      - .ci/docker/ci_commit_pins/triton-xpu.txt
   workflow_dispatch:
-  pull_request:
-    paths:
-      - .github/workflows/build-triton-wheel.yml
-      - .github/workflows/_build-triton-wheel-linux.yml
-      - .github/workflows/_build-triton-wheel-windows.yml
-      - .github/scripts/build_triton_wheel.py
-      - .github/ci_commit_pins/triton.txt
-      - .github/scripts/windows/install_vs2022.ps1
-      - .github/scripts/windows/build_triton.bat
-      - .ci/docker/ci_commit_pins/triton.txt
-      - .ci/docker/ci_commit_pins/triton-xpu.txt
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

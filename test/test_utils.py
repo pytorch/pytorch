@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
+    serialTestFile,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
 )
@@ -65,6 +66,10 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 # mypy: disable-error-code="name-defined"
+
+
+# No other test runs beside those of this file, as in test/run_test.py: "OOM".
+pytestmark = serialTestFile()
 
 
 class RandomDatasetMock(torch.utils.data.Dataset):

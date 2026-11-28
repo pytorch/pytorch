@@ -34,7 +34,7 @@ from torch.distributed.tensor._ops._math_ops import common_reduction_strategy
 from torch.distributed.tensor._ops.utils import replicate_op_strategy
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
@@ -52,6 +52,11 @@ try:
     from torch.utils._cxx_pytree import tree_leaves
 except ImportError:
     from torch.utils._pytree import tree_leaves  # type: ignore[no-redef]
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def extract_tensor_meta(t) -> TensorMeta:

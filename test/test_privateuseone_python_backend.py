@@ -6,13 +6,17 @@ import numpy as np
 import torch
 import torch._C
 import torch._dynamo
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
 from torch.utils.backend_registration import _setup_privateuseone_for_python_backend
 
 
 _setup_privateuseone_for_python_backend("npy")
 
 aten = torch.ops.aten
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 # NOTE: From https://github.com/albanD/subclass_zoo/blob/main/new_device.py

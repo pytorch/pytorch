@@ -17,8 +17,14 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     requires_cuda_p2p_access,
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 @dataclass

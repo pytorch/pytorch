@@ -11,7 +11,13 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfHpu, TEST_XPU, xfailIf
+from torch.testing._internal.common_utils import (
+    run_tests,
+    serialTestFile,
+    skipIfHpu,
+    TEST_XPU,
+    xfailIf,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
@@ -25,6 +31,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 c10d_functional = torch.ops.c10d_functional
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestCommModeFeatures(DTensorTestBase):

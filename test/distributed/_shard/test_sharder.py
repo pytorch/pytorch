@@ -14,7 +14,11 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    run_tests,
+    serialTestFile,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     TEST_GPU_NUM,
@@ -33,6 +37,11 @@ device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 BACKEND = dist.Backend.default_device_backend_map[device_type]
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 # a simple collection of embedding bag implementation

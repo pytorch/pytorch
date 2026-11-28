@@ -10,7 +10,12 @@ import unittest.mock as mock
 
 from torch.distributed.elastic.timer import TimerServer
 from torch.distributed.elastic.timer.api import RequestQueue, TimerRequest
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import HardwareClassification, serialTestFile
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class MockRequestQueue(RequestQueue):

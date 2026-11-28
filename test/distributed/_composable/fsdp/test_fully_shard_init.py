@@ -45,7 +45,7 @@ from torch.testing._internal.common_fsdp import (
     patch_all_gather,
     patch_reduce_scatter,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, serialTestFile
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -54,6 +54,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 device_type = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestFullyShardDeviceTensor(FSDPTestMultiThread):

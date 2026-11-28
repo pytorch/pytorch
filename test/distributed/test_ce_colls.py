@@ -15,12 +15,18 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     requires_cuda_p2p_access,
     run_tests,
+    serialTestFile,
 )
 
 
 if not dist.is_available() or not dist.is_nccl_available():
     print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 # NCCL Copy Engine Collectives

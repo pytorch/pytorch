@@ -111,24 +111,6 @@ name: !{{ build_environment }}
 {%- set preview_test_if = "${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') && needs.get-preview-docker-tag.outputs.test_available == 'true' }}" %}
 
 on:
-  push:
-    {%- if branches == "nightly" %}
-    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
-    {%- endif %}
-    branches:
-      - !{{ branches }}
-    {%- if branches == "nightly" %}
-    tags:
-      # NOTE: Binary build pipelines should only get triggered on release candidate builds
-      # Release candidate tags look like: v1.11.0-rc1
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-    {%- endif %}
-{%- for label in ciflow_config.labels | sort %}
-    {%- if loop.first and branches != "nightly" %}
-    tags:
-    {%- endif %}
-      - '!{{ label }}/*'
-{%- endfor %}
   workflow_dispatch:
 
 permissions:

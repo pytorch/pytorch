@@ -2,13 +2,6 @@
 name: trunk
 
 on:
-  push:
-    branches:
-      - main
-      - release/*
-      - landchecks/*
-    tags:
-      - ciflow/trunk/*
   workflow_dispatch:
     inputs:
       jobs-to-include:
@@ -21,8 +14,6 @@ on:
         required: false
         default: ""
         type: string
-  schedule:
-    - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}

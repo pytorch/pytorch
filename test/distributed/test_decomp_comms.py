@@ -17,11 +17,20 @@ from torch._inductor.fx_passes.decomp_comms import decomp_gram_matrix_all_gather
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import HardwareClassification, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    serialTestFile,
+)
 
 
 aten = torch.ops.aten
 c10d = torch.ops._c10d_functional
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _count_ops(graph: fx.Graph, target) -> int:  # type: ignore[type-arg]

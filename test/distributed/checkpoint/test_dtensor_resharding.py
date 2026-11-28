@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
@@ -62,6 +63,11 @@ for p1 in TWO_D_PLACEMENTS:
     for p2 in TWO_D_PLACEMENTS:
         if p1 != p2:
             TWO_D_TO_TWO_D_PLACEMENTS.append((p1, p2))
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 @instantiate_parametrized_tests

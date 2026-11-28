@@ -10,12 +10,17 @@ from torch.distributed.tensor.parallel.style import (
     ParallelStyle,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, serialTestFile
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     NUM_DEVICES,
     with_comms,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class MLPListModule(torch.nn.Module):

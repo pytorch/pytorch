@@ -26,13 +26,18 @@ from torch.distributed.distributed_c10d import (
     WindowAccessType,
 )
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TEST_CUDA
 
 
 WINDOW_BACKENDS = [
     ("nccl2", "cuda"),
     ("nccl-lazy", "cuda"),
 ]
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class AbstractWindowTest:

@@ -58,6 +58,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     run_tests,
+    serialTestFile,
     skipIfRocm,
     TEST_WITH_ROCM,
     TestCase,
@@ -84,6 +85,11 @@ rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
     _RotateMethod.ALL_TO_ALL: "alltoall",
 }  # mapping from _RotateMethod enum to string
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class SDPAWrapper(torch.nn.Module):

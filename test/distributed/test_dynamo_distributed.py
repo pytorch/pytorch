@@ -52,7 +52,11 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import skipIfTorchInductor, skipIfXpu
+from torch.testing._internal.common_utils import (
+    serialTestFile,
+    skipIfTorchInductor,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -78,6 +82,11 @@ _skipIf_transformers_ge_5_2 = unittest.skipIf(
 
 
 log = logging.getLogger(__name__)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def reset_rng_state():

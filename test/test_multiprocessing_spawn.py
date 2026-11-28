@@ -14,10 +14,15 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
     run_tests,
+    serialTestFile,
     TestCase,
     parametrize,
     instantiate_parametrized_tests
 )
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 def _test_success_func(i):
     pass

@@ -12,7 +12,7 @@ import inspect
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, requires_mkl, first_sample, TEST_WITH_ROCM,
-     make_tensor, skipIfTorchDynamo)
+     make_tensor, skipIfTorchDynamo, serialTestFile)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, onlyNativeDeviceTypes,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol,
@@ -43,6 +43,11 @@ REFERENCE_NORM_MODES = (
     if version.parse(np.__version__) >= version.parse('1.20.0') and (
         not has_scipy_fft or version.parse(scipy.__version__) >= version.parse('1.6.0'))
     else (None, "ortho"))
+
+
+# No other test runs beside those of this file, as in test/run_test.py: "Cause CUDA
+# illegal memory access https://github.com/pytorch/pytorch/issues/88916".
+pytestmark = serialTestFile()
 
 
 def _complex_stft(x, *args, **kwargs):

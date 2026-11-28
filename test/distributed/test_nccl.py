@@ -48,6 +48,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_cuda_p2p_access,
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_ROCM,
     TestCase,
@@ -82,6 +83,11 @@ skip_if_rccl_lt_2_31_2 = skip_but_pass_in_sandcastle_if(
     TEST_WITH_ROCM and nccl.version() < (2, 31, 2),
     "RCCL one-sided signal ops are validated on RCCL 2.31.2 or newer",
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def patch_env(test: TestCase, **values: str) -> None:

@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -56,6 +57,11 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 _THREAD_COUNTS = {1, 2}
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def assert_state_dict_equal(

@@ -12,6 +12,7 @@ from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
+    serialTestFile,
     subtest,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -26,6 +27,11 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestInput(FSDPTestContinuous):

@@ -2,11 +2,6 @@
 name: docker-cache-rocm
 
 on:
-  workflow_run:
-    workflows: [docker-builds]
-    branches: [main, release]
-    types:
-      - completed
   workflow_dispatch:
     inputs:
       branch:

@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     subtest,
 )
 
@@ -63,6 +64,11 @@ tie_dtypes = [
     subtest(torch.float32, name="fp32"),
     subtest(torch.bfloat16, name="bf16"),
 ]
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def with_comms(func=None):

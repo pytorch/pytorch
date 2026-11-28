@@ -96,6 +96,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     recover_orig_fp32_precision,
+    serialTestFile,
     skipIfRocm,
     skipIfTorchInductor,
     TEST_WITH_ROCM,
@@ -138,6 +139,10 @@ if HAS_CUDA_AND_TRITON:
 
 
 _PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 def setUpModule():

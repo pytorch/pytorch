@@ -22,6 +22,7 @@ with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
         NoTest,
         parametrize,
         run_tests,
+        serialTestFile,
         TestCase,
     )
 
@@ -34,6 +35,10 @@ with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
     if not TEST_CUDA:
         print("CUDA not available, skipping tests", file=sys.stderr)
         TestCase = NoTest  # type: ignore[misc, assignment]
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest

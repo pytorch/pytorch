@@ -15,10 +15,15 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     skipIfTorchDynamo,
     TestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+# No other test runs beside those of this file, as in test/run_test.py: "OOM".
+pytestmark = serialTestFile()
 
 
 class TestAutocastCPU(TestAutocast):

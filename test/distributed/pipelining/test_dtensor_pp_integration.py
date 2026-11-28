@@ -32,6 +32,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
 )
 
@@ -54,6 +55,11 @@ TARGET_SEED = 123
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = dist.get_default_backend_for_device(device_type)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class RMSNorm(nn.Module):

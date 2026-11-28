@@ -53,8 +53,13 @@ from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Placement,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _get_mm_metas(M=64, K=32, N=64) -> tuple[TensorMeta, TensorMeta]:

@@ -11,6 +11,7 @@ from torch._python_dispatcher import PythonDispatcher
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 
@@ -43,6 +44,10 @@ dispatch_keys_to_check = (
     "AutogradCUDA",
     "AutogradXLA",
 )
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 def extract_dispatch_table_with_keys(table, dispatch_keys):

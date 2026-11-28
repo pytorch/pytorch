@@ -19,6 +19,7 @@ from torch.testing._internal.common_dtype import (
     integral_types_and, floating_and_complex_types_and, all_types_and, all_types,
 )
 from torch.testing._internal.common_utils import (
+    serialTestFile,
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     parametrize, serialTest, subtest,
     gradcheck, gradgradcheck,
@@ -31,6 +32,10 @@ from torch.testing._internal.common_device_type import (
     precisionOverride, skipXPUIf)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 

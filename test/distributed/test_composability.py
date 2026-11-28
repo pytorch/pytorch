@@ -32,12 +32,18 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     skipIfRocm,
 )
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = torch.distributed.get_default_backend_for_device(device_type)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 # MLP Layer

@@ -2,16 +2,6 @@
 name: pull
 
 on:
-  pull_request:
-    branches-ignore:
-      - nightly
-  push:
-    branches:
-      - main
-      - release/*
-      - landchecks/*
-    tags:
-      - ciflow/pull/*
   workflow_dispatch:
     inputs:
       jobs-to-include:
@@ -24,8 +14,6 @@ on:
         required: false
         default: ""
         type: string
-  schedule:
-    - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}

@@ -46,6 +46,7 @@ from torch.testing._internal.common_fsdp import (
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
+    serialTestFile,
     TEST_HPU,
     wrapSwapTensorsTest,
 )
@@ -63,6 +64,11 @@ from torch.testing._internal.common_fsdp import get_devtype
 
 
 device = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestReplicateForwardInputs(FSDPTestMultiThread):

@@ -11,8 +11,7 @@ name: Auto PR Triage
 # `open source` still starts a run until torchci re-runs triage through
 # `bot-retriage`; drop it from the conditions below after that.
 on:
-  pull_request_target:
-    types: [opened, reopened, ready_for_review, labeled]
+  workflow_dispatch:
 
 # GitHub keeps one pending run per group, so a burst of label events would let
 # an unrelated label's run replace the pending entry run and then skip.

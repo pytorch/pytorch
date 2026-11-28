@@ -27,10 +27,16 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
+    serialTestFile,
     set_warn_always_context,
     TEST_WITH_TSAN,
     TestCase,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _create_c10d_store_mp(is_server, server_addr, port, world_size, wait_for_workers):

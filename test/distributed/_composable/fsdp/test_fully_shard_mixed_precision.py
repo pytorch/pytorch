@@ -41,6 +41,7 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    serialTestFile,
     skipIfRocmVersionLessThan,
     TEST_CUDA,
     TEST_XPU,
@@ -55,6 +56,11 @@ from torch.utils.checkpoint import checkpoint
 
 
 device_type = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def record_copy_in_dtypes(grad_dtypes: list[tuple[torch.dtype, ...]]):

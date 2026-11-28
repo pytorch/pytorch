@@ -27,7 +27,12 @@ if not dist.is_available():
 from torch._C._distributed_c10d import BarrierOptions, FlightRecorderHook, WorkResult
 from torch.distributed.distributed_c10d import _world
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    serialTestFile,
+    TEST_CUDA,
+    TestCase,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
@@ -36,6 +41,11 @@ FR_HOOK_BACKENDS = [
     ("gloo", "cpu"),
     ("nccl2", "cuda"),
 ]
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class AbstractFlightRecorderHookTest:

@@ -12,13 +12,18 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     NUM_DEVICES,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestDecompSharding(TestCase):

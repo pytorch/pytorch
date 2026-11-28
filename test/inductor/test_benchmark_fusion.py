@@ -9,7 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import slowTest
+from torch.testing._internal.common_utils import serialTestFile, slowTest
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     GPU_TYPE,
@@ -54,6 +54,10 @@ from torch._inductor.virtualized import _choices, threadlocal
 
 
 _recording_ids = iter(range(1 << 30))
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 class RecordingFusionChoices(InductorChoices):

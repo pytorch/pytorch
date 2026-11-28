@@ -2,9 +2,6 @@
 name: inductor-A100-perf-compare
 
 on:
-  push:
-    tags:
-      - ciflow/inductor-perf-compare/*
   workflow_dispatch:
 
 concurrency:

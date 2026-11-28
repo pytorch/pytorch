@@ -4,13 +4,7 @@
 name: dtensor
 
 on:
-  push:
-    tags:
-      - ciflow/dtensor/*
   workflow_call:
-  pull_request:
-    paths:
-      - .github/workflows/dtensor.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

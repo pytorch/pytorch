@@ -17,7 +17,7 @@ from torch.distributed.tensor.parallel.style import (
     SequenceParallel,
 )
 from torch.distributed.tensor.placement_types import _Partial
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, serialTestFile
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
@@ -30,6 +30,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 c10d_functional = torch.ops.c10d_functional
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TensorParallelStyleTest(DTensorContinuousTestBase):

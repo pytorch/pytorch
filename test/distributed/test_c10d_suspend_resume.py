@@ -20,13 +20,18 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TEST_CUDA
 
 
 SUSPEND_RESUME_BACKENDS = [
     ("nccl2", "cuda", False),
     ("nccl-lazy", "cuda", True),
 ]
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _has_nccl_offload():

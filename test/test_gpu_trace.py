@@ -12,6 +12,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TEST_CUDA,
     TestCase,
 )
@@ -19,6 +20,10 @@ from torch.testing._internal.common_utils import (
 
 # NOTE: Each test needs to be run in a brand new process, to reset the registered hooks
 # and make sure the gpu streams are initialized for each test that uses them.
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest

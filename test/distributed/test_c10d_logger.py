@@ -17,7 +17,11 @@ if not dist.is_available():
 
 from torch.testing._internal.common_distributed import DistributedTestBase, TEST_SKIPS
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    run_tests,
+    serialTestFile,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 device_type = get_devtype().type
@@ -30,6 +34,11 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 WORLD_SIZE = min(4, max(2, torch.get_device_module(device_type).device_count()))
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def with_comms(func=None):

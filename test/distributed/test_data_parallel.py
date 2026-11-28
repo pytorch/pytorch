@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     dtype2prec_DONTUSE,
     gradcheck,
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
     TEST_MULTIACCELERATOR,
     TEST_XPU,
@@ -38,6 +39,11 @@ gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 _assertGradAndGradgradChecks = functools.partial(
     _assertGradAndGradgradChecks, check_batched_grad=False
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestDataParallel(TestCase):

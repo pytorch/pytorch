@@ -20,10 +20,16 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
+    serialTestFile,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
     TestCase,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 # timer is not supported on these platforms

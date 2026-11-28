@@ -19,7 +19,7 @@ from torch.distributed.tensor._utils import ExplicitRedistributionContext
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import local_map
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     DTensorTestBase,
@@ -38,6 +38,11 @@ funcol_py = torch.ops.c10d_functional
 row_wise = [Shard(0)]  # row-wise sharding placements on 1-d mesh
 col_wise = [Shard(1)]  # col-wise sharding placements on 1-d mesh
 replicate = [Replicate()]  # replicate placements on 1-d mesh
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def equal_allgather_forward(device_mesh, X, Y):

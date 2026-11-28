@@ -2,8 +2,6 @@
 name: inductor-perf-nightly-macos
 
 on:
-  schedule:
-    - cron: 0 7 * * *
   workflow_dispatch:
     inputs:
       training:
@@ -21,10 +19,6 @@ on:
         required: false
         type: string
         default: torchbench_perf_mps
-  pull_request:
-    paths:
-      - .github/workflows/inductor-perf-test-nightly-macos.yml
-      - .ci/pytorch/macos-test.sh
 
 concurrency:
   group:  ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}

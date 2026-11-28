@@ -18,8 +18,14 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
+
+
+# No other test runs beside those of this file, as in test/run_test.py: "Cause CUDA
+# OOM on ROCm".
+pytestmark = serialTestFile()
 
 
 def _num_args(fn: Callable):

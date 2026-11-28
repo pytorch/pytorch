@@ -5,7 +5,12 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.sac_estimator import SACEstimator
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    serialTestFile,
+    TEST_XPU,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -15,6 +20,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestSACEstimator(TestCase):

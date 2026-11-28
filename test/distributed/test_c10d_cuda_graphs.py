@@ -16,10 +16,15 @@ from c10d_backend_common import (
     instantiate_backend_tests,
 )
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, serialTestFile
 
 
 ASYNC_OPS = (False, True)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class AbstractCUDAGraphsTest(C10dBackendTest):

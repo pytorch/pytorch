@@ -11,9 +11,15 @@ from torch.distributed.tensor.debug import _clear_sharding_prop_cache
 from torch.testing._internal.common_utils import (
     requires_accelerator,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 @requires_accelerator

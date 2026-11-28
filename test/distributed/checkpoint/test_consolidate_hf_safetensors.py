@@ -19,7 +19,7 @@ from torch.distributed.checkpoint._consolidate_hf_safetensors import (
 from torch.distributed.checkpoint._hf_utils import _metadata_fn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Shard
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, serialTestFile
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     DTensorTestBase,
@@ -28,6 +28,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestConsolidateHFSafeTensors(DTensorContinuousTestBase):

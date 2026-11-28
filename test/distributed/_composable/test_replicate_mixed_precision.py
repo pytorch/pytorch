@@ -30,12 +30,18 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    serialTestFile,
     skipIfRocmVersionLessThan,
     TEST_HPU,
 )
 
 
 device = torch.device(get_devtype())
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):

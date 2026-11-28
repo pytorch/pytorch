@@ -10,11 +10,21 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    serialTestFile,
+    TEST_XPU,
+    TestCase,
+)
 from torch.utils.checkpoint import CheckpointError
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class MemoryDelta(ContextDecorator):

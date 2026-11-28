@@ -2,10 +2,6 @@
 name: TSan
 
 on:
-  push:
-    tags:
-      - ciflow/tsan/*
-      - ciflow/trunk/*
   workflow_dispatch:
 
 concurrency:

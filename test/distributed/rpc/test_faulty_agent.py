@@ -11,7 +11,7 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_utils import IS_CI, run_tests
+from torch.testing._internal.common_utils import IS_CI, run_tests, serialTestFile
 from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
     FaultyRpcAgentTestFixture,
 )
@@ -19,6 +19,11 @@ from torch.testing._internal.distributed.rpc_utils import (
     FAULTY_AGENT_TESTS,
     generate_tests,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 # On CircleCI these tests are already run on CPU jobs, thus to save resources do

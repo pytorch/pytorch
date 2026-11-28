@@ -10,6 +10,7 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_LINUX,
+    serialTestFile,
     skipIfTorchDynamo,
     TEST_CUDA,
     TEST_PRIVATEUSE1,
@@ -21,6 +22,10 @@ from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 # define TEST_ROCM before changing TEST_CUDA
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 @unittest.skipIf(

@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     run_tests,
+    serialTestFile,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
 )
@@ -41,6 +42,11 @@ _DISTRIBUTED_STATE_DICT_IMPLS = (
     StateDictType.LOCAL_STATE_DICT,
     StateDictType.SHARDED_STATE_DICT,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestDistributedCheckpoint(FSDPTestContinuous):

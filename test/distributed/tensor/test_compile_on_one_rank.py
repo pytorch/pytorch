@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_multigpu,
     run_tests,
+    serialTestFile,
     skipIfXpu,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -49,6 +50,11 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 device_module = torch.get_device_module(device_type)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def extract_graph(fx_g, _, graph_cell):

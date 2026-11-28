@@ -35,6 +35,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
     skipIfXpu,
     TEST_MULTIACCELERATOR,
@@ -53,6 +54,11 @@ device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 device_module = torch.get_device_module(device_type)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _device_graph():

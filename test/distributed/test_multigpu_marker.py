@@ -31,7 +31,12 @@ from torch.testing._internal.common_distributed import (
     skip_if_small_worldsize,
     TEST_SKIPS,
 )
-from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    IS_SANDCASTLE,
+    run_tests,
+    serialTestFile,
+    TestCase,
+)
 
 
 # The marker resolver lives in test/conftest.py. Make it importable whether this
@@ -45,6 +50,11 @@ from conftest import (
     _resolve_gpu_requirement,
     MultiGpuMinFilterPlugin,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _fake_item(func=None):

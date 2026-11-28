@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     slowTest,
     subtest,
     TEST_WITH_ASAN,
@@ -57,6 +58,10 @@ TEST_CUDA_IPC = (
 )  # https://github.com/pytorch/pytorch/issues/90940
 
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 class SubProcess(mp.Process):

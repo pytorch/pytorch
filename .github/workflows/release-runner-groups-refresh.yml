@@ -1,19 +1,12 @@
 name: Refresh release runner groups
 
 on:
-  push:
-    tags:
-      - v[0-9]+.[0-9]+.[0-9]+
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
   workflow_dispatch:
     inputs:
       apply:
         description: "Apply changes (otherwise dry-run)"
         type: boolean
         default: false
-  pull_request:
-    paths:
-      - .github/workflows/release-runner-groups-refresh.yml
 
 permissions:
   contents: read

@@ -27,11 +27,16 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
+    serialTestFile,
     skipIfTorchDynamo,
     slowTest,
     TEST_WITH_ROCM,
     TestCase,
 )
+
+
+# No other test runs beside those of this file, as in test/run_test.py: "OOM".
+pytestmark = serialTestFile()
 
 
 class TestSortAndSelect(TestCase):

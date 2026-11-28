@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     skipIfHpu,
     TestCase,
 )
@@ -39,6 +40,11 @@ if not dist.is_available():
     sys.exit(0)
 
 device_type = get_devtype().type
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestFakePG(TestCase):

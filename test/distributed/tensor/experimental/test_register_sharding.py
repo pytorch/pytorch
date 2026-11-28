@@ -6,7 +6,7 @@ import torch
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.experimental import register_sharding
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, serialTestFile
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -14,6 +14,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 aten = torch.ops.aten
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestRegisterSharding(DTensorTestBase):

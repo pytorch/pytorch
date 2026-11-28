@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -41,6 +42,11 @@ _c10d_functional_autograd = torch.ops._c10d_functional_autograd
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestFakeCollectives(TestCase):

@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
     TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest, decorateIf, skipIfCppFakeTensor, \
-    skipIfXpu
+    skipIfXpu, serialTestFile
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -78,6 +78,10 @@ if TEST_SCIPY:
 
 if TEST_NUMPY:
     import numpy as np
+
+
+# No other test runs beside those of this file, as in test/run_test.py.
+pytestmark = serialTestFile()
 
 
 def _graph_node_names(grad_fn):

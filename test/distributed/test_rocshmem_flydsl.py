@@ -14,6 +14,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    serialTestFile,
     skip_but_pass_in_sandcastle_if,
 )
 
@@ -30,6 +31,11 @@ if (
 
 import torch.distributed as dist
 import torch.distributed._symmetric_memory._rocshmem_flydsl as rocshmem_flydsl
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def _flydsl_available() -> bool:

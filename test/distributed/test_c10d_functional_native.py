@@ -30,11 +30,17 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_LINUX,
     run_tests,
+    serialTestFile,
     TEST_WITH_TORCHINDUCTOR,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def load_test_module(name):

@@ -24,7 +24,11 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    run_tests,
+    serialTestFile,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 device_type = torch.device(get_devtype())
@@ -38,6 +42,11 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestClipGradNorm(FSDPTestContinuous):

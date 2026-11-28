@@ -33,10 +33,16 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_LINUX,
     run_tests,
+    serialTestFile,
     TEST_WITH_ROCM,
     TestCase,
 )
 from torch.utils._triton import has_triton
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 def new_subgroups(group_size: int, pg_tag=None):

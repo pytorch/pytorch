@@ -30,9 +30,15 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import reduce_local_int
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class LocalTensorTestBase(TestCase):

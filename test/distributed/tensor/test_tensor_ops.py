@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    serialTestFile,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -34,6 +35,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     op_strategy_context,
     with_comms,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class DistTensorOpsTest(DTensorContinuousTestBase):

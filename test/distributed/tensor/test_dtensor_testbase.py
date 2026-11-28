@@ -8,13 +8,18 @@ import numpy as np
 import torch
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
 from torch.testing._internal.distributed._tensor import common_dtensor
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     DTensorTestBase,
     with_comms,
 )
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class DTensorContinuousTestBaseTest(TestCase):

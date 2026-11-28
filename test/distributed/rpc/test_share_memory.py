@@ -19,7 +19,12 @@ import torch.multiprocessing.reductions as TorchMpReductions
 from torch import multiprocessing
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import _InternalRPCPickler
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 @contextlib.contextmanager

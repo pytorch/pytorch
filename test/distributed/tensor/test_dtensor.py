@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     run_tests,
+    serialTestFile,
     skipIfHpu,
     TestCase,
 )
@@ -63,6 +64,11 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 c10d_functional = torch.ops.c10d_functional
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class DummyMLP(torch.nn.Module):

@@ -10,7 +10,12 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 from torch.distributed._tools import MemoryTracker
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTestFile, TestCase
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestMemoryTracker(TestCase):

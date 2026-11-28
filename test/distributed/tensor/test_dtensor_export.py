@@ -29,11 +29,17 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_accelerator,
     run_tests,
+    serialTestFile,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._pytree import register_pytree_node
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class SimpleModel(torch.nn.Module):

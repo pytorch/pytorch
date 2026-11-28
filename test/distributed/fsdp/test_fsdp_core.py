@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     run_tests,
+    serialTestFile,
     TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -71,6 +72,11 @@ test_name_mapping = {
     str(ShardingStrategy.NO_SHARD): "no_shard",
 }
 subtest_name = functools.partial(subtest_name, test_name_mapping)
+
+
+# No other test runs beside those of this file: test/run_test.py runs every file with
+# "distributed" in its name so.
+pytestmark = serialTestFile()
 
 
 class TestParityWithDDP(FSDPTest):

@@ -2,8 +2,7 @@
 name: Create a cherry pick from a PR
 
 on:
-  repository_dispatch:
-    types: [try-cherry-pick]
+  workflow_dispatch:
 
 jobs:
   cherry-pick:
