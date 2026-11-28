@@ -15,24 +15,24 @@ from torch._inductor.utils import run_and_get_code
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
-    IS_LINUX,
     is_navi3_arch,
     parametrize,
     patch_test_members,
     preserves_unittest_skip_marks,
     subtest,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.utils._triton import has_triton
 
 
 class MyModule(torch.nn.Module):
-    def __init__(
-        self, n_input: int, n_output: int, has_bias: bool, device=GPU_TYPE
-    ) -> None:
+    def __init__(self, n_input: int, n_output: int, has_bias: bool) -> None:
         super().__init__()
         self.linear = torch.nn.Linear(n_input, n_output, bias=has_bias)
 
@@ -68,15 +68,9 @@ class _TestDecomposeAddMM(torch.nn.Module):
         return torch.ops.aten.addmm.default(z, x, y)
 
 
-@requires_gpu
-@torch._inductor.config.patch(
-    post_grad_fusion_options={
-        "decompose_mm_pass": {},
-    }
-)
-@instantiate_parametrized_tests
-@preserves_unittest_skip_marks()
-class TestDecomposeMemMM(TestCase):
+class _DecomposeMemMMMixin:
+    """Shared tolerance and comparison helpers for Generic and Accelerator classes."""
+
     def __init__(self, method_name="runTest", methodName="runTest"):
         super().__init__(method_name, methodName)
         self.atol = 1e-3
@@ -130,42 +124,16 @@ class TestDecomposeMemMM(TestCase):
             )
         )
 
-    @parametrize(
-        "b,m,k,n,should_decompose",
-        [(10240, 2, 2, 2, True), (10240, 2, 32, 32, False), (2000, 2, 2, 2, False)],
-    )
-    def test_decompose_bmm(self, b, m, n, k, should_decompose):
-        torch._logging.set_logs(inductor=logging.DEBUG)
-        mat1 = torch.randn(b, m, k, device=GPU_TYPE).requires_grad_(True)
-        mat2 = torch.randn(b, k, n, device=GPU_TYPE).requires_grad_(True)
 
-        counters.clear()
-
-        module = MyModule2().to(GPU_TYPE)
-        traced = torch.compile(module)
-        input = [mat1, mat2]
-        ref = module(*input)
-        res = traced(*input)
-
-        self.compare_pred(module, traced, input)
-
-        expected_val = 1 if should_decompose and HAS_GPU_AND_TRITON else 0
-        self.assertEqual(
-            counters["inductor"]["decompose_bmm"],
-            expected_val,
-        )
-
-        ref.sum().backward()
-        res.sum().backward()
-        self.compare_parameters(module, traced)
-        self.compare_gradients(module, traced)
-
-        expected_val = 3 if should_decompose and HAS_GPU_AND_TRITON else 0
-        self.assertEqual(
-            counters["inductor"]["decompose_bmm"],
-            expected_val,
-        )
-        counters.clear()
+@torch._inductor.config.patch(
+    post_grad_fusion_options={
+        "decompose_mm_pass": {},
+    }
+)
+@instantiate_parametrized_tests
+@preserves_unittest_skip_marks()
+class TestDecomposeMemMMGeneric(_DecomposeMemMMMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize(
         "b,m,k,n,should_decompose",
@@ -192,16 +160,95 @@ class TestDecomposeMemMM(TestCase):
 
     @parametrize(
         "m,k,n, should_decompose",
-        [(20480, 5, 2, True), (20480, 32, 2, False), (2048, 2, 2, False)],
+        [(1, 64, 16, True), (2, 64, 16, False), (1, 64, 32, True)],
     )
-    @parametrize("has_bias", [True, False])
-    def test_decompose_linear(self, m, n, k, has_bias, should_decompose):
+    def test_decompose_mm_cpu(self, m, n, k, should_decompose):
         torch._logging.set_logs(inductor=logging.DEBUG)
-        input = torch.randn(m, k, device=GPU_TYPE).requires_grad_(True)
+        mat1 = torch.randn(m, k)
+        mat2 = torch.randn(k, n)
+        counters.clear()
+
+        module = MyModule3()
+        traced = torch.compile(module)
+        input = [mat1, mat2]
+        self.compare_pred(module, traced, input)
+
+        expected_val = 1 if should_decompose else 0
+        self.assertEqual(
+            counters["inductor"]["decompose_mm"],
+            expected_val,
+        )
+        counters.clear()
+
+
+@preserves_unittest_skip_marks()
+class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
+    """Decomposition behavior on accelerator devices."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        # config.patch cannot be a class decorator here: it returns a subclass
+        # whose __dict__ holds no test methods, so instantiate_device_type_tests
+        # would silently collect zero tests.
+        ctx = torch._inductor.config.patch(
+            post_grad_fusion_options={"decompose_mm_pass": {}}
+        )
+        ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+
+    @parametrize(
+        "b,m,k,n,should_decompose",
+        [(10240, 2, 2, 2, True), (10240, 2, 32, 32, False), (2000, 2, 2, 2, False)],
+    )
+    @skipIf(not has_triton(), "requires triton")
+    def test_decompose_bmm(self, device, b, m, n, k, should_decompose):
+        torch._logging.set_logs(inductor=logging.DEBUG)
+        mat1 = torch.randn(b, m, k, device=device).requires_grad_(True)
+        mat2 = torch.randn(b, k, n, device=device).requires_grad_(True)
 
         counters.clear()
 
-        module = MyModule(k, n, has_bias).to(GPU_TYPE)
+        module = MyModule2().to(device)
+        traced = torch.compile(module)
+        input = [mat1, mat2]
+        ref = module(*input)
+        res = traced(*input)
+
+        self.compare_pred(module, traced, input)
+
+        expected_val = 1 if should_decompose and has_triton() else 0
+        self.assertEqual(
+            counters["inductor"]["decompose_bmm"],
+            expected_val,
+        )
+
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_parameters(module, traced)
+        self.compare_gradients(module, traced)
+
+        expected_val = 3 if should_decompose and has_triton() else 0
+        self.assertEqual(
+            counters["inductor"]["decompose_bmm"],
+            expected_val,
+        )
+        counters.clear()
+
+    @parametrize(
+        "m,k,n, should_decompose",
+        [(20480, 5, 2, True), (20480, 32, 2, False), (2048, 2, 2, False)],
+    )
+    @parametrize("has_bias", [True, False])
+    @skipIf(not has_triton(), "requires triton")
+    def test_decompose_linear(self, device, m, n, k, has_bias, should_decompose):
+        torch._logging.set_logs(inductor=logging.DEBUG)
+        input = torch.randn(m, k, device=device).requires_grad_(True)
+
+        counters.clear()
+
+        module = MyModule(k, n, has_bias).to(device)
         traced = torch.compile(module)
         input = [input]
         ref = module(*input)
@@ -209,7 +256,7 @@ class TestDecomposeMemMM(TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and HAS_GPU_AND_TRITON else 0
+        expected_val = 1 if should_decompose and has_triton() else 0
         if has_bias:
             self.assertEqual(
                 counters["inductor"]["decompose_addmm"],
@@ -247,16 +294,19 @@ class TestDecomposeMemMM(TestCase):
         [(20480, 5, 2, True), (20480, 32, 2, False), (2048, 2, 2, False)],
     )
     @parametrize("has_bias", [True, False])
+    @skipIf(not has_triton(), "requires triton")
     def test_decompose_linear_mixed_precision(
-        self, m, n, k, has_bias, should_decompose
+        self, device, m, n, k, has_bias, should_decompose
     ):
-        with torch.amp.autocast(device_type=GPU_TYPE, dtype=torch.bfloat16):
+        with torch.amp.autocast(
+            device_type=torch.device(device).type, dtype=torch.bfloat16
+        ):
             torch._logging.set_logs(inductor=logging.DEBUG)
-            input = torch.randn(m, k, device=GPU_TYPE).requires_grad_(True)
+            input = torch.randn(m, k, device=device).requires_grad_(True)
 
             counters.clear()
 
-            module = MyModule(k, n, has_bias).to(GPU_TYPE)
+            module = MyModule(k, n, has_bias).to(device)
             traced = torch.compile(module)
             input = [input]
             ref = module(*input)
@@ -264,7 +314,7 @@ class TestDecomposeMemMM(TestCase):
 
             self.compare_pred(module, traced, input)
 
-            expected_val = 1 if should_decompose and HAS_GPU_AND_TRITON else 0
+            expected_val = 1 if should_decompose and has_triton() else 0
             if has_bias:
                 self.assertEqual(
                     counters["inductor"]["decompose_addmm"],
@@ -294,14 +344,15 @@ class TestDecomposeMemMM(TestCase):
         [(20480, 5, 2, True), (20480, 32, 2, False), (2048, 2, 2, False)],
     )
     @parametrize("has_bias", [True, False])
-    def test_decompose_mm(self, m, n, k, has_bias, should_decompose):
+    @skipIf(not has_triton(), "requires triton")
+    def test_decompose_mm(self, device, m, n, k, has_bias, should_decompose):
         torch._logging.set_logs(inductor=logging.DEBUG)
-        mat1 = torch.randn(m, k, device=GPU_TYPE).requires_grad_(True)
-        mat2 = torch.randn(k, n, device=GPU_TYPE).requires_grad_(True)
+        mat1 = torch.randn(m, k, device=device).requires_grad_(True)
+        mat2 = torch.randn(k, n, device=device).requires_grad_(True)
 
         counters.clear()
 
-        module = MyModule3().to(GPU_TYPE)
+        module = MyModule3().to(device)
         traced = torch.compile(module)
         input = [mat1, mat2]
         ref = module(*input)
@@ -309,7 +360,7 @@ class TestDecomposeMemMM(TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and HAS_GPU_AND_TRITON else 0
+        expected_val = 1 if should_decompose and has_triton() else 0
         self.assertEqual(
             counters["inductor"]["decompose_mm"],
             expected_val,
@@ -321,31 +372,9 @@ class TestDecomposeMemMM(TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
 
-        expected_val = 1 if should_decompose and HAS_GPU_AND_TRITON else 0
+        expected_val = 1 if should_decompose and has_triton() else 0
         self.assertEqual(
             counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
-            expected_val,
-        )
-        counters.clear()
-
-    @parametrize(
-        "m,k,n, should_decompose",
-        [(1, 64, 16, True), (2, 64, 16, False), (1, 64, 32, True)],
-    )
-    def test_decompose_mm_cpu(self, m, n, k, should_decompose):
-        torch._logging.set_logs(inductor=logging.DEBUG)
-        mat1 = torch.randn(m, k)
-        mat2 = torch.randn(k, n)
-        counters.clear()
-
-        module = MyModule3()
-        traced = torch.compile(module)
-        input = [mat1, mat2]
-        self.compare_pred(module, traced, input)
-
-        expected_val = 1 if should_decompose else 0
-        self.assertEqual(
-            counters["inductor"]["decompose_mm"],
             expected_val,
         )
         counters.clear()
@@ -363,15 +392,20 @@ class TestDecomposeMemMM(TestCase):
         [(20480, 5, 2, True), (20480, 32, 2, False), (2048, 2, 2, False)],
     )
     @parametrize("has_bias", [True, False])
-    def test_decompose_mm_mixed_precision(self, m, n, k, has_bias, should_decompose):
-        with torch.amp.autocast(device_type=GPU_TYPE, dtype=torch.bfloat16):
+    @skipIf(not has_triton(), "requires triton")
+    def test_decompose_mm_mixed_precision(
+        self, device, m, n, k, has_bias, should_decompose
+    ):
+        with torch.amp.autocast(
+            device_type=torch.device(device).type, dtype=torch.bfloat16
+        ):
             torch._logging.set_logs(inductor=logging.DEBUG)
-            mat1 = torch.randn(m, k, device=GPU_TYPE).requires_grad_(True)
-            mat2 = torch.randn(k, n, device=GPU_TYPE).requires_grad_(True)
+            mat1 = torch.randn(m, k, device=device).requires_grad_(True)
+            mat2 = torch.randn(k, n, device=device).requires_grad_(True)
 
             counters.clear()
 
-            module = MyModule3().to(GPU_TYPE)
+            module = MyModule3().to(device)
             traced = torch.compile(module)
             input = [mat1, mat2]
             ref = module(*input)
@@ -379,7 +413,7 @@ class TestDecomposeMemMM(TestCase):
 
             self.compare_pred(module, traced, input)
 
-            expected_val = 1 if should_decompose and HAS_GPU_AND_TRITON else 0
+            expected_val = 1 if should_decompose and has_triton() else 0
             self.assertEqual(
                 counters["inductor"]["decompose_mm"],
                 expected_val,
@@ -391,25 +425,23 @@ class TestDecomposeMemMM(TestCase):
             self.compare_parameters(module, traced)
             self.compare_gradients(module, traced)
 
-            expected_val = 1 if should_decompose and HAS_GPU_AND_TRITON else 0
+            expected_val = 1 if should_decompose and has_triton() else 0
             self.assertEqual(
                 counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
                 expected_val,
             )
             counters.clear()
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/153736")
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/153735")
     @unittest.skip
     @parametrize("m,k,n, should_decompose", [(20480, 5, 2, True)])
     @parametrize("has_bias", [True, False])
-    def test_dynamic_shape(self, m, n, k, has_bias, should_decompose):
+    def test_dynamic_shape(self, device, m, n, k, has_bias, should_decompose):
         torch._logging.set_logs(inductor=logging.DEBUG)
-        input = torch.randn(m, k, device=GPU_TYPE).requires_grad_(True)
+        input = torch.randn(m, k, device=device).requires_grad_(True)
 
         counters.clear()
 
-        module = MyModule(k, n, has_bias).to(GPU_TYPE)
+        module = MyModule(k, n, has_bias).to(device)
         traced = torch.compile(module, dynamic=True)
         input = [input]
         ref = module(*input)
@@ -417,7 +449,7 @@ class TestDecomposeMemMM(TestCase):
 
         self.compare_pred(module, traced, input)
 
-        expected_val = 1 if should_decompose and HAS_GPU_AND_TRITON else 0
+        expected_val = 1 if should_decompose and has_triton() else 0
         if has_bias:
             self.assertEqual(
                 counters["inductor"]["decompose_addmm"],
@@ -430,9 +462,7 @@ class TestDecomposeMemMM(TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
 
-        expected_val = 0
-        if HAS_GPU_AND_TRITON:
-            expected_val = 1 if has_bias else 2
+        expected_val = (1 if has_bias else 2) if has_triton() else 0
 
         self.assertEqual(
             counters["inductor"]["decompose_mm"],
@@ -440,13 +470,14 @@ class TestDecomposeMemMM(TestCase):
         )
         counters.clear()
 
-    def test_realize_input(self):
+    @skipIf(not has_triton(), "requires triton")
+    def test_realize_input(self, device):
         m = 20480
         k = 5
         n = 2
         torch._logging.set_logs(inductor=logging.DEBUG)
-        input1 = torch.randn(m, k, device=GPU_TYPE).T.contiguous()
-        input2 = torch.randn(k, n, device=GPU_TYPE)
+        input1 = torch.randn(m, k, device=device).T.contiguous()
+        input2 = torch.randn(k, n, device=device)
 
         @torch.compile()
         def foo(x, y):
@@ -457,15 +488,15 @@ class TestDecomposeMemMM(TestCase):
         # two kernels generated
         FileCheck().check_count(".run(", 2, exactly=True).run(code[0])
 
-    def test_check_device(self):
+    def test_check_device(self, device):
         m = 5
         k = 5
         n = 2
         torch._logging.set_logs(inductor=logging.DEBUG)
 
-        input1 = torch.randn(m, k, device=GPU_TYPE)
-        input2 = torch.randn(k, n, device=GPU_TYPE)
-        self.assertTrue(check_device(input1, input2, device=GPU_TYPE))
+        input1 = torch.randn(m, k, device=device)
+        input2 = torch.randn(k, n, device=device)
+        self.assertTrue(check_device(input1, input2, device=torch.device(device).type))
         self.assertFalse(check_device(input1, input2, device="cpu"))
 
         input1 = torch.randn(m, k)
@@ -473,7 +504,7 @@ class TestDecomposeMemMM(TestCase):
         self.assertTrue(check_device(input1, input2, device="cpu"))
         self.assertFalse(check_device(input1, input2))
 
-        input1 = torch.randn(m, k, device=GPU_TYPE)
+        input1 = torch.randn(m, k, device=device)
         input2 = torch.randn(k, n)
         self.assertFalse(check_device(input1, input2, device="gpu"))
         self.assertFalse(check_device(input1, input2, device="cpu"))
@@ -485,15 +516,16 @@ class TestDecomposeMemMM(TestCase):
             "decompose_mm_pass": {"skip_dynamic_shape_dim_check": True},
         }
     )
-    def test_dynamic_shape_decompose_addmm(self):
+    @skipIf(not has_triton(), "requires triton")
+    def test_dynamic_shape_decompose_addmm(self, device):
         m, k, n = 19494144, 8, 8
-        input = torch.randn(m, k, device=GPU_TYPE).requires_grad_(False)
-        weight = torch.randn(k, n, device=GPU_TYPE).requires_grad_(False)
-        bias = torch.randn(n, device=GPU_TYPE).requires_grad_(False)
+        input = torch.randn(m, k, device=device).requires_grad_(False)
+        weight = torch.randn(k, n, device=device).requires_grad_(False)
+        bias = torch.randn(n, device=device).requires_grad_(False)
 
         counters.clear()
 
-        module = _TestDecomposeAddMM().to(GPU_TYPE)
+        module = _TestDecomposeAddMM().to(device)
         traced = torch.compile(module, dynamic=True)
         input = [bias, input, weight]
 
@@ -509,8 +541,10 @@ class TestDecomposeMemMM(TestCase):
 class TestDecomposeBmmCpuDynamicShape(TestCase):
     """CPU bmm decomposition when the batch dim is symbolic.
 
-    Kept out of TestDecomposeMemMM because these cases need no GPU.
+    Kept out of TestDecomposeMemMMAccelerator because these cases need no GPU.
     """
+
+    hw_classification = HardwareClassification.CPU
 
     _ENABLED = {"decompose_mm_pass": {"bmm_skip_dynamic_shape_dim_check": True}}
     _DISABLED = {"decompose_mm_pass": {}}
@@ -603,6 +637,8 @@ class TestDecomposeBmmCpuDynamicShape(TestCase):
 
 
 class TestDecomposeAddmmScalars(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Dispatch drops kwargs equal to the int default, so explicit defaults are floats
     # to keep them in the graph the pattern sees.
     @parametrize(
@@ -634,13 +670,22 @@ class TestDecomposeAddmmScalars(TestCase):
         args = (bias, mat1, mat2)
         counters.clear()
         self.assertEqual(torch.compile(fn)(*args), fn(*args), rtol=1e-3, atol=1e-3)
-        self.assertEqual(counters["inductor"]["decompose_addmm"], int(should_decompose))
+        self.assertEqual(
+            counters["inductor"]["decompose_addmm"],
+            int(should_decompose),
+        )
 
 
 instantiate_device_type_tests(
     TestDecomposeAddmmScalars,
     globals(),
-    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestDecomposeMemMMAccelerator,
+    globals(),
+    except_for="cpu",
     allow_xpu=True,
 )
 
