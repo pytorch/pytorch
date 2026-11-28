@@ -27,14 +27,95 @@ layernorm_configs = op_bench.cross_product_configs(
     tags=["long"],
 )
 
+# Row shapes from recommendation models, as [1, rows, N] or [B, M, N]: rms_norm
+# rows of at most one warp (N / 4 <= 32), long rows on each side of N = 32768
+# (also at 512 rows), and wide-row controls.
+rmsnorm_list = op_bench.op_list(
+    attr_names=["op_name", "op_func"],
+    attrs=[
+        ["RMSNorm", nn.RMSNorm],
+    ],
+)
+
+rmsnorm_row_shape_configs = op_bench.config_list(
+    attr_names=["B", "M", "K", "dtype"],
+    attrs=[
+        [11081, 64, 52, torch.bfloat16],
+        [6812, 64, 104, torch.bfloat16],
+        [68, 80, 52, torch.bfloat16],
+        [1, 17, 212992, torch.bfloat16],
+        [1, 17, 131072, torch.bfloat16],
+        [1, 17, 65536, torch.bfloat16],
+        [1, 17, 32768, torch.bfloat16],
+        [1, 17, 16384, torch.bfloat16],
+        [1, 512, 212992, torch.bfloat16],
+        [6561, 1, 1024, torch.bfloat16],
+        [1, 17408, 1152, torch.float],
+        [1, 212329, 512, torch.bfloat16],
+        [1, 512, 32768, torch.bfloat16],
+        [1, 512, 16384, torch.bfloat16],
+    ],
+    cross_product_configs={"device": ["cuda"]},
+    tags=["row_shapes"],
+)
+
+# Both ops over narrow widths (N / 4 = 13 to 32 vectors per row) at two row
+# counts, plus N = 256, 384 and 512 rows as controls.
+layernorm_row_shape_configs = op_bench.cross_product_configs(
+    B=[1],
+    M=[212329, 709184],
+    K=[52, 96, 104, 120, 128, 256],
+    device=["cuda"],
+    dtype=[torch.bfloat16],
+    tags=["row_shapes"],
+) + op_bench.config_list(
+    attr_names=["B", "M", "K", "dtype"],
+    attrs=[
+        [1, 24266, 384, torch.bfloat16],
+        [1, 24266, 512, torch.bfloat16],
+        [16384, 13, 256, torch.bfloat16],
+    ],
+    cross_product_configs={"device": ["cuda"]},
+    tags=["row_shapes"],
+)
+
+
+# layer_norm long rows on each side of N = 32768 (inputs of at most 64 MiB).
+layernorm_only_list = op_bench.op_list(
+    attr_names=["op_name", "op_func"],
+    attrs=[
+        ["LayerNorm", nn.LayerNorm],
+    ],
+)
+
+layernorm_long_row_configs = op_bench.config_list(
+    attr_names=["B", "M", "K", "dtype"],
+    attrs=[
+        [1, 17, 212992, torch.bfloat16],
+        [1, 17, 212992, torch.half],
+        [1, 17, 212992, torch.float],
+        [1, 17, 65536, torch.bfloat16],
+        [1, 17, 32768, torch.bfloat16],
+        [1, 17, 16384, torch.bfloat16],
+        [1, 64, 65536, torch.bfloat16],
+        [1, 512, 32768, torch.bfloat16],
+        [1, 512, 32768, torch.half],
+        [1, 512, 32768, torch.float],
+    ],
+    cross_product_configs={"device": ["cuda"]},
+    tags=["row_shapes"],
+)
+
 
 class LayerNormBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, op_func, device, B, M, K):
+    def init(self, op_func, device, B, M, K, dtype=torch.float):
         self.inputs = {
-            "input": torch.rand(B, M, K, device=device, requires_grad=self.auto_set())
+            "input": torch.rand(
+                B, M, K, device=device, dtype=dtype, requires_grad=self.auto_set()
+            )
         }
         # normalized_shape is the last dimension (hidden dim K)
-        self.op_func = op_func(K, device=device)
+        self.op_func = op_func(K, device=device, dtype=dtype)
         self.set_module_name(op_func.__name__)
 
     def forward(self, input):
@@ -44,6 +125,24 @@ class LayerNormBenchmark(op_bench.TorchBenchmarkBase):
 op_bench.generate_pt_tests_from_op_list(
     layernorm_list,
     layernorm_configs,
+    LayerNormBenchmark,
+)
+
+op_bench.generate_pt_tests_from_op_list(
+    rmsnorm_list,
+    rmsnorm_row_shape_configs,
+    LayerNormBenchmark,
+)
+
+op_bench.generate_pt_tests_from_op_list(
+    layernorm_list,
+    layernorm_row_shape_configs,
+    LayerNormBenchmark,
+)
+
+op_bench.generate_pt_tests_from_op_list(
+    layernorm_only_list,
+    layernorm_long_row_configs,
     LayerNormBenchmark,
 )
 
