@@ -2314,16 +2314,19 @@ impl Act<'_> {
             // They read their last operand into the container before it.
             LIST_EXTEND | SET_UPDATE | DICT_UPDATE | DICT_MERGE => reads::used(&[a(ins.args.len() - 1)]),
             CALL_FUNCTION_EX => {
+                let kwargs = if ins.args.len() > 2 { a(2) } else { std::ptr::null_mut() };
                 if reads::reads_args(a(0)) {
                     let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
                     reads::used(&all);
                     reads::spread(a(1));
+                    // What the callee reads by its operands, as a plain
+                    // call of it is told (and what it built).
+                    reads::call_starred(a(0), a(1), kwargs, result, ran);
                 } else {
                     reads::called(a(0));
                     reads::starred(a(1));
+                    reads::built_starred(a(0), a(1), kwargs, result);
                 }
-                let kwargs = if ins.args.len() > 2 { a(2) } else { std::ptr::null_mut() };
-                reads::built_starred(a(0), a(1), kwargs, result);
             }
             _ => {
                 let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();

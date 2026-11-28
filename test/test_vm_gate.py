@@ -22275,6 +22275,14 @@ EFFECTS_OUTSIDE_BY_KEY = {
     **EFFECTS_BY_KEY,
     **dict.fromkeys(EFFECTS_PLAIN_KEYS, "outside"),
 }
+# `del d[K]` on an OrderedDict looks K up once more at the trace, and the
+# engine looks up only a key that is a str or an int itself: with any other
+# key the OrderedDict is read whole, behind the write, and the trace is
+# refused.
+EFFECTS_ORDERED_DELETE = {
+    **EFFECTS_BY_KEY,
+    **dict.fromkeys(("strsub", "tuple", "plainobj"), "whole after changing it"),
+}
 # By the kind of the index: an int, a negative int, a bool, an object with
 # an __index__.
 EFFECTS_BY_INDEX = {
@@ -22348,7 +22356,7 @@ EFFECTS_WRITES = {
         "delattr": EFFECTS_BUILTIN,
         "dict_item": EFFECTS_BY_KEY,
         "dict_call": EFFECTS_BY_KEY,
-        "ordered_item": EFFECTS_BY_KEY,
+        "ordered_item": EFFECTS_ORDERED_DELETE,
         "list_item": EFFECTS_BY_INDEX,
         "list_call": EFFECTS_BY_INDEX,
     },
@@ -22475,6 +22483,422 @@ class TestVmEffectsWrites(TestCase):
         self.assertEqual((kind, cause), ("RuntimeError", "IndexError"))
         self.assertIn("could not be", text)
         self.assertEqual([state for state, _ in found["rows"]], ["refused"])
+
+
+# What the engine looks up itself: a name on an object, a key in a dict.
+
+
+class LookupStr(str):
+    __slots__ = ()
+
+
+class LookupEnum(enum.StrEnum):
+    V = "v"
+
+
+class LookupOwnCode(str):
+    __slots__ = ()
+
+    # Hashed and compared by code of the program that writes nothing.
+    def __hash__(self):
+        return str.__hash__(self)
+
+    def __eq__(self, other):
+        return str.__eq__(self, other)
+
+
+LOOKUP_COUNTS = collections.Counter()
+
+
+class LookupCountedStr(str):
+    __slots__ = ()
+
+    def __hash__(self):
+        LOOKUP_COUNTS["hash"] += 1
+        return str.__hash__(self)
+
+    def __eq__(self, other):
+        LOOKUP_COUNTS["eq"] += 1
+        return str.__eq__(self, other)
+
+
+class LookupCountedInt(int):
+    def __hash__(self):
+        LOOKUP_COUNTS["hash"] += 1
+        return int.__hash__(self)
+
+    def __eq__(self, other):
+        LOOKUP_COUNTS["eq"] += 1
+        return int.__eq__(self, other)
+
+
+class LookupModule(torch.nn.Module):
+    pass
+
+
+class LookupPlain:
+    pass
+
+
+class LookupOther:
+    pass
+
+
+class LookupSlotted:
+    __slots__ = ("v", "w")
+
+
+# The names: a str, and three that are instances of a subclass of str.
+LOOKUP_NAMES = {
+    "a_str": lambda: "v",
+    "of_a_subclass_of_str": lambda: LookupStr("v"),
+    "a_StrEnum_member": lambda: LookupEnum.V,
+    "of_a_subclass_that_hashes_itself": lambda: LookupOwnCode("v"),
+}
+
+# The objects a name is looked up on.
+LOOKUP_HOLDERS = {
+    "a_module": LookupModule,
+    "a_plain_object": LookupPlain,
+    "an_object_with_slots": LookupSlotted,
+    "a_class": lambda: type("LookupKlass", (), {}),
+    "a_python_module": lambda: types.ModuleType("lookup_module"),
+}
+
+LOOKUP_HEAD = (
+    "def NAME(x):\n    y = x.sin() * 2 + 1\n    out = (y * 3 + 1).cos().tanh().exp()\n"
+)
+
+# The calls of C code that look the name N up on HELD: the end of the
+# function, and what an exact str gets there: "checked" (the lookup is in a
+# region, and a change of what it finds is a miss), or None (no region is
+# promised: C code that calls for the run, a callee with no rule).
+LOOKUP_BY_NAME = {
+    "getattr": ("    return out, getattr(HELD, N)\n", "checked"),
+    "getattr with a default": ("    return out, getattr(HELD, N, None)\n", "checked"),
+    "hasattr": ("    return out, hasattr(HELD, N)\n", "checked"),
+    "object.__getattribute__": ("    return out, GENERIC(HELD, N)\n", "checked"),
+    "the bound __getattribute__": ("    return out, HELD.__getattribute__(N)\n", None),
+    "the class's __getattribute__": (
+        "    return out, type(HELD).__getattribute__(HELD, N)\n",
+        None,
+    ),
+    "a starred getattr": ("    return out, getattr(*(HELD, N))\n", "checked"),
+    "getattr starred a global tuple": (
+        "    return out, getattr(*STARRED)\n",
+        "checked",
+    ),
+    "getattr starred a global list": ("    return out, getattr(*LISTED)\n", "checked"),
+    "getattr starred a dict": ("    return out, getattr(*KEYED)\n", None),
+    "a partial of getattr": (
+        "    return out, functools.partial(getattr, HELD)(N)\n",
+        None,
+    ),
+    "a global partial of getattr": ("    return out, PARTIAL(N)\n", None),
+    "a global partial of hasattr": ("    return out, HAS(N)\n", None),
+    "a method object of getattr": ("    return out, BOUND(N)\n", None),
+    "map of getattr": ("    return out, list(map(getattr, [HELD], [N]))\n", None),
+    "an attrgetter": ("    return out, operator.attrgetter(N)(HELD)\n", None),
+    "a global attrgetter": ("    return out, GETTER(HELD)\n", None),
+}
+
+# The same on the object's __dict__, as a key.
+LOOKUP_IN_DICT = {
+    "an item of __dict__": "    return out, HELD.__dict__[N]\n",
+    "get of __dict__": "    return out, HELD.__dict__.get(N)\n",
+    "in __dict__": "    return out, N in HELD.__dict__\n",
+    "an item of vars": "    return out, vars(HELD)[N]\n",
+}
+
+# A key looked up in the global dict D.
+LOOKUP_BY_KEY = {
+    "an item": "    return out, D[N]\n",
+    "in": "    return out, N in D\n",
+    "get": "    return out, D.get(N)\n",
+    "get with a default": "    return out, D.get(N, None)\n",
+    "dict.__getitem__": "    return out, dict.__getitem__(D, N)\n",
+    "__contains__": "    return out, D.__contains__(N)\n",
+    "a starred get": "    return out, dict.get(*(D, N))\n",
+    "a deletion": "    del D[N]\n    return out, len(D)\n",
+}
+
+# A question about the class of HELD, through the doors of LOOKUP_BY_NAME.
+LOOKUP_QUESTIONS = {
+    "isinstance": ("    return out, isinstance(HELD, KLASS)\n", True),
+    "a starred isinstance": ("    return out, isinstance(*(HELD, KLASS))\n", True),
+    "isinstance starred a global tuple": ("    return out, isinstance(*ASKED)\n", True),
+    "a starred type": ("    return out, type(*(HELD,)) is KLASS\n", True),
+    "a partial of isinstance": (
+        "    return out, functools.partial(isinstance, HELD)(KLASS)\n",
+        False,
+    ),
+    "a global partial of isinstance": ("    return out, IS(KLASS)\n", False),
+    "a global partial of type": ("    return out, KIND() is KLASS\n", False),
+}
+
+LOOKUP_IDS = itertools.count()
+
+
+def lookup_function(tail, space):
+    name = f"lookup_function_{next(LOOKUP_IDS)}"
+    space = dict(space, functools=functools, operator=operator)
+    exec((LOOKUP_HEAD + tail).replace("NAME", name), space)
+    return space[name]
+
+
+def lookup_space(held, name):
+    return {
+        "HELD": held,
+        "N": name,
+        "GENERIC": object.__getattribute__,
+        "STARRED": (held, name),
+        "LISTED": [held, name],
+        "KEYED": {held: 0, name: 0},
+        "PARTIAL": functools.partial(getattr, held),
+        "HAS": functools.partial(hasattr, held),
+        "BOUND": types.MethodType(getattr, held),
+        "GETTER": operator.attrgetter(name),
+    }
+
+
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmLookups(TestCase):
+    """A region is entered while what its trace looked up is found again,
+    and the engine finds it again by looking it up itself: an attribute by
+    its name, an item of a dict by its key. It does so only where the lookup
+    is one it can make without a class of the program's taking part: a name
+    that is a str itself (an instance of a subclass of str, a StrEnum member,
+    is hashed and compared as its class says), handed to C code by an
+    instruction that shows which operand is which, and a str or an int key
+    in a dict that holds only such keys. A lookup by any other name is no
+    region; an item under any other key, or of a dict that holds another
+    kind of key, is the dict whole, compared by what it holds; and a region
+    never runs in place of a lookup that would run code of the program."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def same(self, got, want, msg):
+        if isinstance(want, Exception):
+            self.assertIs(type(got), type(want), msg=f"{msg}: {got!r}")
+            self.assertEqual(str(got), str(want), msg=msg)
+            return
+        self.assertIs(type(got), tuple, msg=msg)
+        self.assertEqual(got[0], want[0], atol=0, rtol=0, msg=msg)
+        self.assertEqual(repr(got[1:]), repr(want[1:]), msg=msg)
+
+    def sweep(self, device, fn, change, counted=False):
+        """Ten calls, `change(other)` before each with `other` true on calls
+        6 and 7: the function's region runs by call, and its rows. With
+        ``counted``, the code of the program's classes runs as often under
+        torch.vm as in eager on every call."""
+        compiled = vm(fn, passes=CHECKS_EARLY)
+        runs = []
+        for call in range(10):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            change(call in (6, 7))
+            before = checks_region_runs(compiled, fn)
+            LOOKUP_COUNTS.clear()
+            got = checks_outcome(compiled, x)
+            under_vm = dict(LOOKUP_COUNTS)
+            runs.append(checks_region_runs(compiled, fn) - before)
+            change(call in (6, 7))
+            LOOKUP_COUNTS.clear()
+            want = checks_outcome(fn, x)
+            self.same(got, want, f"call {call}: {got!r} {want!r}")
+            if counted:
+                self.assertEqual(under_vm, dict(LOOKUP_COUNTS), msg=f"call {call}")
+        return runs, [r for r in vm.regions(compiled) if r["function"] == fn.__name__]
+
+    def checked(self, runs, rows):
+        """The lookup was in a region, and what it finds changed on call 6."""
+        self.assertEqual(
+            (runs[5], runs[6], runs[8:]), (1, 0, [1, 1]), msg=f"{runs} {rows}"
+        )
+
+    @parametrize("holder", list(LOOKUP_HOLDERS))
+    @checks_isolated
+    def test_a_name_is_looked_up_only_as_a_str_itself(self, device, holder):
+        for kind, (door, (tail, promised)) in itertools.product(
+            LOOKUP_NAMES, LOOKUP_BY_NAME.items()
+        ):
+            for presence in (False, True):
+                if presence and "hasattr" not in door and "default" not in door:
+                    continue
+                if not presence and "hasattr" in door:
+                    continue
+                with self.subTest(kind=kind, door=door, presence=presence):
+                    held, name = LOOKUP_HOLDERS[holder](), LOOKUP_NAMES[kind]()
+
+                    def change(other, held=held, presence=presence):
+                        if not presence:
+                            held.v = 2 if other else 1
+                        elif other:
+                            held.v = 1
+                        elif hasattr(held, "v"):
+                            del held.v
+
+                    fn = lookup_function(tail, lookup_space(held, name))
+                    runs, rows = self.sweep(device, fn, change)
+                    msg = f"{runs} {rows}"
+                    # (With the attribute absent, the lookup on a module
+                    # enters nn.Module's __getattr__ for the first time: an
+                    # instruction no trace gets to.)
+                    traced = promised == "checked" and not (
+                        presence and holder == "a_module"
+                    )
+                    if traced and kind == "a_str":
+                        self.checked(runs, rows)
+                    elif traced:
+                        # The trace says why it is no region.
+                        whys = " ".join(r["why"] or "" for r in rows)
+                        self.assertIn("by a name that is a Lookup", whys, msg=msg)
+
+    @parametrize(
+        "holder", [h for h in LOOKUP_HOLDERS if "slots" not in h and "class" not in h]
+    )
+    @checks_isolated
+    def test_a_key_of_the_object_s_dict(self, device, holder):
+        for kind, (door, tail) in itertools.product(
+            LOOKUP_NAMES, LOOKUP_IN_DICT.items()
+        ):
+            with self.subTest(kind=kind, door=door):
+                held, name = LOOKUP_HOLDERS[holder](), LOOKUP_NAMES[kind]()
+
+                def change(other, held=held, presence=door.startswith("in ")):
+                    if not presence:
+                        held.v = 2 if other else 1
+                    elif other:
+                        held.v = 1
+                    elif hasattr(held, "v"):
+                        del held.v
+
+                fn = lookup_function(tail, lookup_space(held, name))
+                runs, rows = self.sweep(device, fn, change)
+                # (A call of vars is in no region.)
+                if runs[5] and "vars" not in door:
+                    self.assertEqual(runs[6], 0, msg=f"{runs} {rows}")
+
+    @parametrize("kind", list(LOOKUP_NAMES))
+    @checks_isolated
+    def test_a_key_is_looked_up_only_as_a_str_or_an_int_itself(self, device, kind):
+        ran = 0
+        for door, tail in LOOKUP_BY_KEY.items():
+            with self.subTest(door=door):
+                name, space = LOOKUP_NAMES[kind](), {"D": {"w": 0}}
+                presence = door in ("in", "__contains__", "get with a default")
+
+                def change(other, space=space, presence=presence, door=door):
+                    if not presence or door == "a deletion":
+                        space["D"]["v"] = 2 if other else 1
+                    elif other:
+                        space["D"]["v"] = 1
+                    else:
+                        space["D"].pop("v", None)
+
+                fn = lookup_function(tail, dict(space, N=name))
+                runs, rows = self.sweep(device, fn, change)
+                if runs[5] and door != "a deletion":
+                    self.assertEqual(runs[6], 0, msg=f"{runs} {rows}")
+                ran += runs[5]
+        # The sweep is of regions that ran with a lookup in them.
+        self.assertGreater(ran, 0)
+
+    @parametrize("stored", ["a_str_subclass", "an_int_subclass"])
+    @checks_isolated
+    def test_a_dict_that_holds_a_key_of_a_class_of_the_program_s(self, device, stored):
+        # Asked by an exact key, with a key of a class of the program's in
+        # the dict that is equal to it: the dict's lookup compares the two
+        # by the class's own __eq__.
+        exact, own = ("v", LookupOwnCode("v")) if "str" in stored else (7, None)
+        for door, tail in LOOKUP_BY_KEY.items():
+            if own is None or door == "a deletion":
+                continue
+            with self.subTest(door=door):
+                space = {"D": {own: 0, "w": 0}}
+
+                def change(other, space=space, own=own, door=door):
+                    if (
+                        door in ("in", "__contains__", "get with a default")
+                        and not other
+                    ):
+                        space["D"].pop(own, None)
+                    else:
+                        space["D"][own] = 2 if other else 1
+
+                fn = lookup_function(tail, dict(space, N=exact))
+                runs, rows = self.sweep(device, fn, change)
+                if runs[5]:
+                    self.assertEqual(runs[6], 0, msg=f"{runs} {rows}")
+        # The key of the program's class takes the exact key's place after
+        # the region ran: from then on a lookup runs the class's __eq__, as
+        # often under torch.vm as in eager.
+        counted = LookupCountedStr("v") if "str" in stored else LookupCountedInt(7)
+        for tail in ("    return out, D[N]\n", "    return out, D[N], D[N]\n"):
+            with self.subTest(tail=tail):
+                space = {"D": {exact: 5, "other": 0}}
+                calls = itertools.count()
+
+                def change(other, space=space, calls=calls):
+                    call = next(calls) // 2
+                    if call == 5 and exact in space["D"]:
+                        del space["D"][exact]
+                        space["D"][counted] = 5
+                    space["D"]["other"] = int(call >= 8)
+
+                fn = lookup_function(tail, dict(space, N=exact))
+                runs, rows = self.sweep(device, fn, change, counted=True)
+                self.assertEqual(runs[4], 1, msg=f"{runs} {rows}")
+
+    @checks_isolated
+    def test_a_question_about_a_class_through_every_door(self, device):
+        for door, (tail, checked) in LOOKUP_QUESTIONS.items():
+            with self.subTest(door=door):
+                held = LookupPlain()
+
+                def change(other, held=held):
+                    held.__class__ = LookupOther if other else LookupPlain
+
+                space = {
+                    "HELD": held,
+                    "KLASS": LookupPlain,
+                    "ASKED": (held, LookupPlain),
+                    "IS": functools.partial(isinstance, held),
+                    "KIND": functools.partial(type, held),
+                }
+                runs, rows = self.sweep(device, lookup_function(tail, space), change)
+                if checked:
+                    self.checked(runs, rows)
+                else:
+                    self.assertEqual(sum(runs), 0, msg=f"{runs} {rows}")
+
+    @checks_isolated
+    def test_a_name_on_a_tensor(self, device):
+        for kind, door in itertools.product(
+            LOOKUP_NAMES, ("getattr with a default", "hasattr")
+        ):
+            with self.subTest(kind=kind, door=door):
+                name = LOOKUP_NAMES[kind]()
+                source = "def NAME(x, t):\n" + LOOKUP_HEAD.split("\n", 1)[1]
+                space = {"N": name}
+                exec(
+                    (source + LOOKUP_BY_NAME[door][0].replace("HELD", "t")).replace(
+                        "NAME", "lookup_on_tensor"
+                    ),
+                    space,
+                )
+                fn = space["lookup_on_tensor"]
+                compiled = vm(fn, passes=CHECKS_EARLY)
+                for call in range(10):
+                    torch.manual_seed(call)
+                    x = torch.randn(4, 8, device=device)
+                    t = x.clone()
+                    t.v = 2 if call in (6, 7) else 1
+                    got, want = checks_outcome(compiled, x, t), checks_outcome(fn, x, t)
+                    self.same(got, want, f"call {call}: {got!r} {want!r}")
+
+
+instantiate_device_type_tests(TestVmLookups, globals())
 
 
 if __name__ == "__main__":

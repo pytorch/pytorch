@@ -117,6 +117,13 @@ pub(super) fn question(f: usize, all: &[*mut PyObject]) -> Option<Question> {
     }
 }
 
+// Whether a call of the builtin `f` (as tr_bound_function gives it) may ask
+// a question, whatever it is handed.
+pub(super) fn asks(f: usize) -> bool {
+    let k = known();
+    [k.type_, k.isinstance, k.issubclass, k.type_instancecheck, k.type_subclasscheck, k.abc_instancecheck, k.abc_subclasscheck].contains(&f)
+}
+
 // The classes (and what else) `against` names: itself, or the members of a
 // tuple or of a union, to any depth.
 pub(super) unsafe fn members(against: *mut PyObject, out: &mut Vec<*mut PyObject>) {

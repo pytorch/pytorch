@@ -409,6 +409,9 @@ struct Trace {
     // What the trace itself has bound on classes of the program's while the
     // body runs (see _region_bound).
     bound: Vec<Py<PyAny>>,
+    // The dicts found to hold only keys that are a str or an int (see
+    // looks_up), each with the version tag it had then.
+    plain: HashMap<usize, u64>,
 }
 
 // What a stale read was read from: a cell, a function (its code and
@@ -549,6 +552,8 @@ unsafe fn exact_scalar(o: *mut PyObject) -> bool {
     tp == &raw mut ffi::PyLong_Type || tp == &raw mut ffi::PyFloat_Type || tp == &raw mut ffi::PyUnicode_Type
 }
 
+// A key the engine may look up itself: a str or an int, and no instance of a
+// subclass of one (whose class hashes and compares it).
 unsafe fn key_ok(k: *mut PyObject) -> bool {
     let tp = ffi::Py_TYPE(k);
     tp == &raw mut ffi::PyLong_Type || tp == &raw mut ffi::PyUnicode_Type
@@ -762,6 +767,47 @@ unsafe fn plain_keys(d: *mut PyObject) -> bool {
     true
 }
 
+// Whether every key of dict d is a str or an int (plain_keys), by the dict's
+// version tag where d is the dict last asked about: the items of one dict
+// are looked at one after the other.
+unsafe fn plain(d: *mut PyObject) -> bool {
+    thread_local! {
+        static LAST: Cell<(usize, u64, bool)> = const { Cell::new((0, 0, false)) };
+    }
+    let tag = tr_dict_version(d);
+    let (at, was, ok) = LAST.get();
+    if tag != 0 && at == d as usize && was == tag {
+        return ok;
+    }
+    let ok = plain_keys(d);
+    LAST.set((d as usize, tag, ok));
+    ok
+}
+
+// The item of dict `d` under `key`, a str or an int itself (borrowed; NULL:
+// none found), and whether that is what a lookup of the program's finds.
+// No code of the program runs here, which a lookup of the dict's own does
+// wherever the dict holds a key of a class of the program's (one with the
+// hash of `key` is compared by its class's __eq__): the dict's own lookup
+// only where every key of the dict is a str or an int, and else a walk over
+// its keys that compares `key` with those of its own class alone. A key of
+// that class that is equal to `key` is the one entry the program finds
+// too. Where the walk finds none, the program may still find a key of
+// another class that is equal: not sure. The one way an entry looks an
+// item of a dict up, when it is recorded and when it is checked.
+unsafe fn find(d: *mut PyObject, key: *mut PyObject) -> (*mut PyObject, bool) {
+    if plain(d) {
+        return (dict_get(d, key), true);
+    }
+    let (mut pos, mut k, mut v) = (0, std::ptr::null_mut(), std::ptr::null_mut());
+    while ffi::PyDict_Next(d, &mut pos, &mut k, &mut v) != 0 {
+        if k == key || (ffi::Py_TYPE(k) == ffi::Py_TYPE(key) && exact::same(k, key)) {
+            return (v, true);
+        }
+    }
+    (std::ptr::null_mut(), false)
+}
+
 // Whether what `holder` holds can be compared in the order C code reads it
 // in: an OrderedDict only while its keys are plain (see snapshot).
 unsafe fn ordered_ok(holder: *mut PyObject, kind: Holder) -> bool {
@@ -834,7 +880,7 @@ impl Item {
     // What `holder` has as this item now (borrowed), NULL for nothing.
     unsafe fn now(&self, holder: *mut PyObject, kind: Holder) -> *mut PyObject {
         match kind {
-            Holder::Dict => dict_get(holder, self.key.as_ptr()),
+            Holder::Dict => find(holder, self.key.as_ptr()).0,
             Holder::List => {
                 let i = ffi::PyLong_AsSsize_t(self.key.as_ptr());
                 if i >= 0 && i < ffi::PyList_GET_SIZE(holder) { ffi::PyList_GET_ITEM(holder, i) } else { std::ptr::null_mut() }
@@ -843,8 +889,10 @@ impl Item {
         }
     }
 
+    // (Of a dict that holds a key of another kind: only what find is sure
+    // of. That a key is absent is not, there.)
     unsafe fn holds(&self, holder: *mut PyObject, kind: Holder) -> bool {
-        same(self.now(holder, kind), self.want, self.value.as_ref())
+        (kind != Holder::Dict || find(holder, self.key.as_ptr()).1) && same(self.now(holder, kind), self.want, self.value.as_ref())
     }
 
     // What the run's own writes since the read say of the item.
@@ -1115,6 +1163,12 @@ impl Trace {
         if self.own.contains(&(holder as usize)) {
             return;
         }
+        if kind == Holder::Dict && !self.looks_up(holder, key) {
+            // No item, which a check could not find again: the dict whole,
+            // which is compared by what it holds, in order, and looks
+            // nothing up.
+            return self.whole(holder, kind);
+        }
         let mut noted = false;
         if self.written.contains(&(holder as usize, key as usize)) {
             match put(&self.wrote, holder, kind, key, 0) {
@@ -1146,8 +1200,31 @@ impl Trace {
         self.group(holder, kind).items.push(Item { key: own(key), want, value, after, left: None });
     }
 
+    // Whether the engine finds item `key` of the dict `d` itself, to record
+    // it and to check it later (see find): a str or an int (key_ok) that
+    // the dict's own lookup may be asked for, because every key of the dict
+    // is such, or that a walk over the dict's keys finds. (By the dict's
+    // version tag where that is the one of the last look.)
+    unsafe fn looks_up(&mut self, d: *mut PyObject, key: *mut PyObject) -> bool {
+        if !key_ok(key) {
+            return false;
+        }
+        let tag = tr_dict_version(d);
+        if tag != 0 && self.plain.get(&(d as usize)) == Some(&tag) {
+            return true;
+        }
+        let plain = plain_keys(d);
+        if plain && tag != 0 {
+            self.plain.insert(d as usize, tag);
+        }
+        plain || find(d, key).1
+    }
+
     unsafe fn dict_item(&mut self, d: *mut PyObject, key: *mut PyObject, present_only: bool) {
-        let now = dict_get(d, key);
+        if !self.looks_up(d, key) {
+            return self.whole(d, Holder::Dict);
+        }
+        let now = find(d, key).0;
         let want = if now.is_null() {
             Want::Absent
         } else if present_only {
@@ -1537,6 +1614,10 @@ impl Trace {
     // it reads.
     unsafe fn hands_to_c(&mut self, f: *mut PyObject, of: &str) -> bool {
         let method = ffi::Py_TYPE(f) == &raw mut super::ffi::PyMethod_Type;
+        let c = if method { tr_bound_function(f) } else { f };
+        if tr_calls_builtin(c) != 0 && by_operands(tr_bound_function(c) as usize) {
+            self.refused = Some(format!("it calls {of} a C function that reads by which operand is which (a lookup by name, a question about a class), with operands that are put together where no instruction shows them"));
+        }
         if tr_calls_builtin(f) != 0 {
             // (A method of C bound to an object: the object is handed too.)
             self.used(f, false);
@@ -1568,6 +1649,9 @@ impl Trace {
         }
         if ffi::Py_TYPE(obj) == &raw mut super::ffi::PyMethod_Type {
             if tr_calls_builtin(tr_bound_function(obj)) != 0 {
+                if by_operands(tr_bound_function(tr_bound_function(obj)) as usize) {
+                    self.refused = Some("it calls a method object of a C function that reads by which operand is which (a lookup by name, a question about a class), with operands that are put together where no instruction shows them".into());
+                }
                 self.used(tr_bound_self(obj), false);
             }
         } else if ffi::PyObject_TypeCheck(obj, builtins().partial as *mut ffi::PyTypeObject) != 0 {
@@ -1921,6 +2005,10 @@ pub unsafe fn global(globals: *mut PyObject, builtins: *mut PyObject, name: *mut
             t.refused = Some("it loads a global from a namespace that isn't a dict".into());
             return;
         }
+        if !plain(globals) || !plain(builtins) {
+            t.refused = Some("it loads a global from a namespace that has a key which is neither a str nor an int".into());
+            return;
+        }
         if dict_get(globals, name).is_null() {
             t.item(globals, Holder::Dict, name, Want::Absent, std::ptr::null_mut());
             t.item(builtins, Holder::Dict, name, want_of(value), value);
@@ -2004,12 +2092,15 @@ pub unsafe fn fills(container: *mut PyObject) {
 // container[key] was read (`ran`: by Python code, which records its own).
 pub unsafe fn subscript(container: *mut PyObject, key: *mut PyObject, ran: bool) {
     with(|t| {
-        if ffi::PyDict_Check(container) != 0 && key_ok(key) {
+        if ffi::PyDict_Check(container) != 0 && t.looks_up(container, key) {
+            // (A frame under the lookup is the container's own code only
+            // where no key of the dict can have entered one.)
+            let ran = ran && plain(container);
             // A dict subclass's __missing__ ran because C code found no such
             // key: no frame reads that, and one that stores nothing leaves
             // the key absent. Nor does the frame of a defaultdict's factory
             // read that the key was missing.
-            if !ran || dict_get(container, key).is_null() || t.filled.contains_key(&(container as usize)) {
+            if !ran || find(container, key).0.is_null() || t.filled.contains_key(&(container as usize)) {
                 t.dict_item(container, key, false);
             }
         } else if ffi::PyList_Check(container) != 0 && ffi::Py_TYPE(key) == &raw mut ffi::PyLong_Type && !ran {
@@ -2032,8 +2123,10 @@ pub unsafe fn subscript(container: *mut PyObject, key: *mut PyObject, ran: bool)
 // `key in container` was evaluated.
 pub unsafe fn contains(container: *mut PyObject, key: *mut PyObject, ran: bool) {
     with(|t| {
-        if ffi::PyDict_Check(container) != 0 && key_ok(key) {
-            if !ran {
+        if ffi::PyDict_Check(container) != 0 && t.looks_up(container, key) {
+            // (As for a subscript: a frame is the container's own code only
+            // in a dict whose keys cannot have entered one.)
+            if !(ran && plain(container)) {
                 t.dict_item(container, key, true);
             }
         } else {
@@ -2152,10 +2245,22 @@ unsafe fn call_read(callee: *mut PyObject, args: &[*mut PyObject], result: *mut 
         all.push(me);
     }
     all.extend_from_slice(args);
-    let str_at = |k: usize| all.len() > k && ffi::Py_TYPE(all[k]) == &raw mut ffi::PyUnicode_Type;
-    if (f == b.getattr || f == b.getattribute || f == b.hasattr) && str_at(1) {
-        let value = if f == b.hasattr { std::ptr::null_mut() } else { result };
-        with(|t| t.attr(all[0], all[1], value, ran, f == b.getattribute));
+    if by_name(f) {
+        // The name: a str itself. One of a subclass of str (an enum member,
+        // a class of the program's) finds what its class hashes and
+        // compares it to, which is no attribute a check can find again, and
+        // anything else raises.
+        let name = all.get(1).copied().filter(|n| ffi::Py_TYPE(*n) == &raw mut ffi::PyUnicode_Type);
+        match name {
+            Some(name) if f == b.getattr || f == b.getattribute || f == b.hasattr => {
+                let value = if f == b.hasattr { std::ptr::null_mut() } else { result };
+                with(|t| t.attr(all[0], name, value, ran, f == b.getattribute));
+            }
+            // Another class's own way to resolve a name (a module's, a
+            // class's), called as a function.
+            Some(_) => refuse(format!("it calls the __getattribute__ of {}, which resolves a name its own way", std::ffi::CStr::from_ptr((*(*(f as *mut ffi::PyDescrObject)).d_type).tp_name).to_string_lossy())),
+            None => refuse(format!("it looks an attribute up by a name that is {}, not a str itself: no check finds again what such a name finds", all.get(1).map_or("not given".into(), |n| format!("a {}", type_name(*n))))),
+        }
     } else if (f == b.dict_get || f == b.dict_getitem || f == b.dict_contains) && all.len() >= 2 && ffi::PyDict_Check(all[0]) != 0 && key_ok(all[1]) {
         with(|t| t.dict_item(all[0], all[1], f == b.dict_contains));
     } else if f == b.len && all.len() == 1 {
@@ -2166,6 +2271,38 @@ unsafe fn call_read(callee: *mut PyObject, args: &[*mut PyObject], result: *mut 
         }
         used(&all);
     }
+}
+
+// As call(), for a starred call of a builtin: `args` is the starred operand
+// and `kwargs` the dict (or NULL). The callee reads its operands as in a
+// plain call, and is told them the same way. Only a tuple or a list is
+// spread in an order that is known here: of anything else (a set, a dict)
+// a callee that reads by which operand is which is refused.
+pub unsafe fn call_starred(callee: *mut PyObject, args: *mut PyObject, kwargs: *mut PyObject, result: *mut PyObject, ran: bool) {
+    if ffi::PyTuple_Check(args) == 0 && ffi::PyList_Check(args) == 0 && by_operands(tr_bound_function(callee) as usize) {
+        refuse(format!("it stars a {} into a C function that reads by which operand is which", type_name(args)));
+    }
+    call(callee, &super::built::spread(args, kwargs), result, ran);
+}
+
+// Whether the builtin `f` (as tr_bound_function gives it) looks a name up on
+// its first operand: getattr, hasattr, and the __getattribute__ of a class
+// of C (object's, a module's, a class's own).
+unsafe fn by_name(f: usize) -> bool {
+    let b = builtins();
+    let wrapper = ffi::Py_TYPE(f as *mut PyObject) == &raw mut ffi::PyWrapperDescr_Type;
+    f == b.getattr || f == b.hasattr || f == b.getattribute || (wrapper && text(tr_descr_name(f as *mut PyObject)) == "__getattribute__")
+}
+
+// Whether what the builtin `f` reads goes by WHICH operand is which, in a
+// way that handing the operands over (see used) does not record: a lookup
+// by name (by_name), a question about a class (asked.rs). The one place that
+// records such a call is call_read, which is told the operands as the call
+// has them: a plain call, a starred call. Where the run calls `f` any other
+// way (as the function of a functools.partial or of a method object, whose
+// operands are put together in C), the trace is refused.
+unsafe fn by_operands(f: usize) -> bool {
+    by_name(f) || asked::asks(f)
 }
 
 // `callee`, which is no Python function, was handed `args` (positional, then
