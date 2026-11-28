@@ -4368,6 +4368,7 @@ def _get_fake_value_impl(
     if (
         torch._dynamo.config.use_graph_deduplication
         or torch._dynamo.config.track_nodes_for_deduplication
+        or tx.output.has_deferred_tensor_format
     ):
         flat_args_kwargs = get_fake_values_from_nodes(
             tx, _get_flat_args(node, {}), allow_non_graph_fake
@@ -4604,6 +4605,19 @@ def _get_fake_value_impl(
             raise_observed_exception(RuntimeError, tx, args=[msg])
         except ObservedException as e:
             raise FakeTensorObservedException(msg, real_stack=e.real_stack) from None
+
+    # Other inputs may alias the tensor when the graph is reused.
+    if tx.output.has_deferred_tensor_format and any(
+        arg._version != id_to_initial_version[id(arg)]
+        for arg in flat_args_kwargs
+        if id(arg) in id_to_initial_version
+    ):
+        unimplemented(
+            gb_type="Tensor mutation after formatting",
+            context=f"{node.op} {node.target}",
+            explanation="Dynamo would reconstruct the string using the tensor's mutated value.",
+            hints=["Move tensor formatting outside the compiled region."],
+        )
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(

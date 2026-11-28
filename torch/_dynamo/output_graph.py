@@ -897,6 +897,7 @@ class OutputGraph(OutputGraphCommon):
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: dict[str, Source] | None = {}
         self.side_effects = SideEffects(self)
+        self.has_deferred_tensor_format = False
         self.user_objects = UserObjectRegistry()
         # Generators created while tracing this frame. Tracked here (not on
         # SideEffects) because SideEffects is cloned/swapped during HOP
@@ -1756,14 +1757,13 @@ class OutputGraph(OutputGraphCommon):
             self.tracers.append(tracer)
             yield tracer
             # Each tracer push enters a scope, so the parent's own scope is its debug_level + 1.
-            if tracer.parent is not None and tracer.parent.tracks_lexical_sources:
-                tracer.parent.has_container_identity |= tracer.has_container_identity
-                tracer.parent.traced_sources.update(tracer.traced_sources)
-                tracer.parent.lexical_sources.update(
-                    item
-                    for item in tracer.lexical_sources
-                    if item[1] <= tracer.parent.debug_level
-                )
+            if (parent := tracer.parent) is not None and parent.tracks_lexical_sources:
+                parent.has_container_identity |= tracer.has_container_identity
+                parent.has_sourceless_grad |= tracer.has_sourceless_grad
+                parent.traced_sources.update(tracer.traced_sources)
+                for source, depth in tracer.lexical_sources:
+                    if depth <= parent.debug_level:
+                        parent.lexical_sources.add((source, depth))
         finally:
             new_scope_ctx.__exit__(None, None, None)
             self.tracers.pop()
@@ -4353,6 +4353,7 @@ class SubgraphTracer(fx.Tracer):
         self.lexical_sources: set[tuple[Source, int]] = set()
         self.has_container_identity = False
         self.has_builtin_method_identity = False
+        self.has_sourceless_grad = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
         self.is_reconstructing_generator = False

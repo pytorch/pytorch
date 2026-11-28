@@ -334,14 +334,13 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             self.assertIs(vars(obj), vars(target))
             self.assertEqual(vars(obj), {"a": 1, "b": 2})
         if kind == "input":
-            for target in (NamespaceOwner(), types.SimpleNamespace()):
+            for target in (other, types.SimpleNamespace(), type("Target", (), {})):
                 report = torch._dynamo.explain(fn)(x, obj, target)
                 self.assertEqual(report.graph_break_count, 0)
-                guard_types = {
-                    t for g in report.out_guards for t in g.guard_types or ()
-                }
-                same_type = type(obj) is type(target)
-                self.assertEqual("NOT_DUPLICATE_INPUT" in guard_types, same_type)
+                names = {t for g in report.out_guards for t in g.guard_types or ()}
+                self.assertEqual(
+                    "NOT_DUPLICATE_INPUT" in names, type(obj) is type(target)
+                )
 
     @parametrize(
         "kind",
