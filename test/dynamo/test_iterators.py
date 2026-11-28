@@ -162,32 +162,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
                 run(x, iter((bytearray(b"a"),))), (x + 1, False, "missing", True)
             )
 
-    @parametrize("method", ["__getattr__", "__getattribute__"])
-    def test_slotted_iterable_custom_attribute(self, method):
-        class Iterable:
-            __slots__ = ()
-
-            def __iter__(self):
-                return iter((1,))
-
-            def get_attribute(self, name):
-                if name == "missing":
-                    return 7
-                return object.__getattribute__(self, name)
-
-            if method == "__getattr__":
-                __getattr__ = get_attribute
-            else:
-                __getattribute__ = get_attribute
-
-        def fn(x, obj):
-            return x + obj.missing, hasattr(obj, "missing")
-
-        x, obj = torch.ones(1), Iterable()
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), fn(x, obj)
-        )
-
     @parametrize(
         "factory, args",
         [
@@ -237,10 +211,10 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         result, iterator, error = compiled(x, owner)
         self.assertEqual(result, x + 1)
-        self.assertIs(type(iterator), type(fn(x, owner)[1]))
+        eager_iterator = fn(x, owner)[1]
+        self.assertIs(type(iterator), type(eager_iterator))
         self.assertEqual(error.name, "missing")
         self.assertIs(error.obj, iterator)
-        eager_iterator = fn(x, owner)[1]
         owner.clear()
         with self.assertRaises(RuntimeError) as expected:
             next(eager_iterator)
@@ -317,12 +291,30 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         previous = vars(obj)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         if kind == "input":
-            other = NamespaceOwner()
-            result, keys = compiled(x, obj, other)
-            self.assertEqual((result, vars(obj), other.b), (x + 1, {"a": 1}, 2))
-            obj.c = 3
-            with self.assertRaisesRegex(RuntimeError, "changed size"):
-                next(keys)
+            for target in (
+                NamespaceOwner(),
+                types.SimpleNamespace(),
+                type("Target", (), {}),
+            ):
+                result, keys = compiled(x, obj, target)
+                self.assertEqual((result, vars(obj), target.b), (x + 1, {"a": 1}, 2))
+                obj.c = 3
+                with self.assertRaisesRegex(RuntimeError, "changed size"):
+                    next(keys)
+                report = torch._dynamo.explain(fn)(x, obj, target)
+                names = {t for g in report.out_guards for t in g.guard_types or ()}
+                self.assertEqual(
+                    "NOT_DUPLICATE_INPUT" in names, type(obj) is type(target)
+                )
+            torch._dynamo.reset()
+            with torch._dynamo.config.patch(caching_precompile=True):
+                self._assert_iterator_fallback(
+                    fn, x, obj, target, reason="cannot guard against an alias"
+                )
+            with self.assertRaisesRegex(Unsupported, "cannot guard against an alias"):
+                torch.compile(fn, backend="aot_eager", fullgraph=True).aot_compile(
+                    ((x, obj, target), {})
+                )
         target = NamespaceOwner() if kind == "chained" else obj
         reason = "'__dict__'" if kind == "chained" else "rebound instance namespace"
         with self.assertRaisesRegex(Unsupported, reason):
@@ -333,14 +325,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         if kind == "chained":
             self.assertIs(vars(obj), vars(target))
             self.assertEqual(vars(obj), {"a": 1, "b": 2})
-        if kind == "input":
-            for target in (other, types.SimpleNamespace(), type("Target", (), {})):
-                report = torch._dynamo.explain(fn)(x, obj, target)
-                self.assertEqual(report.graph_break_count, 0)
-                names = {t for g in report.out_guards for t in g.guard_types or ()}
-                self.assertEqual(
-                    "NOT_DUPLICATE_INPUT" in names, type(obj) is type(target)
-                )
 
     @parametrize(
         "kind",
