@@ -18,12 +18,14 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import config, metrics
 from torch._inductor.utils import run_and_get_kernels
-from torch.testing._internal.common_cuda import evaluate_gfx_arch_within, SM70OrLater
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyCUDA,
+from torch.testing._internal.common_cuda import (
+    evaluate_gfx_arch_within,
+    SM70OrLater,
+    TEST_CUDA,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     MI200_ARCH,
     MI300_ARCH,
@@ -35,7 +37,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
-    TEST_CUDA,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -337,6 +338,8 @@ TEST_CASE_NAMES = [tc.name for tc in TEST_CASES]
 class TestInlineAsmElementwise(TestCase):
     """Parametrized tests for inline_asm_elementwise."""
 
+    hw_classification = HardwareClassification.CUDA
+
     @parametrize(
         "case_idx", list(range(len(TEST_CASES))), name_fn=lambda i: TEST_CASE_NAMES[i]
     )
@@ -441,9 +444,10 @@ class TestInlineAsmElementwise(TestCase):
         self.assertEqual(result.float(), expected.float(), atol=1e-5, rtol=1e-5)
 
 
-@unittest.skipIf(not TEST_CUDA, "CUDA not available")
-class TestInlineAsmElementwiseErrors(TestCase):
-    """Tests for error handling."""
+class TestInlineAsmElementwiseInputValidation(TestCase):
+    """Device-independent tests for error handling."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_error_no_inputs(self):
         with self.assertRaises(ValueError):
@@ -454,6 +458,23 @@ class TestInlineAsmElementwiseErrors(TestCase):
                 constraints="=v" if torch.version.hip else "=f",
                 dtype=torch.float32,
             )
+
+    def test_error_cpu_tensor(self):
+        x = torch.randn(100, dtype=torch.float32)
+        with self.assertRaises(RuntimeError):
+            inline_asm_elementwise(
+                x,
+                asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
+                constraints="=v,v" if torch.version.hip else "=f,f",
+                dtype=torch.float32,
+            )
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available")
+class TestInlineAsmElementwiseErrors(TestCase):
+    """CUDA-specific tests for error handling."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def test_error_constraint_mismatch(self):
         x = torch.randn(100, device="cuda", dtype=torch.float32)
@@ -483,16 +504,6 @@ class TestInlineAsmElementwiseErrors(TestCase):
                 dtype=torch.float32,
             )
 
-    def test_error_cpu_tensor(self):
-        x = torch.randn(100, dtype=torch.float32)
-        with self.assertRaises(RuntimeError):
-            inline_asm_elementwise(
-                x,
-                asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
-                constraints="=v,v" if torch.version.hip else "=f,f",
-                dtype=torch.float32,
-            )
-
     def test_error_multiple_outputs_require_compile(self):
         x = torch.arange(8, device="cuda", dtype=torch.int32)
         with self.assertRaisesRegex(
@@ -517,6 +528,8 @@ class TestInlineAsmElementwiseErrors(TestCase):
 
 
 class TestInlineAsmElementwiseMultipleOutputs(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _check_stochastic_rounding(self, device, fn, rng_state):
         halfway = torch.tensor([0x3F808000], device=device, dtype=torch.int32)
         x = halfway.expand(2).view(torch.float32)
@@ -534,7 +547,6 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         self.assertEqual(code.count("@triton_heuristics"), 1)
         self.assertEqual(code.count("tl.inline_asm_elementwise("), 1)
 
-    @onlyCUDA
     @xfailIfNoAcceleratorTriton
     @skipIfRocm(msg="PTX test")
     def test_multiple_outputs_compile(self, device):
@@ -566,7 +578,6 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         self.assertEqual(result, x.float() * 4)
         self.assertEqual("\n".join(sources).count("tl.inline_asm_elementwise("), 1)
 
-    @onlyCUDA
     @xfailIfNoAcceleratorTriton
     @skipIfRocm(msg="PTX test")
     def test_stochastic_rounding_with_rng_input(self, device):
@@ -587,7 +598,6 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         rng = torch.tensor([0x7FFF, 0x8000], device=device, dtype=torch.int32)
         self._check_stochastic_rounding(device, fn, rng)
 
-    @onlyCUDA
     @xfailIfNoAcceleratorTriton
     @skipIfRocm(msg="PTX test")
     def test_stochastic_rounding_with_inline_rng(self, device):
@@ -610,7 +620,6 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         counter = torch.tensor([1, 0], device=device, dtype=torch.int32)
         self._check_stochastic_rounding(device, fn, counter)
 
-    @onlyCUDA
     @xfailIfNoAcceleratorTriton
     @skipIfRocm(msg="PTX test")
     def test_multiple_outputs_with_pack_compile(self, device):
@@ -634,6 +643,8 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
 class TestInlineAsmElementwiseEdgeCases(TestCase):
     """Tests for edge cases."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def test_empty_tensor(self):
         x = torch.empty(0, device="cuda", dtype=torch.float32)
@@ -780,6 +791,8 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
 @xfailIfNoAcceleratorTriton
 class TestInlineAsmPackPadding(TestCase):
     """Test that pack padding works when block size < pack."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def test_pack2_xblock1_padding(self):
         """Force XBLOCK=1 with pack=2 so padding is needed."""
@@ -991,6 +1004,8 @@ def xor_words(pairs, maximum, outputs):
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
 @unittest.skipIf(not has_triton(), "Requires Triton")
 class TestInlineAsmConcat(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         self.enterContext(config.patch(cat_fuse_computed_input_copies=True))
