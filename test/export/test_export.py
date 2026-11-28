@@ -249,10 +249,16 @@ STRICT_EXPORT_V2_SUFFIX = "_strict_export_v2"
 def _ends_with_harness_suffix(test_name: str, suffix: str) -> bool:
     # instantiate_device_type_tests appends _<device> after harness suffixes
     # (e.g. ..._training_ir_to_decomp_strict_cuda), so plain endswith misses.
+    # Device names may themselves contain underscores (e.g. custom_acc), so
+    # keep stripping trailing segments until the harness suffix is exposed.
     if test_name.endswith(suffix):
         return True
-    base, sep, _ = test_name.rpartition("_")
-    return bool(sep) and base.endswith(suffix)
+    base = test_name
+    while "_" in base:
+        base = base.rpartition("_")[0]
+        if base.endswith(suffix):
+            return True
+    return False
 
 
 # Now default mode is non strict, so original unammended test names
@@ -20088,7 +20094,11 @@ def forward(self, x, y):
         self.assertEqual(result.shape, (1, 256, 64))
 
 
-class TestExportAccelerator(TestCase):
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportAccelerator(TorchTestCase):
+    # Not the Dynamo TestCase: instantiate_device_type_tests calls setUpClass at
+    # import time, and the Dynamo TestCase enters a config.patch there that is
+    # never exited, which would leak into every other test in this file.
     hw_classification = HardwareClassification.ACCELERATOR
 
     @testing.expectedFailureCppRuntime
