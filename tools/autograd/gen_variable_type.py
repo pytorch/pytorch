@@ -1248,96 +1248,127 @@ def emit_body(
         and (not returns_void)
     )
 
+    # Note [Saving inputs that the operator mutates]
+    # An argument annotated as mutable (e.g. `noise` in
+    # `rrelu_with_noise(Tensor self, Tensor(b!) noise, ...)`) is really an extra
+    # output: the kernel fills or updates it during the call, so the value the
+    # backward formula needs only exists once the call returns. Saving it while the
+    # grad_fn is set up appears to work without hooks, because the SavedVariable
+    # aliases the buffer the kernel later writes into. It breaks when a pack hook
+    # copies the data (a hook that clones, save_on_cpu for an accelerator
+    # tensor), since the copy holds the pre-call contents, and under non-reentrant
+    # checkpointing, whose recomputation can stop early at that pack, before the
+    # kernel has run. Either way backward reads whatever the buffer held before
+    # the call, uninitialized memory for a freshly allocated one. These arguments
+    # are therefore saved after the call, together with the outputs. As with
+    # saved outputs, an error raised while saving them (e.g. for an inference
+    # tensor) then surfaces after the kernel has written to its arguments.
+    # The `self` of an in-place op is not included: formulas reach its pre-call
+    # value through original_self and its post-call value through result.
+    mutated_arg_names = {a.name for a in f.func.arguments.post_self_positional_mutable}
+    saved_inputs_mutated_by_call: list[SavedAttribute] = (
+        [
+            arg
+            for arg in info.all_saved_inputs
+            if str(arg.nctype.name) in mutated_arg_names
+        ]
+        if info is not None and info.has_derivatives
+        else []
+    )
+
+    has_tensorlist_arg = any(
+        is_tensor_list_type(arg.type) for arg in args_with_derivatives
+    )
+
+    # We don't want to save tensors if we know that they will never be used
+    # when computing the derivative, so we add guards to those statements
+    def guard_for(arg: SavedAttribute) -> str | None:
+        if info is None:
+            raise AssertionError("info is None in guard_for")
+
+        # It's hard to determine the edge offset if we have TensorLists
+        # NOTE(crcrpar): in-place foreach functions' arguments include tensorlist
+        # but their derivatives don't use it, so let them bypass this check.
+        if has_tensorlist_arg and (not is_inplace_foreach):
+            return None
+
+        # Empirical evaluation of the cases where we insert those guards in
+        # backward show that they are somewhat useless. E.g. there's no need
+        # to guard on some values captured from forward, because they had to
+        # require_grad if the backward function even gets executed. I don't
+        # have any good ideas for detecting those cases, so I simply disabled the
+        # checks.
+        if "backward" in info.name:
+            return None
+
+        # If there's a single derivative we could compute, we already have
+        # a requires_grad check that is sufficient
+        if len(args_with_derivatives) <= 1:
+            return None
+
+        # We really only care about trimming down the amount of tensors we save
+        if arg.nctype.type != BaseCType(tensorT):
+            return None
+
+        # We want to emit simple guards, so we only allow that if checking one
+        # input is enough to determine whether we need that value
+        used_in = [d for d in info.derivatives if arg in d.saved_inputs]
+        if len(used_in) == 0:
+            raise AssertionError(f"used_in is empty for arg {arg.nctype.name}")
+        if len(used_in) != 1:
+            return None
+        derivative = used_in[0]
+
+        # Case with multioutput formulas
+        # TODO: process all derivative formulas!!!
+        if len(derivative.var_names) != 1:
+            wrap_opt_if_start = derivative.formula.find(
+                f"wrap_opt_if({arg.nctype.name}"
+            )
+            if wrap_opt_if_start == -1:
+                return None
+
+            wrap_opt_if_match = re.match(
+                rf"wrap_opt_if\({arg.nctype.name},(.*?)\)",
+                derivative.formula[wrap_opt_if_start:],
+            )
+            if wrap_opt_if_match is None:
+                raise AssertionError(
+                    f"wrap_opt_if_match is None for {arg.nctype.name} in {derivative.formula}"
+                )
+
+            # Condition is between 'wrap_opt_if(var_name,' and ')'.
+            condition_slice = slice(len(rf"wrap_opt_if\({arg.nctype.name},"), -1)
+            wrap_opt_if_condition = wrap_opt_if_match.group(0)[condition_slice].strip()
+            # replace 'grad_input_mask[num]' with 'grad_fn->should_compute_output(num)'
+            wrap_opt_if_condition = re.sub(
+                r"grad_input_mask\[(\d+)\]",
+                r"grad_fn->should_compute_output(\1)",
+                wrap_opt_if_condition,
+            )
+            return f"{wrap_opt_if_condition}"
+
+        # Figure out the offset of the edge that uses this variable
+        derivative_var_name = derivative.var_names[0]
+        for edge_off, a in enumerate(args_with_derivatives):
+            if a.name == derivative_var_name:
+                break
+        else:
+            raise AssertionError
+        return f"grad_fn->should_compute_output({edge_off})"
+
     def emit_save_inputs() -> list[str]:
         setup: list[str] = []
         if info is None or not info.has_derivatives:
             return setup
 
-        has_tensorlist_arg = any(
-            is_tensor_list_type(arg.type) for arg in args_with_derivatives
-        )
-
-        # We don't want to save tensors if we know that they will never be used
-        # when computing the derivative, so we add guards to those statements
-        def guard_for(arg: SavedAttribute) -> str | None:
-            if info is None:
-                raise AssertionError("info is None in guard_for")
-
-            # It's hard to determine the edge offset if we have TensorLists
-            # NOTE(crcrpar): in-place foreach functions' arguments include tensorlist
-            # but their derivatives don't use it, so let them bypass this check.
-            if has_tensorlist_arg and (not is_inplace_foreach):
-                return None
-
-            # Empirical evaluation of the cases where we insert those guards in
-            # backward show that they are somewhat useless. E.g. there's no need
-            # to guard on some values captured from forward, because they had to
-            # require_grad if the backward function even gets executed. I don't
-            # have any good ideas for detecting those cases, so I simply disabled the
-            # checks.
-            if "backward" in info.name:
-                return None
-
-            # If there's a single derivative we could compute, we already have
-            # a requires_grad check that is sufficient
-            if len(args_with_derivatives) <= 1:
-                return None
-
-            # We really only care about trimming down the amount of tensors we save
-            if arg.nctype.type != BaseCType(tensorT):
-                return None
-
-            # We want to emit simple guards, so we only allow that if checking one
-            # input is enough to determine whether we need that value
-            used_in = [d for d in info.derivatives if arg in d.saved_inputs]
-            if len(used_in) == 0:
-                raise AssertionError(f"used_in is empty for arg {arg.nctype.name}")
-            if len(used_in) != 1:
-                return None
-            derivative = used_in[0]
-
-            # Case with multioutput formulas
-            # TODO: process all derivative formulas!!!
-            if len(derivative.var_names) != 1:
-                wrap_opt_if_start = derivative.formula.find(
-                    f"wrap_opt_if({arg.nctype.name}"
-                )
-                if wrap_opt_if_start == -1:
-                    return None
-
-                wrap_opt_if_match = re.match(
-                    rf"wrap_opt_if\({arg.nctype.name},(.*?)\)",
-                    derivative.formula[wrap_opt_if_start:],
-                )
-                if wrap_opt_if_match is None:
-                    raise AssertionError(
-                        f"wrap_opt_if_match is None for {arg.nctype.name} in {derivative.formula}"
-                    )
-
-                # Condition is between 'wrap_opt_if(var_name,' and ')'.
-                condition_slice = slice(len(rf"wrap_opt_if\({arg.nctype.name},"), -1)
-                wrap_opt_if_condition = wrap_opt_if_match.group(0)[
-                    condition_slice
-                ].strip()
-                # replace 'grad_input_mask[num]' with 'grad_fn->should_compute_output(num)'
-                wrap_opt_if_condition = re.sub(
-                    r"grad_input_mask\[(\d+)\]",
-                    r"grad_fn->should_compute_output(\1)",
-                    wrap_opt_if_condition,
-                )
-                return f"{wrap_opt_if_condition}"
-
-            # Figure out the offset of the edge that uses this variable
-            derivative_var_name = derivative.var_names[0]
-            for edge_off, a in enumerate(args_with_derivatives):
-                if a.name == derivative_var_name:
-                    break
-            else:
-                raise AssertionError
-            return f"grad_fn->should_compute_output({edge_off})"
-
+        saved_inputs = [
+            arg
+            for arg in info.all_saved_inputs
+            if arg not in saved_inputs_mutated_by_call
+        ]
         if is_inplace_foreach:
-            save_input_stmts = save_variables(info.all_saved_inputs, False, guard_for)
+            save_input_stmts = save_variables(saved_inputs, False, guard_for)
             if save_input_stmts:
                 setup.append(
                     LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(
@@ -1345,7 +1376,7 @@ def emit_body(
                     )
                 )
         else:
-            setup.extend(save_variables(info.all_saved_inputs, False, guard_for))
+            setup.extend(save_variables(saved_inputs, False, guard_for))
             for arg in args_with_derivatives:
                 if is_tensor_list_type(arg.type):
                     setup.append(f"grad_fn->{arg.name}_size_ = {arg.name}.size();")
@@ -1871,7 +1902,11 @@ def emit_body(
             # out functions don't currently support differentiation
             return ""
         if info is not None and info.has_derivatives:
-            stmts = save_variables(info.all_saved_outputs, True)
+            stmts = [
+                # See Note [Saving inputs that the operator mutates]
+                *save_variables(saved_inputs_mutated_by_call, False, guard_for),
+                *save_variables(info.all_saved_outputs, True),
+            ]
             if len(stmts) == 0:
                 return ""
             if not is_inplace_foreach:
