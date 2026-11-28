@@ -8,6 +8,10 @@ import torch
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import MockGraphHandler
 
 
@@ -67,6 +71,31 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, strea
     {{kernel_name}}_jit(cute_a, cute_b, cute_c, cuda.CUstream(stream))
     return {{get_output()}}
 """
+
+
+@instantiate_parametrized_tests
+class TestCuteDSLTemplateChoice(TestCase):
+    @parametrize("cpp_wrapper,aot_mode", [(True, False), (False, True)])
+    def test_unsupported_wrapper_declines_choice(self, cpp_wrapper, aot_mode):
+        from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
+
+        template_name = f"cutedsl_wrapper_test_{id(self)}"
+        self.addCleanup(CuteDSLTemplate.all_templates.pop, template_name, None)
+        graph = MagicMock(cpp_wrapper=cpp_wrapper, aot_mode=aot_mode)
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                CuteDSLTemplate, "_template_from_string", return_value=MagicMock()
+            ),
+            patch.object(CuteDSLTemplate, "generate") as generate,
+        ):
+            template = CuteDSLTemplate(name=template_name, source="template")
+            choices = []
+            result = template.maybe_append_choice(choices)
+
+        self.assertIsInstance(result, NotImplementedError)
+        self.assertEqual(choices, [])
+        generate.assert_not_called()
 
 
 @unittest.skipUnless(HAS_CUTLASS, "requires cutlass")
