@@ -7,6 +7,7 @@ from typing import Any, Literal, overload, TYPE_CHECKING, TypeVar, Union
 import sympy
 
 import torch
+from torch._inductor import config
 from torch._inductor.dependencies import index_vars_no_squeeze, ReadWrites
 from torch._inductor.utils import sympy_product, sympy_subs
 from torch.utils._ordered_set import OrderedSet
@@ -875,8 +876,14 @@ def _analyze_memory_coalescing(
             # n1 can be split beyond range
 
             MIN_TILING_BLOCK = 8
+            sizevars = V.graph.sizevars
+            block_ok = (
+                sizevars.statically_known_leq
+                if config.triton.coalesce_tiling_allow_min_block
+                else sizevars.statically_known_lt
+            )
             if not all(
-                V.graph.sizevars.statically_known_lt(MIN_TILING_BLOCK, block)
+                block_ok(MIN_TILING_BLOCK, block)
                 for block in (tiling_factor, var_ranges[v] // tiling_factor)
             ):
                 continue
