@@ -1011,6 +1011,8 @@ class DictViewIterator(IteratorVariable):
             return None
 
         def guarded_type(var: VariableTracker) -> type | None:
+            if _method_identity_guards_filtered(tx):
+                return None
             if var.source and any(
                 g.create_fn in (GuardBuilder.TYPE_MATCH, GuardBuilder.CLASS_MATCH)
                 for g in tx.output.guards.get_guards_for_source(var.source)
