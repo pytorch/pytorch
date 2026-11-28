@@ -16,7 +16,11 @@
 
 #ifdef USE_ROCM
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/env.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
+#include <cstring>
+#include <list>
+#include <unordered_map>
 // until hipblas has an API to accept flags, we must use rocblas here
 #include <hipblas/hipblas.h>
 #include <rocblas/rocblas.h>
@@ -213,6 +217,208 @@ static void _syncCurrentWithCarveoutStream(hipStream_t stream, bool presync) {
     AT_CUDA_CHECK(hipStreamWaitEvent(current_stream, event, 0));
   }
 }
+
+// Note [hipBLASLt heuristic cache key]
+// hipblasLtMatmul() does not check that an algo fits the problem, so the key
+// must hold every input that reaches hipblasLtMatmulAlgoGetHeuristic(). Any
+// descriptor attribute or layout set on ROCm before the heuristic call must be
+// added to this key. The device is keyed because the heuristic runs on the
+// per-device handle. Deterministic mode and the SM carveout are keyed as a
+// precaution. CUBLASLT_MATMUL_DESC_BIAS_POINTER is not keyed. Bias presence is
+// keyed through the epilogue. Whether the heuristic depends on the bias pointer
+// is not verified yet; it needs an answer from the hipBLASLt team.
+struct HipblasltGemmConfig {
+  int64_t m, n, k;
+  int64_t lda, ldb, ldc, ldd;
+  int64_t batch_count, stride_a, stride_b, stride_c;
+  uint64_t workspace_bytes;
+  int32_t a_type, b_type, c_type, d_type;
+  int32_t compute_type, scale_type;
+  int32_t transa, transb, epilogue;
+  int32_t device, deterministic, sm_carveout;
+};
+static_assert(std::has_unique_object_representations_v<HipblasltGemmConfig>);
+static_assert(sizeof(HipblasltGemmConfig) % sizeof(uint64_t) == 0);
+
+// The hash is computed once per GEMM and kept with the key, so a miss does not
+// hash again when it inserts and evicts.
+struct HipblasltCacheKey {
+  std::size_t hash;
+  HipblasltGemmConfig config;
+};
+
+struct HipblasltCacheKeyHash {
+  std::size_t operator()(const HipblasltCacheKey& key) const noexcept {
+    return key.hash;
+  }
+};
+
+struct HipblasltCacheKeyEqual {
+  bool operator()(const HipblasltCacheKey& a, const HipblasltCacheKey& b) const noexcept {
+    return a.hash == b.hash &&
+        std::memcmp(&a.config, &b.config, sizeof(HipblasltGemmConfig)) == 0;
+  }
+};
+
+// FNV-1a over 8-byte words. Byte-at-a-time hashing of the 144-byte key is a
+// large part of the per-call cost.
+std::size_t hashGemmConfig(const HipblasltGemmConfig& config) {
+  uint64_t words[sizeof(HipblasltGemmConfig) / sizeof(uint64_t)];
+  std::memcpy(words, &config, sizeof(config));
+  uint64_t h = 0xcbf29ce484222325ULL;
+  for (const uint64_t w : words) {
+    h = (h ^ w) * 0x100000001b3ULL;
+  }
+  return static_cast<std::size_t>(h ^ (h >> 32));
+}
+
+// Maximum entries per thread; 0 disables the cache. Read once per process.
+std::size_t hipblasltHeuristicCacheLimit() {
+  static const std::size_t limit = []() -> std::size_t {
+    constexpr std::size_t kDefault = 1024;
+    const auto val = c10::utils::get_env("TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT");
+    if (!val) {
+      return kDefault;
+    }
+    const std::string& text = val.value();
+    try {
+      std::size_t pos = 0;
+      const long long parsed = std::stoll(text, &pos);
+      if (pos == text.size() && parsed >= 0) {
+        return static_cast<std::size_t>(parsed);
+      }
+    } catch (const std::exception&) {
+    }
+    TORCH_WARN(
+        "invalid TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT=",
+        text,
+        ", expected a non-negative integer (0 disables the cache); using the default of ",
+        kDefault,
+        " entries per thread.");
+    return kDefault;
+  }();
+  return limit;
+}
+
+// One cache per thread, so no lock is needed. It is a plain thread_local, so
+// its entries are freed when the thread exits. The entries are plain data, so
+// the destructor does not call into HIP.
+class HipblasltHeuristicCache {
+ public:
+  static HipblasltHeuristicCache& get() {
+    static thread_local HipblasltHeuristicCache cache;
+    return cache;
+  }
+
+  bool find(const HipblasltCacheKey& key, cublasLtMatmulHeuristicResult_t* out) {
+    if (map_.empty()) {
+      return false;
+    }
+    auto it = map_.find(key);
+    if (it == map_.end()) {
+      return false;
+    }
+    order_.splice(order_.begin(), order_, it->second);
+    *out = it->second->result;
+    return true;
+  }
+
+  // Called after find() missed for this key on this thread, so the key is new.
+  // If it is not, the existing entry is kept.
+  void add(const HipblasltCacheKey& key, const cublasLtMatmulHeuristicResult_t& result) {
+    const std::size_t limit = hipblasltHeuristicCacheLimit();
+    if (limit == 0) {
+      return;
+    }
+    if (order_.size() >= limit) {
+      // Reuse the least recently used entry's list and map nodes, so a miss on
+      // a full cache does not allocate or free.
+      auto victim = std::prev(order_.end());
+      auto node = map_.extract(victim->key);
+      node.key() = key;
+      *victim = Entry{key, result};
+      order_.splice(order_.begin(), order_, victim);
+      if (!map_.insert(std::move(node)).inserted) {
+        order_.pop_front();
+      }
+      return;
+    }
+    order_.push_front(Entry{key, result});
+    try {
+      if (!map_.emplace(key, order_.begin()).second) {
+        order_.pop_front();
+      }
+    } catch (...) {
+      // Keep the list and the map in sync if the map allocation fails.
+      order_.pop_front();
+      throw;
+    }
+  }
+
+  void drop(const HipblasltCacheKey& key) {
+    auto it = map_.find(key);
+    if (it == map_.end()) {
+      return;
+    }
+    order_.erase(it->second);
+    map_.erase(it);
+  }
+
+ private:
+  struct Entry {
+    HipblasltCacheKey key;
+    cublasLtMatmulHeuristicResult_t result;
+  };
+  std::list<Entry> order_;
+  std::unordered_map<
+      HipblasltCacheKey,
+      std::list<Entry>::iterator,
+      HipblasltCacheKeyHash,
+      HipblasltCacheKeyEqual>
+      map_;
+};
+
+HipblasltCacheKey hipblasltCacheKey(
+    cudaDataType_t abType,
+    cudaDataType_t cType,
+    cublasComputeType_t computeType,
+    cudaDataType_t scaleType,
+    cublasOperation_t transa,
+    cublasOperation_t transb,
+    int64_t m, int64_t n, int64_t k,
+    int64_t lda, int64_t ldb, int64_t ldc, int64_t ldd,
+    int64_t num_batches, int64_t stridea, int64_t strideb, int64_t stridec,
+    cublasLtEpilogue_t epilogue,
+    size_t workspace_size) {
+  HipblasltGemmConfig key{};
+  key.m = m;
+  key.n = n;
+  key.k = k;
+  key.lda = lda;
+  key.ldb = ldb;
+  key.ldc = ldc;
+  key.ldd = ldd;
+  if (num_batches > 1) {
+    key.batch_count = num_batches;
+    key.stride_a = stridea;
+    key.stride_b = strideb;
+    key.stride_c = stridec;
+  }
+  key.workspace_bytes = workspace_size;
+  key.a_type = abType;
+  key.b_type = abType;
+  key.c_type = cType;
+  key.d_type = cType;
+  key.compute_type = computeType;
+  key.scale_type = scaleType;
+  key.transa = transa;
+  key.transb = transb;
+  key.epilogue = epilogue;
+  key.device = c10::cuda::current_device();
+  key.deterministic = at::globalContext().deterministicAlgorithms() ? 1 : 0;
+  key.sm_carveout = at::globalContext()._SMCarveout_EXPERIMENTAL().value_or(-1);
+  return HipblasltCacheKey{hashGemmConfig(key), key};
+}
 #endif
 
 } // anonymous namespace
@@ -319,6 +525,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
 
+  // See Note [hipBLASLt heuristic cache key].
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, opa);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, opb);
@@ -369,6 +576,19 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
+#ifdef USE_ROCM
+  const auto heuristic_key = hipblasltCacheKey(
+      abType, cType, computeType, scaleType, opa, opb, m, n, k, lda, ldb, ldc,
+      ldc, num_batches, stridea, strideb, stridec, CUBLASLT_EPILOGUE_DEFAULT,
+      ltworkspace.size);
+  const bool cached =
+      HipblasltHeuristicCache::get().find(heuristic_key, &heuristicResult);
+  if (cached) {
+    returnedResult = 1;
+  }
+#else
+  const bool cached = false;
+#endif
   // on Blackwell+, we fake a n > 1 matmul when querying heuristics
   // to prevent cuBLASLt from dispatching to a GEMV kernel for batch-invariance
 #ifndef USE_ROCM
@@ -376,46 +596,53 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #else
   const bool lie_to_cublaslt = false;
 #endif
-  if (lie_to_cublaslt) {
-     const auto fake_ldb = ldb == 1 ? 2 : ldb;
-     const auto fake_ldc = ldc == 1 ? 2 : ldc;
-     CuBlasLtMatrixLayout FakeBdesc(abType, k, 2, fake_ldb, opb == CUBLAS_OP_T);
-     CuBlasLtMatrixLayout FakeCdesc(cType, m, 2, fake_ldc);
-     if (num_batches > 1) {
-       int num_batches_as_int = static_cast<int>(num_batches);
-       FakeBdesc.setAttribute(
-           CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, num_batches_as_int);
-       FakeCdesc.setAttribute(
-           CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, num_batches_as_int);
-       FakeBdesc.setAttribute(
-           CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, strideb);
-       FakeCdesc.setAttribute(
-           CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stridec);
-     }
+  if (!cached) {
+    if (lie_to_cublaslt) {
+      const auto fake_ldb = ldb == 1 ? 2 : ldb;
+      const auto fake_ldc = ldc == 1 ? 2 : ldc;
+      CuBlasLtMatrixLayout FakeBdesc(abType, k, 2, fake_ldb, opb == CUBLAS_OP_T);
+      CuBlasLtMatrixLayout FakeCdesc(cType, m, 2, fake_ldc);
+      if (num_batches > 1) {
+        int num_batches_as_int = static_cast<int>(num_batches);
+        FakeBdesc.setAttribute(
+            CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, num_batches_as_int);
+        FakeCdesc.setAttribute(
+            CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, num_batches_as_int);
+        FakeBdesc.setAttribute(
+            CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, strideb);
+        FakeCdesc.setAttribute(
+            CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stridec);
+      }
 
-     TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-        ltHandle,
-        computeDesc.descriptor(),
-        Adesc.descriptor(),
-        FakeBdesc.descriptor(),
-        FakeCdesc.descriptor(),
-        FakeCdesc.descriptor(),
-        preference.descriptor(),
-        1,
-        &heuristicResult,
-        &returnedResult));
-  } else {
-    TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-        ltHandle,
-        computeDesc.descriptor(),
-        Adesc.descriptor(),
-        Bdesc.descriptor(),
-        Cdesc.descriptor(),
-        Cdesc.descriptor(),
-        preference.descriptor(),
-        1,
-        &heuristicResult,
-        &returnedResult));
+      TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+          ltHandle,
+          computeDesc.descriptor(),
+          Adesc.descriptor(),
+          FakeBdesc.descriptor(),
+          FakeCdesc.descriptor(),
+          FakeCdesc.descriptor(),
+          preference.descriptor(),
+          1,
+          &heuristicResult,
+          &returnedResult));
+    } else {
+      TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+          ltHandle,
+          computeDesc.descriptor(),
+          Adesc.descriptor(),
+          Bdesc.descriptor(),
+          Cdesc.descriptor(),
+          Cdesc.descriptor(),
+          preference.descriptor(),
+          1,
+          &heuristicResult,
+          &returnedResult));
+    }
+#ifdef USE_ROCM
+    if (returnedResult > 0 && heuristicResult.state == CUBLAS_STATUS_SUCCESS) {
+      HipblasltHeuristicCache::get().add(heuristic_key, heuristicResult);
+    }
+#endif
   }
   if (returnedResult == 0) {
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
@@ -445,6 +672,9 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #endif
   }
   if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
+#ifdef USE_ROCM
+    HipblasltHeuristicCache::get().drop(heuristic_key);
+#endif
     TORCH_WARN(
       "bgemm_internal_cublaslt error: ",
       at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
@@ -1669,6 +1899,7 @@ bool gemm_and_bias(
   }
 #endif
 
+  // See Note [hipBLASLt heuristic cache key].
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, transa);
@@ -1727,17 +1958,37 @@ bool gemm_and_bias(
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-      ltHandle,
-      computeDesc.descriptor(),
-      Adesc.descriptor(),
-      Bdesc.descriptor(),
-      Cdesc.descriptor(),
-      Ddesc_raw,
-      preference.descriptor(),
-      1,
-      &heuristicResult,
-      &returnedResult));
+#ifdef USE_ROCM
+  const auto heuristic_key = hipblasltCacheKey(
+      abType, cType, computeType, scaleType, transa, transb, m, n, k, mat1_ld,
+      mat2_ld, c_ptr ? c_ld : result_ld, result_ld, /*num_batches=*/1, 0, 0, 0,
+      epilogue, ltworkspace.size);
+  const bool cached =
+      HipblasltHeuristicCache::get().find(heuristic_key, &heuristicResult);
+  if (cached) {
+    returnedResult = 1;
+  }
+#else
+  const bool cached = false;
+#endif
+  if (!cached) {
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+        ltHandle,
+        computeDesc.descriptor(),
+        Adesc.descriptor(),
+        Bdesc.descriptor(),
+        Cdesc.descriptor(),
+        Ddesc_raw,
+        preference.descriptor(),
+        1,
+        &heuristicResult,
+        &returnedResult));
+#ifdef USE_ROCM
+    if (returnedResult > 0 && heuristicResult.state == CUBLAS_STATUS_SUCCESS) {
+      HipblasltHeuristicCache::get().add(heuristic_key, heuristicResult);
+    }
+#endif
+  }
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
   if (returnedResult == 0) {
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
@@ -1767,6 +2018,9 @@ bool gemm_and_bias(
 #endif
   }
   if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
+#ifdef USE_ROCM
+    HipblasltHeuristicCache::get().drop(heuristic_key);
+#endif
     TORCH_WARN(
       "gemm_and_bias error: ",
       at::cuda::blas::_cublasGetErrorEnum(cublasStatus),

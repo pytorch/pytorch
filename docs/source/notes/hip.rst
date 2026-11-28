@@ -236,6 +236,49 @@ the handle returned outside capture does not apply inside it. Its workspace for 
 allocated during capture, from the graph's memory pool; one for a stream other than the capture
 stream stays allocated, and keeps part of that pool in use, until the workspace cache is cleared.
 
+.. _hipblaslt-heuristic-cache:
+
+hipBLASLt heuristic cache
+-------------------------
+
+GEMMs on the hipBLASLt backend, for example ``torch.mm``, ``torch.bmm``,
+``torch.addmm``, ``F.linear``, and their backward passes, call
+``hipblasLtMatmulAlgoGetHeuristic()`` to choose an algorithm and then
+``hipblasLtMatmul()`` to run it. The heuristic result is a solution index and
+the workspace that algorithm needs. PyTorch caches it per thread, keyed by the
+GEMM configuration, and reuses it for later calls with the same configuration
+instead of calling the heuristic again. The workspace pointer is not cached:
+it is taken on every call, which keeps HIP graph capture on its own buffer.
+
+``hipblasLtMatmul()`` does not check that an algorithm fits the problem, so the
+key must cover everything the heuristic sees. It includes the data types, the
+compute and scale type, the transpose modes, ``M``, ``N``, ``K``, the leading
+dimensions, the batch count and strides, the epilogue (none, bias, ReLU, or
+GELU), the workspace limit, and the device, because the heuristic runs on that
+device's handle. Deterministic mode and the SM carveout are also in the key as a
+precaution; on ROCm they do not change what the heuristic sees.
+
+Each thread has its own cache, so there is no lock and no shared state between
+threads. A thread's cache is freed when the thread exits. It holds 1024 entries
+by default and drops the least recently used one past that. The limit is set
+with the environment variable ``TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT``, read
+once per process:
+
+* ``TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT=0`` disables the cache.
+* A positive value is the maximum number of entries per thread. There is no
+  unlimited setting; set a large value instead.
+* A negative or non-integer value prints a warning and uses the default.
+
+An empty or failed heuristic query is not stored. If ``hipblasLtMatmul()``
+reports a failure, the entry is removed and the existing rocBLAS or unfused
+fallback runs.
+
+This only stores the answer ``hipblasLtMatmulAlgoGetHeuristic()`` already
+gave. It does not launch or time candidate kernels, so it is not hipBLASLt
+offline tuning and it is not ``torch.compile(mode="max-autotune")`` or
+TunableOp. Those time candidates and can pick a different kernel. Scaled,
+int8, and grouped GEMMs do not use this cache.
+
 .. _hipfft-plan-cache:
 
 hipFFT/rocFFT plan cache
