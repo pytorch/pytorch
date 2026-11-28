@@ -1727,6 +1727,16 @@
       ]
     }
   ],
+  "GB3913": [
+    {
+      "Gb_type": "unsupported globals dictionary operation",
+      "Context": "globals namespace",
+      "Explanation": "Dynamo supports only identity and guarded reads of the globals dictionary.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0098": [
     {
       "Gb_type": "Skip calling `torch.compiler.disable()`d function",
@@ -4242,6 +4252,16 @@
       "Explanation": "Dynamo cannot trace sets of tensors. To get a stable ordering, Dynamo needs to convert the set into a list and the order might not be stable if the set contains tensors.",
       "Hints": [
         "Use a dictionary where the keys are tensors.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1413": [
+    {
+      "Gb_type": "frame globals escape during standalone capture",
+      "Context": "globals namespace",
+      "Explanation": "Standalone capture cannot return the original frame's globals dictionary.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

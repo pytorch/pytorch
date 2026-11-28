@@ -24,7 +24,7 @@ import sys
 import types
 import weakref
 from collections.abc import Callable, Iterator
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
 from torch.utils._pytree import MappingKey
@@ -48,8 +48,11 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     DictGetItemSource,
+    FrameGlobalsSource,
+    GlobalSource,
     is_constant_source,
     is_from_local_source,
+    Source,
     TypeDictSource,
 )
 from ..utils import (
@@ -130,10 +133,14 @@ def _guard_nan_key(key: VariableTracker) -> None:
 
 def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
     # This is a simplified version of the CPython's PyDict_Check function:
+    if isinstance(obj, GlobalDictVariable):
+        obj.unsupported_operation()
     return issubclass(obj.python_type(), dict)
 
 
 def pydict_checkexact(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
+    if isinstance(obj, GlobalDictVariable):
+        obj.unsupported_operation()
     return obj.python_type() is dict
 
 
@@ -1062,6 +1069,176 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if type_attr is not NO_SUCH_SUBOBJ and _is_method_type(type_attr):
             return variables.CallMethodVariable(self, name)
         return super().tp_getattro_impl(tx, name)
+
+
+class GlobalDictVariable(VariableTracker):
+    """The live globals dict, with no traced copy of its storage."""
+
+    _cpython_type = dict
+    _nonvar_fields = {"namespace", *VariableTracker._nonvar_fields}
+
+    def __init__(self, namespace: dict[str, Any], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.namespace = namespace
+
+    @classmethod
+    def create(
+        cls,
+        tx: "InstructionTranslatorBase",
+        namespace: dict[str, Any],
+        function_source: Source | None = None,
+    ) -> "GlobalDictVariable":
+        if type(namespace) is not dict:
+            cls.unsupported_operation()
+        if function_source is not None:
+            source: Source = AttrSource(function_source, "__globals__")
+            install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+        elif namespace is tx.output.global_scope:
+            source = FrameGlobalsSource()
+        else:
+            cls.unsupported_operation()
+        return cls(namespace, source=source)
+
+    @staticmethod
+    def unsupported_operation(*args: Any, **kwargs: Any) -> NoReturn:
+        unimplemented(
+            gb_type="unsupported globals dictionary operation",
+            context="globals namespace",
+            explanation="Dynamo supports only identity and guarded reads of the globals dictionary.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def python_type(self) -> type:
+        return dict
+
+    def _lookup(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker | None:
+        if not key.is_python_constant():
+            self.unsupported_operation()
+        name = key.as_python_constant()
+        if type(name) is not str:
+            self.unsupported_operation()
+        side_effects = tx.output.side_effects
+        namespace = self.namespace
+        # Replay may have pending dictionary and module mutations for the same key.
+        if namespace in side_effects and side_effects.is_modified(
+            side_effects[namespace]
+        ):
+            self.unsupported_operation()
+
+        from ..symbolic_convert import _registered_module_for_globals
+
+        module = _registered_module_for_globals(namespace.get("__name__"), namespace)
+        if module is not None and module[1] in side_effects:
+            if side_effects.has_pending_mutation_of_attr(side_effects[module[1]], name):
+                self.unsupported_operation()
+
+        if namespace is tx.output.global_scope:
+            root = tx.output.root_tx
+            if name in root.symbolic_globals:
+                target = side_effects[root.symbolic_globals[name]]
+                if root._global_deleted_in_trace(target, name):
+                    return None
+                if side_effects.has_pending_mutation_of_attr(target, name):
+                    return side_effects.load_global(target, name)
+
+        source = self.source
+        if source is None:
+            raise AssertionError("Expected a source for the globals dictionary")
+        present = name in namespace
+        guard = (
+            GuardBuilder.DICT_CONTAINS if present else GuardBuilder.DICT_NOT_CONTAINS
+        )
+        install_guard(source.make_guard(functools.partial(guard, key=name)))
+        if present:
+            value_source = (
+                GlobalSource(name)
+                if isinstance(source, FrameGlobalsSource)
+                else DictGetItemSource(source, name)
+            )
+            return VariableTracker.build(tx, namespace[name], value_source)
+        return None
+
+    def mp_subscript_impl(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker:
+        value = self._lookup(tx, key)
+        if value is None:
+            raise_observed_exception(KeyError, tx, args=[key])
+        return value
+
+    def sq_contains_impl(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker:
+        return ConstantVariable.create(self._lookup(tx, key) is not None)
+
+    def dict_get(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, "get", len(args), 1, 2)
+        if kwargs:
+            raise_observed_exception(TypeError, tx)
+        value = self._lookup(tx, args[0])
+        if value is not None:
+            return value
+        return args[1] if len(args) == 2 else ConstantVariable.create(None)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name in ("clear", "pop", "popitem", "update", "setdefault"):
+            self.unsupported_operation()
+        return super().call_method(tx, name, args, kwargs)
+
+    tp_methods = {"get": Method(dict_get)}
+    mp_ass_subscript_impl = unsupported_operation
+    mp_length_impl = unsupported_operation
+    sq_length_impl = unsupported_operation
+    tp_iter_impl = unsupported_operation
+    tp_init_impl = unsupported_operation
+    tp_repr_impl = unsupported_operation
+    tp_str_impl = unsupported_operation
+    nb_or_impl = unsupported_operation
+    nb_inplace_or_impl = unsupported_operation
+
+    def get_id(self, tx: "InstructionTranslatorBase") -> int | None:
+        self.unsupported_operation()
+
+    def identity_compare(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> ConstantVariable:
+        if self is other or self.source == other.source:
+            return ConstantVariable.create(True)
+        if other.python_type() is not dict:
+            return ConstantVariable.create(False)
+        source, other_source = self.source, other.source
+        if source is None or other_source is None:
+            self.unsupported_operation()
+        if self.namespace is not tx.output.resolve_source_value(other_source):
+            # ID_MATCH on namespace objects is dropped by precompile.
+            self.unsupported_operation()
+        install_guard(
+            source.make_guard(
+                functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=other_source)
+            )
+        )
+        return ConstantVariable.create(True)
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        if op in ("__eq__", "__ne__"):
+            if self.identity_compare(tx, other).as_python_constant():
+                return ConstantVariable.create(op == "__eq__")
+        self.unsupported_operation()
 
 
 class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001

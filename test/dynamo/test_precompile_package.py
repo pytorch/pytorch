@@ -31,7 +31,7 @@ import torch._inductor.test_case
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from torch._dynamo.aot_compile import AOTCompiledFunction
-from torch._dynamo.exc import PackageError
+from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.guards import CheckFunctionManager, GuardBuilder, strip_local_scope
 from torch._dynamo.package import load_guards_state
 from torch._dynamo.source import (
@@ -111,6 +111,13 @@ def _unportable_op(x):
 
 
 _unportable_op = _without_module_globals(_unportable_op)
+
+
+def _read_unnamed_globals():
+    return globals()["_test_globals_value"]
+
+
+_read_unnamed_globals = _without_module_globals(_read_unnamed_globals)
 
 
 class _Doubling(torch.autograd.Function):
@@ -278,6 +285,51 @@ _RISKY_DROP_CASES = {
 
 
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
+    @parametrize("caching_precompile", (False, True))
+    def test_globals_read_guard_survives_serialization(self, caching_precompile):
+        def fn(x):
+            return x + globals()["_test_globals_value"]
+
+        x = torch.ones(2)
+        with mock.patch.dict(globals(), _test_globals_value=2):
+            with torch._dynamo.config.patch(caching_precompile=caching_precompile):
+                compiled = _aot_compile(fn, x)
+                data = AOTCompiledFunction.serialize(compiled).serialized_data
+            scope = dict(globals())
+            loaded = AOTCompiledFunction.deserialize(data, guard_globals=scope)
+            self.assertTrue(loaded.guard_check(x))
+            self.assertEqual(loaded(x), x + 2)
+            scope["_test_globals_value"] = 3
+            self.assertFalse(loaded.guard_check(x))
+
+    def test_inlined_globals_guard_resolves_live_function(self):
+        def fn(x):
+            return x + _read_unnamed_globals()
+
+        x = torch.ones(2)
+        with mock.patch.dict(_read_unnamed_globals.__globals__, _test_globals_value=2):
+            compiled = _aot_compile(fn, x)
+            data = AOTCompiledFunction.serialize(compiled).serialized_data
+            scope = dict(globals())
+            loaded = AOTCompiledFunction.deserialize(data, guard_globals=scope)
+            self.assertTrue(loaded.guard_check(x))
+            self.assertEqual(loaded(x), x + 2)
+            target = _read_unnamed_globals
+            replacement = types.FunctionType(
+                target.__code__, dict(target.__globals__, _test_globals_value=3)
+            )
+            scope["_read_unnamed_globals"] = replacement
+            self.assertFalse(loaded.guard_check(x))
+
+    def test_precompile_rejects_escaping_frame_globals(self):
+        def fn(x):
+            return x + 1, globals()
+
+        with self.assertRaisesRegex(
+            Unsupported, "frame globals escape during standalone capture"
+        ):
+            _aot_compile(fn, torch.ones(2))
+
     @parametrize("caching_precompile", (False, True))
     @parametrize("descriptor_kind", ("method", "classmethod"))
     def test_raw_descriptor_guard_survives_serialization(

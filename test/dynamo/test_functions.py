@@ -224,6 +224,110 @@ def deque_length_hints():
 class FunctionTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_globals_read_and_identity(self):
+        def fn(x):
+            ns = globals()
+            return x + ns.get("_test_globals_value", 1), ns
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        with unittest.mock.patch.dict(globals()):
+            globals().pop("_test_globals_value", None)
+            for value in (None, 2, 3, None):
+                if value is None:
+                    globals().pop("_test_globals_value", None)
+                else:
+                    globals()["_test_globals_value"] = value
+                result, ns = compiled(x)
+                self.assertEqual(result, fn(x)[0])
+                self.assertIs(ns, globals())
+
+    @parametrize("access", ("function", "method", "inline"))
+    def test_globals_source_tracks_function_namespace(self, access):
+        def target():
+            return globals()["value"]
+
+        def method(self):
+            return globals()["value"]
+
+        def fn(x, target):
+            if access == "inline":
+                return x + target()
+            if access == "method":
+                target = target.__func__
+            return x + target.__globals__["value"]
+
+        code = method.__code__ if access == "method" else target.__code__
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        for value in (2, 3, 2):
+            namespace = {"value": value, "__builtins__": __builtins__}
+            f = types.FunctionType(code, namespace)
+            if access == "method":
+                f = types.MethodType(f, object())
+            self.assertEqual(compiled(x, f), x + value)
+
+    def test_globals_identity_does_not_reuse_an_alias_guard(self):
+        def fn(x, target):
+            x = x + 1
+            return x, globals() is target.__globals__
+
+        def target():
+            pass
+
+        other = types.FunctionType(target.__code__, dict(globals()))
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x, target), (x + 1, True))
+        with self.assertRaisesRegex(
+            Unsupported, "unsupported globals dictionary operation"
+        ):
+            compiled(x, other)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, other), (x + 1, False))
+
+    def test_globals_account_for_global_store(self):
+        def fn(x):
+            global _test_globals_value
+            before = globals().get("_test_globals_value", 1)
+            _test_globals_value = 2
+            return x + before + globals()["_test_globals_value"]
+
+        x = torch.ones(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with unittest.mock.patch.dict(globals()):
+            globals().pop("_test_globals_value", None)
+            self.assertEqual(compiled(x), x + 3)
+            self.assertEqual(compiled(x), x + 4)
+
+    def test_globals_write_graph_breaks(self):
+        def fn(x):
+            globals()["_test_globals_value"] = 2
+            return x + globals()["_test_globals_value"]
+
+        x = torch.ones(2)
+        with unittest.mock.patch.dict(globals()):
+            with self.assertRaisesRegex(
+                Unsupported, "unsupported globals dictionary operation"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(torch.compile(fn, backend="eager")(x), x + 2)
+            self.assertEqual(globals()["_test_globals_value"], 2)
+
+    def test_globals_live_at_graph_break(self):
+        def fn(x):
+            ns = globals()
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + ns["_test_globals_value"], ns
+
+        counter = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+        with unittest.mock.patch.dict(globals(), _test_globals_value=2):
+            result, ns = torch.compile(fn, backend=counter)(x)
+            self.assertEqual(result, x + 3)
+            self.assertIs(ns, globals())
+        self.assertGreater(counter.frame_count, 0)
+
     @make_test
     def test_inline_jit_annotations(x):
         x = inline_script_if_tracing(x)

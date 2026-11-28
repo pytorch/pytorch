@@ -177,6 +177,7 @@ from .source import (
     DynamicScalarSource,
     FlattenScriptObjectSource,
     FloatTensorSource,
+    FrameGlobalsSource,
     FSDPNNModuleSource,
     GenericAttrSource,
     GetItemSource,
@@ -2024,6 +2025,8 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, FrameGlobalsSource):
+            out = self.get_global_guard_manager()
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very

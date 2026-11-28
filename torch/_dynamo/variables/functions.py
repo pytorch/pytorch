@@ -495,6 +495,14 @@ def _set_qualname(
     store_attr_mutation(tx, vt, "__qualname__", value)
 
 
+def _get_globals(
+    vt: "BaseUserFunctionVariable", tx: "InstructionTranslatorBase"
+) -> VariableTracker:
+    from .dicts import GlobalDictVariable
+
+    return GlobalDictVariable.create(tx, vt.get_globals(), vt.get_source())
+
+
 class BaseUserFunctionVariable(VariableTracker):
     def self_args(self) -> list[VariableTracker]:
         return []
@@ -891,8 +899,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
-        # func_memberlist marks these READONLY; reads keep the existing path.
-        "__globals__": Member(unmodeled_get, readonly_setter),
+        "__globals__": Member(_get_globals, readonly_setter),
         "__builtins__": Member(unmodeled_get, readonly_setter),
     }
 
@@ -2462,8 +2469,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
-        # func_memberlist marks these READONLY; reads keep the existing path.
-        "__globals__": Member(unmodeled_get, readonly_setter),
+        "__globals__": Member(_get_globals, readonly_setter),
         "__builtins__": Member(unmodeled_get, readonly_setter),
     }
 

@@ -102,6 +102,7 @@ from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
     DictKeysVariable,
+    GlobalDictVariable,
     pydict_checkexact,
 )
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
@@ -1242,7 +1243,12 @@ class BuiltinVariable(TypeVariable):
                     left: VariableTracker,
                     right: VariableTracker,
                 ) -> VariableTracker | None:
-                    result = vt_identity_compare(left, right)
+                    if type(left) is GlobalDictVariable:
+                        result = left.identity_compare(tx, right)
+                    elif type(right) is GlobalDictVariable:
+                        result = right.identity_compare(tx, left)
+                    else:
+                        result = vt_identity_compare(left, right)
                     if result is None:
                         return None
                     is_same = result.as_python_constant()
@@ -1783,6 +1789,25 @@ class BuiltinVariable(TypeVariable):
             return args[0].tp_getattro_impl(tx, "__dict__")
         except ObservedAttributeError:
             raise_observed_exception(TypeError, tx)
+
+    def call_globals(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        from ..symbolic_convert import InliningInstructionTranslator
+
+        if args or kwargs:
+            raise_observed_exception(TypeError, tx)
+        scope = tx
+        while isinstance(scope, InliningInstructionTranslator):
+            if source := scope.funcvar.get_source():
+                return GlobalDictVariable.create(tx, tx.f_globals, source)
+            if scope.parent.f_globals is not scope.f_globals:
+                break
+            scope = scope.parent
+        return GlobalDictVariable.create(tx, tx.f_globals)
 
     def call_locals(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
