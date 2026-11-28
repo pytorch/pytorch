@@ -11411,54 +11411,57 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
 
     @dtypes(torch.float)
     def test_call_count_tunableop(self, device, dtype):
-        # Test that after tuning a GEMM in TunableOp, we only call the GEMM kernel once
-        # per PyTorch API invocation.
-        # We use the torch profiler to get the call counts on the kernels
-
-        # Supported only for: MM, batch MM, and GEMM with bias (linear)
         from torch.profiler import profile, ProfilerActivity, supported_activities
 
         if ProfilerActivity.CUDA not in supported_activities():
             self.skipTest("CUDA profiling is not supported")
 
         with self._tunableop_ctx():
-            # set these to single iterations to keep it short but still exercise the code
             torch.cuda.tunable.set_max_tuning_iterations(1)
+            A = torch.rand(10, 10, device=device, dtype=dtype)
+            X = torch.rand(10, 10, device=device, dtype=dtype)
+            bias = torch.rand(10, device=device, dtype=dtype)
+            batch_A = torch.rand(2, 10, 10, device=device, dtype=dtype)
 
-            b = 2
-            M = 10
+            def run_gemms():
+                return (
+                    torch.mm(A, A),
+                    torch.nn.functional.linear(X, A, bias),
+                    torch.bmm(batch_A, batch_A),
+                )
 
-            # MM
-            A = torch.rand(M, M, device=device)
-            C = torch.mm(A, A)
+            def kernel_counts():
+                with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+                    run_gemms()
+                events = prof.events()
+                return {
+                    name: sum(len(evt.kernels) for evt in events if evt.name == name)
+                    for name in ("aten::mm", "aten::addmm", "aten::bmm")
+                }
 
-            # Linear - GEMM BIAS
-            X = torch.rand(M, M, device='cuda')
-            bias = torch.rand(M, device='cuda')
-            Y = torch.nn.functional.linear(X, A, bias)
+            run_gemms()
+            results = torch.cuda.tunable.get_results()
+            self.assertEqual(len(results), 3)
 
-            # BMM
-            batch_A = torch.rand((b, M, M), device='cuda')
-            batch_C = torch.bmm(batch_A, batch_A)
+            # Replay Default so both paths use the same backend algorithm. A GEMM
+            # can launch multiple kernels, so compare each op with TunableOp disabled.
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable._clear_all()
+            filename = torch.cuda.tunable.get_filename()
+            with open(filename, "w") as file:
+                file.writelines(f"Validator,{key},{value}\n" for key, value in torch.cuda.tunable.get_validators())
+                file.writelines(f"{op_sig},{param_sig},Default,0\n" for op_sig, param_sig, _, _ in results)
+            self.assertTrue(torch.cuda.tunable.read_file(filename))
+            self.assertEqual(len(torch.cuda.tunable.get_results()), 3)
 
-            kernel_count = 0
-            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-                C = torch.mm(A, A)
-                Y = torch.nn.functional.linear(X, A, bias)
-                batch_C = torch.bmm(batch_A, batch_A)
+            torch.cuda.tunable.enable(False)
+            run_gemms()
+            expected = kernel_counts()
+            self.assertTrue(all(count > 0 for count in expected.values()), expected)
 
-            # Check that after tuning, there was only one kernel
-            # launched per PyTorch API. The kernels have string
-            # that always starts with `Cijk*`
-            mm_key = 'Cijk' if TEST_WITH_ROCM else 'kernel'
-            events = prof.events()
-            for evt in events:
-                if mm_key in evt.name:
-                    self.assertEqual(evt.count, 1)
-                    kernel_count = kernel_count + 1
-
-            # There must be exactly three kernels only
-            self.assertEqual(kernel_count, 3)
+            torch.cuda.tunable.enable(True)
+            run_gemms()
+            self.assertEqual(kernel_counts(), expected)
 
     @dtypes(torch.float16)
     def test_numerical_check_python_binding_tunableop(self, device, dtype):
