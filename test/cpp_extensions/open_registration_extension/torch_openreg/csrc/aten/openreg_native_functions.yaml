@@ -1,0 +1,14 @@
+backend: PrivateUse1
+cpp_namespace: at::native::openreg
+use_out_as_primary: true
+device_guard: true
+supported:
+  - maximum.out:
+      structured: true
+  - minimum.out:
+      structured: true
+  # Plain .out kernels (structured: false). div is structured in aten, so div and
+  # div_ stay with aten's composite (meta() + redispatch to div_out); angle has no
+  # aten structured or composite kernel, so torchgen derives angle() from angle_out.
+  - div.out
+  - angle.out
