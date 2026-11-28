@@ -970,6 +970,11 @@ class DictionaryToken:
         self.__dict__.update(attrs)
 
 
+class _DelegatingModule(torch.nn.Module):
+    def __getattr__(self, name):
+        return super().__getattr__(name)
+
+
 class TokenConsumer:
     def __init__(self, token):
         if not isinstance(token, DictionaryToken):
@@ -994,7 +999,7 @@ class _RegisteredConsumer(_PayloadConsumer):
 
 class _DynamicConsumer(_RegisteredConsumer):
     def __getattr__(self, name):
-        if name == "__setstate__":
+        if name == "__setstate__" and "token" not in vars(self):
             return lambda state: self.__init__(state["token"])
         raise AttributeError(name)
 
@@ -1085,7 +1090,7 @@ class NamespaceReducedDict(InstanceReducedDict):
         return {}
 
 
-class PlainNamespaceDict(dict):
+class PlainDict(dict):
     pass
 
 
@@ -1101,7 +1106,7 @@ class SlottedDictionary(dict):
     __slots__ = ("tag",)
 
 
-class InheritedNamespaceReducedDict(PlainNamespaceDict, NamespaceReducedDict):
+class InheritedNamespaceReducedDict(PlainDict, NamespaceReducedDict):
     pass
 
 
@@ -1780,15 +1785,15 @@ class _ODictSubclass(collections.OrderedDict):
         super().__setattr__(name, value)
 
 
-class _DictStateLookup(dict):
+class _DictLookup(dict):
     def __getattribute__(self, name):
         if name == "__setstate__" and isinstance(dict.get(self, "b"), _Missing):
             raise AssertionError("State lookup must retain dictionary values")
         return object.__getattribute__(self, name)
 
 
-class _DictStateGetattr(dict):
-    __getattr__ = _DictStateLookup.__getattribute__
+class _DictGetattr(dict):
+    __getattr__ = _DictLookup.__getattribute__
 
 
 class _ODictNoKeys(_ODictSubclass):
@@ -1867,11 +1872,11 @@ class _ODictSlotsState(_ODictSubclass):
 
 
 class _ODictViewStateLookup(collections.OrderedDict):
-    __getattribute__ = _DictStateLookup.__getattribute__
+    __getattribute__ = _DictLookup.__getattribute__
 
 
 class _ODictViewStateGetattr(collections.OrderedDict):
-    __getattr__ = _DictStateLookup.__getattribute__
+    __getattr__ = _DictLookup.__getattribute__
 
 
 @instantiate_parametrized_tests
@@ -1884,10 +1889,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         pickler.dump(scope)
         return load_guards_state(buf.getvalue())
 
-    @parametrize(
-        "mapping_type",
-        [dict, PlainNamespaceDict, GenericGetattrDict, OrderedDict, defaultdict],
-    )
+    @parametrize("cls", [dict, PlainDict, GenericGetattrDict, OrderedDict, defaultdict])
     @parametrize(
         "key,consumer_type",
         [
@@ -1900,10 +1902,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     )
     @parametrize("mapping_first", [False, True])
     def test_pruned_dictionary_preserves_key_and_constructor_state(
-        self, mapping_type, consumer_type, key, mapping_first
+        self, cls, consumer_type, key, mapping_first
     ):
         token = DictionaryToken(payload=["saved"])
-        unused = mapping_type(
+        unused = cls(
             key_alias=_Mode.FAST, constructor_alias=token, lock=threading.Lock()
         )
         keyed = {key: "saved"}
@@ -1964,7 +1966,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         slot = 0 if source == "list" else "token"
         items = [token] if source == "list" else {slot: token}
         consumer = _MappingCallable(items) if source == "dict" else TokenConsumer(token)
-        backing = PlainNamespaceDict()
+        backing = PlainDict()
         backing.copy = mock.Mock(
             side_effect=lambda: {"nested": [consumer], "rank": backing.copy.call_count}
         )
@@ -1976,13 +1978,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             scope = {"proxy": proxy, **scope}
         scope["second"] = types.MappingProxyType(backing)
         dictionaries = [] if source == "list" else [items]
-        kind = "dict" if source == "dict" else "DictionaryToken"
-        error = rf"L\['proxy'\] needs pruned {kind} state in its copy\. Expose the dependency"
-        with self.assertRaisesRegex(PackageError, error):
-            self._roundtrip_pruned(scope, dictionaries)
-        backing.copy.assert_called_once_with()
-        backing.copy.reset_mock()
-        saved = self._roundtrip_pruned(scope, dictionaries, token, token.payload)
+        saved = self._roundtrip_pruned(scope, dictionaries)
         self.assertEqual((saved["proxy"]["rank"], saved["second"]["rank"]), (1, 2))
         self.assertEqual(backing.copy.call_count, 2)
         restored = saved["proxy"]["nested"][0]
@@ -1992,13 +1988,33 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertIs(restored.token, saved["items"][slot])
             self.assertEqual(restored.token.payload, ["required"])
 
+    def test_setstate_fallback_runs_only_during_load(self):
+        calls = []
+
+        def lookup(obj, name):
+            calls.append(name)
+            raise error(name)
+
+        obj, buf = RaisingNameProxy(), io.BytesIO()
+        obj.scale = 3
+        with mock.patch.object(RaisingNameProxy, "__getattr__", lookup):
+            error = AttributeError
+            GuardsStatePickler({id(obj): obj}, {}, {}, {}, buf).dump(obj)
+            self.assertNotIn("__setstate__", calls)
+            load_guards_state(buf.getvalue())
+            self.assertEqual(calls.count("__setstate__"), 1)
+            error = RuntimeError
+            with self.assertRaisesRegex(error, "__setstate__"):
+                load_guards_state(buf.getvalue())
+            self.assertEqual(calls.count("__setstate__"), 2)
+
     def test_state_traversal_bypasses_user_attribute_lookup_and_equality(self):
         class Meta(type):
             def __eq__(cls, other):
                 raise AssertionError("Pickle protocol lookup must not compare classes")
 
             def __hash__(cls):
-                return hash(PlainNamespaceDict)
+                return hash(PlainDict)
 
         class Key:
             @property
@@ -2006,7 +2022,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                 raise AssertionError("Required-state traversal must not read __class__")
 
         mapping_type = Meta("Mapping", (dict,), {})
-        mapping, plain, key = mapping_type(), PlainNamespaceDict(), Key()
+        mapping, plain, key = mapping_type(), PlainDict(), Key()
         key.state = [{"saved": _Mode.FAST}]
         pickler = GuardsStatePickler({id(key): key}, {}, {}, {}, io.BytesIO())
         with mock.patch.dict(copyreg.dispatch_table, {mapping_type: tuple}):
@@ -3678,15 +3694,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
         m.cfg = {"token": m.token}
         backing = {"scale": 2, "consumer": _MappingCallable(m.cfg)}
         if custom_copy:
-            backing = PlainNamespaceDict(backing)
-            backing.copy = functools.partial(PlainNamespaceDict, backing)
+            backing = PlainDict(backing)
+            backing.copy = functools.partial(PlainDict, backing)
         fn = proxy_then_module if proxy_first else module_then_proxy
         kinds = ("TYPE_MATCH", "TENSOR_MATCH", "CONSTANT_MATCH")
         inputs = dict(x=torch.ones(1, 10), opts=types.MappingProxyType(backing), m=m)
-        if custom_copy and not proxy_first:
-            with self.assertRaisesRegex(PackageError, "needs pruned .* state"):
-                self._test_serialization(kinds, fn, **inputs)
-            return
         self._roundtrip_checks(kinds, fn, inputs)
         saved = self._saved_scope
         m, opts = saved["m"], saved["opts"]
@@ -3694,19 +3706,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertIs(m.cfg["token"], m.token)
         self.assertEqual(opts["consumer"](), 3)
 
-    def test_saved_constructor_and_annotation_aliases(self):
+    @parametrize("holder_type", [RaisingNameProxy, _DelegatingModule])
+    def test_saved_constructor_and_annotation_aliases(self, holder_type):
         def fn(x, holder, items=()):
             return x + holder.weight + (items[1] if items else 0)
 
         first, second, direct = (DictionaryToken() for _ in range(3))
-        holder = DictionaryToken(weight=3, stages=[0, 1])
+        holder = holder_type()
+        holder.weight, holder.stages, holder.lock = 3, [0, 1], threading.Lock()
         holder.cb = TokenConsumer(first).__reduce_ex__
         inputs = dict(x=torch.ones(1), holder=holder)
         with torch.fx.traceback.annotate({"stages": holder.stages}):
             kinds = ("CONSTANT_MATCH", "FX_ANNOTATION")
             check = self._roundtrip_checks(kinds, fn, inputs)
         check(inputs, False)
-        self.assertEqual(self._saved_scope["holder"].stages, [0, 1])
+        graph = load_guards_state(self._cached_guards_state).output_graph
+        saved = graph.local_scope["holder"]
+        self.assertIs(saved.stages, graph.fx_annotation["stages"])
+        self.assertEqual(saved.stages, [0, 1])
+        self.assertIsInstance(saved.lock, _Missing)
         inputs["items"] = [first, 5, second, direct]
         annotation = {"consumer": TokenConsumer(second), "token": direct}
         with torch.fx.traceback.annotate(annotation):
@@ -3731,7 +3749,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         else:
             helper = DictionaryToken() if passive else ReducedHolder(2, {})
             helper.cfg = holder.cfg
-        nested = PlainNamespaceDict(opts=[1, DictionaryToken(), DictionaryToken()])
+        nested = PlainDict(opts=[1, DictionaryToken(), DictionaryToken()])
         holder.items = [helper, 5, TokenConsumer(nested["opts"][1])]
         mode = GlobalTorchFunctionMode()
         mode.consumer = TokenConsumer(nested["opts"][2])
@@ -5284,17 +5302,14 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertIs(scope["holder"].cfg, scope["module"].mapping)
         self.assertIsInstance(scope["holder"].lock, _Missing)
 
-    @parametrize(
-        "mapping_type",
-        [_ODictSubclass, _ODictNoKeys, _DictStateLookup, _DictStateGetattr],
-    )
-    def test_implicit_dictionary_keeps_shared_subclass_state(self, mapping_type):
+    @parametrize("mapping", [_ODictSubclass, _ODictNoKeys, _DictLookup, _DictGetattr])
+    def test_implicit_dictionary_keeps_shared_subclass_state(self, mapping):
         def fn(x, owner, other):
             return x + len(owner), tuple(other)
 
         def inputs():
             shared = ["saved"]
-            owner = mapping_type(a=1, b=shared)
+            owner = mapping(a=1, b=shared)
             owner.tag = "saved"
             owner.slot = owner
             return {"x": torch.ones(1), "owner": owner, "other": {"unused": shared}}
