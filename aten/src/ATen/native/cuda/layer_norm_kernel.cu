@@ -2,6 +2,7 @@
 #include <ATen/native/layer_norm.h>
 
 #include <algorithm>
+#include <bit>
 #include <tuple>
 #include <type_traits>
 
@@ -205,7 +206,7 @@ WelfordDataLN cuWelfordCombine(
   }
 }
 
-template<typename T, bool rms_norm = false>
+template<typename T, bool rms_norm = false, bool packed = false>
 __device__ WelfordDataLN compute_stats(
   const T*  __restrict__ X,
   const int N,
@@ -227,51 +228,65 @@ __device__ WelfordDataLN compute_stats(
         wd = cuWelfordOnlineSum<acc_t, rms_norm>(static_cast<acc_t>(data.val[ii]), wd);
       }
     }
-    // intra-warp reduction
-    for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
-        WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset), WARP_SHFL_DOWN(wd.sigma2, offset), WARP_SHFL_DOWN(wd.count, offset)};
+    if constexpr (packed) {
+      // reduce within the blockDim.x lanes of each row
+      for (int offset = (blockDim.x >> 1); offset > 0; offset >>= 1) {
+        WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset, blockDim.x),
+                          WARP_SHFL_DOWN(wd.sigma2, offset, blockDim.x),
+                          WARP_SHFL_DOWN(wd.count, offset, blockDim.x)};
         wd = cuWelfordCombine<rms_norm>(wd, wdB);
-    }
-    // threadIdx.x == 0 has correct values for each warp
-    // inter-warp reductions
-    if (blockDim.y > 1) {
-      float * meansigmabuf = buf;
-      float * countbuf = buf + blockDim.y;
-      for (int offset = blockDim.y/2;  offset > 0;  offset /= 2) {
-        // upper half of warps write to shared
-        if (threadIdx.x == 0 && threadIdx.y >= offset && threadIdx.y < 2*offset) {
-          const int wrt_y = threadIdx.y - offset;
-          meansigmabuf[2*wrt_y] = wd.mean;
-          meansigmabuf[2*wrt_y+1] = wd.sigma2;
-          countbuf[wrt_y] = wd.count;
-        }
-        __syncthreads();
-        // lower half merges
-        if (threadIdx.x == 0 && threadIdx.y < offset) {
-          WelfordDataLN wdB{meansigmabuf[2*threadIdx.y],
-                          meansigmabuf[2*threadIdx.y+1],
-                          countbuf[threadIdx.y]};
-          wd = cuWelfordCombine<rms_norm>(wd, wdB);
-        }
-        __syncthreads();
       }
-      if (threadIdx.x == 0 && threadIdx.y ==0) {
-        meansigmabuf[0] = wd.mean;
-        meansigmabuf[1] = wd.sigma2/float(N);
-      }
-      __syncthreads();
-      return WelfordDataLN{meansigmabuf[0], meansigmabuf[1],0.f};
-
+      return WelfordDataLN{WARP_SHFL(wd.mean, 0, blockDim.x), WARP_SHFL(wd.sigma2, 0, blockDim.x)/float(N), 0.f};
     } else {
-      return WelfordDataLN{WARP_SHFL(wd.mean,0), WARP_SHFL(wd.sigma2,0)/float(N), 0.f};
+      // intra-warp reduction
+      for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
+          WelfordDataLN wdB{WARP_SHFL_DOWN(wd.mean, offset),
+                            WARP_SHFL_DOWN(wd.sigma2, offset),
+                            WARP_SHFL_DOWN(wd.count, offset)};
+          wd = cuWelfordCombine<rms_norm>(wd, wdB);
+      }
+      // threadIdx.x == 0 has correct values for each warp
+      // inter-warp reductions
+      if (blockDim.y > 1) {
+        float * meansigmabuf = buf;
+        float * countbuf = buf + blockDim.y;
+        for (int offset = blockDim.y/2;  offset > 0;  offset /= 2) {
+          // upper half of warps write to shared
+          if (threadIdx.x == 0 && threadIdx.y >= offset && threadIdx.y < 2*offset) {
+            const int wrt_y = threadIdx.y - offset;
+            meansigmabuf[2*wrt_y] = wd.mean;
+            meansigmabuf[2*wrt_y+1] = wd.sigma2;
+            countbuf[wrt_y] = wd.count;
+          }
+          __syncthreads();
+          // lower half merges
+          if (threadIdx.x == 0 && threadIdx.y < offset) {
+            WelfordDataLN wdB{meansigmabuf[2*threadIdx.y],
+                            meansigmabuf[2*threadIdx.y+1],
+                            countbuf[threadIdx.y]};
+            wd = cuWelfordCombine<rms_norm>(wd, wdB);
+          }
+          __syncthreads();
+        }
+        if (threadIdx.x == 0 && threadIdx.y ==0) {
+          meansigmabuf[0] = wd.mean;
+          meansigmabuf[1] = wd.sigma2/float(N);
+        }
+        __syncthreads();
+        return WelfordDataLN{meansigmabuf[0], meansigmabuf[1],0.f};
+
+      } else {
+        return WelfordDataLN{WARP_SHFL(wd.mean,0), WARP_SHFL(wd.sigma2,0)/float(N), 0.f};
+      }
     }
 }
 
 
-template <typename T, typename T_ACC, bool rms_norm = false,
+template <typename T, typename T_ACC, bool rms_norm = false, bool packed = false,
 typename std::enable_if_t<!std::is_same_v<T, double>, int> = 0>
 __device__ __inline__ void vectorized_layer_norm_kernel_impl(
   const int N,
+  const int64_t M,
   T_ACC eps,
   const  T* __restrict__ X,
   const  T* gamma,
@@ -282,9 +297,21 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
     extern __shared__ float s_data[]; //if we made smem WelfordDataLN type, there would be bank conflicts,
     //as one thread would have to write 3 consecutive floats
     auto i1 = blockIdx.x;
+    [[maybe_unused]] bool past_last_row = false;
+    if constexpr (packed) {
+      // packed rows share a block, rows past M reuse row M - 1 for the shuffles and skip the writes
+      const int64_t row = static_cast<int64_t>(blockIdx.x) * blockDim.z + threadIdx.z;
+      past_last_row = row >= M;
+      i1 = static_cast<unsigned int>(past_last_row ? M - 1 : row);
+    }
     const int64_t row_offset = static_cast<int64_t>(i1) * static_cast<int64_t>(N);
     const T * block_row = X + row_offset;
-    WelfordDataLN wd = compute_stats<T, rms_norm>(block_row, N, s_data);
+    WelfordDataLN wd = compute_stats<T, rms_norm, packed>(block_row, N, s_data);
+    if constexpr (packed) {
+      if (past_last_row) {
+        return;
+      }
+    }
 
     using vec_t = aligned_vector<T, vec_size>;
     const vec_t * X_vec = reinterpret_cast<const vec_t*>(block_row);
@@ -348,10 +375,11 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
     }
 }
 
-template <typename T, typename T_ACC, bool rms_norm = false,
+template <typename T, typename T_ACC, bool rms_norm = false, bool packed = false,
 typename std::enable_if_t<std::is_same_v<T, double>, int> = 0>
 __device__ __inline__ void vectorized_layer_norm_kernel_impl(
   const int /*N*/,
+  const int64_t /*M*/,
   T_ACC /*eps*/,
   const  T* __restrict__ /*X*/,
   const  T* /*gamma*/,
@@ -363,9 +391,10 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
   }
 
 //to avoid windows SFINAE errors
-template <typename T, typename T_ACC, bool rms_norm = false>
+template <typename T, typename T_ACC, bool rms_norm = false, bool packed = false>
 __global__ void vectorized_layer_norm_kernel(
   const int N,
+  const int64_t M,
   T_ACC eps,
   const  T* __restrict__ X,
   const  T* gamma,
@@ -373,7 +402,7 @@ __global__ void vectorized_layer_norm_kernel(
   T_ACC* mean,
   T_ACC* rstd,
   T* Y){
-    vectorized_layer_norm_kernel_impl<T, T_ACC, rms_norm>(N, eps, X, gamma, beta, mean, rstd, Y);
+    vectorized_layer_norm_kernel_impl<T, T_ACC, rms_norm, packed>(N, M, eps, X, gamma, beta, mean, rstd, Y);
   }
 
 
@@ -1104,9 +1133,23 @@ void launch_vectorized_layer_norm_kernel(
     //constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     const int warp_size = at::cuda::warp_size();
-    // Only N / vec_size threads have a vector to read. For narrow rows (e.g. per-head
-    // q/k norms) launch just enough warps to cover them, instead of idle warps that
-    // still take part in the cross-warp reduction.
+#ifndef USE_ROCM
+    // rows that fit in one warp are packed and share a block instead of getting one block per row,
+    // with blockDim.x threads for each row and blockDim.z rows in each block (capped at 64 in CUDA),
+    // not enabled on ROCm, because untested and the grid split below steps one row per block
+    if (N / vec_size <= warp_size) {
+      const unsigned int threads_x = std::bit_ceil(static_cast<unsigned int>(N / vec_size));
+      const dim3 threads(threads_x, 1, std::min(num_threads() / threads_x, 64u));
+      const dim3 blocks(static_cast<unsigned int>(at::ceil_div(M, static_cast<int64_t>(threads.z))));
+      vectorized_layer_norm_kernel<T, T_ACC, rms_norm, true><<<blocks, threads, 0, stream>>>(N, M, eps, X_data,
+      gamma_data, beta_data, mean_data, rstd_data, Y_data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      return;
+    }
+#endif
+    // Only N / vec_size threads have a vector to read. For narrow rows (on CUDA only rows
+    // over one warp, as narrower ones are packed above) launch just enough warps to cover
+    // them, instead of idle warps that still take part in the cross-warp reduction.
     int threads_y = num_threads() / warp_size;
     while (threads_y > 1 && (threads_y / 2) * warp_size >= N / vec_size) {
       threads_y /= 2;
@@ -1125,7 +1168,7 @@ void launch_vectorized_layer_norm_kernel(
 
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
     int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
-    vectorized_layer_norm_kernel<T, T_ACC, rms_norm><<<blocks, threads, nshared, stream>>>(N, eps, X_data,
+    vectorized_layer_norm_kernel<T, T_ACC, rms_norm><<<blocks, threads, nshared, stream>>>(N, M, eps, X_data,
     gamma_data, beta_data, mean_data, rstd_data, Y_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -1147,7 +1190,7 @@ void launch_vectorized_layer_norm_kernel(
 
       blocks.x = (remaining > blocks.x) ? blocks.x : remaining;
 
-      vectorized_layer_norm_kernel<T, T_ACC, rms_norm><<<blocks, threads, nshared, stream>>>(N, eps, X_data2,
+      vectorized_layer_norm_kernel<T, T_ACC, rms_norm><<<blocks, threads, nshared, stream>>>(N, remaining, eps, X_data2,
         gamma_data, beta_data, mean_data2, rstd_data2, Y_data2);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
 
