@@ -31,6 +31,8 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
+#include <gloo/reduce_scatter.h>
+#include <limits>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
 
@@ -1598,6 +1600,124 @@ class LambdaWork : public Work {
   c10::intrusive_ptr<c10::ivalue::Future> resultFuture_;
 };
 
+// Native CPU reduce-scatter uses Gloo halving-doubling instead of
+// reducing all elements on every rank. Reserve slots in caller order,
+// before workers can execute collectives out of order.
+bool canUseNativeReduceScatter(
+    const at::Tensor& output,
+    const at::Tensor& input,
+    const ReduceOp& reduceOp,
+    std::chrono::milliseconds timeout) {
+  const auto dtype = input.scalar_type();
+  if (timeout != kUnsetTimeout ||
+      (dtype != at::kFloat && dtype != at::kDouble) ||
+      input.device().type() != at::kCPU ||
+      output.device().type() != at::kCPU ||
+      input.layout() != at::kStrided ||
+      output.layout() != at::kStrided ||
+      input.numel() == 0 ||
+      input.numel() >
+          static_cast<int64_t>(
+              std::numeric_limits<int>::max() / input.element_size()) ||
+      output.numel() > std::numeric_limits<int>::max()) {
+    return false;
+  }
+  return reduceOp == ReduceOp::SUM || reduceOp == ReduceOp::AVG ||
+      reduceOp == ReduceOp::PRODUCT || reduceOp == ReduceOp::MIN ||
+      reduceOp == ReduceOp::MAX;
+}
+
+class AsyncNativeReduceScatterWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncNativeReduceScatterWork(
+      std::shared_ptr<gloo::Context> context,
+      const std::vector<at::Tensor>& outputs,
+      const std::vector<at::Tensor>& buffers,
+      ReduceOp reduceOp,
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
+      : ProcessGroupGloo::AsyncWork(
+            std::move(context),
+            {outputs},
+            OpType::REDUCE_SCATTER,
+            seq,
+            timeout,
+            "gloo:reduce_scatter",
+            buffers),
+        outputs_(outputs),
+        buffers_(buffers),
+        reduceOp_(std::move(reduceOp)) {
+    algorithms_.reserve(buffers_.size());
+    for (const auto i : c10::irange(buffers_.size())) {
+      auto& buffer = buffers_[i];
+      TORCH_INTERNAL_ASSERT(buffer.is_contiguous());
+      const auto count = static_cast<int>(buffer.numel());
+      const auto recvCount = static_cast<int>(outputs_[i].numel());
+      // The result is stored at the start of buffer, not at rank offset.
+      std::vector<int> recvCounts(context_->size, recvCount);
+      if (buffer.scalar_type() == at::kFloat) {
+        algorithms_.push_back(
+            std::make_unique<gloo::ReduceScatterHalvingDoubling<float>>(
+                context_,
+                std::vector<float*>{buffer.data_ptr<float>()},
+                count,
+                recvCounts,
+                function<float>()));
+      } else {
+        algorithms_.push_back(
+            std::make_unique<gloo::ReduceScatterHalvingDoubling<double>>(
+                context_,
+                std::vector<double*>{buffer.data_ptr<double>()},
+                count,
+                recvCounts,
+                function<double>()));
+      }
+    }
+  }
+
+  const std::vector<at::Tensor> getInputTensors() override {
+    return buffers_;
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return outputs_;
+  }
+
+  void run() override {
+    for (const auto i : c10::irange(buffers_.size())) {
+      algorithms_[i]->run();
+      auto reduced = buffers_[i].narrow(0, 0, outputs_[i].size(0));
+      if (reduceOp_ == ReduceOp::AVG) {
+        reduced.div_(context_->size);
+      }
+      outputs_[i].copy_(reduced);
+    }
+  }
+
+ private:
+  template <typename T>
+  const gloo::ReductionFunction<T>* function() const {
+    switch (reduceOp_) {
+      case ReduceOp::SUM:
+      case ReduceOp::AVG:
+        return gloo::ReductionFunction<T>::sum;
+      case ReduceOp::PRODUCT:
+        return gloo::ReductionFunction<T>::product;
+      case ReduceOp::MIN:
+        return gloo::ReductionFunction<T>::min;
+      case ReduceOp::MAX:
+        return gloo::ReductionFunction<T>::max;
+      default:
+        TORCH_CHECK(false, "unsupported Gloo native reduce-scatter op");
+    }
+  }
+
+  std::vector<at::Tensor> outputs_;
+  std::vector<at::Tensor> buffers_;
+  ReduceOp reduceOp_;
+  std::vector<std::unique_ptr<gloo::Algorithm>> algorithms_;
+};
+
 } // namespace
 
 c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single(
@@ -1621,16 +1741,38 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single_coalesced(
   const auto rank = getRank();
   const auto worldSize = getSize();
   std::vector<at::Tensor> buffers;
+  bool useNative = !inputTensors.empty();
   for (const auto i : c10::irange(inputTensors.size())) {
     auto inputShape = inputTensors[i].sizes().vec();
     auto outputShape = outputTensors[i].sizes().vec();
     TORCH_CHECK_EQ(outputTensors[i].dtype(), inputTensors[i].dtype());
     TORCH_CHECK_EQ(outputShape[0] * worldSize, inputShape[0]);
-    for (const auto i : c10::irange(1, outputShape.size())) {
-      TORCH_CHECK_EQ(outputShape[i], inputShape[i]);
+    for (const auto j : c10::irange(1, outputShape.size())) {
+      TORCH_CHECK_EQ(outputShape[j], inputShape[j]);
     }
+    useNative &= canUseNativeReduceScatter(
+        outputTensors[i], inputTensors[i], opts.reduceOp, opts.timeout);
     buffers.push_back(inputTensors[i].clone());
   }
+  if (useNative) {
+    for (auto& buffer : buffers) {
+      buffer = buffer.contiguous();
+    }
+    // Reserve all Gloo slots before enqueueing asynchronous work.
+    const auto tag = nextTag();
+    auto context = getContext(tag);
+    ++seq_;
+    auto work = c10::make_intrusive<AsyncNativeReduceScatterWork>(
+        std::move(context),
+        outputTensors,
+        buffers,
+        opts.reduceOp,
+        seq_,
+        opts.timeout);
+    enqueue(work);
+    return work;
+  }
+
   AllreduceOptions arOpts;
   arOpts.reduceOp = opts.reduceOp;
   arOpts.timeout = opts.timeout;
@@ -2299,6 +2441,34 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
       invalidArgument, outputs.size(), inputs.size());
   assertInputTensorListSizeEqualsWorldSize(
       invalidArgument, inputs[0].size(), worldSize);
+
+  // Flatten list-style CPU inputs, preserving the legacy path for unsupported
+  // dtypes, layouts, reduction operations, and per-collective timeouts.
+  bool useNative = true;
+  for (const auto& chunk : inputs[0]) {
+    useNative &= chunk.dtype() == outputs[0].dtype() &&
+        chunk.sizes() == outputs[0].sizes() &&
+        canUseNativeReduceScatter(
+            outputs[0], chunk, opts.reduceOp, opts.timeout);
+  }
+  useNative &= outputs[0].numel() <=
+      std::numeric_limits<int>::max() /
+          (static_cast<int64_t>(worldSize) * outputs[0].element_size());
+  if (useNative) {
+    std::vector<at::Tensor> buffers{at::cat(inputs[0], 0)};
+    const auto tag = nextTag();
+    auto context = getContext(tag);
+    ++seq_;
+    auto work = c10::make_intrusive<AsyncNativeReduceScatterWork>(
+        std::move(context),
+        outputs,
+        buffers,
+        opts.reduceOp,
+        seq_,
+        opts.timeout);
+    enqueue(work);
+    return work;
+  }
 
   std::vector<at::Tensor> buffers;
   for (const auto i : c10::irange(worldSize)) {
