@@ -285,6 +285,9 @@ inconsistent 'UUID' assignment across ranks, and to prevent races during initial
 .. autofunction:: torch.distributed.distributed_c10d.is_nccl_available
 .. autofunction:: torch.distributed.distributed_c10d.is_torchelastic_launched
 .. autofunction:: torch.distributed.distributed_c10d.is_ucc_available
+.. autofunction:: torch.distributed.distributed_c10d.is_tccl_available
+.. autofunction:: torch.distributed.distributed_c10d.check_tccl_link_layer
+.. autofunction:: torch.distributed.distributed_c10d.list_tccl_devices
 ```
 
 ```{eval-rst}
