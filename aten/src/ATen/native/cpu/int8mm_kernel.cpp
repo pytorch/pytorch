@@ -448,6 +448,82 @@ bool int_mm_fallback_kernel(
   const int64_t n = b.size(1);
   const int64_t lda = a.stride(0);
   const int64_t ldb = b.stride(1);
+  if (m >= 4) {
+    const int64_t full_blocks = m / 4;
+    const int64_t blocked = full_blocks * n;
+    const int64_t tail_rows = m - 4 * full_blocks;
+    at::parallel_for(0, blocked + tail_rows * n, 1, [&](int64_t begin, int64_t end) {
+      for (int64_t i = begin; i < end; ++i) {
+        if (i < blocked) {
+          const int64_t row = (i / n) * 4;
+          const int64_t col = i % n;
+          const auto* x0 = a_data + row * lda;
+          const auto* x1 = x0 + lda;
+          const auto* x2 = x1 + lda;
+          const auto* x3 = x2 + lda;
+          const auto* y = b_data + col * ldb;
+          __m256i acc0 = _mm256_setzero_si256();
+          __m256i acc1 = acc0, acc2 = acc0, acc3 = acc0;
+          int64_t j = 0;
+          const auto widen = [](const int8_t* ptr) {
+            return _mm256_cvtepi8_epi16(
+                _mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr)));
+          };
+          for (; j + 16 <= k; j += 16) {
+            const auto by = widen(y + j);
+            acc0 = _mm256_add_epi32(acc0, _mm256_madd_epi16(widen(x0 + j), by));
+            acc1 = _mm256_add_epi32(acc1, _mm256_madd_epi16(widen(x1 + j), by));
+            acc2 = _mm256_add_epi32(acc2, _mm256_madd_epi16(widen(x2 + j), by));
+            acc3 = _mm256_add_epi32(acc3, _mm256_madd_epi16(widen(x3 + j), by));
+          }
+          const auto reduce = [](__m256i accum) {
+            __m128i sum = _mm_add_epi32(
+                _mm256_castsi256_si128(accum), _mm256_extracti128_si256(accum, 1));
+            sum = _mm_hadd_epi32(sum, sum);
+            sum = _mm_hadd_epi32(sum, sum);
+            return _mm_cvtsi128_si32(sum);
+          };
+          int32_t v0 = reduce(acc0), v1 = reduce(acc1);
+          int32_t v2 = reduce(acc2), v3 = reduce(acc3);
+          for (; j < k; ++j) {
+            const int32_t b_val = y[j];
+            v0 += static_cast<int32_t>(x0[j]) * b_val;
+            v1 += static_cast<int32_t>(x1[j]) * b_val;
+            v2 += static_cast<int32_t>(x2[j]) * b_val;
+            v3 += static_cast<int32_t>(x3[j]) * b_val;
+          }
+          c_data[row * n + col] = v0;
+          c_data[(row + 1) * n + col] = v1;
+          c_data[(row + 2) * n + col] = v2;
+          c_data[(row + 3) * n + col] = v3;
+          continue;
+        }
+        const int64_t scalar_index = i - blocked + 4 * full_blocks * n;
+        const auto* x = a_data + (scalar_index / n) * lda;
+        const auto* y = b_data + (scalar_index % n) * ldb;
+        __m256i accum = _mm256_setzero_si256();
+        int64_t j = 0;
+        for (; j + 16 <= k; j += 16) {
+          const auto ax = _mm256_cvtepi8_epi16(
+              _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + j)));
+          const auto by = _mm256_cvtepi8_epi16(
+              _mm_loadu_si128(reinterpret_cast<const __m128i*>(y + j)));
+          // Pairwise products are accumulated in int32, not saturated to int16.
+          accum = _mm256_add_epi32(accum, _mm256_madd_epi16(ax, by));
+        }
+        __m128i sum = _mm_add_epi32(
+            _mm256_castsi256_si128(accum), _mm256_extracti128_si256(accum, 1));
+        sum = _mm_hadd_epi32(sum, sum);
+        sum = _mm_hadd_epi32(sum, sum);
+        int32_t value = _mm_cvtsi128_si32(sum);
+        for (; j < k; ++j) {
+          value += static_cast<int32_t>(x[j]) * static_cast<int32_t>(y[j]);
+        }
+        c_data[scalar_index] = value;
+      }
+    });
+    return true;
+  }
   at::parallel_for(0, m * n, 1, [&](int64_t begin, int64_t end) {
     for (int64_t i = begin; i < end; ++i) {
       const auto* x = a_data + (i / n) * lda;
