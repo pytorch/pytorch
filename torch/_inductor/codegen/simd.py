@@ -533,6 +533,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     sexpr: Callable[[sympy.Expr], str] = pexpr
     kexpr: Callable[[sympy.Expr], str]
     allow_block_ptr: bool = False
+    # Dropped from its MultiKernel instead of failing the compile if it repeats a choice or its Triton compile fails.
+    optional: bool = False
     # pyrefly: ignore [bad-override]
     kernel_name: str
 
@@ -4850,6 +4852,7 @@ class SIMDScheduling(BaseScheduling):
             kernel_features,
             [tiling],
             {"features": kernel_features, "tiling_scores": tiling_score},
+            allow_tma_variants=True,
         )
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
@@ -4868,19 +4871,37 @@ class SIMDScheduling(BaseScheduling):
         Runs once, after all the leaves exist: the merged workspace size is part of
         each source.
         """
+        num_choices = len(kernels)
         MultiKernel.merge_workspaces_inplace(kernels)
 
         # Collect config_patches from operations (e.g., decomposition ops with
         # coordinate_descent_tuning) and apply during kernel codegen
         config_patches = self._collect_config_patches(node_schedule)
 
-        for kernel in kernels:
+        _, baseline_args, _, baseline_types = kernels[0].args.python_argdefs()
+        for kernel in list(kernels):
+            _, call_args, _, arg_types = kernel.args.python_argdefs()
+            # MultiKernel.call_kernel passes one set of call args to every choice.
+            if kernel.optional and (call_args, arg_types) != (
+                baseline_args,
+                baseline_types,
+            ):
+                raise AssertionError(
+                    f"optional kernel takes {call_args}, baseline takes {baseline_args}"
+                )
             with V.set_kernel_handler(kernel), config.patch(**config_patches):
                 src_code = kernel.codegen_kernel()
+            src_hash = code_hash(src_code)
+            # A TMA choice whose accesses all fell back to tl.load repeats an earlier one.
+            if kernel.optional and any(k.code_hash == src_hash for k in kernels):
+                kernels.remove(kernel)
+                continue
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
             kernel.kernel_name = kernel_name
-            kernel.code_hash = code_hash(src_code)
+            kernel.code_hash = src_hash
+        # Kernel.__init__ also counted the choices dropped above.
+        metrics.generated_kernel_count -= num_choices - len(kernels)
 
     def _launch_kernel_and_cleanup(
         self,
@@ -4907,8 +4928,14 @@ class SIMDScheduling(BaseScheduling):
             self.free_buffers_in_scheduler()
 
     def create_kernel_choices(
-        self, kernel_features: SIMDKernelFeatures, kernel_args, kernel_kwargs
+        self,
+        kernel_features: SIMDKernelFeatures,
+        kernel_args,
+        kernel_kwargs,
+        *,
+        allow_tma_variants: bool = False,
     ) -> list[SIMDKernel]:
+        """allow_tma_variants is for callers that keep every choice, unlike codegen_mix_order_reduction."""
         return [
             self.kernel_type(
                 *kernel_args,

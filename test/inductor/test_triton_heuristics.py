@@ -67,6 +67,7 @@ from torch._inductor.runtime.triton_heuristics import (
     _enforce_reduction_config_block_minimums,
     _find_names,
     _get_nd_pointwise_numels,
+    _maybe_filter_configs_for_tma_restrictions,
     _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
@@ -82,6 +83,7 @@ from torch._inductor.runtime.triton_heuristics import (
     GridExpr,
     GridND,
     make_matmul_triton_config,
+    pointwise,
     PrecomputedGrid,
     template,
     triton_config,
@@ -499,6 +501,40 @@ class TestTritonHeuristics(TestCase):
             {"y": 8, "x": 64, **reduction_hints}, 8, 4, budget
         )
         self.assertEqual(cfg.kwargs, {"XBLOCK": 8, "YBLOCK": 4, **expected})
+
+    def test_tma_filter_keeps_valid_first_config_once(self):
+        configs = [
+            triton.Config({"XBLOCK": 16}, num_warps=4),
+            triton.Config({"XBLOCK": 32}, num_warps=4),
+        ]
+
+        result = _maybe_filter_configs_for_tma_restrictions(
+            {"tma_min_block_sizes": {"XBLOCK": 16}}, configs
+        )
+
+        self.assertEqual(result, configs)
+
+    @parametrize("cc,xblock,num_warps", [(90, 1024, 4), (100, 2048, 2), (103, 1024, 4)])
+    def test_tma_pointwise_config_is_sm100_specific(self, cc, xblock, num_warps):
+        device = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=cc,
+            major=cc // 10,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+        configs = pointwise(
+            {"x": 1024 * 1024},
+            triton_meta={"device": device},
+            inductor_meta={"tma_variant": True},
+            return_configs=True,
+        )
+
+        self.assertEqual(len(configs), 1)
+        self.assertEqual(configs[0].kwargs["XBLOCK"], xblock)
+        self.assertEqual(configs[0].num_warps, num_warps)
 
     def test_native_matmul_config_block_numel_limit(self):
         device = DeviceProperties(

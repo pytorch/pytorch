@@ -27,6 +27,7 @@ import threading
 import warnings
 from bisect import bisect_right
 from collections.abc import Set as AbstractSet
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
@@ -5937,10 +5938,14 @@ class LambdaFuture(CodeCacheFuture):
     def result(self, timeout: float | None = None) -> Callable[..., Any]:
         if timeout is not None and self.future is not None:
             # Wait on the underlying cross-process future with the caller's
-            # timeout; raises concurrent.futures.TimeoutError if it does not
-            # resolve in time. result_fn will then consume the completed
-            # future without blocking further.
-            self.future.result(timeout=timeout)
+            # timeout; result_fn owns any failure from a completed future.
+            try:
+                self.future.result(timeout=timeout)
+            except FuturesTimeoutError:
+                if not self.future.done():
+                    raise
+            except Exception:
+                pass
         return self.result_fn()
 
 
@@ -5957,11 +5962,15 @@ class StaticAutotunerFuture(CodeCacheFuture):
         # We don't store the source code on the CachingAutotuner itself
         # since it can be very large.
         self.reload_kernel_from_src: Callable[[], Any] | None = None
+        # A multi-kernel and wait() can resolve the same future; precompile it once.
+        self._resolved = False
 
     def result(self, timeout: float | None = None) -> CachingAutotuner:
         # timeout is accepted for interface parity with other CodeCacheFuture
         # subclasses; this work is synchronous in-process and has no pending
         # future to wait on.
+        if self._resolved:
+            return self.static_autotuner
         if self.reload_kernel_from_src is None:
             raise AssertionError(
                 "reload_kernel_from_src must be set before calling result()"
@@ -5975,4 +5984,5 @@ class StaticAutotunerFuture(CodeCacheFuture):
                 reload_kernel=self.reload_kernel_from_src,
                 static_triton_bundle_key=None,  # no need to save again
             )
+            self._resolved = True
             return self.static_autotuner
