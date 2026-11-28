@@ -83,6 +83,20 @@ struct NoopPyObjectConversion final : PyObjectConversionInterface {
   PyObject* new_none_pyobject() const override {
     TORCH_CHECK(false, kNoImplMsg);
   }
+  void decref_pyobject(PyObject* /*obj*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  size_t sequence_size_pyobject(PyObject* /*obj*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  PyObject* sequence_get_item_pyobject(PyObject* /*obj*/, size_t /*index*/)
+      const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  PyObject* new_list_pyobject(PyObject* const* /*items*/, size_t /*length*/)
+      const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
 };
 
 const NoopPyObjectConversion noop_impl;

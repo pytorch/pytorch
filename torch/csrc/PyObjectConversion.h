@@ -118,6 +118,22 @@ struct TORCH_API PyObjectConversionInterface {
 
   // Return a new reference to Python None. The GIL must be held.
   virtual PyObject* new_none_pyobject() const = 0;
+
+  // Release one reference to obj. The GIL must be held.
+  virtual void decref_pyobject(PyObject* obj) const = 0;
+
+  // Read the length of a Python list or tuple. The GIL must be held.
+  virtual size_t sequence_size_pyobject(PyObject* obj) const = 0;
+
+  // Return a new reference to the item at index of a Python list or tuple,
+  // erroring if index is out of range. The GIL must be held.
+  virtual PyObject* sequence_get_item_pyobject(PyObject* obj, size_t index)
+      const = 0;
+
+  // Return a new-reference Python list of items[0, length). The items are
+  // borrowed; the list takes its own references. The GIL must be held.
+  virtual PyObject* new_list_pyobject(PyObject* const* items, size_t length)
+      const = 0;
 };
 
 // Install the conversion implementation. Called once by libtorch_python when it
