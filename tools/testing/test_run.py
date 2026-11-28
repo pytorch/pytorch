@@ -24,7 +24,7 @@ class TestRun:
     _excluded: frozenset[str]  # Tests that should be excluded from this test run
     _included: frozenset[
         str
-    ]  # If non-empy, only these tests should be run in this test run
+    ]  # If non-empty, only these tests should be run in this test run
 
     # NB: Also the class is called TestRun, it's not a test class, so having this field set
     # will allow pytest to ignore this accordingly

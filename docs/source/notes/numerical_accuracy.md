@@ -89,7 +89,7 @@ that the input matrix `A` is invertible. If it is close to being non-invertible 
 example, if it has a very small singular value), then these algorithms may silently return
 incorrect results. These matrices are said to be
 [ill-conditioned](https://nhigham.com/2020/03/19/what-is-a-condition-number/).
-If provided with ill-conditioned inputs, the result of these functions they may vary when
+If provided with ill-conditioned inputs, the result of these functions may vary when
 using the same inputs on different devices or when using different backends via the keyword
 `driver`.
 

@@ -87,7 +87,7 @@ class TestE2EBase : public ::testing::Test {
     ownerRRef->registerOwnerCreationFuture(jitFuture);
 
     // Builtin operators does not return py::object, and hence does not require
-    // GIL for destructing the potentially deleted OwerRRef.
+    // GIL for destructing the potentially deleted OwnerRRef.
     jitFuture->addCallback(
         [ownerRRefId = ownerRRef->rrefId()](JitFuture& jitFuture) {
           callback::finishCreatingOwnerRRef(jitFuture, ownerRRefId);

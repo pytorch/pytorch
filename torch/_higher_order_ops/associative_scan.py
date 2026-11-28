@@ -487,7 +487,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             def combine_fn(a: torch.Tensor, b: torch.Tensor):
                 return a * b
 
-            ys = associative_scan(comine_fn, xs),
+            ys = associative_scan(combine_fn, xs),
             which can be unpacked as:
             ys0 = xs0                                         = 1
             ys1 = combine_fn(ys0, xs1) = combine_fn(1, 2)     = 2

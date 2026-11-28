@@ -506,7 +506,7 @@ void spgemm_cutlass_dispatch_layouts_tensor_c(
 // column-major layouts (different layouts between these two tensors
 // are OK, but not all combinations of formats are supported for some
 // datatypes of these matrices).  The "mat1_meta" argument contains
-// sparse semi-strucutred metadata.
+// sparse semi-structured metadata.
 //
 // There exists numerous limitations of CUTLASS sparse GEMM kernel,
 // with regards to sizes and alignments of input tensors, their

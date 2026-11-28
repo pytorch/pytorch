@@ -121,7 +121,7 @@ class ComputeCodegenUnboxedKernels:
                 arg_cpp = "c10::IValue(::std::nullopt)"
             else:
                 # The unboxing code uses the faithful C++ API to avoid the overhead
-                # from wrapping/unwrapping TensorOptios.
+                # from wrapping/unwrapping TensorOptions.
                 # However, we would look to include default args for schema parsing.
                 # Default args only show up in the nonfaithful C++ API,
                 arg_default = cpp.default_expr(
