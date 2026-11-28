@@ -52,7 +52,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_XPU,
 )
-from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON, requires_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
     checkpoint,
@@ -2939,7 +2939,7 @@ class ActivationCheckpointingViaTagsCUDAOnlyTests(
         def build(budget):
             linears = torch.nn.ModuleList(
                 [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
-            ).cuda()
+            ).to(device=GPU_TYPE)
 
             @nested_compile_region
             def region(x):
@@ -2960,15 +2960,16 @@ class ActivationCheckpointingViaTagsCUDAOnlyTests(
         def get_act_mem(f):
             out = f()
             out.backward()
-            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            start_mem = torch.accelerator.memory_stats()["requested_bytes.all.current"]
             out = f()
             act_mem = (
-                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
+                torch.accelerator.memory_stats()["requested_bytes.all.current"]
+                - start_mem
             )
             out.backward()
             return act_mem
 
-        x = torch.randn(N, N, device="cuda")
+        x = torch.randn(N, N, device=GPU_TYPE)
 
         torch._dynamo.reset()
         baseline = torch.compile(build(None), backend="aot_eager", fullgraph=True)
