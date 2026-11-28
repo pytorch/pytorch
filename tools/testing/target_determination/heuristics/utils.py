@@ -138,14 +138,18 @@ def td_enabled_default(
     no_td: bool,
 ) -> bool:
     """run_test.py's --enable-td argparse default: whether TD is allowed on a
-    CI PR job that td_enabled_job and td_enabled_workflow allow. It does not
-    promise TD runs: main() still turns TD off when TESTS_TO_INCLUDE names
-    tests or import_results() returns no tests."""
+    CI PR job allowed by the job/workflow policy, including staged GB300
+    unstable jobs. It does not promise TD runs: main() still turns TD off when
+    TESTS_TO_INCLUDE names tests or import_results() returns no tests."""
+    unstable_gb300 = (
+        workflow == "unstable"
+        and build_environment == "linux-jammy-aarch64-cuda13.2-py3.12-gcc13"
+    )
     return (
         is_ci
         and pr_number is not None
         and td_enabled_job(build_environment, macos=macos, no_td=no_td)
-        and td_enabled_workflow(workflow)
+        and (td_enabled_workflow(workflow) or unstable_gb300)
     )
 
 

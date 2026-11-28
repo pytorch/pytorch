@@ -58,6 +58,7 @@ class TestHeuristicsUtils(unittest.TestCase):
             self.assertTrue(utils.td_enabled_workflow(workflow), workflow)
         for workflow in (
             "periodic",
+            "unstable",
             "inductor",
             "slow",
             "pull-rocm",
@@ -101,6 +102,17 @@ class TestHeuristicsUtils(unittest.TestCase):
         self.assertFalse(default(macos=True))
         self.assertFalse(default(no_td=True))
         self.assertFalse(default(workflow="slow"))
+
+        gb300 = "linux-jammy-aarch64-cuda13.2-py3.12-gcc13"
+        self.assertTrue(default(env=gb300, workflow="unstable"))
+        self.assertFalse(default(env=gb300, workflow="unstable", is_ci=False))
+        self.assertFalse(default(env=gb300, workflow="unstable", pr=None))
+        self.assertFalse(default(env=gb300, workflow="unstable", no_td=True))
+        self.assertFalse(default(env=gb300, workflow="unstable", macos=True))
+        self.assertFalse(default(workflow="unstable"))
+        self.assertFalse(
+            default(env="linux-jammy-cuda13.2-py3.12-gcc11-sm100", workflow="unstable")
+        )
 
 
 if __name__ == "__main__":
