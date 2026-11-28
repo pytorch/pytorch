@@ -30,6 +30,8 @@ using dyn_quant_matmul_4bit_fn = void (*)(
 DECLARE_DISPATCH(weight_to_int4pack_fn, weight_to_int4pack_stub)
 DECLARE_DISPATCH(int4pack_mm_fn, int4pack_mm_stub)
 DECLARE_DISPATCH(int8pack_mm_fn, int8pack_mm_stub)
+using int_mm_fallback_fn = bool (*)(const Tensor&, const Tensor&, Tensor&);
+DECLARE_DISPATCH(int_mm_fallback_fn, int_mm_fallback_stub)
 DECLARE_DISPATCH(
     dyn_quant_pack_4bit_weight_fn,
     dyn_quant_pack_4bit_weight_stub)

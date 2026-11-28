@@ -3637,6 +3637,7 @@ Tensor kron(const Tensor& self, const Tensor& other) {
 DEFINE_DISPATCH(weight_to_int4pack_stub);
 DEFINE_DISPATCH(int4pack_mm_stub);
 DEFINE_DISPATCH(int8pack_mm_stub);
+DEFINE_DISPATCH(int_mm_fallback_stub);
 DEFINE_DISPATCH(dyn_quant_pack_4bit_weight_stub);
 DEFINE_DISPATCH(dyn_quant_matmul_4bit_stub);
 
@@ -3831,6 +3832,15 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
     } catch ([[maybe_unused]] const std::exception& e) {
       TORCH_WARN(func_name, " failed, switching to BLAS gemm: ", e.what());
     }
+  }
+  // Each signed byte product has magnitude at most 128 * 128. Bound K
+  // so all partial sums (including SIMD lanes) fit in an int32_t.
+  constexpr int64_t kMaxSafeSignedDotK =
+      std::numeric_limits<int32_t>::max() / (128 * 128);
+  if (!dispatched && self.scalar_type() == at::kChar &&
+      self.stride(1) == 1 && mat2.stride(0) == 1 &&
+      self.size(1) >= 16 && self.size(1) <= kMaxSafeSignedDotK) {
+    dispatched = int_mm_fallback_stub(kCPU, self, mat2, result);
   }
   if (!dispatched) {
     auto b = reinterpret_cast<int8_t*>(mat2.data_ptr());
