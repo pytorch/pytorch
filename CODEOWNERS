@@ -579,6 +579,7 @@
 # /test/test_pytree.py
 # /test/test_reductions.py
 # /test/test_rename_privateuse1_to_existing_device.py
+# /test/test_rounded_conversion.py
 # /test/test_scatter_gather_ops.py
 # /test/test_schema_check.py
 # /test/test_segment_reductions.py
@@ -918,15 +919,15 @@
 #
 # [profiler]
 # label: oncall: profiler
-# owner: @ryanzhang22 @scotts
+# owner: @ryanzhang22 @scotts @thomasywang
 # /test/cpp/profiler/test_profiler_collection.cpp
 # /test/profiler/
 # /test/test_throughput_benchmark.py
-/torch/autograd/profiler* @scotts @ryanzhang22
+/torch/autograd/profiler* @scotts @ryanzhang22 @thomasywang
 # /torch/autograd/profiler.py
 # /torch/autograd/profiler_legacy.py
 # /torch/autograd/profiler_util.py
-/torch/csrc/autograd/profiler* @scotts @ryanzhang22
+/torch/csrc/autograd/profiler* @scotts @ryanzhang22 @thomasywang
 # /torch/csrc/autograd/profiler.h
 # /torch/csrc/autograd/profiler_kineto.cpp
 # /torch/csrc/autograd/profiler_kineto.h
@@ -934,8 +935,8 @@
 # /torch/csrc/autograd/profiler_legacy.h
 # /torch/csrc/autograd/profiler_python.cpp
 # /torch/csrc/autograd/profiler_python.h
-/torch/csrc/profiler/ @scotts @ryanzhang22
-/torch/profiler/ @scotts @ryanzhang22
+/torch/csrc/profiler/ @scotts @ryanzhang22 @thomasywang
+/torch/profiler/ @scotts @ryanzhang22 @thomasywang
 #
 # [mobile_runtime]
 # label: oncall: mobile
@@ -1167,8 +1168,8 @@
 # /third_party/xnnpack_src_defs.bzl
 # /third_party/xnnpack_wrapper_defs.bzl
 # label: oncall: profiler, module: third_party
-# owner: @ryanzhang22 @scotts
-/third_party/dynolog_headers/ @scotts @ryanzhang22
+# owner: @ryanzhang22 @scotts @thomasywang
+/third_party/dynolog_headers/ @scotts @ryanzhang22 @thomasywang
 # label: module: third_party, module: xpu
 # owner: @EikanWang @gujinghui
 /third_party/xpu.txt @EikanWang @gujinghui

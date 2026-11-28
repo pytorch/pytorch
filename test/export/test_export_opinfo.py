@@ -43,7 +43,6 @@ export_failures = {
 
 # following are failing fake export on gpu device
 fake_export_failures = {
-    xfail("histogram"),
     xfail("masked.amax"),
     xfail("masked.amin"),
     xfail("masked.argmax"),
@@ -83,8 +82,6 @@ if not torch.xpu._is_compiled():
         # https://github.com/intel/torch-xpu-ops/issues/5256
         xfail("nn.functional.max_unpool2d"),
         xfail("nn.functional.max_unpool2d", "grad"),
-        # https://github.com/intel/torch-xpu-ops/issues/5277
-        xfail("nn.functional.scaled_dot_product_attention"),
     }
 
 fake_decomposition_failures = {

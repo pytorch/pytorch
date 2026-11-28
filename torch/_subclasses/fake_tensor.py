@@ -994,11 +994,12 @@ def _enter_fake_mode(
         prev_only_lift_cpu_tensors = torch._C._only_lift_cpu_tensors()
         torch._C._set_only_lift_cpu_tensors(True)
 
-        # In the case of a CUDA/XPU build with no device available, we
+        # In the case of an accelerator build with no device available, we
         # patch the device guard to use FakeGuardImpl. This enables us to
         # trace over device kernels under FakeTensorMode.
-        torch._C._ensureCUDADeviceGuardSet()
-        torch._C._ensureXPUDeviceGuardSet()
+        acc = torch.accelerator.current_accelerator()
+        if acc is not None:
+            torch._C._ensureDeviceGuardSet(acc.type)
 
     if mode is not maybe_prev_fake_mode:
         install()
