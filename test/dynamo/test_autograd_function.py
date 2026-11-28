@@ -228,6 +228,18 @@ class ContextMarkAndSave(torch.autograd.Function):
         return grad_output
 
 
+class InplaceDouble(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        ctx.mark_dirty(x)
+        x.mul_(2)
+        return x
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad * 2
+
+
 class ModuleWithGradFunc(torch.nn.Module):
     def __init__(self, func):
         super().__init__()
@@ -1149,6 +1161,74 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             RuntimeError, "a view of a leaf Variable that requires grad"
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    # apply() inlines forward() when grad mode is off or no input requires grad.
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    @parametrize("grad_mode", ("no_grad", "inference_mode", "enable_grad"))
+    def test_mark_dirty_without_grad(self, backend, grad_mode):
+        def fn(x, weight):
+            for _ in range(3):
+                x = InplaceDouble.apply(x)
+            # fairscale's RowParallelLinear all_reduces its linear output in place.
+            return x, InplaceDouble.apply(torch.nn.functional.linear(x, weight))
+
+        x, weight = torch.randn(4), torch.randn(3, 4)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        with getattr(torch, grad_mode)():
+            ref = fn(x.clone(), weight)
+            res = opt_fn(x, weight)
+        self.assertEqual(res, ref)
+        self.assertIs(res[0], x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    def test_mark_dirty_without_grad_parameter(self, backend):
+        def fn(param):
+            with torch.no_grad():
+                InplaceDouble.apply(param)
+
+        param = torch.nn.Parameter(torch.ones(4))
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        torch.compile(fn, backend=cnt, fullgraph=True)(param)
+        self.assertEqual(param, torch.full((4,), 2.0))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_mark_dirty_without_grad_export(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return InplaceDouble.apply(x.sin())
+
+        x = torch.randn(4)
+        ep = torch.export.export(Mod(), (x,), strict=True)
+        self.assertEqual(ep.module()(x), Mod()(x))
+
+    @parametrize("requires_grad", (False, True))
+    def test_mark_dirty_live_ctx_graph_breaks(self, requires_grad):
+        class Inplace(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                torch._dynamo.graph_break()
+                ctx.mark_dirty(x)
+                x.mul_(2)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+        def fn(x):
+            y = x.clone()
+            return y, Inplace.apply(y)
+
+        x = torch.ones(4, requires_grad=requires_grad)
+        torch._dynamo.utils.counters.clear()
+        y, out = torch.compile(fn, backend="eager")(x)
+        # The break makes apply() run eagerly, so the resumed forward() gets the
+        # live C++ ctx, which only CPython can mark dirty.
+        self.assertIs(out, y)
+        breaks = torch._dynamo.utils.counters["graph_break"]
+        self.assertTrue(any("context `mark_dirty`" in gb for gb in breaks))
 
     def test_multi_output(self):
         torch._dynamo.utils.counters.clear()
