@@ -47,6 +47,7 @@ from torch.utils._ordered_set import OrderedSet
 
 if TYPE_CHECKING:
     import types
+    from collections.abc import Callable
 
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
@@ -195,7 +196,8 @@ class CodeState:
     )
 
 
-_INIT_CODE_STATE: defaultdict[CodeId, CodeState] | None = None
+# Changed since last loaded or written; every mutation of _CODE_STATE must set it.
+_CODE_STATE_DIRTY: bool = False
 _CODE_STATE: defaultdict[CodeId, CodeState] | None = None
 _LOGGED_DYNAMIC_ALLOWLIST: bool = False
 _KNOWN_DYNAMIC_SOURCES: set[str] = set()
@@ -430,6 +432,7 @@ def update_automatic_dynamic(
     *,
     is_unspecialized_nn_module: bool = False,
 ) -> FrameStateSizeEntry:
+    global _CODE_STATE_DIRTY
     code_id = CodeId.make(tx.f_code, tx.closure)
     frame_state = get_code_state()[code_id]
     if torch._dynamo.config.automatic_dynamic_shapes:
@@ -437,6 +440,8 @@ def update_automatic_dynamic(
         mut_entry = frame_state.automatic_dynamic[name]
         old_entry = copy.copy(mut_entry)
         mut_entry |= entry
+        if mut_entry != old_entry:
+            _CODE_STATE_DIRTY = True
 
         # Do some logs (damn, I spend more code logging than I do actually doing
         # the updates lol)
@@ -533,10 +538,23 @@ def update_automatic_dynamic(
             old_entry.scalar,
             entry.scalar,
         )
+        if old_entry != entry:
+            _CODE_STATE_DIRTY = True
         frame_state.automatic_dynamic[name] = entry
         mut_entry = entry
 
     return mut_entry
+
+
+def merge_into_code_state_entry(
+    mut_entry: FrameStateSizeEntry, entry: FrameStateSizeEntry
+) -> None:
+    """Merge ``entry`` in place into ``mut_entry``, which may be stored in _CODE_STATE."""
+    global _CODE_STATE_DIRTY
+    old_entry = copy.copy(mut_entry)
+    mut_entry |= entry
+    if mut_entry != old_entry:
+        _CODE_STATE_DIRTY = True
 
 
 def process_automatic_dynamic(
@@ -795,7 +813,7 @@ class PGOCacheArtifact(CacheArtifact):
 
 
 def hit(key: str, ty: str) -> defaultdict[CodeId, CodeState]:
-    global _INIT_CODE_STATE
+    global _CODE_STATE_DIRTY
     if not isinstance(_CODE_STATE, defaultdict):
         raise AssertionError(
             f"expected _CODE_STATE to be a defaultdict, got {type(_CODE_STATE)}"
@@ -807,7 +825,7 @@ def hit(key: str, ty: str) -> defaultdict[CodeId, CodeState]:
         lambda: render_code_state(_CODE_STATE),  # type: ignore[arg-type]
     )
     set_feature_use("pgo", True)
-    _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
+    _CODE_STATE_DIRTY = False
     return _CODE_STATE
 
 
@@ -902,7 +920,7 @@ def get_extra_remote_code_state(cache_key: str) -> None:
     """
     Reads an additional PGO profile from the given cache key, and merges it with the default PGO profile.
     """
-    global _CODE_STATE
+    global _CODE_STATE, _CODE_STATE_DIRTY
     if _CODE_STATE is None:
         raise AssertionError(
             "_CODE_STATE must be initialized before reading extra remote code state"
@@ -928,6 +946,8 @@ def get_extra_remote_code_state(cache_key: str) -> None:
                         "expected _CODE_STATE to be empty before merging extra remote state"
                     )
                 _CODE_STATE = code_state
+                # Not stored under this job's own key yet; the next put copies it there.
+                _CODE_STATE_DIRTY = True
                 # log to tlparse
                 trace_structured_artifact(
                     "get_extra_remote_code_state",
@@ -937,7 +957,7 @@ def get_extra_remote_code_state(cache_key: str) -> None:
 
 
 def get_code_state() -> defaultdict[CodeId, CodeState]:
-    global _CODE_STATE, _INIT_CODE_STATE
+    global _CODE_STATE
     if _CODE_STATE is not None:
         return _CODE_STATE
 
@@ -972,11 +992,12 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
 
 
 def put_code_state() -> None:
+    global _CODE_STATE_DIRTY
     if _CODE_STATE is None:
         log.info("put_code_state: never initialized, will not write")
         return
 
-    if _CODE_STATE == _INIT_CODE_STATE:
+    if not _CODE_STATE_DIRTY:
         log.info("put_code_state: no change, skipping")
         return
 
@@ -985,12 +1006,17 @@ def put_code_state() -> None:
         log.info("put_code_state: no cache key, skipping")
         return
 
-    put_local_code_state(cache_key)
-    put_remote_code_state(cache_key)
+    pickled_code = pickle.dumps(_CODE_STATE)
+    render = functools.cache(lambda: render_code_state(_CODE_STATE))
+    put_local_code_state(cache_key, pickled_code=pickled_code, render=render)
+    put_remote_code_state(cache_key, pickled_code=pickled_code, render=render)
     if (sticky_write := torch.compiler.config.pgo_extra_write_key) is not None:
         extra_write_key = get_extra_cache_key(sticky_write)
         if extra_write_key is not None:
-            put_remote_code_state(extra_write_key)
+            put_remote_code_state(
+                extra_write_key, pickled_code=pickled_code, render=render
+            )
+    _CODE_STATE_DIRTY = False
 
 
 def write_local_impl(cache_key: str, pickled_code: bytes) -> tuple[str, int] | None:
@@ -1018,7 +1044,12 @@ def write_local_impl(cache_key: str, pickled_code: bytes) -> tuple[str, int] | N
     return path, size
 
 
-def put_local_code_state(cache_key: str) -> None:
+def put_local_code_state(
+    cache_key: str,
+    *,
+    pickled_code: bytes | None = None,
+    render: Callable[[], str] | None = None,
+) -> None:
     with dynamo_timed(name := "pgo.put_local_code_state", log_pt2_compile_event=True):
         CompileEventLogger.pt2_compile(name, cache_key=cache_key)
         if _CODE_STATE is None:
@@ -1026,7 +1057,8 @@ def put_local_code_state(cache_key: str) -> None:
                 "_CODE_STATE must be initialized before writing local code state"
             )
 
-        pickled_code = pickle.dumps(_CODE_STATE)
+        if pickled_code is None:
+            pickled_code = pickle.dumps(_CODE_STATE)
 
         CacheArtifactRecorder(PGOCacheArtifact.type(), cache_key).record(pickled_code)
 
@@ -1041,11 +1073,17 @@ def put_local_code_state(cache_key: str) -> None:
         trace_structured_artifact(
             "put_local_code_state",
             "string",
-            lambda: render_code_state(_CODE_STATE),
+            render or (lambda: render_code_state(_CODE_STATE)),
         )
 
 
-def put_remote_code_state(cache_key: str, extra_code_state: bool = False) -> None:
+def put_remote_code_state(
+    cache_key: str,
+    extra_code_state: bool = False,
+    *,
+    pickled_code: bytes | None = None,
+    render: Callable[[], str] | None = None,
+) -> None:
     event_name = (
         "put_remote_code_state"
         if not extra_code_state
@@ -1068,7 +1106,9 @@ def put_remote_code_state(cache_key: str, extra_code_state: bool = False) -> Non
             log.info("%s: remote cache disabled", event_name)
             return
 
-        content = pickle.dumps(_CODE_STATE)
+        content = (
+            pickled_code if pickled_code is not None else pickle.dumps(_CODE_STATE)
+        )
         CompileEventLogger.pt2_compile(name, cache_size_bytes=len(content))
         cache_data: JsonDataTy = {
             "data": base64.b64encode(content).decode("ascii"),
@@ -1077,17 +1117,16 @@ def put_remote_code_state(cache_key: str, extra_code_state: bool = False) -> Non
         log.info(
             "%s: wrote remote %s, %d entries", event_name, cache_key, len(_CODE_STATE)
         )
-        # TODO: don't log this multiple times
         trace_structured_artifact(
             event_name,
             "string",
-            lambda: render_code_state(_CODE_STATE),
+            render or (lambda: render_code_state(_CODE_STATE)),
         )
 
 
 # NB: this does NOT reset the cached code state on disk
 def reset_code_state() -> None:
-    global _CODE_STATE, _INIT_CODE_STATE, _LOGGED_DYNAMIC_ALLOWLIST
+    global _CODE_STATE, _CODE_STATE_DIRTY, _LOGGED_DYNAMIC_ALLOWLIST
     _CODE_STATE = None
-    _INIT_CODE_STATE = None
+    _CODE_STATE_DIRTY = False
     _LOGGED_DYNAMIC_ALLOWLIST = False
