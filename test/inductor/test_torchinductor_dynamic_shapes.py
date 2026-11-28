@@ -130,6 +130,11 @@ test_failures = {
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
+    # Lowerings see symbolic scalars as sympy expressions, so scatter(value=)
+    # with an out-of-range symbolic int is not checked yet (#205507).
+    "test_scalar_fill_overflow_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu", "mps")
+    ),
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),

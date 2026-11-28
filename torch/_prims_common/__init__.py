@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import math
 import operator
 import typing
 import warnings
@@ -1362,6 +1363,77 @@ def check_layout(layout: torch.layout):
     torch._check_not_implemented(
         layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}"
     )
+
+
+def check_scalar_fits_dtype(
+    value: object, dtype: torch.dtype, *, strict_unsigned: bool = False
+) -> None:
+    """
+    Raises when eager Scalar conversion rejects value for dtype. Integer values
+    wrap to unsigned dtypes where eager supports it unless strict_unsigned is
+    set; floating values use truncation bounds for integer dtypes. NaN is
+    accepted for floating dtypes, while infinities require a dtype that supports
+    them. Symbolic values are checked like meta full: direct symbols into integer
+    dtypes only.
+    """
+    msg = f"value cannot be converted to type {dtype} without overflow"
+
+    def check(condition) -> None:
+        torch._check(condition, lambda: msg)
+
+    if isinstance(value, (torch.SymInt, torch.SymFloat)):
+        # Like meta full: only direct symbols into integer dtypes; a compound
+        # expression may overflow before its generated check.
+        is_int = isinstance(value, torch.SymInt)
+        if (
+            value.node.expr.is_Symbol
+            and is_integer_dtype(dtype)
+            and not (is_int and dtype in (torch.int64, torch.uint64))
+        ):
+            info = torch.iinfo(dtype)
+            lower = (
+                -info.max
+                if is_int and not dtype.is_signed and not strict_unsigned
+                else info.min
+            )
+            check(lower <= value)
+            check(value < info.max + 1)
+        return
+    if dtype == torch.bool or not isinstance(value, (bool, int, float, complex)):
+        return
+
+    if isinstance(value, complex):
+        if not is_complex_dtype(dtype):
+            check(value.imag == 0)
+            value = value.real
+    if is_float_dtype(dtype) or is_complex_dtype(dtype):
+        real = corresponding_real_dtype(dtype) if is_complex_dtype(dtype) else dtype
+        values = (value.real, value.imag) if isinstance(value, complex) else (value,)
+        no_inf_dtypes = {
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+            torch.float8_e8m0fnu,
+        }
+        limit = torch.finfo(real).max
+        for part in values:
+            if isinstance(part, IntWithoutSymInt):
+                check(abs(part) <= limit)
+            elif math.isinf(part):
+                check(real not in no_inf_dtypes)
+            elif not math.isnan(part):
+                check(abs(part) <= limit)
+    elif is_integer_dtype(dtype):
+        info = torch.iinfo(dtype)
+        if isinstance(value, IntWithoutSymInt):
+            # Unsigned targets wrap like eager; uint64 goes through int64 first.
+            if dtype.is_signed or strict_unsigned:
+                lower = info.min
+            else:
+                lower = -(2**63) if dtype is torch.uint64 else -info.max
+            check(lower <= value <= info.max)
+        elif isinstance(value, FloatWithoutSymFloat):
+            check(math.isfinite(value) and info.min <= value < info.max + 1)
 
 
 # TODO: maybe unify with can_cast_to?
