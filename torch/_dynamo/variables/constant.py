@@ -540,7 +540,22 @@ class StrConstantVariable(ConstantVariable):
 
     tp_repr_impl = ConstantVariable._unary_slot(str.__repr__)
     tp_richcompare_impl = ConstantVariable._richcompare_slot(str)
-    nb_remainder_impl = ConstantVariable._binary_slot(str, "mod")
+    _constant_nb_remainder_impl = ConstantVariable._binary_slot(str, "mod")
+
+    def nb_remainder_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
+        if (
+            not other.is_python_constant()
+            and variables.user_defined.NewClassVariable.contains_new_class(other)
+        ):
+            unimplemented(
+                gb_type="Percent-formatting a class created in the same frame",
+                context="percent-formatting a class created in the same frame",
+                explanation="Dynamo cannot safely format this class while it has deferred mutations.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
+        return self._constant_nb_remainder_impl(tx, other, reverse)
     mp_subscript_impl = ConstantVariable._sequence_slot(
         str.__getitem__, VariableTracker.mp_subscript_impl
     )

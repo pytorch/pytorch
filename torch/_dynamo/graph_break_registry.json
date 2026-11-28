@@ -39,6 +39,126 @@
       ]
     }
   ],
+  "GB6631": [
+    {
+      "Gb_type": "Instantiating a class created in the same frame",
+      "Context": "str(self.value)",
+      "Explanation": "Dynamo cannot preserve the identity of this class and its instances.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1566": [
+    {
+      "Gb_type": "Representing a class created in the same frame",
+      "Context": "repr({self.value})",
+      "Explanation": "Dynamo cannot safely represent this class while it has deferred mutations.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4542": [
+    {
+      "Gb_type": "Deleting an attribute from a class created in the same frame",
+      "Context": "delattr({self}, {name_var})",
+      "Explanation": "Dynamo cannot safely replay this deletion when rebuilding the class.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5008": [
+    {
+      "Gb_type": "Non-constant class attribute mutation",
+      "Context": "setattr({self}, {name_var}, {value})",
+      "Explanation": "Dynamo cannot validate this class attribute mutation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5661": [
+    {
+      "Gb_type": "Unsupported attribute write on a new class",
+      "Context": "setattr({self}, {attr_name}, {value})",
+      "Explanation": "Dynamo does not model this metaclass attribute setter.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6010": [
+    {
+      "Gb_type": "Introspection on a class created in the same frame",
+      "Context": "{self.value}.{name}",
+      "Explanation": "Dynamo cannot safely materialize this class metadata.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5333": [
+    {
+      "Gb_type": "Non-constant class name mutation",
+      "Context": "setattr({self}, {attr_name}, {value})",
+      "Explanation": "Dynamo cannot validate this class name mutation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7484": [
+    {
+      "Gb_type": "Listing attributes of a class created in the same frame",
+      "Context": "dir({arg.value})",
+      "Explanation": "Dynamo cannot safely inspect this class while it has deferred mutations.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1713": [
+    {
+      "Gb_type": "Formatting a class created in the same frame",
+      "Context": "formatting a class created in the same frame",
+      "Explanation": "Dynamo cannot safely format this class while it has deferred mutations.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1012": [
+    {
+      "Gb_type": "type() with non-constant class arguments",
+      "Context": "type({obj}, {args[0]}, {args[1]})",
+      "Explanation": "Dynamo can only reconstruct classes created from constant arguments.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1608": [
+    {
+      "Gb_type": "Dynamic class creation outside fullgraph",
+      "Context": "type(name, bases, namespace)",
+      "Explanation": "Dynamo only traces dynamic class creation when graph breaks are errors.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5580": [
+    {
+      "Gb_type": "type() with unsupported class arguments",
+      "Context": "type({name}, {bases}, {namespace})",
+      "Explanation": "Dynamo only reconstructs plain classes with literal namespaces.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0003": [
     {
       "Gb_type": "Attempt to trace generator",
@@ -1974,6 +2094,14 @@
     }
   ],
   "GB7494": [
+    {
+      "Gb_type": "Dynamic class creation with type",
+      "Context": "type(name, bases, namespace, **kwargs)",
+      "Explanation": "Dynamo does not support keyword arguments when creating a class with type().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "Dynamic class creation with type",
       "Context": "type(name, bases, namespace)",
@@ -7468,6 +7596,36 @@
       "Hints": [
         "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB1122": [
+    {
+      "Gb_type": "Calling a type slot on a class created in the same frame",
+      "Context": "{self.descriptor.__objclass__.__name__}.{name}({obj})",
+      "Explanation": "Dynamo cannot safely run this slot while the class has deferred mutations.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1123": [
+    {
+      "Gb_type": "Percent-formatting a class created in the same frame",
+      "Context": "percent-formatting a class created in the same frame",
+      "Explanation": "Dynamo cannot safely format this class while it has deferred mutations.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1124": [
+    {
+      "Gb_type": "Using a getset descriptor on a class created in the same frame",
+      "Context": "{self.descriptor.__objclass__.__name__}.{self.descriptor.__name__}",
+      "Explanation": "Dynamo cannot safely use this descriptor on a class being rebuilt.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

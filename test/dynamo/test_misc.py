@@ -226,6 +226,386 @@ class UserDefineSetAttr:
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
+    def test_new_class_attribute_writes(self):
+        def fn(x):
+            cls = type("A", (), {})
+            cls.answer = 42
+            cls.__doc__ = "updated"
+            cls.__name__ = "B"
+            return x + cls.answer, cls.__doc__, cls.__name__, cls
+
+        cnt = CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.ones(2)
+        first = compiled(x)
+        second = compiled(x)
+        self.assertEqual(first[:3], fn(x)[:3])
+        self.assertEqual(second[:3], first[:3])
+        self.assertEqual(first[3].answer, 42)
+        self.assertEqual(first[3].__doc__, "updated")
+        self.assertEqual(first[3].__name__, "B")
+        self.assertIsNot(first[3], second[3])
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_new_class_observed_errors(self):
+        def invalid_name_type(x):
+            try:
+                type(1, (), {})
+            except TypeError:
+                return x + 1
+
+        def invalid_name_encoding(x):
+            try:
+                type("\ud800", (), {})
+            except UnicodeEncodeError:
+                return x + 1
+
+        x = torch.ones(2)
+        for fn in (invalid_name_type, invalid_name_encoding):
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x), x + 1
+            )
+
+        def invalid_attr(x):
+            cls = type("A", (), {})
+            try:
+                setattr(cls, 1, 2)
+            except TypeError:
+                return x + 1
+
+        self.assertEqual(
+            torch.compile(invalid_attr, backend="eager", fullgraph=True)(x), x + 1
+        )
+
+        def invalid_class_name_type(x):
+            cls = type("A", (), {})
+            try:
+                cls.__name__ = 1
+            except TypeError:
+                return x + 1
+
+        def invalid_class_name_value(x):
+            cls = type("A", (), {})
+            try:
+                cls.__name__ = "a\x00b"
+            except ValueError:
+                return x + 1
+
+        def invalid_class_name_encoding(x):
+            cls = type("A", (), {})
+            try:
+                cls.__name__ = "\ud800"
+            except UnicodeEncodeError:
+                return x + 1
+
+        def invalid_class_qualname(x):
+            cls = type("A", (), {})
+            try:
+                cls.__qualname__ = None
+            except TypeError:
+                return x + 1
+
+        def invalid_arity(x):
+            try:
+                type(x, x)
+            except TypeError:
+                return x + 1
+
+        def invalid_keyword_arity(x):
+            try:
+                type(x, key=True)
+            except TypeError:
+                return x + 1
+
+        for fn in (
+            invalid_class_name_type,
+            invalid_class_name_value,
+            invalid_class_name_encoding,
+            invalid_class_qualname,
+            invalid_arity,
+            invalid_keyword_arity,
+        ):
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x), x + 1
+            )
+
+    def test_new_class_rejected_inputs(self):
+        class Base:
+            pass
+
+        def non_object_base(x):
+            return x, type("A", (Base,), {})
+
+        def non_literal_namespace(x):
+            return type("A", (), {"value": x})
+
+        x = torch.ones(2)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "type\\(\\) with unsupported class arguments",
+        ):
+            torch.compile(non_object_base, backend="eager", fullgraph=True)(x)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "type\\(\\) with non-constant class arguments",
+        ):
+            torch.compile(non_literal_namespace, backend="eager", fullgraph=True)(x)
+
+    def test_new_class_unsafe_uses_graph_break(self):
+        def read_dict(x):
+            cls = type("A", (), {})
+            cls.answer = 42
+            return x + int("answer" in cls.__dict__)
+
+        def instantiate(x):
+            cls = type("A", (), {})
+            cls.answer = 42
+            return x + cls().answer
+
+        def read_dir(x):
+            cls = type("A", (), {})
+            cls.answer = 42
+            return x + int("answer" in dir(cls))
+
+        def read_repr(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in repr(cls))
+
+        def read_str(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in str(cls))
+
+        def read_fstring(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in f"{cls}")
+
+        def read_format(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in format(cls))
+
+        def read_str_format(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in "{}".format(cls))
+
+        def read_nested_fstring(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in f"{[cls]}")
+
+        def read_nested_str_format(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in "{0[k]}".format({"k": cls}))
+
+        def read_percent_format(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in "%s" % cls)
+
+        def read_inplace_percent_format(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            value = "%s"
+            value %= cls
+            return x + int("B" in value)
+
+        def call_percent_dunder(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in "%s".__mod__(cls))
+
+        def read_type_dict_descriptor(x):
+            cls = type("A", (), {})
+            cls.answer = 42
+            namespace = type.__dict__["__dict__"].__get__(cls)
+            return x + int("answer" in namespace)
+
+        def set_type_name_descriptor(x):
+            cls = type("A", (), {})
+            try:
+                type.__dict__["__name__"].__set__(cls, 1)
+            except TypeError:
+                return x + 1
+            return x
+
+        def delete_type_doc_descriptor(x):
+            cls = type("A", (), {})
+            try:
+                type.__dict__["__doc__"].__delete__(cls)
+            except TypeError:
+                return x + 1
+            return x
+
+        def call_type_setattr(x):
+            cls = type("A", (), {})
+            type.__setattr__(cls, "answer", 42)
+            return x + cls.answer
+
+        def call_type_delattr(x):
+            cls = type("A", (), {"answer": 42})
+            type.__delattr__(cls, "answer")
+            return x + int(hasattr(cls, "answer"))
+
+        def call_type_repr(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in type.__repr__(cls))
+
+        def call_object_new(x):
+            cls = type("A", (), {"answer": 1})
+            cls.answer = 42
+            return x + object.__new__(cls).answer
+
+        def call_class_new(x):
+            cls = type("A", (), {"answer": 1})
+            cls.answer = 42
+            return x + cls.__new__(cls).answer
+
+        def delete_attr(x):
+            cls = type("A", (), {"value": 1})
+            del cls.value
+            return x + int(hasattr(cls, "value"))
+
+        cases = (
+            (read_dict, "Introspection on a class created in the same frame"),
+            (instantiate, "Instantiating a class created in the same frame"),
+            (
+                read_dir,
+                "Listing attributes of a class created in the same frame",
+            ),
+            (read_repr, "Representing a class created in the same frame"),
+            (read_str, "Representing a class created in the same frame"),
+            (read_fstring, "Formatting a class created in the same frame"),
+            (read_format, "Formatting a class created in the same frame"),
+            (read_str_format, "Formatting a class created in the same frame"),
+            (read_nested_fstring, "Formatting a class created in the same frame"),
+            (
+                read_nested_str_format,
+                "Formatting a class created in the same frame",
+            ),
+            (
+                read_percent_format,
+                "Percent-formatting a class created in the same frame",
+            ),
+            (
+                read_inplace_percent_format,
+                "Percent-formatting a class created in the same frame",
+            ),
+            (
+                call_percent_dunder,
+                "Percent-formatting a class created in the same frame",
+            ),
+            (
+                read_type_dict_descriptor,
+                "Using a getset descriptor on a class created in the same frame",
+            ),
+            (
+                set_type_name_descriptor,
+                "Using a getset descriptor on a class created in the same frame",
+            ),
+            (
+                delete_type_doc_descriptor,
+                "Using a getset descriptor on a class created in the same frame",
+            ),
+            (
+                call_type_setattr,
+                "Calling a type slot on a class created in the same frame",
+            ),
+            (
+                call_type_delattr,
+                "Calling a type slot on a class created in the same frame",
+            ),
+            (
+                call_type_repr,
+                "Calling a type slot on a class created in the same frame",
+            ),
+            (
+                call_object_new,
+                "Instantiating a class created in the same frame",
+            ),
+            (
+                call_class_new,
+                "Instantiating a class created in the same frame",
+            ),
+            (
+                delete_attr,
+                "Deleting an attribute from a class created in the same frame",
+            ),
+        )
+        x = torch.ones(2)
+        for fn, error in cases:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                error,
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            counter = CompileCounter()
+            compiled = torch.compile(fn, backend=counter)
+            for _ in range(torch._dynamo.config.recompile_limit + 1):
+                self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(counter.frame_count, 0)
+
+    def test_new_class_attribute_list_alias(self):
+        def fn(x):
+            cls = type("A", (), {})
+            items = [1]
+            cls.items = items
+            items.append(2)
+            cls.items.append(3)
+            return x + len(cls.items), cls, items, cls.items is items
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        for _ in range(2):
+            result, cls, items, aliased = compiled(x)
+            self.assertEqual(result, fn(x)[0])
+            self.assertEqual(items, [1, 2, 3])
+            self.assertTrue(aliased)
+            self.assertIs(cls.items, items)
+
+    def test_new_class_attribute_graph_break(self):
+        def fn(x):
+            cls = type("A", (), {})
+            cls.__doc__ = "before"
+            cls.items = [1]
+            x = x + 1
+            torch._dynamo.graph_break()
+            cls.items.append(2)
+            cls.__doc__ = "after"
+            return x + len(cls.items), cls
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
+        x = torch.ones(2)
+        for _ in range(torch._dynamo.config.recompile_limit + 1):
+            result, cls = compiled(x)
+            expected, eager_cls = fn(x)
+            self.assertEqual(result, expected)
+            self.assertEqual(cls.__doc__, eager_cls.__doc__)
+            self.assertEqual(cls.items, eager_cls.items)
+        self.assertEqual(counter.frame_count, 0)
+
+    def test_existing_class_doc_mutation_graph_break(self):
+        class Existing:
+            pass
+
+        def fn(x):
+            Existing.__doc__ = "updated"
+            doc = Existing.__doc__
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x, doc, Existing.__doc__
+
+        result, before, after = torch.compile(fn, backend="eager")(torch.ones(2))
+        self.assertEqual(result, torch.full((2,), 2.0))
+        self.assertEqual(before, "updated")
+        self.assertEqual(after, "updated")
+
     def test_storage_offset_scalar_output(self):
         def fn(x):
             return x.storage_offset()

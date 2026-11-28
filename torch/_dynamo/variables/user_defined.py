@@ -58,6 +58,7 @@ from ..exc import (
     raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
+    raise_value_error,
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
@@ -423,6 +424,12 @@ KNOWN_DATA_DESCRIPTOR_TYPES: frozenset[type] = frozenset(
 # A metaclass whose MRO resolves __getattribute__ to anything else replaces
 # type_getattro, including one that only inherits the override.
 _type_getattribute = type.__getattribute__
+
+_MUTABLE_TYPE_METADATA = frozenset(
+    {"__doc__", "__module__", "__name__", "__qualname__"}
+)
+_NEW_CLASS_INTROSPECTION = frozenset({"__base__", "__bases__", "__dict__", "__mro__"})
+_TYPE_NAME_METADATA = frozenset({"__name__", "__qualname__"})
 
 
 def is_data_descriptor(obj: object) -> bool:
@@ -808,6 +815,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Step 1-2: Metaclass data descriptors.
         # For type(cls) is type, these are C-level getset/member descriptors
         # for __dict__, __mro__, __name__, __qualname__, __doc__, etc.
+        # Direct callers bypass generic_getattr's pending-mutation check.
+        if (
+            metacls is type
+            and name in _MUTABLE_TYPE_METADATA
+            and tx.output.side_effects.has_pending_mutation_of_attr(self, name)
+        ):
+            return tx.output.side_effects.load_attr(self, name)
+
         meta_attr = self.lookup_metaclass_attr(name)
         if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
             return self.resolve_meta_data_descriptor(tx, name, meta_attr, source)
@@ -2303,6 +2318,159 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def get_real_python_backed_value(self) -> object:
         return self.value
+
+
+class NewClassVariable(UserDefinedClassVariable):
+    """A plain class created by type() in this trace, reconstructed per call."""
+
+    def __init__(
+        self,
+        value: type[object],
+        constructor_args: list[VariableTracker],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(value, **kwargs)
+        self.constructor_args = constructor_args
+
+    def is_python_constant(self) -> bool:
+        return False
+
+    @staticmethod
+    def contains_new_class(value: Any) -> bool:
+        found = False
+
+        def visit(vt: VariableTracker) -> None:
+            nonlocal found
+            found |= isinstance(vt, NewClassVariable)
+
+        VariableTracker.visit(visit, value)
+        return found
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="Instantiating a class created in the same frame",
+            context=str(self.value),
+            explanation="Dynamo cannot preserve the identity of this class and its instances.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+            skip_frame=True,
+            preserve_skip_frame_after_inline=True,
+        )
+
+    def tp_setattro_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name_var: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        if value is None:
+            unimplemented(
+                gb_type="Deleting an attribute from a class created in the same frame",
+                context=f"delattr({self}, {name_var})",
+                explanation="Dynamo cannot safely replay this deletion when rebuilding the class.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
+        if not name_var.is_python_constant():
+            unimplemented(
+                gb_type="Non-constant class attribute mutation",
+                context=f"setattr({self}, {name_var}, {value})",
+                explanation="Dynamo cannot validate this class attribute mutation.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
+        attr_name = name_var.as_python_constant()
+        if not isinstance(attr_name, str):
+            raise_type_error(
+                tx,
+                f"attribute name must be string, not '{type(attr_name).__name__}'",
+            )
+        if attr_name in _TYPE_NAME_METADATA:
+            if not value.is_python_constant():
+                unimplemented(
+                    gb_type="Non-constant class name mutation",
+                    context=f"setattr({self}, {attr_name}, {value})",
+                    explanation="Dynamo cannot validate this class name mutation.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+            metadata = value.as_python_constant()
+            current_name = self.value.__name__
+            if tx.output.side_effects.has_pending_mutation_of_attr(self, "__name__"):
+                current_name = tx.output.side_effects.load_attr(
+                    self, "__name__"
+                ).as_python_constant()
+            if not isinstance(metadata, str):
+                raise_type_error(
+                    tx,
+                    f"can only assign string to {current_name}.{attr_name}, not '{type(metadata).__name__}'",
+                )
+            if attr_name == "__name__":
+                if "\x00" in metadata:
+                    raise_value_error(tx, "type name must not contain null characters")
+                try:
+                    metadata.encode("utf-8")
+                except UnicodeEncodeError as exc:
+                    raise_observed_exception(
+                        UnicodeEncodeError, tx, args=list(exc.args)
+                    )
+        meta_attr = self.lookup_metaclass_attr(attr_name)
+        if (
+            meta_attr is not NO_SUCH_SUBOBJ
+            and is_data_descriptor(meta_attr)
+            and (attr_name not in _MUTABLE_TYPE_METADATA)
+        ):
+            unimplemented(
+                gb_type="Unsupported attribute write on a new class",
+                context=f"setattr({self}, {attr_name}, {value})",
+                explanation="Dynamo does not model this metaclass attribute setter.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
+        return super().tp_setattro_impl(tx, name_var, value)
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name in _NEW_CLASS_INTROSPECTION:
+            unimplemented(
+                gb_type="Introspection on a class created in the same frame",
+                context=f"{self.value}.{name}",
+                explanation="Dynamo cannot safely materialize this class metadata.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
+        return super().tp_getattro_impl(tx, name)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        unimplemented(
+            gb_type="Representing a class created in the same frame",
+            context=f"repr({self.value})",
+            explanation="Dynamo cannot safely represent this class while it has deferred mutations.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+            skip_frame=True,
+            preserve_skip_frame_after_inline=True,
+        )
+
+    def getattr_needs_tracing(self, tx: "InstructionTranslatorBase", name: str) -> bool:
+        return name in _NEW_CLASS_INTROSPECTION or super().getattr_needs_tracing(
+            tx, name
+        )
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "type"))
+        for arg in self.constructor_args:
+            codegen(arg)
+        codegen.extend_output(create_call_function(3, False))
 
 
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):

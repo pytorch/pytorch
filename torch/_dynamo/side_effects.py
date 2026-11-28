@@ -973,6 +973,9 @@ class SideEffects:
         reconstruction. Roughly, the reconstruction looks like this
             base_cls_vt.__new__(user_cls, *init_args)
         """
+        if isinstance(cls_vt, variables.user_defined.NewClassVariable):
+            assert tx is not None
+            return cls_vt.call_function(tx, [], {})
         cls_source = cls_vt.source
         user_cls = cls_vt.value  # type: ignore[attr-defined]
         variable_cls = self.get_variable_cls(user_cls)
@@ -1266,9 +1269,12 @@ class SideEffects:
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                     hints=[],
                 )
-            elif isinstance(var, variables.ExceptionVariable):
-                # Exceptions cannot be built via object.__new__ (CPython rejects
-                # it), so reconstruct() constructs by calling the type. Cache
+            elif isinstance(
+                var,
+                (variables.ExceptionVariable, variables.user_defined.NewClassVariable),
+            ):
+                # Exceptions and new classes cannot be built via object.__new__,
+                # so reconstruct() constructs by calling the type. Cache
                 # the result so later references load the single instance; any
                 # __dict__ attributes replay in codegen_update_mutated.
                 var.reconstruct(cg)

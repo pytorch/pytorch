@@ -256,6 +256,15 @@ class WrapperDescriptorVariable(DescriptorVariable):
         obj = obj.realize()
         if name in ("__setattr__", "__delattr__"):
             setattr_hackcheck(tx, obj, self.descriptor)
+        if isinstance(obj, variables.user_defined.NewClassVariable):
+            unimplemented(
+                gb_type="Calling a type slot on a class created in the same frame",
+                context=f"{self.descriptor.__objclass__.__name__}.{name}({obj})",
+                explanation="Dynamo cannot safely run this slot while the class has deferred mutations.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
         # The VT class modeling objclass, e.g. ConstDictVariable for
         # dict.__eq__ on an OrderedDict: its impl, not the subclass VT's.
         vt_cls = _vt_cls_modeling(obj, objclass)
@@ -1287,6 +1296,17 @@ class GetSetDescriptorVariable(DescriptorVariable):
     def as_python_constant(self) -> types.GetSetDescriptorType:
         return self.descriptor
 
+    def _guard_new_class(self, obj: VariableTracker) -> None:
+        if isinstance(obj, variables.user_defined.NewClassVariable):
+            unimplemented(
+                gb_type="Using a getset descriptor on a class created in the same frame",
+                context=f"{self.descriptor.__objclass__.__name__}.{self.descriptor.__name__}",
+                explanation="Dynamo cannot safely use this descriptor on a class being rebuilt.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
+
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
@@ -1301,6 +1321,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
         value: VariableTracker | None,
     ) -> VariableTracker:
         _check_descriptor_obj_type(tx, self.descriptor, obj)
+        self._guard_new_class(obj)
         name = self.descriptor.__name__
         entry = obj.lookup_tp_getset_member(name)
         if entry is None:
@@ -1340,6 +1361,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
         if obj is None:
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
+        self._guard_new_class(obj)
         # Prefer the VT's declarative table when it models this attribute
         entry = obj.lookup_tp_getset_member(attr_name)
         if entry is not None and entry.getter is not None:
