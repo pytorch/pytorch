@@ -954,6 +954,28 @@ def infer_fake_from_real_out(fake_mode: Any, func: Any, real: RealOpResult) -> A
     return fake_out
 
 
+def _destination_device_usable(device_type: str) -> bool:
+    """Whether real kernels can run on this device type right now.
+
+    The global device-init avoidance below only reflects the current
+    machine, while a fake graph may reference a device type the build
+    never compiled or that has no device present; constant-propagating
+    a conversion onto such a device executes a real kernel and raises.
+    """
+    if device_type == "cuda":
+        return bool(torch.cuda._is_compiled() and torch.cuda.is_available())
+    if device_type == "xpu":
+        return bool(torch.xpu._is_compiled() and torch.xpu.is_available())
+    if device_type == "mps":
+        return bool(torch.backends.mps.is_available())
+    if device_type == "mtia":
+        mtia = getattr(torch, "mtia", None)
+        return bool(mtia is not None and mtia.is_available())
+    if device_type == torch._C._get_privateuse1_backend_name():
+        return _is_privateuse1_backend_available()
+    return True
+
+
 def _avoid_device_init() -> bool:
     if torch.xpu._is_compiled():
         if torch.cuda._is_compiled():
@@ -3757,6 +3779,13 @@ class FakeTensorMode(TorchDispatchMode):
         # If we are trying to avoid device init, then we need to avoid constant
         # prop on constant tensors for ops that change devices.
         avoiding_device_init = False
+        if (
+            func is torch.ops.aten._to_copy.default
+            and "device" in kwargs
+            and kwargs["device"].type != "cpu"  # type: ignore[attr-defined]
+            and not _destination_device_usable(kwargs["device"].type)  # type: ignore[attr-defined]
+        ):
+            avoiding_device_init = True
         if self.avoid_device_init:
             if (
                 func is torch.ops.aten._to_copy.default

@@ -2572,6 +2572,24 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
 
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @patch("torch.cuda._is_compiled", return_value=False)
+    @patch("torch.cuda.is_available", return_value=False)
+    @patch.object(
+        torch._subclasses.fake_tensor,
+        "_is_privateuse1_backend_available",
+        lambda: True,
+    )
+    def test_cpu_to_unavailable_device_skips_const_prop(self, *_mocks):
+        # on a build whose only accelerator is a privateuse1 backend, the
+        # global device-init avoidance stays off while cuda kernels are
+        # missing; converting real cpu inputs to cuda must go through the
+        # meta path instead of constant-propagating a real kernel
+        x = torch.zeros(2)
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            y = x.to("cuda:0")
+        self.assertTrue(is_fake_tensor(y))
+        self.assertEqual(y.device, torch.device("cuda:0"))
+
     @parametrize("op", ["detach", "data", "shallow_copy_data"])
     @parametrize("active", [False, True])
     @parametrize("symbolic", [False, True])
