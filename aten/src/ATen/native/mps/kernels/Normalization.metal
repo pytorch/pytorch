@@ -8,6 +8,11 @@ using namespace c10::metal;
 
 #include <ATen/native/mps/kernels/NormBackward.h>
 
+template <typename T>
+inline float4 load_float4(device T* p) {
+  return float4(p[0], p[1], p[2], p[3]);
+}
+
 template <typename T, typename idx_t>
 kernel void layer_norm_single_row(
     device T* input [[buffer(0)]],
@@ -20,7 +25,6 @@ kernel void layer_norm_single_row(
     device T* bias [[buffer(7)]],
     uint tg_id [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
-    uint lsize [[threads_per_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]]) {
   constexpr int N_READS = 4;
 
@@ -33,45 +37,100 @@ kernel void layer_norm_single_row(
 
   uint base_lane = tid * N_READS;
   int count = min((int)N_READS, max(0, (int)axis_size - (int)base_lane));
-  float vals[N_READS];
+  float4 vals;
+  if (count == N_READS) {
+    vals = load_float4(x);
+  } else {
 #pragma unroll
-  for (int i = 0; i < N_READS; i++) {
-    vals[i] = (i < count) ? float(x[i]) : 0.0f;
+    for (int i = 0; i < N_READS; i++) {
+      vals[i] = (i < count) ? float(x[i]) : 0.0f;
+    }
   }
 
+  // Each simdgroup centers its part of the row on the part's own mean p and
+  // reduces the sum of squares M2 and the sum r of the centered values.
+  // Simdgroup 0 then merges the parts exactly: about the row mean m, a part
+  // of c elements contributes M2 + c * (p - m)^2 + 2 * (p - m) * r. The
+  // identity needs the exact p used for centering, so p is stored rather than
+  // recomputed, and r cancels its rounding error. Like a two-pass variance
+  // this avoids the cancellation of E[x^2]-E[x]^2 for small variances, with a
+  // single threadgroup reduction
+  constexpr int simdgroup_elems = simdgroup_size * N_READS;
   threadgroup float local_sum[simdgroup_size];
-  threadgroup float local_sum_sq[simdgroup_size];
-
-  float partial_sum = 0.0f;
+  threadgroup float local_center[simdgroup_size];
+  threadgroup float local_m2[simdgroup_size];
+  threadgroup float local_r[simdgroup_size];
+  threadgroup float row_stats[2];
+  uint simdgroup_id = tid / simdgroup_size;
+  int part_size = min(
+      simdgroup_elems, (int)axis_size - (int)simdgroup_id * simdgroup_elems);
+  float sum = ::metal::simd_sum(vals.x + vals.y + vals.z + vals.w);
+  float center = sum / float(part_size);
+  float4 d = vals - center;
+  if (count < N_READS) {
 #pragma unroll
-  for (int i = 0; i < N_READS; i++) {
-    partial_sum += vals[i];
+    for (int i = 0; i < N_READS; i++) {
+      if (i >= count) {
+        d[i] = 0.0f;
+      }
+    }
   }
-  float mean =
-      threadgroup_sum(local_sum, partial_sum, tid, lsize) / float(axis_size);
-
-  // Two-pass variance from the centered values avoids the catastrophic
-  // cancellation of E[x^2]-E[x]^2 for small variances.
-  float partial_sum_sq = 0.0f;
-#pragma unroll
-  for (int i = 0; i < N_READS; i++) {
-    float d = (i < count) ? (vals[i] - mean) : 0.0f;
-    partial_sum_sq += d * d;
+  float m2 = ::metal::simd_sum(dot(d, d));
+  float r = ::metal::simd_sum(d.x + d.y + d.z + d.w);
+  if (simd_lane_id == 0) {
+    local_sum[simdgroup_id] = sum;
+    local_center[simdgroup_id] = center;
+    local_m2[simdgroup_id] = m2;
+    local_r[simdgroup_id] = r;
   }
-  float var = threadgroup_sum(local_sum_sq, partial_sum_sq, tid, lsize) /
-      float(axis_size);
-  float inv_std = metal::precise::rsqrt(var + epsilon);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (simdgroup_id == 0) {
+    // Element count of the part this lane merges, 0 past the last part
+    int c = clamp(
+        (int)axis_size - (int)simd_lane_id * simdgroup_elems,
+        0,
+        simdgroup_elems);
+    float s = c > 0 ? local_sum[simd_lane_id] : 0.0f;
+    float mean = ::metal::simd_sum(s) / float(axis_size);
+    float part = 0.0f;
+    if (c > 0) {
+      float dm = local_center[simd_lane_id] - mean;
+      part = local_m2[simd_lane_id] + dm * (c * dm + 2 * local_r[simd_lane_id]);
+    }
+    float var = ::metal::simd_sum(part) / float(axis_size);
+    if (simd_lane_id == 0) {
+      row_stats[0] = mean;
+      row_stats[1] = metal::precise::rsqrt(var + epsilon);
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float mean = row_stats[0];
+  float inv_std = row_stats[1];
 
+  if (count == N_READS) {
+    // Checking weight and bias once per slice rather than per element keeps
+    // the loads and stores unpredicated
+    float4 norm = (vals - mean) * inv_std;
+    if (weight != nullptr)
+      norm *= load_float4(weight + base_lane);
+    if (bias != nullptr)
+      norm += load_float4(bias + base_lane);
 #pragma unroll
-  for (int i = 0; i < N_READS; i++) {
-    if (i < count) {
-      float norm = (vals[i] - mean) * inv_std;
-      uint lane_idx = base_lane + i;
-      if (weight != nullptr)
-        norm *= float(weight[lane_idx]);
-      if (bias != nullptr)
-        norm += float(bias[lane_idx]);
-      out[i] = static_cast<T>(norm);
+    for (int i = 0; i < N_READS; i++) {
+      out[i] = static_cast<T>(norm[i]);
+    }
+  } else {
+#pragma unroll
+    for (int i = 0; i < N_READS; i++) {
+      if (i < count) {
+        float norm = (vals[i] - mean) * inv_std;
+        uint lane_idx = base_lane + i;
+        if (weight != nullptr)
+          norm *= float(weight[lane_idx]);
+        if (bias != nullptr)
+          norm += float(bias[lane_idx]);
+        out[i] = static_cast<T>(norm);
+      }
     }
   }
 
@@ -148,15 +207,14 @@ kernel void layer_norm_looped(
   for (idx_t r = 0; r < axis_size; r += lsize * N_READS) {
     idx_t base = r + tid * N_READS;
     if (base + N_READS <= axis_size) {
+      float4 norm = (load_float4(x + base) - mean) * inv_std;
+      if (weight != nullptr)
+        norm *= load_float4(weight + base);
+      if (bias != nullptr)
+        norm += load_float4(bias + base);
 #pragma unroll
       for (int i = 0; i < N_READS; i++) {
-        float xi = float(x[base + i]);
-        float norm = (xi - mean) * inv_std;
-        if (weight != nullptr)
-          norm *= float(weight[base + i]);
-        if (bias != nullptr)
-          norm += float(bias[base + i]);
-        out[base + i] = T(norm);
+        out[base + i] = T(norm[i]);
       }
     } else {
 #pragma unroll
@@ -194,7 +252,6 @@ kernel void layer_norm_looped(
       device DTYPE* bias [[buffer(7)]],                          \
       uint tg_id [[threadgroup_position_in_grid]],               \
       uint tid [[thread_position_in_threadgroup]],               \
-      uint lsize [[threads_per_threadgroup]],                    \
       uint simd_lane_id [[thread_index_in_simdgroup]]);
 
 #define instantiate_layer_norm_looped(DTYPE, IDX_T, IDXNAME)                 \
