@@ -72,6 +72,9 @@ which will handle all the rough edges of the C API for the user.
 - `bool_from_pyobject` / `bool_to_pyobject`: `bool` (only `True` or `False`) <-> `bool`
 - `int64_from_pyobject` / `int64_to_pyobject`: `int` (not `bool`; values outside the `int64_t` range raise) <-> `int64_t`
 - `double_from_pyobject` / `double_to_pyobject`: `float` or `int` <-> `double`
+- `string_from_pyobject`: `str` (encoded as UTF-8) or `bytes` (as is) -> `std::string`
+- `string_to_pyobject`: `std::string_view` (decoded as UTF-8) -> `str`;
+  embedded NUL bytes are preserved in both directions
 - `is_tensor_pyobject`: whether a Python object's actual type is `torch.Tensor`
   or a subclass; overridden `__class__` attributes are ignored, as in
   `tensor_from_pyobject`
@@ -98,6 +101,8 @@ Unlike the rest of the stable ABI, they require `libtorch_python` to be loaded a
 runtime and must be called with the GIL held. If you call them from a context that
 may run without the GIL (for example a boxed `STABLE_TORCH_LIBRARY` kernel),
 acquire it first.
+
+See the [C++ Python object interop reference](https://docs.pytorch.org/cppdocs/api/stable/python-interop.html) for detailed conversion contracts. <!-- @lint-ignore: added in #205955; awaiting the next nightly docs publication -->
 
 ### Performance overhead
 
