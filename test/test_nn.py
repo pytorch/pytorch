@@ -9932,7 +9932,6 @@ class TestNNDeviceType(NNTestCase):
         unittest.skip('Lanczos mode does not support align_corners=True'),
         lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type == 'cpu' and p['antialias'] and p['align_corners'],
     )
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6206")
     def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode, memory_format):
         self._test_upsamplingBiMode2d(
             device, antialias, align_corners, mode, memory_format
@@ -10055,9 +10054,10 @@ class TestNNDeviceType(NNTestCase):
                 if needs_compiled_autograd_workaround
                 else contextlib.nullcontext()
             )
+            # Bilinear/bicubic backward is nondeterministic because of atomic adds
             nondet_tol = (
                 1e-5
-                if torch.device(input_device).type == "cuda"
+                if torch.device(input_device).type in ("cuda", "xpu")
                 else 0.0
             )
             with gradcheck_context:
