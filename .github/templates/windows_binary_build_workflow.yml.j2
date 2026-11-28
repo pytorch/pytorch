@@ -144,9 +144,11 @@ jobs:
         with:
           submodules: recursive
       - name: Bootstrap Python
-        shell: cmd
+        shell: bash
+        env:
+          PYTHON_ARCH: arm64
         run: |
-          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
+          source .ci/wheel/windows/set_desired_python.sh
       - name: Bootstrap APL
         shell: cmd
         run: |
@@ -262,9 +264,11 @@ jobs:
         run: |
           ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Python
-        shell: cmd
+        shell: bash
+        env:
+          PYTHON_ARCH: arm64
         run: |
-          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
+          source .ci/wheel/windows/set_desired_python.sh
       - name: Bootstrap Rust
         shell: cmd
         run: |

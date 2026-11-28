@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
 # Install the Python.org Python requested by $DESIRED_PYTHON and expose
-# it on PATH for the subsequent build_env_setup.py / build_install_deps.py /
-# build_wheel.py invocations.
+# it on PATH for the x64 wheel pipeline and ARM64 build/test batch scripts.
 #
 # Windows analog of `.ci/wheel/linux/set_desired_python.sh`. The Linux variant
 # just prepends a manylinux-image-shipped /opt/python/cpXY/bin to PATH; the
 # Windows AMI doesn't bake Pythons in, so we run the installer.
 #
 # Source this file (don't exec it) so the PATH export reaches the caller.
+# PYTHON_ARCH defaults to amd64. For arm64, DEPENDENCIES_DIR supplies the
+# installation root; GitHub Actions receives native paths for later cmd steps.
 #
 # This was originally a thin wrapper around `internal/install_python.bat`,
 # but invoking that bat via `cmd /c` from bash was unreliable on the
@@ -29,6 +30,14 @@ fi
 # (Python install, downloads) stays under .ci/pytorch/windows.
 _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WIN_CI_DIR="$(cd "$_HERE/../../pytorch/windows" && pwd)"
+PYTHON_ARCH="${PYTHON_ARCH:-amd64}"
+case "$PYTHON_ARCH" in
+    amd64|arm64) ;;
+    *)
+        echo "Unsupported PYTHON_ARCH=$PYTHON_ARCH; expected amd64 or arm64" >&2
+        exit 1
+        ;;
+esac
 
 # DESIRED_PYTHON is e.g. "3.13" or, for free-threaded builds, "3.13t".
 # Strip the trailing "t" to get the base version and add the freethreaded
@@ -48,8 +57,8 @@ fi
 # minor on its oldest, CVE-laden release. Security-only minors (3.11-3.12)
 # are pinned to their last release that shipped a Windows installer; later
 # patches are source-only and 404. Bugfix minors (3.13+) point at the
-# current newest installer and should be bumped here deliberately. Keep this
-# in sync with the matrix in generated-windows-binary-wheel-nightly.yml.
+# current newest installer and should be bumped here deliberately. This table
+# serves both generated Windows binary workflows and win-arm64-build-test.yml.
 case "$PYTHON_BASE" in
     3.11) PYTHON_FULL="3.11.9" ;;
     3.12) PYTHON_FULL="3.12.10" ;;
@@ -68,16 +77,27 @@ echo "Resolved ${DESIRED_PYTHON} to ${PYTHON_FULL}"
 # 3.14.6 are unchanged.
 PYTHON_DL_DIR="${PYTHON_FULL%%[a-z]*}"
 # shellcheck disable=SC2034  # consumed below in the install loop
-PYTHON_INSTALLER_URL="https://www.python.org/ftp/python/${PYTHON_DL_DIR}/python-${PYTHON_FULL}-amd64.exe"
+PYTHON_INSTALLER_URL="https://www.python.org/ftp/python/${PYTHON_DL_DIR}/python-${PYTHON_FULL}-${PYTHON_ARCH}.exe"
 
-INSTALLER="$WIN_CI_DIR/python-amd64.exe"
+INSTALLER="$WIN_CI_DIR/python-${PYTHON_ARCH}.exe"
 INSTALLER_W="$(cygpath -w "$INSTALLER")"
 PYDIR="$WIN_CI_DIR/Python"
+if [[ "$PYTHON_ARCH" == arm64 ]]; then
+    if [[ -z "${DEPENDENCIES_DIR:-}" ]]; then
+        echo "DEPENDENCIES_DIR must be set for ARM64 Python installation" >&2
+        exit 1
+    fi
+    PYDIR="$(cygpath -u "$DEPENDENCIES_DIR")/Python"
+    mkdir -p "$(dirname "$PYDIR")"
+fi
 PYDIR_W="$(cygpath -w "$PYDIR")"
 
 # Build PowerShell -ArgumentList in array form so each option lands as a
 # distinct argument to the installer.
 PS_INSTALL_ARGS="'/quiet','InstallAllUsers=1','PrependPath=0','Include_test=0'"
+if [[ "$PYTHON_ARCH" == arm64 ]]; then
+    PS_INSTALL_ARGS="'/quiet','Include_debug=1','PrependPath=0'"
+fi
 if [[ -n "$ADDITIONAL_OPTIONS" ]]; then
     PS_INSTALL_ARGS="${PS_INSTALL_ARGS},'${ADDITIONAL_OPTIONS}'"
 fi
@@ -96,7 +116,7 @@ for ((i = 1; i <= attempts; i++)); do
     # cleanup. PowerShell's Start-Process -Wait blocks for the process
     # *and its descendants*, matching what `start /wait` did in the
     # legacy cmd-native chain.
-    if curl --retry 3 -kL "$PYTHON_INSTALLER_URL" --output "$INSTALLER" \
+    if curl --retry 3 -fL "$PYTHON_INSTALLER_URL" --output "$INSTALLER" \
         && powershell -NoProfile -NonInteractive -Command \
             "\$p = Start-Process -FilePath '${INSTALLER_W}' -ArgumentList ${PS_INSTALL_ARGS} -Wait -NoNewWindow -PassThru; exit \$p.ExitCode"
     then
@@ -114,7 +134,9 @@ if [[ ! -x "$PYDIR/$PYTHON_EXE_NAME" ]]; then
     exit 1
 fi
 
-"$PYDIR/$PYTHON_EXE_NAME" -m pip install --upgrade pip setuptools packaging wheel build
+if [[ "$PYTHON_ARCH" == amd64 ]]; then
+    "$PYDIR/$PYTHON_EXE_NAME" -m pip install --upgrade pip setuptools packaging wheel build
+fi
 
 # `cmake/data/bin` is materialized by the cmake pip install later, but adding
 # it to PATH preemptively is harmless and matches the legacy ordering in
@@ -127,4 +149,8 @@ export PATH="$PYDIR/Lib/site-packages/cmake/data/bin:$PYDIR/Scripts:$PYDIR:$PATH
 # the free-threaded test job rejects. Downstream build steps must use this exe
 # so the wheel's ABI tag matches DESIRED_PYTHON.
 export DESIRED_PYTHON_EXE="$PYDIR/$PYTHON_EXE_NAME"
+if [[ "$PYTHON_ARCH" == arm64 && -n "${GITHUB_ENV:-}" && -n "${GITHUB_PATH:-}" ]]; then
+    printf 'DESIRED_PYTHON_EXE=%s\n' "$(cygpath -w "$DESIRED_PYTHON_EXE")" >> "$GITHUB_ENV"
+    printf '%s\n' "$PYDIR_W" "$(cygpath -w "$PYDIR/Scripts")" "$(cygpath -w "$PYDIR/libs")" >> "$GITHUB_PATH"
+fi
 echo "DESIRED_PYTHON=$DESIRED_PYTHON installed at $PYDIR (exe: $DESIRED_PYTHON_EXE)"

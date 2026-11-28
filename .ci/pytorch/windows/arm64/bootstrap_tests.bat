@@ -6,17 +6,20 @@ for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\
 where cl.exe
 
 :: create virtual environment
-python -m venv .venv
+if not defined DESIRED_PYTHON_EXE set DESIRED_PYTHON_EXE=python
+"%DESIRED_PYTHON_EXE%" -m venv .venv
+if errorlevel 1 exit /b 1
 echo * > .venv\.gitignore
 call .\.venv\Scripts\activate
 where python
 
 :: install dependencies
 python -m pip install --upgrade pip
-pip install -r requirements.txt
-pip install pytest numpy protobuf expecttest hypothesis
+if errorlevel 1 exit /b 1
+python -m pip install --only-binary=numpy -c "%PYTORCH_ROOT%\.ci\pytorch\windows\arm64\requirements-build-constraints.txt" -r requirements.txt pytest protobuf expecttest hypothesis
+if errorlevel 1 exit /b 1
 
 :: find file name for pytorch wheel
 for /f "delims=" %%f in ('dir /b "%PYTORCH_FINAL_PACKAGE_DIR%" ^| findstr "torch-"') do set "TORCH_WHEEL_FILENAME=%PYTORCH_FINAL_PACKAGE_DIR%\%%f"
 
-pip install %TORCH_WHEEL_FILENAME%
+python -m pip install -c "%PYTORCH_ROOT%\.ci\pytorch\windows\arm64\requirements-build-constraints.txt" "%TORCH_WHEEL_FILENAME%"

@@ -503,20 +503,14 @@ def generate_wheels_matrix(
             ):
                 continue
 
-            # TODO: Enable python 3.14 for rest
+            # TODO: Enable Python 3.15 on linux-s390x.
             if os not in [
                 "linux",
                 "linux-aarch64",
-                "linux-s390x",
-                "macos-arm64",
                 "windows",
-            ] and (python_version == "3.14" or python_version == "3.14t"):
-                continue
-
-            # TODO: Enable python 3.15 on non linux OSes
-            if os not in ["linux", "linux-aarch64", "windows", "macos-arm64"] and (
-                python_version == "3.15" or python_version == "3.15t"
-            ):
+                "windows-arm64",
+                "macos-arm64",
+            ] and (python_version == "3.15" or python_version == "3.15t"):
                 continue
 
             # CUDA wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS

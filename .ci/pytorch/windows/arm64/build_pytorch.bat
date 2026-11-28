@@ -31,14 +31,18 @@ cd %PYTORCH_ROOT%
 copy %libuv_ROOT%\bin\uv.dll torch\lib\uv.dll
 
 :: create virtual environment
-python -m venv .venv
+if not defined DESIRED_PYTHON_EXE set DESIRED_PYTHON_EXE=python
+"%DESIRED_PYTHON_EXE%" -m venv .venv
+if errorlevel 1 exit /b 1
 echo * > .venv\.gitignore
 call .\.venv\Scripts\activate
 where python
 
 :: python install dependencies
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+if errorlevel 1 exit /b 1
+python -m pip install --only-binary=numpy -c "%PYTORCH_ROOT%\.ci\pytorch\windows\arm64\requirements-build-constraints.txt" -r requirements.txt
+if errorlevel 1 exit /b 1
 :: DISTUTILS_USE_SDK should be set after psutil dependency
 set DISTUTILS_USE_SDK=1
 
@@ -49,6 +53,7 @@ sccache --show-stats
 
 :: Call PyTorch build script
 python -m build --wheel --no-isolation --outdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+if errorlevel 1 exit /b 1
 
 :: show sccache stats
 sccache --show-stats
