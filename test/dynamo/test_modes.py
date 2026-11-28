@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import operator
+import re
 import unittest
 from unittest.mock import patch
 
@@ -247,6 +248,118 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_function_mode_guards_cpp(self):
         self._run_torch_function_mode_guard_test()
+
+    @staticmethod
+    def _normalize_torch_function_mode_guard_reason(reason, mode_type=None):
+        reason = re.sub(r"^\d+/\d+:", "<compile_id>:", reason)
+        if mode_type is not None:
+            reason = reason.replace(f"{mode_type.__module__}.", "<module>.")
+        return reason
+
+    def test_torch_function_mode_guard_recompile_hint(self):
+        class ModeA(BaseTorchFunctionMode):
+            pass
+
+        class ModeB(BaseTorchFunctionMode):
+            pass
+
+        failures = []
+        x = torch.ones(2)
+
+        def f(x):
+            return x + 1
+
+        compiled = torch._dynamo.optimize(
+            backend="eager",
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(f)
+        compiled(x)
+        with ModeA():
+            compiled(x)
+        self.assertEqual(len(failures), 1)
+        self.assertExpectedInline(
+            self._normalize_torch_function_mode_guard_reason(failures[0]),
+            """<compile_id>: Number of active TorchFunctionMode instances changed: expected 0, found 1. Call the compiled function under the same mode contexts as when it was compiled.""",
+        )
+
+        failures.clear()
+
+        def g(x):
+            return x + 2
+
+        compiled_with_mode = torch._dynamo.optimize(
+            backend="eager",
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(g)
+        with ModeA():
+            compiled_with_mode(x)
+        self.assertEqual(failures, [])
+        with ModeB():
+            compiled_with_mode(x)
+        self.assertEqual(len(failures), 1)
+        self.assertExpectedInline(
+            self._normalize_torch_function_mode_guard_reason(failures[0], ModeA),
+            """<compile_id>: TorchFunctionMode at stack index 0 changed class: expected <module>.TorchFunctionModeTests.test_torch_function_mode_guard_recompile_hint.<locals>.ModeA, found <module>.TorchFunctionModeTests.test_torch_function_mode_guard_recompile_hint.<locals>.ModeB. Mode classes are compared by identity; reuse the original class at each position, even if a redefined class has the same name.""",
+        )
+
+    def test_torch_function_mode_guard_recompile_hint_order(self):
+        class ModeA(BaseTorchFunctionMode):
+            pass
+
+        class ModeB(BaseTorchFunctionMode):
+            pass
+
+        failures = []
+        x = torch.ones(2)
+
+        def f(x):
+            return x + 1
+
+        compiled = torch._dynamo.optimize(
+            backend="eager",
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(f)
+        with ModeA(), ModeB():
+            compiled(x)
+        with ModeB(), ModeA():
+            compiled(x)
+        self.assertEqual(len(failures), 1)
+        self.assertExpectedInline(
+            self._normalize_torch_function_mode_guard_reason(failures[0], ModeA),
+            """<compile_id>: TorchFunctionMode at stack index 0 changed class: expected <module>.TorchFunctionModeTests.test_torch_function_mode_guard_recompile_hint_order.<locals>.ModeA, found <module>.TorchFunctionModeTests.test_torch_function_mode_guard_recompile_hint_order.<locals>.ModeB. Mode classes are compared by identity; reuse the original class at each position, even if a redefined class has the same name.""",
+        )
+
+    def test_torch_function_mode_guard_recompile_hint_identity(self):
+        def make_mode_class():
+            class Mode(BaseTorchFunctionMode):
+                pass
+
+            return Mode
+
+        first_mode = make_mode_class()
+        second_mode = make_mode_class()
+        self.assertIsNot(first_mode, second_mode)
+        self.assertEqual(first_mode.__qualname__, second_mode.__qualname__)
+
+        failures = []
+        x = torch.ones(2)
+
+        def f(x):
+            return x + 1
+
+        compiled = torch._dynamo.optimize(
+            backend="eager",
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(f)
+        with first_mode():
+            compiled(x)
+        with second_mode():
+            compiled(x)
+        self.assertEqual(len(failures), 1)
+        self.assertExpectedInline(
+            self._normalize_torch_function_mode_guard_reason(failures[0], first_mode),
+            """<compile_id>: TorchFunctionMode at stack index 0 changed class: expected <module>.TorchFunctionModeTests.test_torch_function_mode_guard_recompile_hint_identity.<locals>.make_mode_class.<locals>.Mode, found <module>.TorchFunctionModeTests.test_torch_function_mode_guard_recompile_hint_identity.<locals>.make_mode_class.<locals>.Mode. Mode classes are compared by identity; reuse the original class at each position, even if a redefined class has the same name.""",
+        )
 
     def test_torch_function_mode_preserves_cuda_rng_state(self):
         class ConstantReturnMode(TorchFunctionMode):
