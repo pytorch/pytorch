@@ -883,6 +883,9 @@ class AbstractIsolatedCollectivesTest(CollectivesTestMixin, C10dBackendTest):
         if not self.supports_gather_single:
             with self.assertRaisesRegex(RuntimeError, "does not support gather_single"):
                 self._test_gather_single(4, torch.float32, False)
+            # Gloo's connecting side counts as connected before its peer accepts, so
+            # exiting with no collective can close the socket under a peer still in init.
+            dist.barrier()
             return
         self._test_transport_matrix(self._test_gather_single)
 
