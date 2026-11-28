@@ -123,6 +123,11 @@ def alpha_dropout(
     if p == 0:
         return self
 
+    # Compute in the input's computation dtype (fp16/bf16 -> fp32, fp64 -> fp64)
+    # so fp64 keeps full precision; otherwise bool * python-float promotes to
+    # torch.get_default_dtype() and the fp64 coefficients lose precision.
+    computation_dtype = utils.get_computation_dtype(self.dtype)
+
     dropout_mask = _dropout_helper(self, 1 - p)
 
     # From paper: Self-Normalizing Neural Networks (https://arxiv.org/pdf/1706.02515.pdf)
@@ -132,11 +137,11 @@ def alpha_dropout(
     alpha = -1.7580993408473766
 
     a = 1.0 / math.sqrt((alpha * alpha * p + 1) * (1 - p))
-    b = torch.logical_not(dropout_mask)
+    b = torch.logical_not(dropout_mask).to(computation_dtype)
     b = b * (alpha * a) + alpha * a * p
-    dropout_mask = a * dropout_mask
+    dropout_mask = dropout_mask.to(computation_dtype) * a
 
-    return self * dropout_mask + b
+    return (self.to(computation_dtype) * dropout_mask + b).to(self.dtype)
 
 
 def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
