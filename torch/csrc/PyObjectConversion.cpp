@@ -53,6 +53,24 @@ struct NoopPyObjectConversion final : PyObjectConversionInterface {
       at::MemoryFormat /*memory_format*/) const override {
     TORCH_CHECK(false, kNoImplMsg);
   }
+  bool bool_from_pyobject(PyObject* /*obj*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  PyObject* bool_to_pyobject(bool /*value*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  int64_t int64_from_pyobject(PyObject* /*obj*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  PyObject* int64_to_pyobject(int64_t /*value*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  double double_from_pyobject(PyObject* /*obj*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  PyObject* double_to_pyobject(double /*value*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
 };
 
 const NoopPyObjectConversion noop_impl;

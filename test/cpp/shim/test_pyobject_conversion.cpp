@@ -174,4 +174,25 @@ TEST(TorchPyObjectConversion, MemoryFormatCodeValidatedBeforeNarrowing) {
   EXPECT_NE(std::strstr(message, "invalid memory format code 256"), nullptr);
 }
 
+TEST(TorchPyObjectConversion, ScalarNoopErrorsWithoutLibtorchPython) {
+  int dummy = 0;
+  bool bool_out = true;
+  expect_noop_error(torch_bool_from_pyobject(&dummy, &bool_out));
+  EXPECT_TRUE(bool_out);
+  int64_t int64_out = -1;
+  expect_noop_error(torch_int64_from_pyobject(&dummy, &int64_out));
+  EXPECT_EQ(int64_out, -1);
+  double double_out = 1.25;
+  expect_noop_error(torch_double_from_pyobject(&dummy, &double_out));
+  EXPECT_EQ(double_out, 1.25);
+
+  void* py_out = nullptr;
+  expect_noop_error(torch_bool_to_pyobject(true, &py_out));
+  EXPECT_EQ(py_out, nullptr);
+  expect_noop_error(torch_int64_to_pyobject(17, &py_out));
+  EXPECT_EQ(py_out, nullptr);
+  expect_noop_error(torch_double_to_pyobject(1.5, &py_out));
+  EXPECT_EQ(py_out, nullptr);
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
