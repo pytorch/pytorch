@@ -755,7 +755,9 @@ def sparse_(
     with torch.no_grad():
         tensor.normal_(0, std, generator=generator)
         for col_idx in range(cols):
-            row_indices = torch.randperm(rows)
+            row_indices = torch.randperm(
+                rows, device=tensor.device, generator=generator
+            )
             zero_indices = row_indices[:num_zeros]
             tensor[zero_indices, col_idx] = 0
     return tensor
