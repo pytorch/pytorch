@@ -17,6 +17,8 @@ from torch._inductor.fx_passes.pad_mm import (
     get_pad_cache,
     get_padded_length,
     is_mm_compute_bound,
+    pad_mat1,
+    pad_mat2,
     should_pad,
     should_pad_bench_key,
     should_pad_mm_bf16,
@@ -1212,6 +1214,73 @@ class PadMMDeviceAgnosticTest(TestCase):
             get_do_bench("xpu")(lambda: None)
         forwarded = mock_bench.call_args.kwargs
         self.assertEqual(forwarded, {"warmup": 5, "device_type": "xpu"})
+
+    def test_pad_mat2_preserves_stride_order(self):
+        # mat2 of an nn.Linear's mm is weight.t(), i.e. column major. Eager
+        # constant_pad_nd would return a contiguous operand, but inductor lowers
+        # constant_pad_nd as a pointwise op and keeps the input's stride order,
+        # so the benchmark has to pad the same way to time the same kernel.
+        weight = torch.randn(196, 196, device=GPU_TYPE, dtype=torch.float16)
+        mat2 = weight.t()
+
+        default = pad_mat2(mat2, k_padded_length=4, n_padded_length=4)
+        preserved = pad_mat2(
+            mat2, k_padded_length=4, n_padded_length=4, preserve_stride_order=True
+        )
+
+        self.assertEqual(default.shape, (200, 200))
+        self.assertEqual(preserved.shape, (200, 200))
+        self.assertTrue(default.is_contiguous())
+        self.assertFalse(preserved.is_contiguous())
+        self.assertEqual(preserved.stride(), (1, 200))
+        # same values, only the layout differs
+        self.assertEqual(default, preserved)
+        self.assertEqual(preserved[:196, :196], mat2)
+        self.assertEqual(preserved[196:, :].abs().sum().item(), 0)
+        self.assertEqual(preserved[:, 196:].abs().sum().item(), 0)
+
+    def test_pad_mat1_preserves_stride_order(self):
+        mat1 = torch.randn(64, 32, device=GPU_TYPE, dtype=torch.float16).t()
+        preserved = pad_mat1(
+            mat1, m_padded_length=6, k_padded_length=8, preserve_stride_order=True
+        )
+        self.assertEqual(preserved.shape, (38, 72))
+        self.assertEqual(preserved.stride(), (1, 38))
+        self.assertEqual(preserved[:32, :64], mat1)
+        self.assertEqual(preserved[32:, :].abs().sum().item(), 0)
+        self.assertEqual(preserved[:, 64:].abs().sum().item(), 0)
+
+    def test_pad_preserves_stride_order_is_noop_when_contiguous(self):
+        mat2 = torch.randn(196, 196, device=GPU_TYPE, dtype=torch.float16)
+        default = pad_mat2(mat2, k_padded_length=4, n_padded_length=4)
+        preserved = pad_mat2(
+            mat2, k_padded_length=4, n_padded_length=4, preserve_stride_order=True
+        )
+        self.assertEqual(default.stride(), preserved.stride())
+        self.assertEqual(default, preserved)
+
+    @parametrize("is_bmm", (False, True))
+    def test_pad_preserves_stride_order_matches_values(self, is_bmm):
+        # asymmetric padding on every dim, so a mixed up permutation shows up as
+        # a value mismatch rather than silently working
+        if is_bmm:
+            base = torch.randn(3, 20, 12, device=GPU_TYPE, dtype=torch.float16)
+            mat2 = base.permute(0, 2, 1)
+        else:
+            base = torch.randn(20, 12, device=GPU_TYPE, dtype=torch.float16)
+            mat2 = base.t()
+
+        default = pad_mat2(mat2, k_padded_length=5, n_padded_length=3, is_bmm=is_bmm)
+        preserved = pad_mat2(
+            mat2,
+            k_padded_length=5,
+            n_padded_length=3,
+            is_bmm=is_bmm,
+            preserve_stride_order=True,
+        )
+        self.assertEqual(default.shape, preserved.shape)
+        self.assertEqual(default, preserved)
+        self.assertNotEqual(default.stride(), preserved.stride())
 
 
 if __name__ == "__main__":
