@@ -49,6 +49,7 @@ class CUDASymmetricMemory : public SymmetricMemory {
   void** get_buffer_ptrs_dev() override;
   void** get_signal_pad_ptrs_dev() override;
   size_t get_buffer_size() override;
+  size_t get_signal_pad_size() override;
   size_t get_offset() override;
 
   bool has_multicast_support() override;
@@ -88,6 +89,7 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
       HandleType mc_handle,
       void* mc_addr,
       size_t buffer_size,
+      size_t signal_pad_size,
       int local_device_idx,
       int rank,
       int world_size,
@@ -117,6 +119,7 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
   HandleType mc_handle_;
   void* mc_addr_;
   size_t buffer_size_;
+  size_t signal_pad_size_;
   int local_device_idx_;
   int rank_;
   int world_size_;
@@ -137,6 +140,8 @@ struct Block : public c10::intrusive_ptr_target {
   // user buffer. The signal pad occupies the first two thirds of
   // [0, buffer_offset) and the multimem barrier's state the last; see alloc().
   size_t buffer_offset;
+  // The signal pad size this block was allocated with.
+  size_t signal_pad_size;
   std::optional<std::string> default_group_name;
   std::map<std::string, c10::intrusive_ptr<CUDAPeerAllocInfo>> symm_mems;
 
@@ -146,6 +151,7 @@ struct Block : public c10::intrusive_ptr_target {
       size_t block_size,
       size_t buffer_size,
       size_t buffer_offset,
+      size_t signal_pad_size,
       const std::optional<std::string>& group_name);
 };
 

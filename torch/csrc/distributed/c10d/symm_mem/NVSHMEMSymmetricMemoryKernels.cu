@@ -13,8 +13,9 @@ void launch_barrier_kernel(
     int channel,
     int rank,
     int world_size,
+    size_t signal_pad_size,
     size_t timeout_ms) {
-  check_channel(channel, world_size, get_signal_pad_size());
+  check_channel(channel, world_size, signal_pad_size);
   barrier_kernel<<<
       1,
       std::max(at::cuda::warp_size(), world_size),
@@ -30,8 +31,9 @@ void launch_put_signal_kernel(
     int channel,
     int rank,
     int world_size,
+    size_t signal_pad_size,
     size_t timeout_ms) {
-  check_channel(channel, world_size, get_signal_pad_size());
+  check_channel(channel, world_size, signal_pad_size);
   put_signal_kernel<<<
       1,
       at::cuda::warp_size(),
@@ -47,8 +49,9 @@ void launch_wait_signal_kernel(
     int channel,
     int rank,
     int world_size,
+    size_t signal_pad_size,
     size_t timeout_ms) {
-  check_channel(channel, world_size, get_signal_pad_size());
+  check_channel(channel, world_size, signal_pad_size);
   wait_signal_kernel<<<
       1,
       at::cuda::warp_size(),

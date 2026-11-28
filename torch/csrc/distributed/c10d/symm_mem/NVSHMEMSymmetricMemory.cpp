@@ -43,16 +43,20 @@ struct NVSHMEMAllocation {
   void* alloc_base;
   size_t buffer_size;
   size_t buffer_offset;
+  // The signal pad size this allocation was made with.
+  size_t signal_pad_size;
   int device_idx;
 
   NVSHMEMAllocation(
       void* alloc_base,
       size_t buffer_size,
       size_t buffer_offset,
+      size_t signal_pad_size,
       int device_idx)
       : alloc_base(alloc_base),
         buffer_size(buffer_size),
         buffer_offset(buffer_offset),
+        signal_pad_size(signal_pad_size),
         device_idx(device_idx) {}
 
   // Whether ptr falls within this allocation's data buffer.
@@ -95,7 +99,8 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
       NVSHMEMAllocation* allocation,
       const std::string& group_name)
       : base_ptr_(allocation->alloc_base),
-        buffer_size_(allocation->buffer_size) {
+        buffer_size_(allocation->buffer_size),
+        signal_pad_size_(allocation->signal_pad_size) {
     // Byte offset from base_ptr_ to the start of the user buffer; only needed
     // during setup below.
     const size_t buffer_offset = allocation->buffer_offset;
@@ -192,6 +197,7 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
  private:
   void* base_ptr_;
   size_t buffer_size_;
+  size_t signal_pad_size_;
   int rank_;
   int world_size_;
   std::vector<void*> buffers_;
@@ -256,6 +262,10 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return pai_->buffer_size_;
   }
 
+  size_t get_signal_pad_size() override {
+    return pai_->signal_pad_size_;
+  }
+
   bool has_multicast_support() override {
     return pai_->mc_addr_ != nullptr;
   }
@@ -283,6 +293,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
         channel,
         pai_->rank_,
         pai_->world_size_,
+        get_signal_pad_size(),
         timeout_ms);
   }
 
@@ -300,6 +311,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
         channel,
         pai_->rank_,
         pai_->world_size_,
+        get_signal_pad_size(),
         timeout_ms);
   }
 
@@ -317,6 +329,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
         channel,
         pai_->rank_,
         pai_->world_size_,
+        get_signal_pad_size(),
         timeout_ms);
   }
 
@@ -454,8 +467,9 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     // Signal pad first at [0, buffer_offset), data buffer at buffer_offset,
     // which is the signal pad size rounded up to signal_pad_alignment.
+    const size_t signal_pad_size = get_signal_pad_size();
     const size_t buffer_offset =
-        at::round_up(get_signal_pad_size(), signal_pad_alignment);
+        at::round_up(signal_pad_size, signal_pad_alignment);
     const size_t total_size = buffer_offset + at::round_up(size, 16UL);
     auto alloc_base = nvshmem_malloc(total_size);
     TORCH_CHECK(alloc_base != nullptr, "nvshmem_malloc failed");
@@ -479,7 +493,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       allocations_.try_emplace(
           buffer_ptr,
           std::make_unique<NVSHMEMAllocation>(
-              alloc_base, size, buffer_offset, device_idx));
+              alloc_base, size, buffer_offset, signal_pad_size, device_idx));
     }
     return buffer_ptr;
   }

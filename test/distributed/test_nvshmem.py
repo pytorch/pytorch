@@ -598,6 +598,25 @@ class NVSHMEMSignalNegativeTest(MultiProcessTestCase):
 
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
+    def test_channel_out_of_bounds_after_pad_size_grows(self) -> None:
+        self._init_process()
+        t = symm_mem.empty(64, device=self.device)
+        pad_size = symm_mem.get_signal_pad_size()
+        symm_mem.set_signal_pad_size(pad_size * 4)
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        self.assertEqual(hdl.get_signal_pad(self.rank).numel() * 4, pad_size)
+
+        channel = pad_size // (4 * self.world_size)
+        peer = (self.rank + 1) % self.world_size
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            hdl.barrier(channel=channel)
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            hdl.put_signal(dst_rank=peer, channel=channel)
+        with self.assertRaisesRegex(RuntimeError, "maximum supported channel"):
+            hdl.wait_signal(src_rank=peer, channel=channel)
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
     def test_rank_out_of_bounds(self) -> None:
         self._init_process()
 
