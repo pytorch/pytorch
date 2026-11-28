@@ -22,6 +22,7 @@ class BenchmarkCallableType(Protocol):
 
 _kernel_category_choices = [
     "foreach",
+    "gather",
     "persistent_reduction",
     "pointwise",
     "reduction",
