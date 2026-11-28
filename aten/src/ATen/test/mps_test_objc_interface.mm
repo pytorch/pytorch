@@ -119,13 +119,13 @@ TEST(MPSObjCInterfaceTest, MPSCustomKernel) {
     id<MTLComputePipelineState> kernelPSO = [device newComputePipelineStateWithFunction: customFunction error: &error];
     TORCH_CHECK(kernelPSO, error.localizedDescription.UTF8String);
 
-    // Get a reference of the MPSStream MTLCommandBuffer.
-    id<MTLCommandBuffer> commandBuffer = torch::mps::get_command_buffer();
-    TORCH_CHECK(commandBuffer, "Failed to retrieve command buffer reference");
-
     // Get a reference of the MPSStream dispatch_queue. This is used for CPU side synchronization while encoding.
     dispatch_queue_t serialQueue = torch::mps::get_dispatch_queue();
     dispatch_sync(serialQueue, ^(){
+      // Get a reference of the MPSStream MTLCommandBuffer. This has to run on the stream's dispatch_queue.
+      id<MTLCommandBuffer> commandBuffer = torch::mps::get_command_buffer();
+      TORCH_CHECK(commandBuffer, "Failed to retrieve command buffer reference");
+
       // Start a compute pass.
       id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
       TORCH_CHECK(computeEncoder, "Failed to create compute command encoder");
