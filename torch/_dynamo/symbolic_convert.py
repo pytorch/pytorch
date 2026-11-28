@@ -4464,6 +4464,10 @@ class InstructionTranslatorBase(
         self.pop()
 
     def _convert_value(self, value: VariableTracker, flag: int) -> VariableTracker:
+        mutations = self.output.side_effects.store_attr_mutations
+        if flag and mutations and isinstance(value, UserDefinedObjectVariable):
+            slots = ("__str__", "__repr__") if flag == 1 else ("__repr__",)
+            BuiltinVariable.check_format_slots(self, value, slots)
         if flag == 1:
             return VariableTracker.build(self, str).call_function(self, [value], {})  # type: ignore[arg-type]
         elif flag == 2:
@@ -4505,7 +4509,11 @@ class InstructionTranslatorBase(
                 py_type = realized.python_type()
             except NotImplementedError:
                 py_type = None
-            if py_type is not None and py_type.__format__ is object.__format__:
+            if (
+                py_type is not None
+                and py_type.__format__ is object.__format__
+                and not BuiltinVariable.has_pending_format_slots(self)
+            ):
                 try:
                     from .variables.object_protocol import generic_str
 
@@ -4520,7 +4528,7 @@ class InstructionTranslatorBase(
             self, "{:" + fmt_spec.as_python_constant() + "}"
         )
 
-        format_fn = VariableTracker.build(self, str.format)
+        format_fn = SourcelessBuilder.create_internal_builtin(str.format)
         self.call_function(format_fn, [fmt_var, value], {})
 
     @break_graph_if_unsupported(

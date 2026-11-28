@@ -901,6 +901,7 @@ class OutputGraph(OutputGraphCommon):
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache: dict[Source, VariableTracker] = {}
+        self.created_enum_classes: dict[int, type] = {}
         # Cache for sources resolved via MRO walk, keyed by (id(owning class),
         # name). When the same descriptor (e.g. property) is reached from
         # multiple instances or subclasses, we reuse the first source to avoid
@@ -3963,6 +3964,7 @@ class OutputGraph(OutputGraphCommon):
         # some of the tensor objects to be held alive for longer than necessary.
         self.root_tx = None  # type: ignore[assignment]
         self.local_generators.clear()
+        self.created_enum_classes.clear()
         self.nn_modules.clear()
         self.used_inlined_inbuilt_modules_names.clear()
         self.param_name_to_source = None
@@ -4319,6 +4321,7 @@ class SubgraphTracer(fx.Tracer):
         # this subtracer's trace. Used by invoke_subgraph reuse to collect
         # guards and detect mutations on captured variables.
         self.traced_sources: OrderedSet[Source] = OrderedSet()
+        self.has_builtin_method_identity = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
         self.is_reconstructing_generator = False

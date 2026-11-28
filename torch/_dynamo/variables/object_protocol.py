@@ -85,12 +85,31 @@ if TYPE_CHECKING:
 def vt_identity_compare(
     left: VariableTracker,
     right: VariableTracker,
+    *,
+    guard_identity: bool = True,
 ) -> "VariableTracker | None":
     """Try to determine Python identity (left is right) at trace time.
 
     Returns ConstantVariable(True/False) if determinable, else None.
     Mirrors the logic in BuiltinVariable's handle_is handler.
     """
+    # Binding equality permits fresh wrappers; identity observations do not.
+    if guard_identity:
+        left, right = left.unwrap(), right.unwrap()
+        if (
+            isinstance(left, variables.BoundBuiltinMethodVariable)
+            and isinstance(right, variables.BoundBuiltinMethodVariable)
+            and type(left.value) is types.BuiltinMethodType
+            and type(right.value) is types.BuiltinMethodType
+            and left.value == right.value
+        ):
+            from ..symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
+            for arg in (left, right):
+                if arg.source is not None:
+                    arg.get_id(tx)
+                    install_guard(arg.source.make_guard(GuardBuilder.ID_MATCH))
     if left is right:
         return ConstantVariable.create(True)
 
@@ -967,7 +986,7 @@ def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> 
     if not pylong_check(obj.python_type()):
         raise_type_error(tx, "an integer is required")
     # A Py_ssize_t holds no symbol, so a backed SymInt has to specialize here.
-    val = specialize_symnode(obj).as_python_constant()
+    val = specialize_symnode(obj).guard_as_python_constant()
     if not -sys.maxsize - 1 <= val <= sys.maxsize:
         raise_observed_exception(
             OverflowError,
@@ -999,7 +1018,7 @@ def pynumber_as_ssize_t(
     if isinstance(value, SymNodeVariable):
         val = value.evaluate_expr(tx.output)
     else:
-        val = value.as_python_constant()
+        val = value.guard_as_python_constant()
 
     if not isinstance(val, int):
         raise AssertionError("pynumber_index did not return an int-like value")
@@ -1059,7 +1078,7 @@ def pynumber_tobase(
     """
     index = pynumber_index(tx, obj)
     format_fn = {2: bin, 8: oct, 16: hex}[base]
-    return ConstantVariable.create(format_fn(index.as_python_constant()))
+    return ConstantVariable.create(format_fn(index.guard_as_python_constant()))
 
 
 def pyiter_next(
@@ -1611,7 +1630,7 @@ def validate_sequence_repeat_count(
     tx: "InstructionTranslatorBase",
     count: VariableTracker,
 ) -> None:
-    n = count.as_python_constant()
+    n = count.guard_as_python_constant()
     if n < -sys.maxsize - 1 or n > sys.maxsize:
         raise_observed_exception(
             OverflowError,
@@ -2062,7 +2081,7 @@ def generic_richcompare_bool(
     """
     if op not in ("__eq__", "__ne__"):
         raise AssertionError(f"generic_richcompare_bool only supports eq/ne, got {op}")
-    identity = vt_identity_compare(v, w)
+    identity = vt_identity_compare(v, w, guard_identity=False)
     if identity is not None and identity.as_python_constant():
         return ConstantVariable.create(op == "__eq__")
     return generic_richcompare(tx, v, w, op)
