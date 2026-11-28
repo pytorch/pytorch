@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import re
 import types
 from itertools import count
 from types import SimpleNamespace
@@ -1205,6 +1206,34 @@ int64_t s0 = s1;""",
         self.assertNotEqual(first, second)
         self.assertIn(f"{first}[] = {{2, 3}};", first_buffer.getvalue())
         self.assertIn(f"{second}[] = {{2, 3}};", second_buffer.getvalue())
+
+    def test_optional_tensor_reinterpret_view_handle_owned(self):
+        wrapper = self._new_cpp_wrapper()
+        wrapper.lines = []
+        wrapper.tmp_tensor_id = count()
+        layout = ir.FixedLayout(
+            torch.device("cpu"), torch.float32, size=[8], stride=[1]
+        )
+        view = ir.ReinterpretView(
+            data=ir.StorageBox(ir.InputBuffer(name="arg0", layout=layout)),
+            layout=layout,
+        )
+        graph = SimpleNamespace(
+            wrapper_code=wrapper,
+            aot_mode=False,
+            sizevars=SimpleNamespace(simplify=lambda x: x),
+        )
+
+        with V.set_graph_handler(graph):
+            arg = wrapper.val_to_arg_str(
+                view, torch.OptionalType(torch.TensorType.get())
+            )
+        handles = re.findall(
+            r"AtenTensorHandle (tmp_\w+);", "\n".join(map(str, wrapper.lines))
+        )
+
+        self.assertEqual(len(handles), 1)
+        self.assertIn(f"RAIIAtenTensorHandle({handles[0]})", arg)
 
 
 if __name__ == "__main__":
