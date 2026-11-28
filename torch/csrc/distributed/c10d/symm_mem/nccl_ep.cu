@@ -240,6 +240,7 @@ c10::intrusive_ptr<NcclEpHandle> nccl_ep_create_handle(
         stream));
 
     return c10::make_intrusive<NcclEpHandle>(
+        group,
         ep_handle,
         layout,
         group->group_name,
