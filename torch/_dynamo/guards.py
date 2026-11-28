@@ -159,7 +159,6 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
-from .exc import unimplemented
 from .source import (
     AttrProxySource,
     AttrSource,
@@ -406,17 +405,6 @@ def _method_identity_guards_filtered(
     return context is not None and context.is_aot_capture
 
 
-def _untracked_method_identity(context: str, *, skip_frame: bool = False) -> NoReturn:
-    unimplemented(
-        gb_type="Builtin method operation requires identity guards",
-        context=context,
-        explanation="Dynamo cannot establish the stable receiver identity required by this operation.",
-        hints=["Pass the computed result as an input to the compiled function."],
-        skip_frame=skip_frame,
-        preserve_skip_frame_after_inline=skip_frame,
-    )
-
-
 def install_builtin_method_guard(
     tx: InstructionTranslatorBase, source: Source, value: object = None
 ) -> None:
@@ -428,7 +416,7 @@ def install_builtin_method_guard(
         create = functools.partial(GuardBuilder.NATIVE_METHOD_MATCH, expected=expected)
         install_guard(source.make_guard(create))
     elif filtered:
-        _untracked_method_identity(f"binding prebound builtin method {source.name}")
+        exc.unimplemented_identity(f"binding prebound builtin method {source.name}")
     else:
         install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
@@ -3903,8 +3891,6 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    # Multi-source guard (two inputs aliasing) — not expressible as a
-    # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     _identity_check_spec = register_guard_check_spec(
         get_metadata_fn=lambda guard, values: values[0] is values[1],
@@ -3915,6 +3901,10 @@ class GuardBuilder(GuardBuilderBase):
     @_identity_check_spec
     def NOT_DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
         pair = (guard.originating_source, source_b)
+        if any(
+            is_from_skip_guard_source(s) or is_from_optimizer_source(s) for s in pair
+        ):
+            return
         key = frozenset(pair)
         if key not in self._cached_distinct_inputs:
             self._cached_distinct_inputs.add(key)
@@ -7645,7 +7635,8 @@ def unique(seq: Sequence[T]) -> Generator[T, None, None]:
 
 
 def guard_mixed_scope_alias(left: Source, right: Source) -> None:
-    # make_dupe_guard cannot relate a local argument to a preloaded global.
+    # make_dupe_guard skips mixed scopes. Nested reuse needs the alias to replay
+    # attribute guards against the canonical source of an already loaded object.
     if is_from_local_source(left) != is_from_local_source(right):
         check = functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=right)
         install_guard(left.make_guard(check))
