@@ -3,6 +3,7 @@
 import _json
 import copy
 import dataclasses
+import datetime
 import os
 import re
 import sys
@@ -854,8 +855,350 @@ class TestUserDefinedClassDict(TestCase):
         self.assertEqual(cnt.frame_count, 2)
 
 
+@instantiate_parametrized_tests
 class TestClassSetattr(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_set_doc(self):
+        def fn():
+            class X:
+                "elephant"
+
+            X.__doc__ = "banana"
+
+            try:
+                type(list).__dict__["__doc__"].__set__(list, "blah")
+            except TypeError as e:
+                set_error = str(e)
+
+            try:
+                type(X).__dict__["__doc__"].__delete__(X)
+            except TypeError as e:
+                delete_error = str(e)
+
+            return X.__doc__, set_error, delete_error
+
+        def type_doc_error(operation):
+            try:
+                operation()
+            except TypeError as e:
+                return str(e)
+            raise AssertionError("expected type.__doc__ descriptor to raise TypeError")
+
+        expected_errors = (
+            type_doc_error(
+                lambda: type(list).__dict__["__doc__"].__set__(list, "blah")
+            ),
+            type_doc_error(
+                lambda: type.__dict__["__doc__"].__delete__(type("X", (), {}))
+            ),
+        )
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, ("banana", *expected_errors))
+
+    def test_class_doc_setattr_persists(self):
+        class MyClass:
+            "original"
+
+        def fn():
+            MyClass.__doc__ = "updated"
+            return MyClass.__doc__
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), "updated")
+        self.assertEqual(MyClass.__doc__, "updated")
+
+    def test_class_doc_setattr_cache_hit(self):
+        class MyClass:
+            "original"
+
+        def fn(doc):
+            MyClass.__doc__ = doc
+            return MyClass.__doc__ + 1
+
+        counter = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        first = torch.tensor(1.0)
+        second = torch.tensor(2.0)
+        self.assertEqual(compiled(first), first + 1)
+        self.assertEqual(compiled(second), second + 1)
+        self.assertEqual(MyClass.__doc__, second)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_class_doc_descriptor_setter_persists(self):
+        class MyClass:
+            "original"
+
+        def fn(doc):
+            type.__dict__["__doc__"].__set__(MyClass, doc)
+            return MyClass.__doc__ + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        doc = torch.tensor(1.0)
+        self.assertEqual(compiled(doc), doc + 1)
+        self.assertEqual(MyClass.__doc__, doc)
+
+    @parametrize("mutable_constant", [False, True])
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_trace_local_class_doc_dynamic_value_graph_breaks(self, mutable_constant):
+        def fn(x):
+            class MyClass:
+                "original"
+
+            doc = [] if mutable_constant else x
+            type.__dict__["__doc__"].__set__(MyClass, doc)
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "on sourceless class __doc__"):
+            compiled(torch.tensor(1.0))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_trace_local_exception_class_doc(self):
+        def fn(x):
+            class LocalError(Exception):
+                pass
+
+            LocalError.__doc__ = "local error"
+            try:
+                raise LocalError
+            except LocalError as exc:
+                return x + 1, type(exc).__name__, LocalError.__doc__
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.tensor(1.0)
+        self.assertEqual(compiled(x), fn(x))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_trace_local_class_doc_rejects_outer_scope_mutation(self):
+        def fn(pred, x):
+            class MyClass:
+                "original"
+
+            def true_fn(x):
+                MyClass.__doc__ = "true branch"
+                return x + 1
+
+            def false_fn(x):
+                return x - 1
+
+            return torch.cond(pred, true_fn, false_fn, (x,))
+
+        from torch._dynamo.exc import UncapturedHigherOrderOpError
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            UncapturedHigherOrderOpError, "HOP: Unsafe side effect"
+        ):
+            compiled(torch.tensor(False), torch.tensor(1.0))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_class_doc_does_not_mutate_class_returned_by_metaclass(self):
+        class Existing:
+            "original"
+
+        class Meta(type):
+            def __new__(mcls, name, bases, namespace):
+                if name == "Aliased":
+                    return Existing
+                return super().__new__(mcls, name, bases, namespace)
+
+        class Base(metaclass=Meta):
+            pass
+
+        def fn(x):
+            class Aliased(Base):
+                pass
+
+            Aliased.__doc__ = "updated"
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "on sourceless class __doc__"):
+            compiled(torch.tensor(1.0))
+        self.assertEqual(Existing.__doc__, "original")
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_class_doc_does_not_mutate_class_returned_by_explicit_metaclass(self):
+        class Existing:
+            "original"
+
+        def factory(name, bases, namespace):
+            return Existing
+
+        def fn(x):
+            class Aliased(metaclass=factory):
+                pass
+
+            Aliased.__doc__ = "updated"
+            return x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "on sourceless class __doc__"):
+            compiled(torch.tensor(1.0))
+        self.assertEqual(Existing.__doc__, "original")
+
+    def test_type_doc_descriptor_get_with_custom_metaclass_dict(self):
+        class Meta(type):
+            @property
+            def __dict__(cls):
+                return {"__doc__": torch.tensor(5)}
+
+        class MyClass(metaclass=Meta):
+            __doc__ = torch.tensor(2)
+
+        doc = type.__dict__["__doc__"]
+
+        def fn(x):
+            return x + doc.__get__(MyClass)
+
+        x = torch.tensor(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Custom metaclass metadata access"):
+            compiled(x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_namedtuple_class_doc_set_inside_trace(self):
+        from collections import namedtuple
+
+        def fn(x):
+            Point = namedtuple("Point", ["x"])
+            Point.__doc__ = "updated"
+            return x + 1, Point.__doc__
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.tensor(1.0)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_builtin_mutable_class_doc_set_graph_breaks(self):
+        original_doc = ExceptionGroup.__doc__
+        self.addCleanup(setattr, ExceptionGroup, "__doc__", original_doc)
+
+        def fn():
+            type.__dict__["__doc__"].__set__(ExceptionGroup, "updated")
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Write to unmodeled getset/member"):
+            compiled()
+        self.assertEqual(ExceptionGroup.__doc__, original_doc)
+
+    def test_immutable_non_builtin_class_doc_set_raises(self):
+        def fn():
+            try:
+                type.__dict__["__doc__"].__set__(datetime.date, "updated")
+            except TypeError as error:
+                return str(error)
+            raise AssertionError("expected type.__doc__ descriptor to raise TypeError")
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
+    def test_class_doc_descriptor_is_not_mutated_during_trace(self):
+        class DocDescriptor:
+            def __get__(self, obj, owner):
+                return "descriptor doc"
+
+        doc_descriptor = DocDescriptor()
+
+        class MyClass:
+            __doc__ = doc_descriptor
+
+        seen_during_compile = []
+
+        def backend(graph, example_inputs):
+            seen_during_compile.append(MyClass.__dict__["__doc__"] is doc_descriptor)
+            return graph.forward
+
+        def fn(doc):
+            MyClass.__doc__ = doc
+            return doc + 1
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        doc = torch.tensor(1.0)
+        self.assertEqual(compiled(doc), doc + 1)
+        self.assertEqual(seen_during_compile, [True])
+        self.assertIs(MyClass.__dict__["__doc__"], doc)
+
+    def test_class_doc_pending_descriptor_get(self):
+        class DocDescriptor:
+            def __get__(self, obj, owner):
+                return owner.__name__
+
+        class MyClass:
+            pass
+
+        descriptor = DocDescriptor()
+        type_doc = type.__dict__["__doc__"]
+
+        def fn(x):
+            type_doc.__set__(MyClass, descriptor)
+            return x + 1, MyClass.__doc__, type_doc.__get__(MyClass)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.tensor(1.0)
+        self.assertEqual(compiled(x), (x + 1, "MyClass", "MyClass"))
+        self.assertIs(MyClass.__dict__["__doc__"], descriptor)
+
+    def test_type_doc_descriptor_get_cache_with_shadowing_metaclass(self):
+        class Meta(type):
+            @property
+            def __doc__(cls):
+                return "shadow"
+
+        class MyClass(metaclass=Meta):
+            "first"
+
+        type_doc = type.__dict__["__doc__"]
+
+        def fn(x):
+            return x + len(type_doc.__get__(MyClass))
+
+        counter = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor(1.0)
+        self.assertEqual(compiled(x), fn(x))
+        type_doc.__set__(MyClass, "new value")
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(MyClass.__doc__, "shadow")
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_class_doc_setattr_with_abc_metaclass(self):
+        from abc import ABC, abstractmethod
+
+        class MyClass(ABC):
+            "original"
+
+            @abstractmethod
+            def method(self):
+                pass
+
+        def fn(doc):
+            MyClass.__doc__ = doc
+            return MyClass.__doc__ + 1
+
+        counter = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for doc in (torch.tensor(1.0), torch.tensor(2.0)):
+            self.assertEqual(compiled(doc), doc + 1)
+            self.assertIs(MyClass.__doc__, doc)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_custom_metaclass_doc_set_graph_breaks(self):
+        class Meta(type):
+            def __setattr__(cls, name, value):
+                raise AssertionError("custom metaclass setter ran during tracing")
+
+        class MyClass(metaclass=Meta):
+            "original"
+
+        def fn():
+            MyClass.__doc__ = "updated"
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Write to unmodeled getset/member"):
+            compiled()
+        self.assertEqual(MyClass.__doc__, "original")
 
     def test_setattr_class_attribute(self):
         class MyModule:

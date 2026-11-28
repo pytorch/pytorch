@@ -2311,6 +2311,16 @@ def guard_mro_absent(
         tx.output.guarded_mro_absent_keys.add(absent_key)
 
 
+def _unimplemented_metaclass_metadata_access(attr: str, name: str) -> NoReturn:
+    unimplemented(
+        gb_type="Custom metaclass metadata access",
+        context=f"metadata={attr}, name={name}",
+        explanation="Dynamo cannot safely construct a class metadata source "
+        "through custom metaclass accessors.",
+        hints=[*graph_break_hints.SUPPORTABLE],
+    )
+
+
 def mro_attr_source(
     tx: "InstructionTranslatorBase",
     klass: type,
@@ -2336,13 +2346,7 @@ def mro_attr_source(
             elif not direct and has_custom_metaclass_accessor(klass, "__mro__"):
                 attr = "__mro__"
             if attr is not None:
-                unimplemented(
-                    gb_type="Custom metaclass metadata access",
-                    context=f"metadata={attr}, name={name}",
-                    explanation="Dynamo cannot safely construct a class metadata source "
-                    "through custom metaclass accessors.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
+                _unimplemented_metaclass_metadata_access(attr, name)
         if name not in namespace:
             continue
 
@@ -2648,8 +2652,12 @@ def generic_getattr(
     if obj.is_tensor() and name == "_grad":
         name = "grad"
 
-    # Side effects: check for pending attribute mutations.
-    if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
+    # Class __doc__ must go through type lookup to bind pending descriptors
+    # and honor a metaclass that shadows the standard descriptor.
+    class_doc = name == "__doc__" and isinstance(
+        obj, variables.UserDefinedClassVariable
+    )
+    if not class_doc and tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
         if not isinstance(obj, variables.UserDefinedObjectVariable):
             is_module = isinstance(obj, variables.PythonModuleVariable)
             value = tx.output.side_effects.load_attr(obj, name, deleted_ok=is_module)
@@ -2683,7 +2691,7 @@ def generic_getattr(
 
     # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
     # tp_getattro so a tp_getattro_impl override need not repeat the consult.
-    getset = obj.lookup_tp_getset_member(name)
+    getset = None if class_doc else obj.lookup_tp_getset_member(name)
     if getset is not None and getset.getter is not None:
         result = getset.getter(obj, tx)
         if result is not None:

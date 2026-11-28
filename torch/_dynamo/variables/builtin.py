@@ -2156,7 +2156,16 @@ class BuiltinVariable(TypeVariable):
                 # exception so a surrounding except can catch it, instead of
                 # escaping the compiled region.
                 raise_observed_exception(type(exc), tx, args=list(exc.args))
-            return VariableTracker.build(tx, r)
+            result = VariableTracker.build(tx, r)
+            # Custom metaclasses may return a class that predates this trace.
+            if (
+                type(r) is type
+                and const_kwargs.get("metaclass", type) is type
+                and all(type(base) is type for base in const_args[1:])
+                and isinstance(result, variables.UserDefinedClassVariable)
+            ):
+                result.mutation_type = ValueMutationNew()
+            return result
         else:
             fail(args, kwargs)
 

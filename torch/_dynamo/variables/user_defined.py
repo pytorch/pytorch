@@ -74,6 +74,7 @@ from ..source import (
     GetItemSource,
     is_constant_source,
     RandomValueSource,
+    TypeDictSource,
     TypeMROSource,
     TypeSource,
     UnspecializedParamBufferSource,
@@ -92,6 +93,8 @@ from ..utils import (
     float_methods,
     frozenset_methods,
     get_custom_getattr,
+    get_type_dict_no_user_code,
+    has_custom_metaclass_accessor,
     has_torch_function,
     int_methods,
     is_lru_cache_wrapped_function,
@@ -120,6 +123,8 @@ from .base import (
     attr_getset,
     AttrMutationKind,
     GetSet,
+    is_side_effect_safe,
+    load_pending_mutation,
     Member,
     Method,
     MutationType,
@@ -144,6 +149,7 @@ from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
     _resolve_descriptor_get,
+    _unimplemented_metaclass_metadata_access,
     generic_is_true,
     guard_mro_absent,
     is_nb_not_implemented,
@@ -423,6 +429,9 @@ KNOWN_DATA_DESCRIPTOR_TYPES: frozenset[type] = frozenset(
 # A metaclass whose MRO resolves __getattribute__ to anything else replaces
 # type_getattro, including one that only inherits the override.
 _type_getattribute = type.__getattribute__
+_type_doc = type.__dict__["__doc__"]
+_Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
+_Py_TPFLAGS_HEAPTYPE = 1 << 9
 
 
 def is_data_descriptor(obj: object) -> bool:
@@ -456,6 +465,22 @@ class UserDefinedVariable(VariableTracker):
         return None
 
 
+def check_type_doc_write(
+    tx: "InstructionTranslatorBase", cls: type, value: VariableTracker | None
+) -> None:
+    # CPython rejects either operation before it can change the class.
+    flags = type.__dict__["__flags__"].__get__(cls)
+    if value is None or flags & _Py_TPFLAGS_IMMUTABLETYPE:
+        try:
+            if value is None:
+                _type_doc.__delete__(cls)
+            else:
+                _type_doc.__set__(cls, None)
+        except TypeError as exc:
+            raise_type_error(tx, str(exc))
+        raise AssertionError("type.__doc__ accepted a rejected write")
+
+
 class UserDefinedClassVariable(UserDefinedVariable):
     # pyrefly: ignore[bad-override]
     value: type[object]
@@ -464,7 +489,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         "__name__": attr_getset("__name__", lambda vt: vt.value),
         "__qualname__": attr_getset("__qualname__", lambda vt: vt.value),
         "__module__": attr_getset("__module__", lambda vt: vt.value),
-        "__doc__": attr_getset("__doc__", lambda vt: vt.value),
+        "__doc__": GetSet(
+            lambda vt, tx: vt._get_doc(tx),
+            lambda vt, tx, value: vt._set_doc(tx, value, direct=True),
+        ),
         # missing:
         # "__bases__": GetSet(...),
         # "__mro__": GetSet(...),
@@ -501,6 +529,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 explanation="Dynamo does not support tracing mutations on a class when its __dict__ is materialized",
                 hints=graph_break_hints.SUPPORTABLE,
             )
+        if name.is_constant_match("__doc__"):
+            return self._set_doc(tx, value)
         mod = getattr(self.value, "__module__", None) or ""
         if mod == "torch" or mod.startswith(("torch.", "torch_")):
             # Writing a class attribute of a torch-owned class mutates library
@@ -513,6 +543,107 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         return super().tp_setattro_impl(tx, name, value)
+
+    def _get_doc(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .builder import lookup_tracked_variable
+
+        tracked = lookup_tracked_variable(tx, self.value)
+        owner = self if tracked is None else tracked
+        pending = load_pending_mutation(tx, owner, "__doc__")
+        if pending is not None:
+            return self._bind_pending_class_attr(tx, pending)
+
+        source = self.source
+        if type.__dict__["__flags__"].__get__(self.value) & _Py_TPFLAGS_HEAPTYPE:
+            if source is not None and type(self.value) is not type:
+                if has_custom_metaclass_accessor(self.value, "__dict__"):
+                    _unimplemented_metaclass_metadata_access("__dict__", "__doc__")
+                meta = type(self.value)
+                meta_source = TypeSource(source)
+                for attr in ("__dict__", "__getattribute__"):
+                    slot_source = mro_attr_source(tx, meta, meta_source, attr)
+                    if slot_source is not None:
+                        install_guard(slot_source.make_guard(GuardBuilder.ID_MATCH))
+            namespace = get_type_dict_no_user_code(self.value)
+            dict_source = TypeDictSource(source) if source is not None else None
+            if "__doc__" not in namespace:
+                if dict_source is not None:
+                    missing = functools.partial(
+                        GuardBuilder.DICT_NOT_CONTAINS, key="__doc__"
+                    )
+                    install_guard(dict_source.make_guard(missing))
+                return ConstantVariable.create(None)
+            doc = namespace["__doc__"]
+            if mro_lookup(type(doc), "__get__") is not NO_SUCH_SUBOBJ:
+                return self.resolve_cls_descriptor(tx, "__doc__", doc, None)
+            doc_source = (
+                DictGetItemSource(dict_source, "__doc__") if dict_source else None
+            )
+            return VariableTracker.build(tx, doc, doc_source)
+
+        doc_source = AttrSource(source, "__doc__") if source is not None else None
+        return VariableTracker.build(tx, _type_doc.__get__(self.value), doc_source)
+
+    def _set_doc(
+        self,
+        tx: "InstructionTranslatorBase",
+        value: VariableTracker | None,
+        *,
+        direct: bool = False,
+    ) -> VariableTracker:
+        from .builder import lookup_tracked_variable
+
+        meta_doc = self.lookup_metaclass_attr("__doc__")
+        standard_setattr = self.lookup_metaclass_attr("__setattr__") is type.__setattr__
+        if direct or (standard_setattr and meta_doc is _type_doc):
+            check_type_doc_write(tx, self.value, value)
+        if (
+            value is None
+            or self.ban_mutation
+            or not standard_setattr
+            or (meta_doc is not _type_doc and is_data_descriptor(meta_doc))
+        ):
+            unmodeled_setter(self, tx, value)
+
+        side_effects = tx.output.side_effects
+        tracked = lookup_tracked_variable(tx, self.value)
+        if self.source is None and tracked is None:
+            if (
+                isinstance(self.mutation_type, ValueMutationNew)
+                and isinstance(value, ConstantVariable)
+                and ConstantVariable.is_base_literal(value.as_python_constant())
+            ):
+                side_effects.check_allowed_side_effect(self)
+                if is_side_effect_safe(self.mutation_type):
+                    _type_doc.__set__(self.value, value.as_python_constant())
+                    return value
+            unimplemented(
+                gb_type="setattr() on sourceless class __doc__",
+                context=f"{self}.__doc__ = {value}",
+                explanation="Dynamo cannot replay a dynamic __doc__ write to a sourceless class.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        module = type.__dict__["__module__"].__get__(self.value) or ""
+        if module == "torch" or module.startswith(("torch.", "torch_")):
+            unmodeled_setter(self, tx, value)
+        if tracked is None:
+            tracked = side_effects.track_object_existing(self.value, self)
+        if not (
+            isinstance(tracked, UserDefinedClassVariable)
+            and side_effects.is_attribute_mutation(tracked)
+            and not tracked.ban_mutation
+        ):
+            unmodeled_setter(self, tx, value)
+        if tracked.source is not None:
+            meta = type(self.value)
+            meta_source = TypeSource(tracked.source)
+            for name in ("__setattr__", "__doc__"):
+                slot_source = mro_attr_source(tx, meta, meta_source, name)
+                if slot_source is not None:
+                    install_guard(slot_source.make_guard(GuardBuilder.ID_MATCH))
+        side_effects.store_attr(tracked, "__doc__", value)
+        return value
 
     def get_id_guard_type(self) -> Callable[..., Any] | None:
         if self.source:
@@ -817,18 +948,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         owner = self.pending_setattr_owner(tx, name)
         if owner is not None:
             value = tx.output.side_effects.load_attr(owner, name)
-            # The store sits in owner.__dict__, so a descriptor is bound to this
-            # class, as in step 4 below.
-            if isinstance(
-                value, (variables.StaticMethodVariable, variables.ClassMethodVariable)
-            ):
-                return value.tp_descr_get_impl(tx, self, self)
-            if isinstance(value, UserDefinedVariable) and (
-                mro_lookup(value.python_type(), "__get__") is not NO_SUCH_SUBOBJ
-            ):
-                none = variables.ConstantVariable.create(None)
-                return value.call_method(tx, "__get__", [none, self], {})
-            return value
+            return self._bind_pending_class_attr(tx, value)
 
         # Step 3-5: Class MRO lookup.
         cls_attr = self.lookup_cls_mro_attr(name)
@@ -875,6 +995,21 @@ class UserDefinedClassVariable(UserDefinedVariable):
             tx,
             args=[f"type object '{self.value.__name__}' has no attribute '{name}'"],
         )
+
+    def _bind_pending_class_attr(
+        self, tx: "InstructionTranslatorBase", value: VariableTracker
+    ) -> VariableTracker:
+        # A class-dict descriptor receives None and the class being accessed.
+        if isinstance(
+            value, (variables.StaticMethodVariable, variables.ClassMethodVariable)
+        ):
+            return value.tp_descr_get_impl(tx, self, self)
+        if isinstance(value, UserDefinedVariable) and (
+            mro_lookup(value.python_type(), "__get__") is not NO_SUCH_SUBOBJ
+        ):
+            none = ConstantVariable.create(None)
+            return value.call_method(tx, "__get__", [none, self], {})
+        return value
 
     def resolve_meta_data_descriptor(
         self,

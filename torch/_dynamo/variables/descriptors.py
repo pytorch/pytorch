@@ -49,7 +49,13 @@ from .base import (
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
 from .object_protocol import mro_lookup, python_constant_repr_impl
-from .user_defined import setattr_hackcheck, UserDefinedObjectVariable
+from .user_defined import (
+    _type_doc,
+    check_type_doc_write,
+    setattr_hackcheck,
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -1301,6 +1307,15 @@ class GetSetDescriptorVariable(DescriptorVariable):
         value: VariableTracker | None,
     ) -> VariableTracker:
         _check_descriptor_obj_type(tx, self.descriptor, obj)
+        if (
+            self.descriptor is _type_doc
+            and not isinstance(obj, UserDefinedClassVariable)
+            and obj.is_python_constant()
+        ):
+            target = obj.as_python_constant()
+            if isinstance(target, type):
+                check_type_doc_write(tx, target, value)
+                unmodeled_setter(obj, tx, value)
         name = self.descriptor.__name__
         entry = obj.lookup_tp_getset_member(name)
         if entry is None:
