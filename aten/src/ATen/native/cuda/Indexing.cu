@@ -1529,6 +1529,54 @@ static size_t getSliceSize(const Tensor & dst,
   return dstSliceSize;
 }
 
+#ifndef USE_ROCM
+template <typename scalar_t, typename index_t, typename offset_t, bool Scale>
+__global__ void indexAddPaired(
+    scalar_t* output,
+    const memory::aligned_vector<scalar_t, 2>* source,
+    const index_t* index,
+    offset_t pairs,
+    offset_t half_width,
+    offset_t index_stride,
+    int64_t output_rows,
+    offset_t output_numel,
+    scalar_t alpha) {
+  const offset_t grid_stride =
+      static_cast<offset_t>(blockDim.x) * gridDim.x;
+  for (offset_t q = static_cast<offset_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+       q < pairs;
+       q += grid_stride) {
+    const offset_t row = q / half_width;
+    const offset_t column = (q % half_width) * 2;
+    const int64_t destination = index[row * index_stride];
+    CUDA_KERNEL_ASSERT(destination >= 0 && destination < output_rows);
+    auto value = source[q];
+    if constexpr (Scale) {
+      value.val[0] = value.val[0] * alpha;
+      value.val[1] = value.val[1] * alpha;
+    }
+    const offset_t offset =
+        static_cast<offset_t>(destination) * (half_width * 2) + column;
+#if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 800
+    if constexpr (std::is_same_v<scalar_t, c10::Half>) {
+      __half2 value2;
+      value2.x = static_cast<__half>(value.val[0]);
+      value2.y = static_cast<__half>(value.val[1]);
+      atomicAdd(reinterpret_cast<__half2*>(output + offset), value2);
+    } else {
+      __nv_bfloat162 value2;
+      value2.x = static_cast<__nv_bfloat16>(value.val[0]);
+      value2.y = static_cast<__nv_bfloat16>(value.val[1]);
+      atomicAdd(reinterpret_cast<__nv_bfloat162*>(output + offset), value2);
+    }
+#else
+    fastAtomicAdd(output, offset, output_numel, value.val[0], true);
+    fastAtomicAdd(output, offset + 1, output_numel, value.val[1], true);
+#endif
+  }
+}
+#endif
+
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.
 // This kernel in fact works for all choices of problem size, but if
@@ -1993,6 +2041,77 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   const bool indContig = index.is_contiguous();
 
   const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+
+#ifndef USE_ROCM
+  const auto paired_dtype = self_.scalar_type();
+  const bool paired_dtype_supported =
+      (paired_dtype == at::kHalf || paired_dtype == at::kBFloat16) &&
+      !alpha.isComplex();
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+  const bool prefer_wide_scatter_add = paired_dtype_supported && dim == 0 &&
+      alpha.equal(1) && indContig && numIndex > 32 && sliceSize >= 512 &&
+      sliceSize % 8 == 0 &&
+      reinterpret_cast<std::uintptr_t>(self_.const_data_ptr()) % 16 == 0 &&
+      reinterpret_cast<std::uintptr_t>(source_.const_data_ptr()) % 16 == 0 &&
+      at::cuda::getCurrentDeviceProperties()->major >= 9;
+#else
+  constexpr bool prefer_wide_scatter_add = false;
+#endif
+  if (paired_dtype_supported && !prefer_wide_scatter_add &&
+      dim == 0 && numIndex > 0 && sliceSize % 2 == 0 &&
+      self_.is_contiguous() && source_.is_contiguous() &&
+      reinterpret_cast<std::uintptr_t>(self_.const_data_ptr()) % 4 == 0 &&
+      reinterpret_cast<std::uintptr_t>(source_.const_data_ptr()) % 4 == 0 &&
+      at::cuda::getCurrentDeviceProperties()->major >= 8) {
+    const uint64_t pairs = sourceTotalSize / 2;
+    constexpr int threads = 256;
+    const int blocks = static_cast<int>(std::min<uint64_t>(
+        ceil_div(pairs, static_cast<uint64_t>(threads)), mpc * 32));
+    const uint64_t index_stride = index.dim() == 0 ? 1 : index.stride(0);
+    const bool scale = !alpha.equal(1);
+    const bool use_32bit = cuda::detail::canUse32BitIndexMath(self_) &&
+        cuda::detail::canUse32BitIndexMath(source_) &&
+        cuda::detail::canUse32BitIndexMath(index);
+    AT_DISPATCH_V2(
+        paired_dtype,
+        "index_add_paired",
+        AT_WRAP([&] {
+          const auto alpha_value = alpha.to<scalar_t>();
+          AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_paired_index", [&] {
+            const auto launch = [&](auto offset_type, auto scale_type) {
+              using offset_t = decltype(offset_type);
+              indexAddPaired<scalar_t, index_t, offset_t, decltype(scale_type)::value>
+                  <<<blocks, threads, 0, stream>>>(
+                      self_.mutable_data_ptr<scalar_t>(),
+                      reinterpret_cast<const memory::aligned_vector<scalar_t, 2>*>(
+                          source_.const_data_ptr<scalar_t>()),
+                      index.const_data_ptr<index_t>(),
+                      static_cast<offset_t>(pairs),
+                      static_cast<offset_t>(sliceSize / 2),
+                      static_cast<offset_t>(index_stride),
+                      static_cast<int64_t>(selfAddDimSize),
+                      static_cast<offset_t>(selfNumel),
+                      alpha_value);
+            };
+            if (use_32bit) {
+              if (scale) {
+                launch(uint32_t{}, std::true_type{});
+              } else {
+                launch(uint32_t{}, std::false_type{});
+              }
+            } else if (scale) {
+              launch(uint64_t{}, std::true_type{});
+            } else {
+              launch(uint64_t{}, std::false_type{});
+            }
+          });
+        }),
+        at::kHalf,
+        at::kBFloat16);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    return;
+  }
+#endif
 
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
   // Fast path: index_add_(0, idx, src) with alpha == 1 is equivalent to
