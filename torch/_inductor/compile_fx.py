@@ -791,6 +791,10 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
     ):
         _propagate_invoke_subgraph_nested_region_config(gm)
         with _patch_nested_region_inductor_config(gm):
+            for subgraph_name in _get_subgraph_names(gm):
+                subgraph = getattr(gm, subgraph_name)
+                _recursive_post_grad_passes(subgraph, is_inference)
+
             if not config.use_post_grad_passes:
                 # A user-kernel functional HOP (e.g. triton_kernel_wrapper_functional,
                 # a user-defined Triton kernel already in the model) has no inductor
@@ -820,9 +824,6 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
                     gm.recompile()
                 return
 
-            for subgraph_name in _get_subgraph_names(gm):
-                subgraph = getattr(gm, subgraph_name)
-                _recursive_post_grad_passes(subgraph, is_inference)
             post_grad_passes(gm, is_inference)
 
 
