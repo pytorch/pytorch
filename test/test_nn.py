@@ -18632,6 +18632,28 @@ class TestFusionUtils(TestCase):
             self.assertEqual(weight.requires_grad, w_rg)
             self.assertEqual(bias.requires_grad, b_rg)
 
+    def test_fuse_conv_bn_weights_invalid_shapes(self):
+        conv_w = torch.randn(4, 3, 3, 3)
+        conv_b = torch.randn(4)
+        bn_rm = torch.randn(4)
+        bn_rv = torch.ones(4)
+        bn_w = torch.ones(4)
+        bn_b = torch.zeros(4)
+
+        # Non-1D BatchNorm / bias tensors must be rejected before broadcasting
+        with self.assertRaisesRegex(ValueError, "Expected 1D tensor for bn_w"):
+            fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, 1e-5, bn_w.unsqueeze(1), bn_b)
+        with self.assertRaisesRegex(ValueError, "Expected 1D tensor for bn_rm"):
+            fuse_conv_bn_weights(conv_w, conv_b, bn_rm.unsqueeze(1), bn_rv.unsqueeze(1), 1e-5, bn_w, bn_b)
+        with self.assertRaisesRegex(ValueError, "Expected 1D tensor for conv_b"):
+            fuse_conv_bn_weights(conv_w, conv_b.unsqueeze(1), bn_rm, bn_rv, 1e-5, bn_w, bn_b)
+
+        # Mismatched channel counts must be rejected
+        with self.assertRaisesRegex(ValueError, "matching bn_rm"):
+            fuse_conv_bn_weights(conv_w, conv_b, bn_rm, torch.ones(3), 1e-5, bn_w, bn_b)
+        with self.assertRaisesRegex(ValueError, "output channels"):
+            fuse_conv_bn_weights(conv_w, torch.randn(3), torch.randn(3), torch.ones(3), 1e-5, torch.ones(3), torch.zeros(3))
+
     def test_fuse_linear_bn_requires_grad(self):
         linear = torch.nn.Linear(3, 3)
         bn = torch.nn.BatchNorm1d(3)
