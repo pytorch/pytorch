@@ -25,6 +25,7 @@
 
 torch.utils.benchmark <utils/benchmark>
 torch.utils.checkpoint <utils/checkpoint>
+torch.utils.component_benchmark <utils/component_benchmark>
 torch.utils.cpp_extension <utils/cpp_extension>
 torch.utils.data <utils/data>
 torch.utils.deterministic <utils/deterministic>
