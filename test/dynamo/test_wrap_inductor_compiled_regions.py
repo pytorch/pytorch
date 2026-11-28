@@ -13,6 +13,7 @@ from torch._functorch import config as functorch_config
 from torch._inductor import config as inductor_config
 from torch.nn.attention.flex_attention import flex_attention, flex_attention_hop
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._debug_mode import DebugMode
 from torch.utils.checkpoint import (
@@ -72,8 +73,10 @@ def count_ops(
     return gm
 
 
-class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+class TestWrapInductorCompiledRegionsDevice(torch._dynamo.test_case.TestCase):
     """Tests for wrap_inductor_compiled_regions option"""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_gpu_and_triton
     def test_wrap_enabled_visible_in_debug_mode(self, device):
@@ -1152,14 +1155,84 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(k.grad, k2.grad, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
 
+    def test_hop_codegen_releases_multiple_boxed_inputs_before_dispatch(self, device):
+        from torch._higher_order_ops.wrap import (
+            inductor_code_side_table,
+            inductor_compiled_code,
+            InductorCompiledCallable,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
 
-instantiate_device_type_tests(
-    TestWrapInductorCompiledRegions, globals(), only_for=("cuda", "xpu"), allow_xpu=True
-)
+        dtype = torch.uint8
+        num_saved = 2
+        saved_size = 8 * 1024 * 1024
+        iterations = 3
+        live_before_scratch = []
+        peak_during_backward = []
+        baseline_memory = 0
+        track_memory = False
+
+        def cleanup():
+            torch.accelerator.empty_cache()
+            torch.accelerator.reset_peak_memory_stats()
+
+        def fw_callable(inputs):
+            x = inputs[0]
+            return (x + 1, x + 2)
+
+        def bw_callable(inputs):
+            if track_memory:
+                inputs.clear()
+                live_before_scratch.append(
+                    torch.accelerator.memory_allocated() - baseline_memory
+                )
+                scratch = torch.empty((saved_size,), device=device, dtype=dtype)
+                peak_during_backward.append(
+                    torch.accelerator.max_memory_allocated() - baseline_memory
+                )
+                del scratch
+                return (torch.empty((), device=device, dtype=dtype),)
+            return (inputs[0] + inputs[1],)
+
+        inductor_code_side_table.reset_table()
+        fw = InductorCompiledCallable(fw_callable)
+        bw = InductorCompiledCallable(bw_callable)
+
+        def wrapper(x):
+            out = inductor_compiled_code(fw, [x], name="minimal_fw")
+            return inductor_compiled_code(
+                bw,
+                [out[i] for i in range(num_saved)],
+                name="minimal_bw",
+            )
+
+        gm = make_fx(wrapper)(torch.empty((saved_size,), dtype=dtype))
+        track_memory = True
+
+        try:
+            for _ in range(iterations):
+                cleanup()
+                inp = torch.empty((saved_size,), device=device, dtype=dtype)
+                baseline_memory = torch.accelerator.memory_allocated()
+                out = gm(inp)
+                torch.accelerator.synchronize()
+                del out, inp
+                cleanup()
+        finally:
+            inductor_code_side_table.reset_table()
+
+        max_live_before_scratch = max(live_before_scratch)
+        max_peak_during_backward = max(peak_during_backward)
+        self.assertLess(max_live_before_scratch, saved_size // 4)
+        self.assertLess(
+            max_peak_during_backward, num_saved * saved_size + saved_size // 2
+        )
 
 
-class TestWrapInductorCompiledRegionsCPU(torch._dynamo.test_case.TestCase):
-    """Tests that don't require a GPU device"""
+class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+    """Device-agnostic tests for wrap_inductor_compiled_regions."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_fake_tensor_mode_works(self):
         """Test that running compiled code inside FakeTensorMode works with FX graph fallback"""
@@ -1322,81 +1395,6 @@ class TestWrapInductorCompiledRegionsCPU(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(alive_during_call, [False])
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_hop_codegen_releases_multiple_boxed_inputs_before_dispatch(self):
-        from torch._higher_order_ops.wrap import (
-            inductor_code_side_table,
-            inductor_compiled_code,
-            InductorCompiledCallable,
-        )
-        from torch.fx.experimental.proxy_tensor import make_fx
-
-        device = torch.device("cuda")
-        dtype = torch.uint8
-        num_saved = 2
-        saved_size = 8 * 1024 * 1024
-        iterations = 3
-        live_before_scratch = []
-        peak_during_backward = []
-        baseline_memory = 0
-        track_memory = False
-
-        def cleanup():
-            torch.cuda.empty_cache()
-            torch.cuda.reset_peak_memory_stats()
-
-        def fw_callable(inputs):
-            x = inputs[0]
-            return (x + 1, x + 2)
-
-        def bw_callable(inputs):
-            if track_memory:
-                inputs.clear()
-                live_before_scratch.append(
-                    torch.cuda.memory_allocated() - baseline_memory
-                )
-                scratch = torch.empty((saved_size,), device=device, dtype=dtype)
-                peak_during_backward.append(
-                    torch.cuda.max_memory_allocated() - baseline_memory
-                )
-                del scratch
-                return (torch.empty((), device=device, dtype=dtype),)
-            return (inputs[0] + inputs[1],)
-
-        inductor_code_side_table.reset_table()
-        fw = InductorCompiledCallable(fw_callable)
-        bw = InductorCompiledCallable(bw_callable)
-
-        def wrapper(x):
-            out = inductor_compiled_code(fw, [x], name="minimal_fw")
-            return inductor_compiled_code(
-                bw,
-                [out[i] for i in range(num_saved)],
-                name="minimal_bw",
-            )
-
-        gm = make_fx(wrapper)(torch.empty((saved_size,), dtype=dtype))
-        track_memory = True
-
-        try:
-            for _ in range(iterations):
-                cleanup()
-                inp = torch.empty((saved_size,), device=device, dtype=dtype)
-                baseline_memory = torch.cuda.memory_allocated()
-                out = gm(inp)
-                torch.cuda.synchronize()
-                del out, inp
-                cleanup()
-        finally:
-            inductor_code_side_table.reset_table()
-
-        max_live_before_scratch = max(live_before_scratch)
-        max_peak_during_backward = max(peak_during_backward)
-        self.assertLess(max_live_before_scratch, saved_size // 4)
-        self.assertLess(
-            max_peak_during_backward, num_saved * saved_size + saved_size // 2
-        )
-
     @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
     def test_sac_cached_value_fifo_mismatch(self):
         """
@@ -1469,6 +1467,14 @@ class TestWrapInductorCompiledRegionsCPU(torch._dynamo.test_case.TestCase):
                 out.sum().backward()
         finally:
             dist.destroy_process_group()
+
+
+instantiate_device_type_tests(
+    TestWrapInductorCompiledRegionsDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
