@@ -15,6 +15,8 @@ from torch._inductor.heuristics.registry import (
     register_codegen_heuristic,
 )
 from torch._inductor.runtime.hints import TileHint, TRITON_MAX_BLOCK
+from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -38,13 +40,19 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
         hinted_configs: list[Any],
         tile_hint: TileHint | None = None,
         inductor_meta: dict[str, Any] | None = None,
+        triton_meta: dict[str, Any] | None = None,
     ) -> list[Any]:
         inductor_meta = inductor_meta or {}
         n = len(size_hints)
         if n == 1:
-            return self._configs_1d(
+            configs = self._configs_1d(
                 size_hints, bs, hinted_configs, triton_config_fn, inductor_meta
             )
+            if len(configs) > 1 and not inductor_meta.get("combo_subkernel_probe"):
+                self._add_sm107_1d_configs(
+                    configs, size_hints, bs, triton_config_fn, triton_meta
+                )
+            return configs
         if n == 2:
             return self._configs_2d(
                 size_hints,
@@ -59,6 +67,32 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
                 size_hints, bs, hinted_configs, triton_config_fn, inductor_meta
             )
         raise NotImplementedError(f"size_hints: {size_hints}")
+
+    @staticmethod
+    def _add_sm107_1d_configs(configs, size_hints, bs, triton_config_fn, triton_meta):
+        """Append 2x and 4x XBLOCK 1D configs (num_warps=4) on sm_107 only."""
+        device = (triton_meta or {}).get("device")
+        if device is None or device.type != "cuda" or device.cc != 107:
+            return
+        # Larger blocks mean fewer programs. With fewer than about 4 programs
+        # per SM, the 4x block leaves SMs idle or unevenly loaded and tends to
+        # run slower than the default configs, so the extras are skipped there.
+        # The threshold of 4 is an empirical heuristic tuned on current sm_107
+        # hardware and may need revisiting on other parts or toolchains.
+        if size_hints["x"] // (bs * 4) < 4 * device.multi_processor_count:
+            return
+        seen = OrderedSet(triton_config_to_hashable(c) for c in configs)
+        for scale in (2, 4):
+            xblock = bs * scale
+            if xblock > TRITON_MAX_BLOCK["X"]:
+                break
+            cfg = triton_config_fn(size_hints, xblock, num_warps=4)
+            # triton_config can grow XBLOCK (min_elem_per_thread), which can
+            # reproduce a config already in the list.
+            key = triton_config_to_hashable(cfg)
+            if key not in seen:
+                seen.add(key)
+                configs.append(cfg)
 
     def _configs_1d(
         self, size_hints, bs, hinted_configs, triton_config_fn, inductor_meta

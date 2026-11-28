@@ -42,6 +42,7 @@ except ImportError:
     raise unittest.SkipTest("requires triton")  # noqa: B904
 
 from torch._inductor import config
+from torch._inductor.heuristics.triton_codegen.pointwise import PointwiseHeuristic
 from torch._inductor.heuristics.triton_codegen.reduction import (
     ROCmReductionHeuristic,
     XPUReductionHeuristic,
@@ -316,6 +317,110 @@ class TestTritonHeuristics(TestCase):
         for cfg in configs:
             self.assertEqual(set(cfg.kwargs), {f"{p.upper()}BLOCK" for p in hints})
             check_config(cfg.kwargs, size_hints=hints)
+
+    def _pointwise_1d_blocks(
+        self, cc, size_hints, bs, inductor_meta, min_elem_per_thread=0, num_sms=1
+    ):
+        triton_meta = {
+            "device": DeviceProperties(
+                type="cuda",
+                index=0,
+                multi_processor_count=num_sms,
+                cc=cc,
+                warp_size=32,
+            )
+        }
+        configs = PointwiseHeuristic().get_configs(
+            size_hints,
+            bs,
+            functools.partial(triton_config, min_elem_per_thread=min_elem_per_thread),
+            [],
+            inductor_meta=inductor_meta,
+            triton_meta=triton_meta,
+        )
+        keys = [triton_config_to_hashable(c) for c in configs]
+        self.assertEqual(len(keys), len(set(keys)), "duplicate pointwise configs")
+        return [(c.kwargs["XBLOCK"], c.num_warps) for c in configs]
+
+    @parametrize("cc", [100, 107])
+    @parametrize(
+        "inductor_meta",
+        [{}, {"autotune_pointwise": False, "max_autotune_pointwise": True}],
+    )
+    def test_pointwise_1d_sm107_larger_xblock(self, cc, inductor_meta):
+        expected = [(1024, 4), (512, 8)]
+        if cc == 107:
+            expected += [(2048, 4), (4096, 4)]
+        self.assertEqual(
+            self._pointwise_1d_blocks(cc, {"x": 1 << 20}, 1024, inductor_meta),
+            expected,
+        )
+
+    @parametrize("cc", [100, 107])
+    def test_pointwise_1d_sm107_no_autotune(self, cc):
+        meta = {"autotune_pointwise": False}
+        self.assertEqual(
+            self._pointwise_1d_blocks(cc, {"x": 1 << 20}, 1024, meta), [(1024, 4)]
+        )
+
+    @parametrize("cc", [100, 107])
+    def test_pointwise_1d_sm107_combo_probe_unchanged(self, cc):
+        # The no-bench combo-kernel gate counts the probed configs, so the
+        # probe must see the same list on sm_107 as on other GPUs.
+        meta = {"combo_subkernel_probe": True}
+        self.assertEqual(
+            self._pointwise_1d_blocks(cc, {"x": 1 << 20}, 1024, meta),
+            [(1024, 4), (512, 8)],
+        )
+
+    @parametrize(
+        "numel,extras",
+        [(1 << 20, []), (1 << 21, []), (1 << 22, [(2048, 4), (4096, 4)])],
+    )
+    def test_pointwise_1d_sm107_min_programs_per_sm(self, numel, extras):
+        # 212 SMs: the larger XBLOCKs are tried only if XBLOCK=4096 gives
+        # >= 4 programs per SM.
+        self.assertEqual(
+            self._pointwise_1d_blocks(107, {"x": numel}, 1024, {}, num_sms=212),
+            [(1024, 4), (512, 8), *extras],
+        )
+
+    @skipIfRocm
+    def test_pointwise_1d_sm107_small_kernel_no_extras(self):
+        # Fewer than 4 programs per SM at 4 * bs: no candidate is added.
+        self.assertEqual(
+            self._pointwise_1d_blocks(107, {"x": 2048}, 256, {}),
+            [(256, 4), (128, 4)],
+        )
+        self.assertEqual(
+            self._pointwise_1d_blocks(107, {"x": 512}, 256, {}),
+            [(256, 4), (128, 4)],
+        )
+
+    def test_pointwise_1d_sm107_dedupes_min_elem_per_thread(self):
+        # min_elem_per_thread=16 (fp8 e5m2) already grows the first config to
+        # XBLOCK=2048 with 4 warps, which equals the 2x candidate.
+        self.assertEqual(
+            self._pointwise_1d_blocks(
+                107, {"x": 1 << 20}, 1024, {}, min_elem_per_thread=16
+            ),
+            [(2048, 4), (4096, 8), (4096, 4)],
+        )
+
+    @parametrize("cc", [100, 107])
+    def test_pointwise_passes_triton_meta_to_heuristic(self, cc):
+        from torch._inductor.runtime import triton_heuristics
+
+        triton_meta = {
+            "device": DeviceProperties(
+                type="cuda", index=0, multi_processor_count=1, cc=cc, warp_size=32
+            )
+        }
+        configs = triton_heuristics.pointwise(
+            {"x": 1 << 20}, triton_meta, inductor_meta={}, return_configs=True
+        )
+        expected = [1024, 512] + ([2048, 4096] if cc == 107 else [])
+        self.assertEqual([c.kwargs["XBLOCK"] for c in configs], expected)
 
     @parametrize(
         "hints",
