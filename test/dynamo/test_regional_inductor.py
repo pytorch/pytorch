@@ -1682,8 +1682,10 @@ def forward(self, primals_0, primals_1, amax, log, tangents_0):
     where_2 = torch.ops.aten.where.self(ne_2, unsqueeze_1, full_default_2);  ne_2 = unsqueeze_1 = full_default_2 = None
     iota_default = torch.ops.prims.iota.default(64, start = 0, step = 1, dtype = torch.int64, device = device(type='cpu'), requires_grad = False)
     view_default = torch.ops.aten.view.default(iota_default, [1, 64]);  iota_default = None
-    expand_default = torch.ops.aten.expand.default(where_2, [8, 64]);  where_2 = None
-    eq_tensor = torch.ops.aten.eq.Tensor(expand_default, view_default);  expand_default = view_default = None
+    expand_default = torch.ops.aten.expand.default(view_default, [8, 64])
+    gather_default = torch.ops.aten.gather.default(expand_default, 1, where_2);  expand_default = where_2 = None
+    expand_default_1 = torch.ops.aten.expand.default(gather_default, [8, 64]);  gather_default = None
+    eq_tensor = torch.ops.aten.eq.Tensor(expand_default_1, view_default);  expand_default_1 = view_default = None
     scalar_tensor_default = torch.ops.aten.scalar_tensor.default(0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
     scalar_tensor_default_1 = torch.ops.aten.scalar_tensor.default(-1.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
     where_self = torch.ops.aten.where.self(eq_tensor, scalar_tensor_default_1, scalar_tensor_default);  eq_tensor = scalar_tensor_default_1 = scalar_tensor_default = None

@@ -204,6 +204,20 @@ class TestScatterOpt(TestCase):
             )
             self.check_metric()
 
+    def test_out_of_bounds_index(self):
+        # See https://github.com/pytorch/pytorch/issues/205661
+        def f(x):
+            return torch.zeros(3, device=x.device).scatter(0, x, 1.0)
+
+        # On GPU a device-side assert would break later tests, so raise on CPU.
+        for idx in (99, -1):
+            with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
+                torch.compile(f)(torch.tensor([idx], device="cpu"))
+        self.check_metric()
+
+        _, (code,) = run_and_get_code(torch.compile(f), torch.tensor([1]))
+        self.assertIn("index out of bounds", code)
+
     def test_cross_entropy_loss(self):
         """
         Match full+scatter in CEL and replaces it with a pointwise.

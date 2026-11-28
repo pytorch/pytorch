@@ -1351,6 +1351,10 @@ def scatter_upon_const_tensor(
         view_shape[dim] = length
         indices_view = indices.view(*view_shape)
 
+        # A comparison silently ignores out-of-bounds indices. Gathering selector
+        # from the arange returns the same values but keeps scatter's bounds check.
+        selector = torch.gather(indices_view.expand(shape), dim, selector)
+
         # Broadcast selector to match full tensor shape
         selector_expanded = selector.expand(shape)
 
