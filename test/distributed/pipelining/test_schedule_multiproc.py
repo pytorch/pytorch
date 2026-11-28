@@ -63,6 +63,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
     DeterministicGuard,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -1553,10 +1554,11 @@ instantiate_parametrized_tests(ScheduleTest)
 
 
 class ScheduleTestCUDA(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
     world_size = 4
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         # Testing with NCCL backend
         return backend
 
