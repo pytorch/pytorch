@@ -569,7 +569,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize(
         "operation",
-        ["repr", "reversed", "enum", "iter", "extend", "copy", "update", "union"]
+        ["repr", "reversed", "enum", "extend", "copy", "update", "union"]
         + [pytree.tree_map, pytree.tree_map_with_path],
     )
     def test_dict_materialization_order_guard(self, mapping_type, operation):
@@ -582,10 +582,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 return x + 1, enum.Enum("Fields", mapping).b.name
             if callable(operation):
                 return list(operation(lambda *args: args[-1] + x, mapping).items())
-            if operation == "iter":
-                views = mapping.keys(), mapping.values(), mapping.items()
-                iterables = (mapping, *views, dict.items(mapping))
-                return x + 1, tuple((type(it), next(it)) for it in map(iter, iterables))
             if operation in ("extend", "update"):
                 result = [] if operation == "extend" else mapping_type()
                 getattr(result, operation)(mapping)
@@ -636,7 +632,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 view = desc.__get__(obj)() if binding == "bound" else desc(obj)
             if method in ("__iter__", "__reversed__"):
                 return x + 1, list(view), type(view) if method == "__iter__" else None
-            contents = list(view), list(type(view).__reversed__(view))
+            contents = list(view), list(type(view).__reversed__(view)), type(iter(view))
             return x + 1, contents, type(view), isinstance(view, keys_type), repr(view)
 
         class CustomNew(kind):
@@ -733,7 +729,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return mapping, view
 
         x = torch.ones(1)
-        mapping, view = torch.compile(fn, backend="eager", fullgraph=not graph_break)(x)
+        counter = torch._dynamo.testing.CompileCounter()
+        mapping, view = torch.compile(fn, backend=counter, fullgraph=not graph_break)(x)
+        self.assertEqual(counter.frame_count, 1)
         expected, expected_view = fn(x)
         self.assertEqual(list(mapping), list(expected))
         self.assertEqual(list(dict.items(mapping)), list(dict.items(expected)))

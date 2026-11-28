@@ -86,20 +86,22 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
-    def test_equal_code_objects_reconstruct_distinct_literal(self):
+    def test_equal_code_objects_reconstruct_distinct_constant(self):
         def fn(x):
-            return x + 1, 4.5
+            return x + 1, lambda: None
 
-        other = float("4.5")
+        # Free-threaded CPython interns literal floats, but keeps distinct nested code objects.
         code = fn.__code__
-        consts = tuple(other if type(v) is float else v for v in code.co_consts)
+        consts = tuple(
+            v.replace() if isinstance(v, types.CodeType) else v for v in code.co_consts
+        )
         twin = types.FunctionType(code.replace(co_consts=consts), fn.__globals__)
         self.assertEqual(code, twin.__code__)
         x = torch.ones(1)
-        self.assertIsNot(fn(x)[1], twin(x)[1])
+        self.assertIsNot(fn(x)[1].__code__, twin(x)[1].__code__)
         for original in (fn, twin):
             compiled = torch.compile(original, backend="eager", fullgraph=True)
-            self.assertIs(compiled(x)[1], original(x)[1])
+            self.assertIs(compiled(x)[1].__code__, original(x)[1].__code__)
 
     @parametrize("operation", ["read", "write", "alias"])
     def test_formatted_tensor_before_later_operation(self, operation):
