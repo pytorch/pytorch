@@ -13,6 +13,7 @@ from torch._native.ops.topk.flydsl_impl import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -104,6 +105,56 @@ def _tied_input(shape, dtype: torch.dtype) -> torch.Tensor:
     return torch.randint(0, 4, shape, device="cuda").to(dtype)
 
 
+def _group_edge_input(
+    rows: int, n: int, k: int, edge: int, largest: bool
+) -> torch.Tensor:
+    """int32 rows whose K-th element sits on the radix bin edge ``edge``.
+
+    A value's radix bin is its top byte plus 128: phase 1 flips the sign bit.
+    ``largest=False`` complements the ordinal, so the bin is 255 minus that.
+    The edges 16, 128 and 240 therefore sit on the 16-bin group edges 0|1,
+    7|8 and 14|15 in both modes.
+
+    Each row keeps ``k - 1``, ``k`` or ``k + 1`` elements on the keep side of
+    the edge, so the K-th element falls just below, on, or just above it.
+    Even rows spread bins over the 16 bins next to the edge. Odd rows use
+    only the two bins beside it, with small low bytes, so ties reach the low
+    byte pass.
+    """
+    dev = "cuda"
+    row = torch.arange(rows, device=dev)
+    keep = torch.tensor([k - 1, k, k + 1], device=dev)[(row // 2) % 3]
+    rank = torch.rand(rows, n, device=dev).argsort(dim=1).argsort(dim=1)
+    keep_mask = rank < keep[:, None]
+    above = keep_mask if largest else ~keep_mask  # True: bin >= edge
+    exact = (row % 2 == 1)[:, None]
+    up = torch.where(exact, 0, torch.randint(0, 16, (rows, n), device=dev))
+    down = torch.where(exact, 0, torch.randint(0, 16, (rows, n), device=dev))
+    low = torch.where(
+        exact,
+        torch.randint(0, 4, (rows, n), device=dev),
+        torch.randint(0, 1 << 24, (rows, n), device=dev),
+    )
+    bin_ = torch.where(above, edge + up, edge - 1 - down)
+    return ((bin_ - 128) * (1 << 24) + low).to(torch.int32)
+
+
+@skipIfNoFlyDSL
+class TestFlyDSLTopKHost(TestCase):
+    def test_topk_radix_rejects_k_outside_row(self):
+        # The radix walk assumes 1 <= k <= n. topk_radix_out refuses other k
+        # before any device use, so CPU tensors are enough.
+        from torch._native.ops.topk.flydsl_kernels import topk_radix
+
+        x = make_tensor((4, 100), device="cpu", dtype=torch.float32)
+        for k in (0, 101):
+            with self.subTest(k=k):
+                with self.assertRaisesRegex(
+                    ValueError, "topk_radix_out needs 1 <= k <= n"
+                ):
+                    topk_radix(x, k)
+
+
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @skipIfNoFlyDSL
 @unittest.skipIf(
@@ -162,6 +213,27 @@ class TestFlyDSLTopK(TestCase):
         misses = topk_cache_info(kernel).misses
         self._assert_topk_matches_aten(x, k)
         self.assertEqual(topk_cache_info(kernel).misses, misses + 1)
+
+    @parametrize("k", (65, 257))
+    def test_radix_group_edge_boundaries(self, k: int):
+        # Radix scan groups are 16 bins. Each row puts the K-th element on one
+        # side or the other of a group edge, resolved in the top byte pass or
+        # the low byte pass, for both largest modes.
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        n = _test_n(k, torch.int32)
+        kernel = _expected_kernel(k, n, torch.int32)
+        self.assertEqual(kernel, "radix")
+        torch.manual_seed(0)
+        rows = _test_m(k, torch.int32)
+        misses = topk_cache_info(kernel).misses
+        for largest in (True, False):
+            for edge in (16, 128, 240):
+                with self.subTest(k=k, largest=largest, edge=edge):
+                    x = _group_edge_input(rows, n, k, edge, largest)
+                    self._assert_topk_matches_aten(x, k, largest=largest)
+        # One radix compile per `largest`, so the FlyDSL kernel ran.
+        self.assertEqual(topk_cache_info(kernel).misses, misses + 2)
 
     def test_register_correctness_with_odd_rows(self):
         # Register kernel packs two rows per CTA; odd M leaves a tail
@@ -505,6 +577,47 @@ class TestFlyDSLTopK(TestCase):
         self.assertGreaterEqual(info.hits, 1)
         self.assertEqual(info.currsize, 1)
 
+    @parametrize(
+        "dtype,k", ((torch.float32, 64), (torch.float16, 257), (torch.int8, 1024))
+    )
+    @parametrize("largest", (False, True))
+    @parametrize("deterministic", (False, True))
+    def test_radix_reuses_one_kernel_across_n_and_m(
+        self, dtype: torch.dtype, k: int, largest: bool, deterministic: bool
+    ):
+        # The second launch changes both rows and row length while reusing one
+        # kernel. Tied input makes the deterministic gather order observable.
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        torch.manual_seed(15)
+        n0 = _test_n(k, dtype)
+        n1 = 2 * n0 + 1
+        m = _test_m(k, dtype)
+        self.assertEqual(_expected_kernel(k, n0, dtype), "radix")
+        self.assertEqual(_expected_kernel(k, n1, dtype), "radix")
+
+        with DeterministicGuard(deterministic):
+            for rows, n in ((m, n0), (m + 1, n1)):
+                x = _tied_input((rows, n), dtype)
+                # The longer row's last column is its scalar tail. A unique
+                # extreme there has to be selected, so a reused kernel that
+                # still scans only the first length fails.
+                if n == n1:
+                    x[:, -1] = 4 if largest else -1
+                if deterministic:
+                    with pn.flydsl.disabled():
+                        ref_v, ref_i = torch.topk(x, k, dim=-1, largest=largest)
+                    got_v, got_i = torch.topk(x, k, dim=-1, largest=largest)
+                    self.assertEqual(got_v, ref_v, atol=0, rtol=0)
+                    self.assertEqual(got_i, ref_i)
+                else:
+                    self._assert_topk_matches_aten(x, k, largest=largest)
+
+        info = topk_cache_info("radix")
+        self.assertEqual(info.misses, 1)
+        self.assertGreaterEqual(info.hits, 1)
+        self.assertEqual(info.currsize, 1)
+
     @parametrize("k,n", ((32, 4096), (8, 1537), (64, 4096), (320, 8192)))
     def test_unsupported_configuration_falls_through_without_compiling(
         self, k: int, n: int
@@ -627,15 +740,11 @@ class TestFlyDSLTopK(TestCase):
         self.assertEqual(_expected_kernel(k, n, dtype), "radix")
         x = _tied_input((_test_m(k, dtype), n), dtype)
 
-        prior = torch.are_deterministic_algorithms_enabled()
-        try:
-            torch.use_deterministic_algorithms(True)
+        with DeterministicGuard(True):
             with pn.flydsl.disabled():
                 ref_v, ref_i = torch.topk(x, k, dim=-1, largest=largest)
             v1, i1 = torch.topk(x, k, dim=-1, largest=largest)
             v2, i2 = torch.topk(x, k, dim=-1, largest=largest)
-        finally:
-            torch.use_deterministic_algorithms(prior)
 
         self.assertEqual(topk_cache_info("radix").misses, 1)
         self.assertEqual(v1, v2, atol=0, rtol=0)
@@ -657,13 +766,9 @@ class TestFlyDSLTopK(TestCase):
         x = _tied_input((_test_m(k, dtype), n), dtype)
         expected_i = torch.argsort(x, dim=-1, descending=largest, stable=True)[:, :k]
 
-        prior = torch.are_deterministic_algorithms_enabled()
-        try:
-            torch.use_deterministic_algorithms(True)
+        with DeterministicGuard(True):
             v1, i1 = torch.topk(x, k, dim=-1, largest=largest)
             v2, i2 = torch.topk(x, k, dim=-1, largest=largest)
-        finally:
-            torch.use_deterministic_algorithms(prior)
 
         self.assertEqual(i1, i2)
         self.assertEqual(v1, v2, atol=0, rtol=0)

@@ -1570,10 +1570,8 @@ class TestMemoryProfilerTimeline(TestCase):
             )
 
 
-instantiate_device_type_tests(TestIdentifyGradients, globals(), only_for=("cpu",))
-instantiate_device_type_tests(
-    TestMemoryProfilerE2EDeviceType, globals(), only_for=("cpu",)
-)
+instantiate_device_type_tests(TestIdentifyGradients, globals())
+instantiate_device_type_tests(TestMemoryProfilerE2EDeviceType, globals())
 instantiate_device_type_tests(TestMemoryProfilerTimeline, globals(), allow_xpu=True)
 
 if __name__ == "__main__":

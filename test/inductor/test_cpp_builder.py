@@ -2,6 +2,8 @@
 
 import ntpath
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -428,6 +430,54 @@ class TestCppBuilder(TestCase):
         env = run.call_args.kwargs["env"]
         self.assertIsInstance(env, dict)
         self.assertEqual(env["PATH"], "/mock/bin")
+
+    def test_extra_cflags_and_ldflags(self) -> None:
+        def command(compile_only: bool) -> str:
+            options = cpp_builder.CppOptions(compile_only=compile_only)
+            return cpp_builder.CppBuilder(
+                "model", "model.cpp", options
+            ).get_command_line()
+
+        with cpp_builder.config.patch(
+            {
+                "cpp.extra_cflags": ["-mllvm", "-a=1", "-mllvm", "-b=2"],
+                "cpp.extra_ldflags": ["-Wl,-mllvm,-c=3"],
+            }
+        ):
+            with mock.patch.object(cpp_builder, "_IS_LINUX", True):
+                compile_command = command(compile_only=True)
+                link_command = command(compile_only=False)
+            with mock.patch.object(cpp_builder, "_IS_LINUX", False):
+                other_platform_command = command(compile_only=False)
+        # A repeated flag such as -mllvm stays next to its value.
+        self.assertIn(" -mllvm -a=1 -mllvm -b=2 ", compile_command)
+        self.assertIn(" -mllvm -a=1 -mllvm -b=2 ", link_command)
+        self.assertNotIn("-c=3", compile_command)
+        self.assertIn(" -Wl,-mllvm,-c=3 ", link_command)
+        # Linux only.
+        self.assertNotIn("-a=1", other_platform_command)
+        self.assertNotIn("-c=3", other_platform_command)
+
+    @unittest.skipUnless(
+        IS_LINUX and all(shutil.which(t) for t in ("ld", "objcopy", "nm")),
+        "requires GNU ld, objcopy and nm",
+    )
+    def test_convert_cubin_to_obj_kernels_sharing_a_cubin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cubin = os.path.join(tmp, "shared.cubin")
+            with open(cubin, "wb") as f:
+                f.write(bytes(range(64)))
+            kernels = ("kernel_a", "kernel_b")
+            objs = [
+                cpp_builder.convert_cubin_to_obj(cubin, k, "ld", "objcopy")
+                for k in kernels
+            ]
+            linked = os.path.join(tmp, "linked.o")
+            subprocess.run(["ld", "-r", "-o", linked, *objs], check=True)
+            symbols = subprocess.check_output(["nm", linked], text=True)
+        for kernel in kernels:
+            for suffix in ("start", "end", "size"):
+                self.assertIn(f"__{kernel}_{suffix}", symbols)
 
 
 if __name__ == "__main__":

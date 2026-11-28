@@ -32,6 +32,8 @@ class SyncActivityProfilerHandler {
   void prepareTrace(const Config& config);
   void toggleCollectionDynamic(const bool enable);
   void startTrace();
+  // Stops the trace without processing it. stopTrace() then only processes.
+  void stopCollection();
   std::unique_ptr<ActivityTraceInterface> stopTrace();
   void cancel();
 
@@ -42,5 +44,7 @@ class SyncActivityProfilerHandler {
  private:
   GenericActivityProfiler& profiler_;
   std::atomic<bool> active_{false};
+  // Set by stopCollection() until stopTrace() or cancel() ends the trace.
+  std::atomic<bool> collectionStopped_{false};
 };
 } // namespace KINETO_NAMESPACE

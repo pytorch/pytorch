@@ -9,8 +9,11 @@ bits, sign at bit 31. ``largest=False`` complements the narrow field.
 threads (``sort_len`` = K rounded up to a power of 2; the bin floor lets
 phase 1 zero the histogram one bin per thread).
   1. Radix byte passes (MSB to LSB, one per byte of the ordinal) over an LDS
-     histogram; thread 0 scans descending, narrowing ``s_prefix``/``s_mask``
-     until it holds the K-th ordinal and ``s_rem_k`` the ties to keep.
+     histogram. The first ``_N_SCAN_GROUPS`` threads each sum one group of
+     ``_SCAN_GROUP_BINS`` bins into ``s_groups``; thread 0 scans the group
+     sums, then the bins of one group, descending, narrowing
+     ``s_prefix``/``s_mask`` until it holds the K-th ordinal and ``s_rem_k``
+     the ties to keep.
   2. Gather at-or-above that threshold. Deterministic: prefix-sum slots
      preserve input order, lowest-index ties win. Otherwise LDS atomic
      counters claim slots and ties resolve per run.
@@ -40,7 +43,8 @@ the scan.
 and ``s_keys`` - they alias, each live only within its phase. The phase-2
 barrier before bitonic sort is the hand-off: after it ``s_scan`` is dead and
 ``s_keys`` is live until phase 4. Anything spanning phases needs a struct
-member, not a union member.
+member, not a union member. ``s_groups`` is a struct member as well: it is
+live only in phase 1, but together with ``s_hist``, so the two must not alias.
 """
 
 import math
@@ -77,6 +81,12 @@ _RADIX_BITS = 8
 _RADIX_MASK = (1 << _RADIX_BITS) - 1
 _RADIX_SIGN_BIT = 1 << (_RADIX_BITS - 1)
 _N_HIST_BINS = 1 << _RADIX_BITS
+# The threshold scan sums the histogram in groups of _SCAN_GROUP_BINS bins, then
+# walks the group sums and the bins of one group: 2 * 16 steps instead of 256.
+_SCAN_GROUP_BINS = 16
+_N_SCAN_GROUPS = _N_HIST_BINS // _SCAN_GROUP_BINS
+if _N_HIST_BINS % _SCAN_GROUP_BINS != 0:
+    raise AssertionError("_SCAN_GROUP_BINS must divide _N_HIST_BINS")
 _REGISTER_ROWS_PER_CTA = 2
 _ORD_BITS = 32
 
@@ -289,6 +299,36 @@ def _split_key(key):
     return stored, idx
 
 
+def _find_from_top(arr, top, size, k_rem, base):
+    """Find which entry of arr[top], arr[top - 1], ... holds the k_rem-th element.
+
+    Walks the `size` entries from `top` downward with a running count that starts
+    at `base`. Returns ``(idx, above)``: the first index whose inclusive count
+    reaches `k_rem`, and the count strictly above it (`base` included).
+
+    Counts are never negative, so the running count is monotone and the entries
+    still below `k_rem` form a prefix of the walk. ``idx`` steps down once per
+    such entry, and ``above`` keeps the last count that was still below. Both use
+    selects, so the walk has no branches. Unrolled at trace time.
+
+    Precondition: `k_rem` is reachable, i.e. ``base + sum(entries) >= k_rem``.
+    Otherwise every entry is below `k_rem` and ``idx`` ends at ``top - size``,
+    outside the walked range. ``topk_radix_out`` guarantees it for the whole
+    kernel by rejecting ``k > n``. It also rejects ``k < 1``, which the walk
+    itself tolerates, since the kernel would write nothing for it.
+    """
+    cum = base
+    above = base
+    idx = fx.Int32(top)
+    for i in range_constexpr(size):
+        cum = cum + arr[top - i]
+        below = cum < k_rem
+        # Keep updating idx and above as long as cum < k_rem.
+        above = below.select(cum, above)
+        idx = below.select(idx - fx.Int32(1), idx)
+    return idx, above
+
+
 def _make_topk_storage(sort_len: int, block_threads: int, spec: TopKSpec):
     @fx.struct
     class CounterStorage:
@@ -308,6 +348,7 @@ def _make_topk_storage(sort_len: int, block_threads: int, spec: TopKSpec):
         s_prefix: Array[Int32, 1, 4]
         s_mask: Array[Int32, 1, 4]
         s_rem_k: Array[Int32, 1, 4]
+        s_groups: Array[Int32, _N_SCAN_GROUPS, 16]
         s_vals: Array[spec.elem_ty, sort_len, 16]
         s_idxs: Array[Int32, sort_len, 16]
 
@@ -322,7 +363,7 @@ def _make_topk_storage(sort_len: int, block_threads: int, spec: TopKSpec):
 # dtype/largest part of the key. FlyDSL 0.5 keys traced MLIR and fixes this:
 # https://github.com/ROCm/FlyDSL/pull/1338
 def _build_radix_select_topk_module(
-    n: int, k: int, deterministic: bool, arch: str, spec: TopKSpec
+    k: int, deterministic: bool, arch: str, spec: TopKSpec
 ):
     cache_tag = spec.cache_token()  # See Note [FlyDSL 0.3.x cache tag].
     num_stages = (k - 1).bit_length()
@@ -339,19 +380,20 @@ def _build_radix_select_topk_module(
     warp_size = 32 if is_rdna_arch(arch) else 64
     num_warps = block_threads // warp_size
     tile = block_threads * spec.vec
-    vec_iters = n // tile
-    vec_end = vec_iters * tile
-    scalar_tail_iters = (n - vec_end + block_threads - 1) // block_threads
 
     @flyc.kernel(known_block_size=[block_threads, 1, 1])
     def radix_select_topk_kernel(
         input: fx.Tensor,
         values: fx.Tensor,
         indices: fx.Tensor,
+        n: fx.Int32,
     ):
         _ = cache_tag  # Keep the compatibility token in the kernel closure.
         row = fx.block_idx.x
         tid = fx.thread_idx.x
+        vec_iters = n // tile
+        vec_end = vec_iters * tile
+        scalar_tail_iters = (n - vec_end + (block_threads - 1)) // block_threads
 
         input_buf = fx.rocdl.make_buffer_tensor(input)
         values_buf = fx.rocdl.make_buffer_tensor(values)
@@ -369,6 +411,7 @@ def _build_radix_select_topk_module(
         s_prefix = storage.s_prefix.peek().view(fx.make_layout(1, 1))
         s_mask = storage.s_mask.peek().view(fx.make_layout(1, 1))
         s_rem_k = storage.s_rem_k.peek().view(fx.make_layout(1, 1))
+        s_groups = storage.s_groups.peek().view(fx.make_layout(_N_SCAN_GROUPS, 1))
         s_write_ctr = storage.s_phase.s_counters.s_write_ctr.peek().view(
             fx.make_layout(1, 1)
         )
@@ -452,7 +495,7 @@ def _build_radix_select_topk_module(
             # Accumulate the current byte histogram.
             prefix = s_prefix[0]
             decided_mask = s_mask[0]
-            for step in range_constexpr(vec_iters):
+            for step in range(vec_iters):
                 rvals = _load_vec(
                     spec, copy_atom_v, input_div, step * block_threads + tid
                 )
@@ -465,7 +508,7 @@ def _build_radix_select_topk_module(
                         shift,
                         sign_bit_xor_val,
                     )
-            for step in range_constexpr(scalar_tail_iters):
+            for step in range(scalar_tail_iters):
                 col = vec_end + step * block_threads + tid
                 if col < n:
                     accumulate_radix_byte_hist(
@@ -478,23 +521,36 @@ def _build_radix_select_topk_module(
                     )
             gpu.barrier()
 
-            # Select the radix threshold.
+            # Select the radix threshold. Threads 0.._N_SCAN_GROUPS-1 each sum
+            # one group of bins, then a block barrier orders those stores before
+            # thread 0 walks the group sums and the bins of one group.
+            if tid < fx.Int32(_N_SCAN_GROUPS):
+                group_sum = fx.Int32(0)
+                for j in range_constexpr(_SCAN_GROUP_BINS):
+                    group_sum = group_sum + s_hist[tid * _SCAN_GROUP_BINS + j]
+                s_groups[tid] = group_sum
+            gpu.barrier()
             if tid == 0:
                 remaining_k = s_rem_k[0]
-                acc = 0
-                found = 0
-                sel_bin = 0
-                elems_above = 0
-
-                for b in range(_N_HIST_BINS):
-                    bin_idx = _N_HIST_BINS - 1 - b
-                    count = s_hist[bin_idx]
-                    if found == 0:
-                        if acc + count >= remaining_k:
-                            sel_bin = fx.Int32(bin_idx)
-                            elems_above = acc
-                            found = 1
-                    acc = acc + count
+                # Find the group, the "meta bucket" that holds the
+                # remaining_k-th element.
+                group, group_above = _find_from_top(
+                    s_groups,
+                    _N_SCAN_GROUPS - 1,
+                    _N_SCAN_GROUPS,
+                    remaining_k,
+                    fx.Int32(0),
+                )
+                # Find the bin inside the group that holds the remaining_k-th
+                # element. This walk starts from the count above the group, so
+                # elems_above is the count above the bin.
+                sel_bin, elems_above = _find_from_top(
+                    s_hist,
+                    group * _SCAN_GROUP_BINS + (_SCAN_GROUP_BINS - 1),
+                    _SCAN_GROUP_BINS,
+                    remaining_k,
+                    group_above,
+                )
 
                 actual_byte = sel_bin ^ fx.Int32(sign_bit_xor_val)
                 s_prefix[0] = prefix | (actual_byte << fx.Int32(shift))
@@ -553,7 +609,7 @@ def _build_radix_select_topk_module(
                 eq_base = (next_eq_base < remaining_k).select(next_eq_base, remaining_k)
                 return above_base, eq_base
 
-            for step in range_constexpr(vec_iters):
+            for step in range(vec_iters):
                 tile_base = step * tile
                 base = tile_base + tid * spec.vec
                 rvals = _load_vec(
@@ -568,7 +624,7 @@ def _build_radix_select_topk_module(
                 )
 
             # --- Scalar tail ---
-            for step in range_constexpr(scalar_tail_iters):
+            for step in range(scalar_tail_iters):
                 col = vec_end + step * block_threads + tid
                 valid = col < n
                 col_safe = valid.select(col, 0)
@@ -595,7 +651,7 @@ def _build_radix_select_topk_module(
                         vals[pos] = val
                         idxs[pos] = idx
 
-            for step in range_constexpr(vec_iters):
+            for step in range(vec_iters):
                 tile_base = step * tile
                 base = tile_base + tid * spec.vec
                 rvals = _load_vec(
@@ -604,7 +660,7 @@ def _build_radix_select_topk_module(
                 for vi in range_constexpr(spec.vec):
                     idx = fx.Int32(base + vi)
                     gather_candidate(rvals[vi], idx, s_vals, s_idxs)
-            for step in range_constexpr(scalar_tail_iters):
+            for step in range(scalar_tail_iters):
                 col = vec_end + step * block_threads + tid
                 if col < n:
                     gather_candidate(row_in[col], fx.Int32(col), s_vals, s_idxs)
@@ -669,9 +725,10 @@ def _build_radix_select_topk_module(
         values: fx.Tensor,
         indices: fx.Tensor,
         rows_m: fx.Int32,
+        n: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
     ):
-        launcher = radix_select_topk_kernel(input, values, indices)
+        launcher = radix_select_topk_kernel(input, values, indices, n)
         launcher.launch(
             grid=(rows_m, 1, 1),
             block=(block_threads, 1, 1),
@@ -903,13 +960,12 @@ def topk_register(
 
 @instrumented_flydsl_cache(
     "aten::topk",
-    key_fn=lambda n, k, deterministic, arch, spec, backend, device_index, *a, **kw: (
-        f"radix N={n} K={k} deterministic={deterministic} {spec.cache_token()} "
+    key_fn=lambda k, deterministic, arch, spec, backend, device_index, *a, **kw: (
+        f"radix K={k} deterministic={deterministic} {spec.cache_token()} "
         f"{arch} backend={backend} device={device_index}"
     ),
 )
 def _compile_radix_select_topk(
-    n: int,
     k: int,
     deterministic: bool,
     arch: str,
@@ -920,14 +976,22 @@ def _compile_radix_select_topk(
     compile_args,
 ) -> flyc.CompiledFunction:
     del backend, device_index  # cache keys only; see _compile_register_topk
-    input_2d, values_2d, indices_2d, rows_m, stream = compile_args
-    launch = _build_radix_select_topk_module(n, k, deterministic, arch, spec)
+    input_2d, values_2d, indices_2d, rows_m, n, stream = compile_args
+    launch = _build_radix_select_topk_module(k, deterministic, arch, spec)
+    # These marks make it safe to drop N from the cache key: without them the
+    # compiled input descriptor keeps the first length's shape and row stride.
+    input_arg = (
+        make_compile_arg(input_2d, read_only=True)
+        .mark_shape_dynamic(1)
+        .mark_stride_dynamic(0)
+    )
     return flyc.compile(
         launch,
-        make_compile_arg(input_2d, read_only=True),
+        input_arg,
         make_compile_arg(values_2d),
         make_compile_arg(indices_2d),
         rows_m,
+        n,
         stream,
     )
 
@@ -943,6 +1007,11 @@ def topk_radix_out(
 ) -> None:
     rows_m = input_2d.shape[0]
     n = input_2d.shape[1]
+    # Reject k outside 1 <= k <= n. k > n breaks _find_from_top's reachability
+    # precondition and would let its index run below the walked range. k < 1 is
+    # defensive: the walk copes, but there is nothing to select.
+    if not 1 <= k <= n:
+        raise ValueError(f"topk_radix_out needs 1 <= k <= n, got k={k}, n={n}")
     device_index = input_2d.device.index
     arch: str = _resolve_rocm_arch(device_index)  # pyrefly: ignore[bad-assignment]
     spec = topk_spec(input_2d.dtype, largest)
@@ -950,16 +1019,15 @@ def topk_radix_out(
     with torch.cuda.device(input_2d.device):
         stream = torch.cuda.current_stream(input_2d.device)
         compiled = _compile_radix_select_topk(
-            n,
             k,
             deterministic,
             arch,
             spec,
             flyc.compile_backend_name(),
             device_index,
-            compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
+            compile_args=(input_2d, values_2d, indices_2d, rows_m, n, stream),
         )
-        compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, stream)
+        compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, n, stream)
 
 
 def topk_radix(
