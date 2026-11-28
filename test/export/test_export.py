@@ -19499,7 +19499,8 @@ class TestExportAccelerator(TorchTestCase):
             ep.module()(torch.randn(64))
 
 
-class TestExportTriton(TestCase):
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportTriton(TorchTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_export_custom_triton_kernel(self, device):
@@ -19675,7 +19676,8 @@ class TestExportTriton(TestCase):
         self.assertEqual(out_copy2, out_copy3)
 
 
-class TestExportFlexAttention(TestCase):
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportFlexAttention(TorchTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_flex_attention_export(self, device):
@@ -19767,7 +19769,9 @@ class TestExportFlexAttention(TestCase):
         exported_out = exported_mod(x)
         self.assertEqual(exported_out, eager_out)
 
-class TestExportRNN(TestCase):
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportRNN(TorchTestCase):
+
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_export_lstm(self, device):
@@ -19837,7 +19841,8 @@ class TestExportRNN(TestCase):
         self.assertEqual(eager_out, export_out)
 
 
-class TestExportAutocastException(TestCase):
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportAutocastException(TorchTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_exception(self, device):
@@ -19886,7 +19891,8 @@ class TestExportAutocastException(TestCase):
                     strict=False,
                 ).module()
 
-class TestExportAssociativeScan(TestCase):
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportAssociativeScan(TorchTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @testing.expectedFailureCppRuntime
@@ -19976,7 +19982,8 @@ class TestExportAssociativeScan(TestCase):
                 1,
             )
 
-class TestExportModuleToDevice(TestCase):
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportModuleToDevice(TorchTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_module_to_with_shared_weights(self, device):
