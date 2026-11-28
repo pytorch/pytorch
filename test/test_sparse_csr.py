@@ -29,6 +29,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     precisionOverride,
     skipCPUIfNoMklSparse,
+    skipCUDAIf,
     skipCUDAIfNoSparseGeneric,
     skipCUDAIfRocm,
     skipMeta,
@@ -2936,6 +2937,67 @@ class TestSparseCSRDevice(TestCase):
         for (k, n), (upper, unitriangular, transpose, zero) in itertools.product(itertools.product(ks, ns),
                                                                                  itertools.product([True, False], repeat=4)):
             run_test(n, k, upper, unitriangular, transpose, zero)
+
+    def _skip_if_spsolve_unavailable(self, device, dtype):
+        # CUDA builds without cuDSS register _spsolve, but every call fails.
+        A = torch.eye(1, dtype=dtype, device=device).to_sparse_csr()
+        b = torch.ones(1, dtype=dtype, device=device)
+        try:
+            torch.sparse.spsolve(A, b)
+        except RuntimeError as e:
+            if "Calling linear solver with sparse tensors requires compiling " in str(e):
+                self.skipTest("PyTorch was not built with cuDSS support")
+            raise
+
+    @onlyAccelerator
+    @skipCUDAIf(not TEST_CUDA_CUDSS, "The test requires cuDSS")
+    @dtypes(*floating_types())
+    def test_spsolve(self, device, dtype):
+        self._skip_if_spsolve_unavailable(device, dtype)
+
+        def make_spd(n):
+            # Symmetric positive definite with eigenvalues >= n, so the system
+            # has a unique, well-conditioned solution.
+            m = make_tensor((n, n), dtype=dtype, device=device, low=-1, high=1)
+            return m @ m.mT + n * torch.eye(n, dtype=dtype, device=device)
+
+        test_matrices = [
+            torch.eye(5, dtype=dtype, device=device),  # identity
+            make_spd(1),  # 1x1
+            make_spd(4),  # dense-ish
+            make_spd(16),  # larger
+            # diagonal (extreme sparsity)
+            torch.diag(make_tensor((7,), dtype=dtype, device=device, low=1, high=2)),
+            # tridiagonal (banded sparsity pattern)
+            torch.diag(torch.full((6,), 4.0, dtype=dtype, device=device))
+            + torch.diag(torch.full((5,), -1.0, dtype=dtype, device=device), 1)
+            + torch.diag(torch.full((5,), -1.0, dtype=dtype, device=device), -1),
+        ]
+
+        for A_dense in test_matrices:
+            # Pick the solution first and build b from it, so the reference does
+            # not depend on any solver implementation.
+            x_ref = make_tensor((A_dense.size(0),), dtype=dtype, device=device, low=-1, high=1)
+            b = A_dense @ x_ref
+            self.assertEqual(torch.sparse.spsolve(A_dense.to_sparse_csr(), b), x_ref)
+
+    @onlyAccelerator
+    @skipCUDAIf(not TEST_CUDA_CUDSS, "The test requires cuDSS")
+    @dtypes(*floating_types())
+    def test_spsolve_errors(self, device, dtype):
+        self._skip_if_spsolve_unavailable(device, dtype)
+
+        A_csr = torch.eye(4, dtype=dtype, device=device).to_sparse_csr()
+        b = make_tensor((4,), dtype=dtype, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "only left == true is supported"):
+            torch.sparse.spsolve(A_csr, b, left=False)
+
+        with self.assertRaisesRegex(RuntimeError, "b must be a 1D tensor"):
+            torch.sparse.spsolve(A_csr, make_tensor((4, 2), dtype=dtype, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, "linear system size mismatch"):
+            torch.sparse.spsolve(A_csr, make_tensor((5,), dtype=dtype, device=device))
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
