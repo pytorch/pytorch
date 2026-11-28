@@ -1647,8 +1647,7 @@ class ConditionalKernelDispatchLine(WrapperLine):
         else:
             k_i64.run(...)
 
-    If the last condition is not None, the chain ends in an `else` that raises, so
-    no input silently skips the launch.
+    Only the last condition is None, so some branch always launches.
     """
 
     wrapper: PythonWrapperCodegen
@@ -1657,6 +1656,11 @@ class ConditionalKernelDispatchLine(WrapperLine):
     # are wrapper lines not yet generated (see ConditionalMultiKernel.call_kernel);
     # codegen generates them indented under their branch.
     choices: list[tuple[str | None, list[Line]]]
+
+    def __post_init__(self) -> None:
+        conds = [cond for cond, _ in self.choices]
+        if conds[-1] is not None or None in conds[:-1]:
+            raise AssertionError(f"only the last condition may be None: {conds}")
 
     def codegen(self, code: IndentedBuffer) -> None:
         for i, (cond, lines) in enumerate(self.choices):
@@ -1670,12 +1674,6 @@ class ConditionalKernelDispatchLine(WrapperLine):
                         line.codegen(code)
                     else:
                         code.writeline(line)
-        if self.choices[-1][0] is not None:
-            code.writeline("else:")
-            with code.indent():
-                code.writeline(
-                    'raise RuntimeError("no kernel variant matches the input sizes")'
-                )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         raise NotImplementedError(

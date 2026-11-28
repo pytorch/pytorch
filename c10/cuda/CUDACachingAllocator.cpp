@@ -836,12 +836,9 @@ struct ExpandableSegment {
             c10::make_scope_exit([&myfd]() { close(static_cast<int>(myfd)); });
         CUmemGenericAllocationHandle handle = 0;
 #ifdef USE_ROCM
-#if ROCM_VERSION >= 70100
-        void* myfd_handle =
-            reinterpret_cast<void*>(static_cast<uintptr_t>(myfd));
-#else
-        void* myfd_handle = (void*)(uintptr_t)&myfd;
-#endif
+        void* myfd_handle = c10::cuda::hipMemImportTakesFdByValue()
+            ? reinterpret_cast<void*>(static_cast<uintptr_t>(myfd))
+            : static_cast<void*>(&myfd);
         C10_CUDA_CHECK(hipMemImportFromShareableHandle(
             &handle, myfd_handle, hipMemHandleTypePosixFileDescriptor));
 #else
