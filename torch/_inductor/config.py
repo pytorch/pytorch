@@ -2004,7 +2004,7 @@ avoid_32bit_indexing_guards: bool = False
 # Takes precedence over avoid_32bit_indexing_guards for the kernels it covers;
 # assume_32bit_indexing takes precedence over it. Not applied with the cpp or FX
 # wrapper or triton.autotune_at_compile_time.
-dual_index_dtype_kernels: bool = False
+dual_index_dtype_kernels: bool = True
 
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
 # arguments passed to the @triton.autotune in the user's code; this is unsafe, as
