@@ -833,7 +833,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             with self.assertRaisesRegex(TypeError, "descriptor '__hash__'"):
                 test_fn(x)
 
-    def test_instance_hash_with_unguardable_class_source(self):
+    def test_instance_hash_with_constant_class_source(self):
         class Function(torch.autograd.Function):
             pass
 
@@ -851,11 +851,15 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             torch.compile(class_fn, backend="eager", fullgraph=True)(x), class_fn(x)
         )
+        compiled = torch.compile(instance_fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), instance_fn(x))
+        Function.__hash__ = None
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported, "Unsupported autograd.Function method"
         ):
-            torch.compile(instance_fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(torch.compile(instance_fn, backend="eager")(x), instance_fn(x))
+            compiled(x)
+        with self.assertRaisesRegex(TypeError, "unhashable type"):
+            torch.compile(instance_fn, backend="eager")(x)
 
     @parametrize("name", ("__name__", "__bases__"))
     def test_dunder_attribute_uses_generic_getattr(self, name):

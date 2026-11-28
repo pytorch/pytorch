@@ -497,8 +497,12 @@ class OutputGraphGuardsState:
     compile_on_one_rank: bool = False
     # torch.fx.traceback annotation active when the frame started tracing
     fx_annotation: dict[str, Any] | None = None
+    # Names Dynamo minted for constant results, which a loading process lacks.
+    constant_result_names: set[str] = dc_field(default_factory=set)
     # ___unnamed_scope_* key -> source of the namespace it was minted for
     unnamed_scope_sources: dict[str, Source] = dc_field(default_factory=dict)
+    # Importable classes can change before loading. Rebuild MRO guards from their captured values.
+    mro_guard_values: dict[Source, object] | None = None
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -526,6 +530,8 @@ class OutputGraphGuardsState:
             global_state_guard=self.global_state_guard,
             fx_annotation=self.fx_annotation,
             unnamed_scope_sources=self.unnamed_scope_sources,
+            constant_result_names=self.constant_result_names,
+            mro_guard_values=self.mro_guard_values,
             name_of_builtins_dict_key_in_fglobals=self.name_of_builtins_dict_key_in_fglobals,
             export=self.export,
             export_constraints=self.export_constraints,
@@ -682,6 +688,8 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.compile_on_one_rank,
             fx_annotation=output_graph_guards_state.fx_annotation,
             unnamed_scope_sources=output_graph_guards_state.unnamed_scope_sources,
+            constant_result_names=output_graph_guards_state.constant_result_names,
+            mro_guard_values=output_graph_guards_state.mro_guard_values,
         )
 
         self.import_sources = import_sources or {}
@@ -912,6 +920,7 @@ class OutputGraph(OutputGraphCommon):
         # not its MRO, so a base shared by two classes needs a guard through
         # each, since either can reassign __bases__.
         self.guarded_mro_absent_keys: set[tuple[int, int, str]] = set()
+        self.guarded_mro_type_ids: set[int] = set()
         # Cache for inspect.signature results: function -> VariableTracker
         self.signature_cache: dict[Any, VariableTracker] = {}
         self.unique_var_id = itertools.count()
@@ -2054,6 +2063,7 @@ class OutputGraph(OutputGraphCommon):
             def wrap_name(module_key: str) -> VariableTracker:
                 self.output.update_co_names(module_key)
                 self.global_scope[module_key] = target
+                self.constant_result_names.add(module_key)
                 return VariableTracker.build(
                     self,  # type: ignore[arg-type]
                     target,
@@ -3968,6 +3978,7 @@ class OutputGraph(OutputGraphCommon):
         self.variable_tracker_cache.clear()
         self.mro_source_cache.clear()
         self.guarded_mro_absent_keys.clear()
+        self.guarded_mro_type_ids.clear()
         self.signature_cache.clear()
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()

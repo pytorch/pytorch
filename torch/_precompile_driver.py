@@ -656,7 +656,7 @@ def _build_multigraph_forward():
     # fails the guard that certified it instead of passing against a stale
     # copy, and a global the frame writes lands where the module reads it.
     # Only names Dynamo minted while tracing are bound into it (every backend id
-    # of the artifact, plus that module's import aliases and builtins key),
+    # of the artifact, import aliases, constant results and the builtins key),
     # never the artifact's own, so nothing here shadows a user global. A module
     # is opened only for a frame the driver serves; a dead record never imports
     # its module.
@@ -760,6 +760,10 @@ def _build_multigraph_forward():
                         f"guards read through. Unbind it and load again."
                     )
                 _seed(scope, key, builtins_dict)
+            output_graph = guards_state.output_graph
+            for name in output_graph.constant_result_names:
+                if name not in scope:
+                    _seed(scope, name, output_graph.global_scope[name])
             manager = load_guard_manager(guards_state, target, scope)
             body = SerializedCode.to_code_object(guarded["dynamo_code"])
             variants.append((manager, body))
