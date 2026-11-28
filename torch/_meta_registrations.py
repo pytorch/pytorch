@@ -8681,7 +8681,9 @@ def meta_upsample_inter_area2d(input, output_size, scales_h=None, scales_w=None)
         lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.shape}",
     )
     return input.new_empty(full_output_size).to(
-        memory_format=utils.suggest_memory_format(input)
+        memory_format=utils.upsample_output_memory_format(
+            input, allow_single_channel=False
+        )
     )
 
 

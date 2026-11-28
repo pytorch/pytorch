@@ -2867,19 +2867,23 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             "_upsample_bilinear2d_aa",
             "_upsample_bicubic2d_aa",
             "_upsample_lanczos2d_aa",
+            "_upsample_inter_area2d",
             "upsample_nearest3d",
             "_upsample_nearest_exact3d",
             "upsample_trilinear3d",
         ],
     )
     def test_upsample_channels_last_view_with_size1_batch(self, device, op_name):
-        if op_name == "_upsample_lanczos2d_aa" and torch.device(device).type != "cpu":
-            self.skipTest("lanczos is CPU only")
+        on_cpu = torch.device(device).type == "cpu"
+        cpu_only = op_name in ("_upsample_lanczos2d_aa", "_upsample_inter_area2d")
+        if cpu_only and not on_cpu:
+            self.skipTest(f"{op_name} is CPU only")
         op = getattr(torch.ops.aten, op_name).default
         spatial = (5, 6) if op_name.endswith(("2d", "2d_aa")) else (4, 5, 6)
-        args = [[2 * s for s in spatial]] + ([] if "nearest" in op_name else [False])
+        args = ([2 * s for s in spatial],)
+        if "nearest" not in op_name and op_name != "_upsample_inter_area2d":
+            args += (False,)
         # uint8 views are recognized as channels-last on CPU; trilinear has no uint8 kernel.
-        on_cpu = torch.device(device).type == "cpu"
         dtype = torch.uint8 if on_cpu and "trilinear" not in op_name else torch.float32
         out = []
         mode = FakeTensorMode()
@@ -2899,6 +2903,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             "_upsample_bilinear2d_aa",
             "_upsample_bicubic2d_aa",
             "_upsample_lanczos2d_aa",
+            "_upsample_inter_area2d",
         ],
     )
     @parametrize("resize_out", [True, False])
@@ -2907,18 +2912,19 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
             self.skipTest("The singleton-batch uint8 layout rule is CPU only")
 
         op = getattr(torch.ops.aten, op_name).out
+        args = ([4, 6],) if op_name == "_upsample_inter_area2d" else ([4, 6], False)
         x = torch.zeros((8, 12, 3), dtype=torch.uint8, device=device)
         x = x.movedim(-1, 0)[None]
         shape = (0,) if resize_out else (1, 3, 4, 6)
         out = x.new_empty(shape)
-        self.assertIs(op(x, [4, 6], False, out=out), out)
+        self.assertIs(op(x, *args, out=out), out)
         expected_format = torch.channels_last if resize_out else torch.contiguous_format
         self.assertTrue(out.is_contiguous(memory_format=expected_format))
 
         with FakeTensorMode() as mode:
             fake_x = mode.from_tensor(x)
             fake_out = fake_x.new_empty(shape)
-            self.assertIs(op(fake_x, [4, 6], False, out=fake_out), fake_out)
+            self.assertIs(op(fake_x, *args, out=fake_out), fake_out)
         self.checkMetaProps(out, fake_out)
 
     @onlyAccelerator

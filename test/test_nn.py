@@ -9938,9 +9938,13 @@ class TestNNDeviceType(NNTestCase):
             device, antialias, align_corners, mode, memory_format
         )
 
-    @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic", "lanczos"])
+    @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic", "lanczos", "inter-area"])
     @parametrize_test("antialias", [True, False])
     @parametrize_test("dtype", [torch.uint8, torch.float32])
+    @decorateIf(
+        unittest.skip("inter-area is CPU only"),
+        lambda p: p["mode"] == "inter-area" and torch.device(p["device"]).type != "cpu",
+    )
     @decorateIf(
         unittest.skip("antialias is only supported for bilinear, bicubic and lanczos"),
         lambda p: p["antialias"] and p["mode"] not in ("bilinear", "bicubic", "lanczos"),
@@ -9964,7 +9968,7 @@ class TestNNDeviceType(NNTestCase):
             out = F.interpolate(x, size=size, mode=mode, antialias=antialias)
             expected = F.interpolate(x_ref, size=size, mode=mode, antialias=antialias)
             self.assertEqual(out, expected)
-            if dtype == torch.uint8 and torch.device(device).type == "cpu" and mode in ("bilinear", "bicubic", "lanczos"):
+            if dtype == torch.uint8 and torch.device(device).type == "cpu" and mode in ("bilinear", "bicubic", "lanczos", "inter-area"):
                 # x is recognized as channels-last, for the uint8 AVX2 / NEON kernels.
                 self.assertEqual(out.stride(), expected.stride())
             else:
@@ -10560,6 +10564,29 @@ class TestNNDeviceType(NNTestCase):
         exported = torch.export.export(resize, (x,), dynamic_shapes=({2: height},))
         other = torch.rand(1, 3, 12, 8, device=device)
         self.assertEqual(exported.module()(other), resize(other))
+
+    @onlyCPU
+    @parametrize_test("batch_size,dtype,decoder_view", [
+        (1, torch.float32, False), (2, torch.uint8, False), (1, torch.uint8, True),
+    ])
+    def test_upsamplingInterArea2d_dynamic_channels(self, device, batch_size, dtype, decoder_view):
+        class Resize(torch.nn.Module):
+            def forward(self, x):
+                return F.interpolate(x, size=(4, 6), mode="inter-area")
+
+        def make_input(c):
+            if decoder_view:
+                return torch.ones(8, 12, c, dtype=dtype, device=device).permute(2, 0, 1)[None]
+            return torch.ones(batch_size, c, 8, 12, dtype=dtype, device=device)
+
+        resize = Resize()
+        channels = torch.export.Dim("channels", min=2, max=6)
+        exported = torch.export.export(resize, (make_input(3),), dynamic_shapes=({1: channels},))
+        for c in (3, 5):
+            x = make_input(c)
+            actual, expected = exported.module()(x), resize(x)
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual.stride(), expected.stride())
 
     @onlyCPU
     def test_upsamplingInterArea2d_inconsistent_scales(self, device):
