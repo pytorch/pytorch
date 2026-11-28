@@ -145,8 +145,23 @@ Register callbacks that fire at each point in any CUDA graph's lifecycle -- capt
 start, capture end, instantiate, each replay, and destroy -- for example, a profiler
 observing graph lifecycle without the graph code carrying any consumer knowledge, and
 including graphs the consumer did not build. Registering a hook is the opt-in and the whole
-API -- the graph fires them; with none registered they are no-ops. Each has a per-graph
+API -- the graph fires them; without a registered hook a lifecycle step does nothing extra
+(PyTorch itself registers one capture-end hook, described below). Each has a per-graph
 counterpart on {class}`torch.cuda.CUDAGraph`. Live in `torch.cuda.graphs`.
+
+PyTorch registers one capture-end hook itself. On CUDA builds with `cuda-bindings` >= 13.2
+installed and a CUDA 13.2+ driver, every capture that ends through {meth}`torch.cuda.CUDAGraph.capture_end`
+({class}`torch.cuda.graph`, {func}`torch.cuda.make_graphed_callables`, Inductor CUDA graph
+trees) has its memset nodes of at most 8 KiB -- what `zero_()` on a small dense tensor
+records -- replaced by fill-kernel nodes, which replay faster than small memset nodes. The
+replayed result is unchanged. What changes is what graph inspection reports: node types,
+counts and handles from {meth}`torch.cuda.CUDAGraph.raw_cuda_graph`, the output of
+`get_graph_data`, `debug_dump` and `export_dot`, and profiler traces, where those
+`Memset` events become fill kernels. Capture-end hooks observe the graph after the
+rewrite. Set `torch.cuda.graphs._memset_to_kernel_max_bytes = 0` to turn the rewrite off, or
+to another byte count to move the threshold. Memsets with elements wider than one byte and
+nodes inside child or conditional graphs are left alone. Without `cuda-bindings` >= 13.2, on an older driver, and on ROCm, graphs are left
+as captured.
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.graphs

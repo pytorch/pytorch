@@ -394,6 +394,23 @@ def _get_capture_state(stream: Any) -> _CaptureState | None:
     return graph, list(_deps[:_num_deps])
 
 
+def _get_graph_nodes(graph: Any) -> list[Any]:
+    """Return all nodes of the graph (not those of child or conditional graphs)."""
+    _, num_nodes = _check_cuda_bindings(
+        _cuda_runtime.cudaGraphGetNodes(  # pyrefly: ignore[missing-attribute]
+            graph, numNodes=0
+        )
+    )
+    if num_nodes == 0:
+        return []
+    nodes, num_nodes = _check_cuda_bindings(
+        _cuda_runtime.cudaGraphGetNodes(  # pyrefly: ignore[missing-attribute]
+            graph, numNodes=num_nodes
+        )
+    )
+    return list(nodes[:num_nodes])
+
+
 def _get_root_nodes(graph: Any) -> list[Any]:
     """Return the current root nodes for the graph."""
     _, num_roots = _check_cuda_bindings(
@@ -536,6 +553,29 @@ def annotation_for(tools_id: int) -> dict[str, Any] | None:
     with _REGISTRY_LOCK:
         graph = _GRAPH_ANNOTATIONS.get(tools_id >> 32)
         return None if graph is None else graph.annotations.get(tools_id & 0xFFFFFFFF)
+
+
+def transfer_node_annotation(old_tools_id: int, new_tools_id: int) -> None:
+    """Move what is recorded for one capture-graph node to another node of the same
+    graph. Used when a capture-end pass replaces a node (the memset-to-kernel rewrite in
+    ``torch.cuda.graphs``) so a ``mark_kernels`` annotation follows the work. Pending
+    scope ids are rewritten too, for captures that resolve after the pass. Not a public
+    API."""
+    with _REGISTRY_LOCK:
+        for _annotation, tools_ids in _pending_scopes:
+            for i, tools_id in enumerate(tools_ids):
+                if tools_id == old_tools_id:
+                    tools_ids[i] = new_tools_id
+        graph = _GRAPH_ANNOTATIONS.get(old_tools_id >> 32)
+        if graph is None:
+            return
+        old_node, new_node = old_tools_id & 0xFFFFFFFF, new_tools_id & 0xFFFFFFFF
+        if old_node in graph.annotations:
+            graph.annotations[new_node] = graph.annotations.pop(old_node)
+        if old_node in graph.py_stacks:
+            graph.py_stacks[new_node] = graph.py_stacks.pop(old_node)
+        # The replacement is a kernel node, which carries a source node id.
+        graph.sourceless_nodes.discard(old_node)
 
 
 # Node types we annotate (kernels, memcpys, memcpy batches, memsets, batch mem ops, event
