@@ -3,7 +3,6 @@
 
 import contextlib
 from collections.abc import Iterable
-from contextvars import ContextVar
 from typing import Union
 from warnings import warn
 
@@ -68,12 +67,11 @@ _backend_names = {
     "math": "MATH",
     "overrideable": "OVERRIDEABLE",
 }
-_sdpa_kernel_uses_priority = ContextVar("sdpa_kernel_uses_priority", default=False)
 
 
 def _is_sdp_priority_order_active() -> bool:
-    """Return whether an enclosing sdpa_kernel context set backend priority."""
-    return _sdpa_kernel_uses_priority.get()
+    """Return whether a user-specified SDPA backend priority order is active."""
+    return torch._C._has_user_sdp_priority_order()
 
 
 def _backend_from_string(name: str):
@@ -94,17 +92,35 @@ def _cur_sdpa_kernel_backends(with_priority: bool = False):
 
 
 def _sdpa_kernel(backends: Iterable, set_priority: bool = False) -> None:
+    if set_priority:
+        torch._C._set_sdp_priority_order([int(backend) for backend in backends])
     for name, val in _backend_names.items():
         enabled = getattr(SDPBackend, val) in backends
         getattr(torch._C, f"_set_sdp_use_{name}")(enabled)
+
+
+def _save_sdpa_kernel(
+    set_priority: bool,
+) -> tuple[list[SDPBackend], bool, list[int] | None]:
+    """Return the state that _restore_sdpa_kernel needs to undo _sdpa_kernel."""
+    previous_priority = (
+        torch._C._get_sdp_priority_order()
+        if set_priority and torch._C._has_user_sdp_priority_order()
+        else None
+    )
+    return _cur_sdpa_kernel_backends(), set_priority, previous_priority
+
+
+def _restore_sdpa_kernel(
+    state: tuple[list[SDPBackend], bool, list[int] | None],
+) -> None:
+    previous_backends, set_priority, previous_priority = state
+    _sdpa_kernel(previous_backends, set_priority=False)
     if set_priority:
-        # backends should be a unique list
-        user_priority = [int(backend) for backend in backends]
-        previous_priority = torch._C._get_sdp_priority_order()
-        for backend in previous_priority:
-            if backend not in user_priority:
-                user_priority.append(int(backend))
-        torch._C._set_sdp_priority_order(user_priority)
+        if previous_priority is not None:
+            torch._C._set_sdp_priority_order(previous_priority)
+        else:
+            torch._C._reset_sdp_priority_order()
 
 
 @contextlib.contextmanager
@@ -140,7 +156,10 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
             scaled_dot_product_attention(...)
 
     This context manager can be used to select which backend to use for scaled dot product attention.
-    Upon exiting the context manager, the previous state of the flags will be restored, enabling all backends.
+    On exit, the context manager restores the previously enabled backends. If ``set_priority=True``,
+    it also restores the priority order that was active on entry.
+
+    .. note:: The enabled backends and the priority order are process-wide, so they also affect other threads.
     """
     if not isinstance(backends, (list, SDPBackend)):
         raise AssertionError(
@@ -152,22 +171,37 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
 
     backends = list(dict.fromkeys(backends))
 
-    previous_backends = _cur_sdpa_kernel_backends(with_priority=set_priority)
-    priority_token = _sdpa_kernel_uses_priority.set(
-        set_priority or _sdpa_kernel_uses_priority.get()
-    )
+    previous_state = _save_sdpa_kernel(set_priority)
     try:
         _sdpa_kernel(backends, set_priority)
         yield {}
     finally:
-        _sdpa_kernel_uses_priority.reset(priority_token)
-        _sdpa_kernel(previous_backends, set_priority)
+        _restore_sdpa_kernel(previous_state)
 
 
-# variadic version of sdpa_kernel for dynamo to use while reconstructing
+def _enter_sdpa_kernel(
+    backend_names: tuple[str, ...], set_priority: bool
+) -> contextlib.AbstractContextManager:
+    backends = [_backend_from_string(name) for name in backend_names]
+    ctx = sdpa_kernel(backends, set_priority)
+    ctx.__enter__()
+    return ctx
+
+
+def _exit_sdpa_kernel(ctx: contextlib.AbstractContextManager) -> None:
+    ctx.__exit__(None, None, None)
+
+
+# variadic versions of sdpa_kernel for dynamo to use while reconstructing
 @contextlib.contextmanager
 def _sdpa_kernel_variadic(*backends: SDPBackend):
     with sdpa_kernel(list(backends)):
+        yield
+
+
+@contextlib.contextmanager
+def _sdpa_kernel_variadic_with_priority(*backends: SDPBackend):
+    with sdpa_kernel(list(backends), set_priority=True):
         yield
 
 

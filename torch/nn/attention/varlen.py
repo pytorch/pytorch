@@ -47,10 +47,12 @@ def _validate_scale(scale: float | None) -> None:
 
 
 @torch.compiler.assume_constant_result
-def _get_sdp_priority_order() -> list[int]:
+def _get_sdp_priority_order(prefer_flash: bool = False) -> list[int]:
     """Capture varlen backend priority at trace time."""
     if _is_sdp_priority_order_active():
         return torch._C._get_sdp_priority_order()
+    if prefer_flash or torch._C._is_cudnn_sdp_deprioritized():
+        return [_FLASH_ATTENTION_BACKEND, _CUDNN_ATTENTION_BACKEND]
     return [_CUDNN_ATTENTION_BACKEND, _FLASH_ATTENTION_BACKEND]
 
 
@@ -207,14 +209,10 @@ def _select_backend(
     # Only FA4 consumes the gradient of a returned lse, so prefer it over cuDNN
     # unless the user set an explicit priority order.
     prefer_flash = (
-        flash_enabled
-        and return_lse
-        and needs_backward
-        and current_flash_attention_impl() == "FA4"
-        and not _is_sdp_priority_order_active()
+        return_lse and needs_backward and current_flash_attention_impl() == "FA4"
     )
-    for backend in _get_sdp_priority_order():
-        if backend == _CUDNN_ATTENTION_BACKEND and cudnn_eligible and not prefer_flash:
+    for backend in _get_sdp_priority_order(prefer_flash):
+        if backend == _CUDNN_ATTENTION_BACKEND and cudnn_eligible:
             return backend
         if backend == _FLASH_ATTENTION_BACKEND and flash_enabled:
             return backend
@@ -380,8 +378,10 @@ def varlen_attn(
     This function is similar to scaled_dot_product_attention but optimized for
     variable-length sequences using cumulative sequence position tensors.
     Backend enablement follows :func:`torch.nn.attention.sdpa_kernel`. By default,
-    eligible cuDNN is preferred over Flash, except that Flash is preferred when FA4 is active
-    and the lse is returned under grad; ``set_priority=True`` overrides this order.
+    eligible cuDNN is preferred over Flash, except that Flash is preferred when
+    ``TORCH_CUDNN_SDPA_DEPRIORITIZED=1`` is set, or when FA4 is active and the lse is
+    returned under grad; ``set_priority=True`` overrides this order. Under
+    :func:`torch.compile`, the backend is selected when the graph is traced.
 
     Args:
         query (Tensor): Query tensor; shape :math:`(T_q, H_q, D)`

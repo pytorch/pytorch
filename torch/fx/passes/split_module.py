@@ -302,14 +302,11 @@ def _split_module(
                 if defined is not None:
                     use_partition.dependencies.setdefault(defined)
 
-    def instantiate_node_partition_mapping(node: Node) -> None:
-        partition_idx = split_callback(node)
-        partition_name = str(partition_idx)
-        if partition_affix is not None:
-            # For example, if user specifies partition_affix = "pp", then the
-            # partition name will be "pp_0", "pp_1", etc
-            partition_name = "_".join([partition_affix, partition_name])
+    def get_partition_name(idx: int) -> str:
+        return str(idx) if partition_affix is None else f"{partition_affix}_{idx}"
 
+    def instantiate_node_partition_mapping(node: Node) -> None:
+        partition_name = get_partition_name(split_callback(node))
         log.debug(
             "instantiate_node_partition_mapping %s (%s)", node.name, partition_name
         )
@@ -324,10 +321,14 @@ def _split_module(
 
     # Global State Nodes are nodes which by their global state effects,
     # "taint" all downstream nodes while they are active.
+    context_pairs = {
+        torch.amp._enter_autocast: torch.amp._exit_autocast,
+        torch.nn.attention._enter_sdpa_kernel: torch.nn.attention._exit_sdpa_kernel,
+    }
     GLOBAL_STATE_NODES = [
-        torch.amp._enter_autocast,
-        torch.amp._exit_autocast,
         torch._C._set_grad_enabled,
+        *context_pairs,
+        *context_pairs.values(),
     ]
 
     # For grad regions:
@@ -336,18 +337,13 @@ def _split_module(
     # 2. subsequent regions: we insert the set_grad at the beginning
     grad_regions: OrderedDict[Node, set[int]] = OrderedDict()
 
-    # For autocast regions:
-    # ------------------------
-    # 1. first region: we will only insert the _exit at the end
-    # 2. intermediate regions: we will insert both the
-    #    _enter at the beginning and _exit at the end
-    # 3. last region: we will only insert _enter at the beginning
-    # We will do so in the order in which the autocasts were instantiated.
-    autocast_regions: OrderedDict[Node, set[int]] = OrderedDict()
-    autocast_exits: dict[Node, Node | None] = {}
+    # Each partition must enter and exit its own contexts so that saved Python
+    # state never crosses a partition boundary. Preserve the nesting order.
+    context_regions: OrderedDict[Node, set[int]] = OrderedDict()
+    context_exits: dict[Node, Node] = {}
 
     active_grad = None
-    active_autocasts = set()
+    active_contexts = set()
 
     for node in m.graph.nodes:
         # This will prefer placeholder bindings, because those come first.
@@ -380,43 +376,38 @@ def _split_module(
                     raise AssertionError(f"Expected bool arg, got {type(node.args[0])}")
                 active_grad = node
                 grad_regions[active_grad] = set({split_callback(node)})
-            elif node.target is torch.amp._enter_autocast:
-                # Should all be python constants
-                if not all(not isinstance(arg, Node) for arg in node.args):
+            elif node.target in context_pairs:
+                if node.all_input_nodes:
                     raise AssertionError(
                         "Expected all args to be python constants, not Nodes"
                     )
-                active_autocasts.add(node)
-                autocast_regions[node] = set({split_callback(node)})
-                autocast_exits[node] = None
-            elif node.target is torch.amp._exit_autocast:
-                if len(node.args) != 1:
-                    raise AssertionError(
-                        f"Expected 1 arg for _exit_autocast, got {len(node.args)}"
-                    )
-                autocast_regions[node.args[0]].add(split_callback(node))
-                active_autocasts.remove(node.args[0])
-                autocast_exits[node.args[0]] = node
+                active_contexts.add(node)
+                context_regions[node] = {split_callback(node)}
+            else:
+                if len(node.args) != 1 or not isinstance(node.args[0], Node):
+                    raise AssertionError(f"Expected an enter node for {node.target}")
+                enter = node.args[0]
+                context_regions[enter].add(split_callback(node))
+                active_contexts.remove(enter)
+                context_exits[enter] = node
 
         if active_grad is not None:
             grad_regions[active_grad].add(split_callback(node))
 
-        for a in active_autocasts:
-            autocast_regions[a].add(split_callback(node))
+        for enter in active_contexts:
+            context_regions[enter].add(split_callback(node))
 
-    if not all(v is not None for v in autocast_exits.values()):
-        raise AssertionError("autocast must exit")
+    if active_contexts:
+        raise AssertionError("Each context must have an exit node")
 
-    # pyrefly: ignore [bad-assignment]
-    autocast_regions = {k: sorted(v) for k, v in autocast_regions.items()}
-    # pyrefly: ignore [bad-assignment]
-    grad_regions = {k: sorted(v) for k, v in grad_regions.items()}
+    sorted_context_regions = {k: sorted(v) for k, v in context_regions.items()}
+    sorted_grad_regions = {k: sorted(v) for k, v in grad_regions.items()}
 
     if _LOGGER.isEnabledFor(logging.DEBUG):
-        _LOGGER.debug("autocast_regions: %s", autocast_regions)
+        _LOGGER.debug("context_regions: %s", context_regions)
         _LOGGER.debug("grad_regions: %s", grad_regions)
 
-    assert_monotonically_increasing = bool(autocast_regions) or bool(grad_regions)
+    assert_monotonically_increasing = bool(context_regions) or bool(grad_regions)
 
     # split nodes into partitions
     highest_partition = -1
@@ -437,7 +428,7 @@ def _split_module(
             pid = split_callback(node)
             if highest_partition > pid:
                 raise AssertionError(
-                    "autocast or set_grad_enabled require monotonically increasing "
+                    "Global state nodes require monotonically increasing "
                     f"partitions: highest: {highest_partition}, this node's: {pid}"
                 )
             highest_partition = pid
@@ -472,21 +463,18 @@ def _split_module(
         raise RuntimeError("cycle exists between partitions!")
 
     # Enter prelude
-    for regions_mapping in [autocast_regions, grad_regions]:
+    for regions_mapping in [sorted_context_regions, sorted_grad_regions]:
         for node, regions in regions_mapping.items():
             if len(regions) == 0:
                 raise AssertionError("Expected at least one region for node")
-            # pyrefly: ignore [bad-index]
-            partitions[str(regions[0])].environment[node] = node
-            # pyrefly: ignore [bad-index, index-error]
-            # pyrefly: ignore [bad-index, index-error]
+            partitions[get_partition_name(regions[0])].environment[node] = node
             for r in regions[1:]:
-                partition = partitions[str(r)]
+                partition = partitions[get_partition_name(r)]
                 new_node = partition.graph.create_node(
                     op=node.op,
                     target=node.target,
-                    args=tuple(arg for arg in node.args),
-                    kwargs={},
+                    args=node.args,
+                    kwargs=node.kwargs,
                     type_expr=node.type,
                 )
                 new_node.meta = (
@@ -601,27 +589,18 @@ def _split_module(
             partition.environment[node] = new_node
 
     # Exit epilogue
-    for regions_mapping in [autocast_regions]:
-        for node in reversed(regions_mapping):
-            regions = regions_mapping[node]
-            if len(regions) == 0:
-                raise AssertionError("Expected at least one region")
-            # pyrefly: ignore [bad-index, index-error]
-            for r in regions[:-1]:
-                partition = partitions[str(r)]
-                exit_node = autocast_exits[node]
-                if exit_node is None:
-                    raise AssertionError("Missing exit node")
-                new_node = partition.graph.create_node(
-                    op=exit_node.op,
-                    target=exit_node.target,
-                    args=(partition.environment[node],),
-                    kwargs={},
-                    type_expr=exit_node.type,
-                )
-                new_node.meta = (
-                    exit_node.meta.copy()
-                )  # is it really a good idea to copy this?
+    for node, regions in reversed(sorted_context_regions.items()):
+        exit_node = context_exits[node]
+        for r in regions[:-1]:
+            partition = partitions[get_partition_name(r)]
+            new_node = partition.graph.create_node(
+                op=exit_node.op,
+                target=exit_node.target,
+                args=(partition.environment[node],),
+                kwargs={},
+                type_expr=exit_node.type,
+            )
+            new_node.meta = exit_node.meta.copy()
 
     # original module environment dict mapping node names to nodes
     orig_mod_env: dict[str, Node] = {}
@@ -1049,6 +1028,9 @@ def split_module_simple(
     codegen — this eliminates the dominant cost when creating 70-100+
     partition submodules for large models.
 
+    For graphs with ``sdpa_kernel`` contexts, this function uses
+    :func:`split_module` to keep each context local to its partition.
+
     Args:
         m: Graph module to split.
         node_to_partition: Maps each operational node to a partition ID.
@@ -1056,6 +1038,16 @@ def split_module_simple(
         partition_affix: If set, submodule names become
             ``submod_{affix}_{idx}`` instead of ``submod_{idx}``.
     """
+    enter = torch.nn.attention._enter_sdpa_kernel
+    if m.graph.find_nodes(op="call_function", target=enter, sort=False):
+        return split_module(
+            m,
+            m,
+            node_to_partition.__getitem__,
+            keep_original_order=True,
+            partition_affix=partition_affix,
+        )
+
     partition_graphs, partition_inputs, partition_outputs, seen_partitions = (
         _detect_dependencies(m, node_to_partition)
     )

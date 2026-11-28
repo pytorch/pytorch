@@ -284,18 +284,61 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
-void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
-  // TODO*eqy): should it always be the number of backends - 1 (override backend excluded?)
-  TORCH_CHECK(at::num_sdp_backends == sdp_priority_order.size(),
-    "setSDPPriority order expected ", sdp_priority_order.size() - 1, " but got ",
-    at::num_sdp_backends, " unique backends specified in priority order.");
-  for (uint32_t i = 0; i < order.size(); i++) {
-    sdp_priority_order[i] = static_cast<at::SDPBackend>(order[i]);
+namespace {
+std::array<at::SDPBackend, at::num_sdp_backends> buildSDPPriorityOrder(
+    const std::vector<int64_t>& order,
+    const std::array<at::SDPBackend, at::num_sdp_backends>& base) {
+  TORCH_CHECK(
+      order.size() <= base.size(),
+      "Invalid SDP priority order (expected at most ",
+      base.size(),
+      " backends, got ",
+      order.size(),
+      ").");
+  auto result = base;
+  auto next = result.begin();
+  std::array<bool, at::num_sdp_backends> seen{};
+  for (const auto id : order) {
+    TORCH_CHECK(
+        id >= 0 && id < at::num_sdp_backends,
+        "SDP backend ID ",
+        id,
+        " is out of range [0, ",
+        at::num_sdp_backends,
+        ").");
+    TORCH_CHECK(
+        !seen[id], "SDP priority order has a duplicate backend ID ", id, ".");
+    seen[id] = true;
+    *next++ = static_cast<at::SDPBackend>(id);
   }
+  for (const auto backend : base) {
+    if (!seen[static_cast<int>(backend)]) {
+      *next++ = backend;
+    }
+  }
+  return result;
+}
+} // namespace
+
+void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
+  user_sdp_priority_order = buildSDPPriorityOrder(order, sDPPriorityOrder());
+}
+
+void Context::setDefaultSDPPriorityOrder(const std::vector<int64_t>& order) {
+  default_sdp_priority_order =
+      buildSDPPriorityOrder(order, default_sdp_priority_order);
+}
+
+void Context::resetSDPPriorityOrder() {
+  user_sdp_priority_order = std::nullopt;
+}
+
+bool Context::hasUserSetSDPPriorityOrder() const {
+  return user_sdp_priority_order.has_value();
 }
 
 std::array<at::SDPBackend, at::num_sdp_backends> Context::sDPPriorityOrder() {
-  return sdp_priority_order;
+  return user_sdp_priority_order.value_or(default_sdp_priority_order);
 }
 
 bool Context::allowTF32OneDNN() const {

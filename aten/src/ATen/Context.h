@@ -284,7 +284,23 @@ class TORCH_API Context {
   // the math SDP kernel, you can force your code to use flash kernels.
   // The math SDP kernel can be disabled by setting
   // at::globalContext().setUserEnabledMathSDP(false) flag.
+
+  // Note [SDP Priority Order]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~
+  // The SDP backend priority is process-global. It has a platform default and
+  // an optional user order that overrides the default.
+  // setSDPPriorityOrder sets the user order, which stays active until
+  // resetSDPPriorityOrder. A backend that installs its own default must call
+  // setDefaultSDPPriorityOrder, which does not change the user order.
+  // Both setters require distinct, valid backend IDs. They append omitted
+  // backends in their previous relative order. setSDPPriorityOrder uses the
+  // effective order and setDefaultSDPPriorityOrder uses the default order.
+  // sDPPriorityOrder returns the effective order. If hasUserSetSDPPriorityOrder
+  // was false on entry, restore that state with resetSDPPriorityOrder.
   void setSDPPriorityOrder(const std::vector<int64_t>& order);
+  void setDefaultSDPPriorityOrder(const std::vector<int64_t>& order);
+  void resetSDPPriorityOrder();
+  bool hasUserSetSDPPriorityOrder() const;
   std::array<at::SDPBackend, at::num_sdp_backends> sDPPriorityOrder();
 
   void setSDPUseFlash(bool /*e*/);
@@ -512,12 +528,14 @@ class TORCH_API Context {
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool _deterministic_fill_uninitialized_memory = true;
-  std::array<at::SDPBackend, at::num_sdp_backends> sdp_priority_order = {
+  std::array<at::SDPBackend, at::num_sdp_backends> default_sdp_priority_order = {
       at::SDPBackend::flash_attention,
       at::SDPBackend::efficient_attention,
       at::SDPBackend::math,
       at::SDPBackend::cudnn_attention,
       at::SDPBackend::overrideable};
+  std::optional<std::array<at::SDPBackend, at::num_sdp_backends>>
+      user_sdp_priority_order = std::nullopt;
   bool enabled_flashSDP = true;
   bool enabled_fa3SDP = false;
   bool enabled_fa4SDP = false;

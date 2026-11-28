@@ -10,6 +10,7 @@
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/core/ScalarType.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <array>
@@ -74,20 +75,12 @@ constexpr bool kCuDNNFrontendSupportsD256 =
 constexpr bool kCuDNNFrontendSupportsD256 = false;
 #endif
 
-// tracks whether we've set the default priority order once, to avoid setting
-// it redundantly or overwriting a user-specified priority order
-// when the priority order context manager is used before the default priority
-// order is initialized the following happens:
-// (1) the current priority order is queried
-// (2) priority_order() is called, which initializes it to the default as init_ is false
-// (3) the user-specified priority order is set
-// (3.1) we are in the priority context...
-// (3.2) we exit the priority context...
-// (4) the previous priority order (default) is restored
-bool priority_order_init_ = false;
+// Initialize the platform default priority order once, only when no
+// user-specified priority order is active.
+c10::once_flag priority_order_init_flag_;
 
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
-// Needs to be kept in-sync with test_fused_chocie in test_transformers.py
+// Needs to be kept in-sync with _cudnn_sdp_preferred_by_default in test_transformers.py
 bool check_prefer_cudnn_attention() {
   static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_DEPRIORITIZED") != true;
   if (!prefer_cudnn) {
@@ -119,17 +112,22 @@ bool check_prefer_cudnn_attention() {
 
 // flash_attention V2 is universally faster than efficient_attention and Math
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
-  if (!priority_order_init_) {
-    priority_order_init_ = true;
-    if (check_prefer_cudnn_attention()) {
-        const std::vector<int64_t> cudnn_order = {static_cast<int64_t>(at::SDPBackend::cudnn_attention),
-                                                  static_cast<int64_t>(at::SDPBackend::flash_attention),
-                                                  static_cast<int64_t>(at::SDPBackend::efficient_attention),
-                                                  static_cast<int64_t>(at::SDPBackend::math)};
-        at::globalContext().setSDPPriorityOrder(cudnn_order);
-    }
+  auto& ctx = at::globalContext();
+  if (ctx.hasUserSetSDPPriorityOrder()) {
+    return ctx.sDPPriorityOrder();
   }
-  return at::globalContext().sDPPriorityOrder();
+  c10::call_once(priority_order_init_flag_, [&]() {
+    if (check_prefer_cudnn_attention()) {
+      const std::vector<int64_t> cudnn_order = {
+          static_cast<int64_t>(at::SDPBackend::cudnn_attention),
+          static_cast<int64_t>(at::SDPBackend::flash_attention),
+          static_cast<int64_t>(at::SDPBackend::efficient_attention),
+          static_cast<int64_t>(at::SDPBackend::math),
+          static_cast<int64_t>(at::SDPBackend::overrideable)};
+      ctx.setDefaultSDPPriorityOrder(cudnn_order);
+    }
+  });
+  return ctx.sDPPriorityOrder();
 }
 
 bool use_tensor_cores(sdp_params const& params, cudaDeviceProp* dprops, bool is_half) {
