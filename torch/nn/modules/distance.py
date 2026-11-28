@@ -65,7 +65,9 @@ class CosineSimilarity(Module):
     r"""Returns cosine similarity between :math:`x_1` and :math:`x_2`, computed along `dim`.
 
     .. math ::
-        \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}.
+    \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2, \epsilon) \cdot \max(\Vert x_2 \Vert _2, \epsilon)}.
+
+    See :func:`torch.nn.functional.cosine_similarity` for the corresponding functional API.
 
     Args:
         dim (int, optional): Dimension where cosine similarity is computed. Default: 1
