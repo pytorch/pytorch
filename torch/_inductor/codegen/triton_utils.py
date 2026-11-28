@@ -15,6 +15,7 @@ from ..utils import (
     _type_of,
     device_supports_fp64,
     expr_fits_within_32bit,
+    tensor_is_aligned,
     triton_version_uses_attrs_dict,
 )
 from ..virtualized import V
@@ -321,8 +322,8 @@ def is_unaligned_buffer_name(buf_name: str) -> bool:
         return False
 
     if buf_name in V.graph.constants:
-        # all constants are assumed to be aligned
-        return False
+        # Constant tensor views can have unaligned storage offsets.
+        return not tensor_is_aligned(V.graph.constants[buf_name])
 
     layout = _get_buffer_layout(buf_name)
     if isinstance(layout, torch._inductor.ir.NonOwningLayout):
