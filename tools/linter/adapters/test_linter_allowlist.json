@@ -312,7 +312,6 @@
   "test/inductor/test_aoti_cross_compile_windows.py",
   "test/inductor/test_aoti_pdl.py",
   "test/inductor/test_async_compile.py",
-  "test/inductor/test_auto_chunker.py",
   "test/inductor/test_autoheuristic.py",
   "test/inductor/test_autows_utils.py",
   "test/inductor/test_b2b_gemm.py",
