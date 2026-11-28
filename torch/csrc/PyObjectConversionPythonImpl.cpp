@@ -8,6 +8,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Layout.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/python_headers.h>
 
@@ -114,6 +115,28 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
     // defensively so we never hand back a null PyObject.
     TORCH_CHECK(
         py != nullptr, "torch_device_to_pyobject: THPDevice_New returned null");
+    return py;
+  }
+
+  at::Layout layout_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_layout_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        THPLayout_Check(obj),
+        "torch_layout_from_pyobject: expected torch.layout, got ",
+        Py_TYPE(obj)->tp_name);
+    return reinterpret_cast<THPLayout*>(obj)->layout;
+  }
+
+  PyObject* layout_to_pyobject(at::Layout layout) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_layout_to_pyobject requires the GIL to be held");
+    // getTHPLayout returns a borrowed reference to the registered singleton.
+    PyObject* py = reinterpret_cast<PyObject*>(torch::getTHPLayout(layout));
+    Py_INCREF(py);
     return py;
   }
 };

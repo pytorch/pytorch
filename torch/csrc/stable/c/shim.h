@@ -386,6 +386,16 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
  */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
+// Read the layout out of a Python torch.layout object. The returned code uses
+// the same encoding as aoti_torch_layout_*().
+AOTI_TORCH_EXPORT AOTITorchError
+torch_layout_from_pyobject(void* py_obj, int32_t* ret_layout);
+
+// Wrap a layout code (aoti_torch_layout_*() encoding) as a Python torch.layout.
+AOTI_TORCH_EXPORT AOTITorchError torch_layout_to_pyobject(
+    int32_t layout,
+    void** ret); // returns new reference
+
 // Reads an integer from at::cpu::get_cpu_capabilities().
 // Key is borrowed and NUL-terminated. Outputs are caller-owned.
 // A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
