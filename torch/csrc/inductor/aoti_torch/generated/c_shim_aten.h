@@ -17,18 +17,60 @@ extern "C" {
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_add_Tensor(AtenTensorHandle self, AtenTensorHandle other, double alpha, AtenTensorHandle* ret0);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_all(AtenTensorHandle self, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_all_dim(AtenTensorHandle self, int64_t dim, int32_t keepdim, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_all_dims(AtenTensorHandle self, const int64_t** dim, int64_t dim_len_, int32_t keepdim, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_amax(AtenTensorHandle self, const int64_t* dim, int64_t dim_len_, int32_t keepdim, AtenTensorHandle* ret0);
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_empty_strided(const int64_t* size, int64_t size_len_, const int64_t* stride, int64_t stride_len_, int32_t* dtype, int32_t* layout, int32_t* device, int32_t device_index_, int32_t* pin_memory, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_equal(AtenTensorHandle self, AtenTensorHandle other, int32_t* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_expand(AtenTensorHandle self, const int64_t* size, int64_t size_len_, int32_t implicit, AtenTensorHandle* ret0);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_fill__Scalar(AtenTensorHandle self, double value);
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_full(const int64_t* size, int64_t size_len_, double fill_value, int32_t* dtype, int32_t* layout, int32_t* device, int32_t device_index_, int32_t* pin_memory, AtenTensorHandle* ret0);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_index_fill__int_Scalar(AtenTensorHandle self, int64_t dim, AtenTensorHandle index, double value);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_index_fill__int_Tensor(AtenTensorHandle self, int64_t dim, AtenTensorHandle index, AtenTensorHandle value);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_median(AtenTensorHandle self, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_median_dim(AtenTensorHandle self, int64_t dim, int32_t keepdim, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_narrow(AtenTensorHandle self, int64_t dim, int64_t start, int64_t length, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_new_empty(AtenTensorHandle self, const int64_t* size, int64_t size_len_, int32_t* dtype, int32_t* layout, int32_t* device, int32_t device_index_, int32_t* pin_memory, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_new_zeros(AtenTensorHandle self, const int64_t* size, int64_t size_len_, int32_t* dtype, int32_t* layout, int32_t* device, int32_t device_index_, int32_t* pin_memory, AtenTensorHandle* ret0);
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_nonzero(AtenTensorHandle self, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_pad(AtenTensorHandle self, const int64_t* pad, int64_t pad_len_, const char* mode, double* value, AtenTensorHandle* ret0);
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_repeat_interleave_Tensor(AtenTensorHandle repeats, int64_t* output_size, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_repeat_interleave_self_Tensor(AtenTensorHandle self, AtenTensorHandle repeats, int64_t* dim, int64_t* output_size, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_repeat_interleave_self_int(AtenTensorHandle self, int64_t repeats, int64_t* dim, int64_t* output_size, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_roll(AtenTensorHandle self, const int64_t* shifts, int64_t shifts_len_, const int64_t* dims, int64_t dims_len_, AtenTensorHandle* ret0);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_aten_slice_Tensor(AtenTensorHandle self, int64_t dim, int64_t* start, int64_t* end, int64_t step, AtenTensorHandle* ret0);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0

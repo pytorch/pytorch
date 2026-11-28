@@ -15,6 +15,7 @@
 
 #ifdef USE_MPS
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSSleep.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
@@ -68,6 +69,20 @@ static PyObject* MPSModule_isMacOSorNewer(
   } else {
     Py_RETURN_FALSE;
   }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_hasMpp(PyObject* /*_unused*/, PyObject* /*noargs*/) {
+  HANDLE_TH_ERRORS
+#ifdef USE_MPS
+  if (at::mps::has_mpp()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+#else
+  Py_RETURN_FALSE;
+#endif
   END_HANDLE_TH_ERRORS
 }
 
@@ -301,6 +316,7 @@ static struct PyMethodDef _MPSModule_methods[] = {
      MPSModule_isMacOSorNewer,
      METH_VARARGS,
      nullptr},
+    {"_mps_has_mpp", MPSModule_hasMpp, METH_NOARGS, nullptr},
     {"_mps_get_default_generator",
      MPSModule_getDefaultMPSGenerator,
      METH_NOARGS,

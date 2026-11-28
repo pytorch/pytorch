@@ -133,7 +133,6 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
     ),
@@ -224,6 +223,16 @@ class DynamicShapesOpTests:
             check_gradient=True,
             assert_dynamic_dims={0: (0, 1, 2, 3)},
         )
+
+    def test_float_pow_symint_exponent(self):
+        # Bias correction as in Adam-like optimizers: FloatPow(0.95, ToFloat(s0))
+        def fn(x):
+            return torch.lerp(x, x * 2, 0.05 / (1.0 - 0.95 ** x.shape[0]))
+
+        cfn = torch.compile(fn, fullgraph=True, dynamic=True)
+        for n in (8, 13):
+            x = torch.randn(n, device=self.device)
+            self.assertEqual(cfn(x), fn(x))
 
 
 if RUN_CPU:
@@ -985,6 +994,21 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(orig_w, w.grad)
 
     @onlyAccelerator
+    @parametrize("mode", ["avoid_32bit_indexing_guards"])
+    def test_split_scan_int64_index(self, device, mode):
+        """A split scan (cumsum over a long row) compiled with int64 indexing."""
+
+        def fn(x):
+            return torch.cumsum(x, -1)
+
+        x = torch.rand(10 * 3 * 352 * 352, device=device)
+        with config.patch({mode: True}):
+            actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x), rtol=1e-4, atol=1e-5)
+        self.assertIn("exclusive_scan_decoupled_lookback", code)
+        self.assertIn("numel': 'i64'", code)
+
+    @onlyAccelerator
     @skipPRIVATEUSE1
     @parametrize("avoid_guards", [False, True])
     def test_avoid_32bit_indexing_guards(self, device, avoid_guards):
@@ -1518,6 +1542,19 @@ class TestInductorDynamic(DynamicShapesTestCase):
         x = torch.empty_strided((1, 4), (5, 1), device=device)
         torch._dynamo.decorators.mark_unbacked(x, 0)
         f(x)
+
+    def test_adaptive_avg_pool2d_backward_dynamic_shapes(self, device):
+        def fn(grad_output, x):
+            return torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        grad_output = torch.randn(2, 3, 5, 4, device=device)
+        # Heights 7 and 8 share the overlap bound; height 3 needs another tap.
+        for height, expected_frames in ((7, 1), (8, 1), (3, 2)):
+            x = torch.randn(2, 3, height, 9, device=device)
+            self.assertEqual(compiled(grad_output, x), fn(grad_output, x))
+            self.assertEqual(counter.frame_count, expected_frames)
 
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
     def test_unspecialized_float_operations(self, device):

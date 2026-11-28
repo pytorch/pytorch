@@ -1,23 +1,23 @@
 #include <ATen/native/mkldnn/detail/Lstm.h>
-#include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/IdeepUtils.h>
 
 #if AT_MKLDNN_ENABLED()
 
 namespace at::native::mkldnn {
 
 void lstm_forward_inference(
-    const ideep::tensor& src_layer,
-    const ideep::tensor& src_iter,
-    const ideep::tensor& src_iter_c,
-    const ideep::tensor& weights_layer,
-    const ideep::tensor& weights_iter,
-    const ideep::tensor& bias,
-    ideep::tensor& dst_layer,
-    ideep::tensor& dst_iter,
-    ideep::tensor& dst_iter_c,
+    const MkldnnMemory& src_layer,
+    const MkldnnMemory& src_iter,
+    const MkldnnMemory& src_iter_c,
+    const MkldnnMemory& weights_layer,
+    const MkldnnMemory& weights_iter,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst_layer,
+    MkldnnMemory& dst_iter,
+    MkldnnMemory& dst_iter_c,
     bool reverse,
     dnnl::prop_kind prop_kind) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto direction = reverse ? dnnl::rnn_direction::unidirectional_right2left
                            : dnnl::rnn_direction::unidirectional_left2right;
 
@@ -28,13 +28,13 @@ void lstm_forward_inference(
   auto weights_layer_desc = weights_layer.get_desc().to_format_any();
   auto weights_iter_desc = weights_iter.get_desc().to_format_any();
 
-  ideep::attr_t op_attr;
+  Attr op_attr;
   if (src_layer.get_data_type() == dnnl::memory::data_type::u8) {
-    weights_layer_desc = ideep::tensor::desc(
+    weights_layer_desc = MkldnnMemory::desc(
         weights_layer.get_dims(),
         dnnl::memory::data_type::s8,
         dnnl::memory::format_tag::any);
-    weights_iter_desc = ideep::tensor::desc(
+    weights_iter_desc = MkldnnMemory::desc(
         weights_iter.get_dims(),
         dnnl::memory::data_type::s8,
         dnnl::memory::format_tag::any);
@@ -69,10 +69,10 @@ void lstm_forward_inference(
       weights_layer.reorder_if_differ_in(pd.weights_layer_desc(), op_attr);
   auto expected_weights_iter =
       weights_iter.reorder_if_differ_in(pd.weights_iter_desc(), op_attr);
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   dnnl::lstm_forward(pd).execute(
-      ideep::stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC_LAYER, src_layer},
        {DNNL_ARG_SRC_ITER, src_iter},
        {DNNL_ARG_SRC_ITER_C, src_iter_c},
@@ -85,17 +85,17 @@ void lstm_forward_inference(
        {DNNL_ARG_SCRATCHPAD, scratchpad}});
 }
 
-std::tuple<ideep::tensor::desc, ideep::tensor::desc>
+std::tuple<MkldnnMemory::desc, MkldnnMemory::desc>
 lstm_forward_inference_expected_weights_desc(
     const dnnl::memory::dims& output_sizes,
-    const ideep::tensor& src_layer,
-    const ideep::tensor& src_iter,
-    const ideep::tensor& src_iter_c,
-    const ideep::tensor& weights_layer,
-    const ideep::tensor& weights_iter,
-    const ideep::tensor& bias,
+    const MkldnnMemory& src_layer,
+    const MkldnnMemory& src_iter,
+    const MkldnnMemory& src_iter_c,
+    const MkldnnMemory& weights_layer,
+    const MkldnnMemory& weights_iter,
+    const MkldnnMemory& bias,
     bool reverse) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto direction = reverse ? dnnl::rnn_direction::unidirectional_right2left
                            : dnnl::rnn_direction::unidirectional_left2right;
 
@@ -106,13 +106,13 @@ lstm_forward_inference_expected_weights_desc(
   auto weights_layer_desc = weights_layer.get_desc().to_format_any();
   auto weights_iter_desc = weights_iter.get_desc().to_format_any();
 
-  ideep::attr_t op_attr;
+  Attr op_attr;
   if (src_layer.get_data_type() == dnnl::memory::data_type::u8) {
-    weights_layer_desc = ideep::tensor::desc(
+    weights_layer_desc = MkldnnMemory::desc(
         weights_layer.get_dims(),
         dnnl::memory::data_type::s8,
         dnnl::memory::format_tag::any);
-    weights_iter_desc = ideep::tensor::desc(
+    weights_iter_desc = MkldnnMemory::desc(
         weights_iter.get_dims(),
         dnnl::memory::data_type::s8,
         dnnl::memory::format_tag::any);
@@ -122,7 +122,7 @@ lstm_forward_inference_expected_weights_desc(
   }
 
   auto bias_desc = bias.get_desc();
-  ideep::tensor::desc dst_layer_desc(
+  MkldnnMemory::desc dst_layer_desc(
       output_sizes, src_layer.get_data_type(), dnnl::memory::format_tag::tnc);
 
   auto pd = dnnl::lstm_forward::primitive_desc(
@@ -141,22 +141,22 @@ lstm_forward_inference_expected_weights_desc(
       op_attr);
 
   return std::make_tuple(
-      ideep::tensor::desc(pd.weights_layer_desc()),
-      ideep::tensor::desc(pd.weights_iter_desc()));
+      MkldnnMemory::desc(pd.weights_layer_desc()),
+      MkldnnMemory::desc(pd.weights_iter_desc()));
 }
 
 dnnl::lstm_forward::primitive_desc lstm_forward_training_prepare(
-    const ideep::tensor& src_layer,
-    const ideep::tensor& src_iter,
-    const ideep::tensor& src_iter_c,
-    const ideep::tensor& weights_layer,
-    const ideep::tensor& weights_iter,
-    const ideep::tensor& bias,
-    const ideep::tensor& dst_layer,
-    const ideep::tensor& dst_iter,
-    const ideep::tensor& dst_iter_c,
+    const MkldnnMemory& src_layer,
+    const MkldnnMemory& src_iter,
+    const MkldnnMemory& src_iter_c,
+    const MkldnnMemory& weights_layer,
+    const MkldnnMemory& weights_iter,
+    const MkldnnMemory& bias,
+    const MkldnnMemory& dst_layer,
+    const MkldnnMemory& dst_iter,
+    const MkldnnMemory& dst_iter_c,
     bool reverse) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto direction = reverse ? dnnl::rnn_direction::unidirectional_right2left
                            : dnnl::rnn_direction::unidirectional_left2right;
 
@@ -184,16 +184,16 @@ dnnl::lstm_forward::primitive_desc lstm_forward_training_prepare(
 
 void lstm_forward_training(
     const dnnl::lstm_forward::primitive_desc& pd,
-    const ideep::tensor& src_layer,
-    const ideep::tensor& src_iter,
-    const ideep::tensor& src_iter_c,
-    const ideep::tensor& weights_layer,
-    const ideep::tensor& weights_iter,
-    const ideep::tensor& bias,
-    const ideep::tensor& workspace,
-    ideep::tensor& dst_layer,
-    ideep::tensor& dst_iter,
-    ideep::tensor& dst_iter_c) {
+    const MkldnnMemory& src_layer,
+    const MkldnnMemory& src_iter,
+    const MkldnnMemory& src_iter_c,
+    const MkldnnMemory& weights_layer,
+    const MkldnnMemory& weights_iter,
+    const MkldnnMemory& bias,
+    const MkldnnMemory& workspace,
+    MkldnnMemory& dst_layer,
+    MkldnnMemory& dst_iter,
+    MkldnnMemory& dst_iter_c) {
   auto expected_weights_layer =
       weights_layer.reorder_if_differ_in(pd.weights_layer_desc());
   auto expected_weights_iter =
@@ -204,10 +204,10 @@ void lstm_forward_training(
   dst_layer.reinit_if_possible(pd.dst_layer_desc());
   dst_iter.reinit_if_possible(pd.dst_iter_desc());
   dst_iter_c.reinit_if_possible(pd.dst_iter_c_desc());
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   dnnl::lstm_forward(pd).execute(
-      ideep::stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC_LAYER, src_layer},
        {DNNL_ARG_SRC_ITER, src_iter},
        {DNNL_ARG_SRC_ITER_C, src_iter_c},
@@ -223,25 +223,25 @@ void lstm_forward_training(
 
 void lstm_backward(
     const dnnl::lstm_forward::primitive_desc& forward_hints,
-    const ideep::tensor& src_layer,
-    const ideep::tensor& src_iter,
-    const ideep::tensor& src_iter_c,
-    const ideep::tensor& weights_layer,
-    const ideep::tensor& weights_iter,
-    const ideep::tensor& bias,
-    const ideep::tensor& dst_layer,
-    const ideep::tensor& dst_iter,
-    const ideep::tensor& dst_iter_c,
-    const ideep::tensor& diff_dst_layer,
-    const ideep::tensor& diff_dst_iter,
-    const ideep::tensor& diff_dst_iter_c,
-    const ideep::tensor& workspace,
-    ideep::tensor& diff_src_layer,
-    ideep::tensor& diff_src_iter,
-    ideep::tensor& diff_src_iter_c,
-    ideep::tensor& diff_weights_layer,
-    ideep::tensor& diff_weights_iter,
-    ideep::tensor& diff_bias,
+    const MkldnnMemory& src_layer,
+    const MkldnnMemory& src_iter,
+    const MkldnnMemory& src_iter_c,
+    const MkldnnMemory& weights_layer,
+    const MkldnnMemory& weights_iter,
+    const MkldnnMemory& bias,
+    const MkldnnMemory& dst_layer,
+    const MkldnnMemory& dst_iter,
+    const MkldnnMemory& dst_iter_c,
+    const MkldnnMemory& diff_dst_layer,
+    const MkldnnMemory& diff_dst_iter,
+    const MkldnnMemory& diff_dst_iter_c,
+    const MkldnnMemory& workspace,
+    MkldnnMemory& diff_src_layer,
+    MkldnnMemory& diff_src_iter,
+    MkldnnMemory& diff_src_iter_c,
+    MkldnnMemory& diff_weights_layer,
+    MkldnnMemory& diff_weights_iter,
+    MkldnnMemory& diff_bias,
     bool reverse) {
   if (is_avx2_vnni_2() &&
       one_of(
@@ -252,7 +252,7 @@ void lstm_backward(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   constexpr auto f32 = dnnl::memory::data_type::f32;
   auto direction = reverse ? dnnl::rnn_direction::unidirectional_right2left
                            : dnnl::rnn_direction::unidirectional_left2right;
@@ -273,9 +273,9 @@ void lstm_backward(
   auto diff_src_layer_desc = src_layer_desc.to_type(f32);
   auto diff_src_iter_desc = src_iter_desc.to_type(f32);
   auto diff_src_iter_c_desc = src_iter_c_desc.to_type(f32);
-  auto diff_weights_layer_desc = ideep::tensor::desc(
+  auto diff_weights_layer_desc = MkldnnMemory::desc(
       weights_layer.get_dims(), f32, dnnl::memory::format_tag::any);
-  auto diff_weights_iter_desc = ideep::tensor::desc(
+  auto diff_weights_iter_desc = MkldnnMemory::desc(
       weights_iter.get_dims(), f32, dnnl::memory::format_tag::any);
   auto diff_bias_desc = bias_desc.to_type(f32);
   auto diff_dst_layer_desc = dst_layer_desc.to_type(f32);
@@ -322,16 +322,16 @@ void lstm_backward(
   diff_src_iter_c.reinit_if_possible(pd.diff_src_iter_c_desc());
 
   // oneDNN accumulates into the weight and bias gradients, so start from zero.
-  ideep::tensor expected_diff_weights_layer;
+  MkldnnMemory expected_diff_weights_layer;
   expected_diff_weights_layer.zero_init(pd.diff_weights_layer_desc());
-  ideep::tensor expected_diff_weights_iter;
+  MkldnnMemory expected_diff_weights_iter;
   expected_diff_weights_iter.zero_init(pd.diff_weights_iter_desc());
-  ideep::tensor expected_diff_bias;
+  MkldnnMemory expected_diff_bias;
   expected_diff_bias.zero_init(pd.diff_bias_desc());
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   dnnl::lstm_backward(pd).execute(
-      ideep::stream::default_stream(),
+      IStream::default_stream(),
       {{DNNL_ARG_SRC_LAYER, src_layer},
        {DNNL_ARG_SRC_ITER, src_iter},
        {DNNL_ARG_SRC_ITER_C, src_iter_c},

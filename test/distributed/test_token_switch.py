@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 
+import gc
 import importlib.util
 import logging
 import subprocess
@@ -1532,8 +1533,18 @@ instantiate_device_type_tests(TokenSwitchRoutingDtypeTest, globals(), only_for="
 class _TokenSwitchMoRIOnlyTests:
     """MoRI-only tests; the host class is TokenSwitchMoRITest."""
 
-    @parametrize("layout", ["flat", "expert_major"])
-    def test_dispatch_short_out_raises(self, layout):
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "layout,output_index",
+        [
+            ("flat", 0),
+            ("flat", 1),
+            ("flat", 2),
+            ("expert_major", 0),
+            ("expert_major", 1),
+        ],
+    )
+    def test_dispatch_short_out_raises(self, layout, output_index):
         self._init()
         ts = self.get_contract_token_switch()
         topk_idx, w, x, _nd, _exp, _ = self._contract_inputs(seed=31)
@@ -1541,10 +1552,14 @@ class _TokenSwitchMoRIOnlyTests:
         need = ts.max_expert_major_slots_per_rank
         if layout == "flat":
             need = ts.max_recv_tokens_per_rank
-        out = ts._alloc_dispatch_outputs(routing, x, w, need, HIDDEN, CONTRACT_TOP_K)
+        out = list(
+            ts._alloc_dispatch_outputs(routing, x, w, need, HIDDEN, CONTRACT_TOP_K)
+        )
+        out[output_index] = out[output_index][: need - 1]
         with self.assertRaisesRegex(ValueError, f"require at least {need} rows"):
-            ts.dispatch(routing, x, w, out=(out[0][: need - 1], out[1], out[2]))
+            ts.dispatch(routing, x, w, out=tuple(out))
 
+    @skip_if_lt_x_gpu(2)
     @parametrize("layout", ["flat", "expert_major"])
     def test_combine_backward_zeroes_unused_rows(self, layout):
         # combine ignores rows past the received slots, so their gradient is zero.
@@ -1629,6 +1644,7 @@ class TokenSwitchMoRITest(
         torch.cuda.set_device(self.device)
         dist.barrier()
 
+    @skip_if_lt_x_gpu(2)
     def test_expert_major_slots_and_combine(self):
         # One slot per (token, local expert), grouped by local expert; a second
         # dispatch on the Routing keeps the slots; unweighted combine of an identity
@@ -1677,6 +1693,7 @@ class TokenSwitchMoRITest(
         ts.combine(routing, first, out=combined)
         self.assertEqual(combined.float(), CONTRACT_TOP_K * x.float())
 
+    @skip_if_lt_x_gpu(2)
     def test_expert_major_interleaved_autograd(self):
         # Two expert_major Routings, two dispatches before either combine; each
         # token's gradient is its number of (token, expert) pairs, K.
@@ -1701,6 +1718,58 @@ class TokenSwitchMoRITest(
         self.assertEqual(
             t2.grad.float(), torch.full_like(x2, 2 * k, dtype=torch.float32)
         )
+
+
+@requires_nccl_ep()
+class TokenSwitchLifecycleTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    def _inputs(self):
+        torch.cuda.set_device(self.rank)
+        dist.barrier()
+        switch = TokenSwitchNCCL(
+            dist.distributed_c10d._get_default_group(),
+            self.world_size,
+            16,
+            self.world_size * 16,
+            128,
+        )
+        ids = torch.full(
+            (16, 1),
+            (self.rank + 1) % self.world_size,
+            device="cuda",
+            dtype=torch.int64,
+        )
+        routing = switch.create_routing(ids, layout="flat")
+        return switch, routing
+
+    def _buffers(self, rank):
+        capacity = self.world_size * 16
+        rows = torch.arange(16, device="cuda") + rank * 16 + 1
+        tokens = rows[:, None].expand(16, 64).to(torch.bfloat16)
+        weights = (rows[:, None] / 100).float()
+        received = tokens.new_zeros(capacity, 64)
+        scores = weights.new_zeros(capacity, 1)
+        ids = torch.full((capacity, 1), -1, device="cuda", dtype=torch.int64)
+        return tokens, weights, received, scores, ids
+
+    @skip_if_lt_x_gpu(2)
+    def test_handle_retains_group(self):
+        switch, routing = self._inputs()
+        ep = switch._ep
+        del switch
+        gc.collect()
+        self.assertEqual(routing.handle.get_num_recv_tokens(), 16)
+        tokens, weights, received, scores, ids = self._buffers(self.rank)
+        ep._nccl_ep_dispatch(routing.handle, tokens, weights, received, scores, ids)
+        source, _, _, _, _ = self._buffers((self.rank - 1) % self.world_size)
+        self.assertEqual(received[:16], source)
+        del routing
+        gc.collect()
 
 
 if __name__ == "__main__":

@@ -2164,6 +2164,36 @@ class TestSaveLoad(TestCase):
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
+    def test_load_namedtuple_output_whose_class_changed(self):
+        class Out(NamedTuple):
+            loss: torch.Tensor
+            logits: torch.Tensor
+
+        @dataclass
+        class DataOut:
+            loss: torch.Tensor
+            logits: torch.Tensor
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return Out(x.sum(), x * 2)
+
+        name = "test.export.test_serialize.test_load_namedtuple_output.Out"
+        pytree._register_namedtuple(Out, serialized_type_name=name)
+        artifact = serialize(export(M(), (torch.ones(2),)))
+        pytree._deregister_pytree_node(Out)
+        self.addCleanup(pytree.treespec_loads.cache_clear)
+
+        torch.export.register_dataclass(DataOut, serialized_type_name=name)
+        self.addCleanup(pytree._deregister_pytree_node, DataOut)
+        with self.assertRaisesRegex(TypeError, "not a namedtuple class"):
+            deserialize(artifact)
+
+        # The recovery the message names.
+        pytree._register_namedtuple(Out, serialized_type_name=name)
+        self.addCleanup(pytree._deregister_pytree_node, Out)
+        self.assertIsInstance(deserialize(artifact).module()(torch.ones(2)), Out)
+
     @parametrize(
         "module_cls",
         [_EmptyAutocastInNoGrad, _StepCounter, _EmptyCond],

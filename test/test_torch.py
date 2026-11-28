@@ -37,6 +37,7 @@ from torch.testing._internal.common_optimizers import (
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI200_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA, TEST_CUDA_GRAPH, run_tests, IS_JETSON,
+    MI350_ARCH, MI450_ARCH, runOnRocmArch,
     IS_FILESYSTEM_UTF8_ENCODING,
     skipIfCppFakeTensor,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
@@ -59,7 +60,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyCPU,
     preserves_device_selection,
-    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
+    dtypes, dtypesIfCUDA, dtypesIfCPU, dtypesIfXPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf)
 import torch.backends.quantized
@@ -95,6 +96,9 @@ TEST_CUDAMALLOCASYNC = TEST_CUDA and torch.cuda.get_allocator_backend() == "cuda
 
 
 is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
+
+# Device types that are expected to raise/warn nondeterministic alerts.
+NONDETERMINISTIC_ALERT_DEVICES = ('cuda', 'xpu')
 
 
 # FIXME: move to test_scatter_gather_ops
@@ -223,7 +227,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(base, torch.ones(4, device=device))
 
     @onlyNativeDeviceTypes
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5378
     @dtypes(torch.bits1x8, torch.bits2x4, torch.bits4x2, torch.bits8,
             torch.bits16, torch.float4_e2m1fn_x2)
     def test_zero_dtypes_without_fill_kernel(self, device, dtype):
@@ -354,7 +357,8 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(raises_on_data_ptr(s2))
 
     @onlyNativeDeviceTypes
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5377
+    # storage_type() returns None on XPU: TypedStorage is a deprecated API, no plan to fix.
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/2508
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
     def test_tensor_storage_type(self, device, dtype):
@@ -1417,8 +1421,8 @@ class TestTorchDeviceType(TestCase):
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_AvgPool3d(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.AvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
         res = module(input)
@@ -1426,12 +1430,12 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'avg_pool3d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'avg_pool3d_backward_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_AdaptiveAvgPool2d(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.AdaptiveAvgPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
         res = module(input)
@@ -1439,12 +1443,12 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'adaptive_avg_pool2d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'adaptive_avg_pool2d_backward_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_AdaptiveAvgPool3d(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.AdaptiveAvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
         res = module(input)
@@ -1452,12 +1456,12 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'adaptive_avg_pool3d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'adaptive_avg_pool3d_backward_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_MaxPool3d(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.MaxPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
         res = module(input)
@@ -1465,12 +1469,12 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'max_pool3d_with_indices_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'max_pool3d_with_indices_backward_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_AdaptiveMaxPool2d(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.AdaptiveMaxPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
         res = module(input)
@@ -1478,12 +1482,12 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'adaptive_max_pool2d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'adaptive_max_pool2d_backward_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_FractionalMaxPool2d(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.FractionalMaxPool2d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
         res = module(input)
@@ -1491,12 +1495,12 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'fractional_max_pool2d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'fractional_max_pool2d_backward_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_FractionalMaxPool3d(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.FractionalMaxPool3d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, 3, requires_grad=True, device=device)
         res = module(input)
@@ -1504,8 +1508,8 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'fractional_max_pool3d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'fractional_max_pool3d_backward_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @dtypes(*floating_types_and(torch.half))
     @onlyNativeDeviceTypes
@@ -1541,8 +1545,8 @@ class TestTorchDeviceType(TestCase):
             'max_unpooling3d_forward_out')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_interpolate_linear(self, device):
+        device_type = torch.device(device).type
         input = torch.randn(1, 2, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
             input,
@@ -1553,11 +1557,10 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad),
-            'upsample_linear1d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
+            f'upsample_linear1d_backward_out_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_no_nondeterministic_alert_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
 
@@ -1730,8 +1733,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(grad.cpu(), reference_input.grad, atol=atol, rtol=rtol)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
+        device_type = torch.device(device).type
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
             input,
@@ -1742,8 +1745,8 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad),
-            'upsample_bicubic2d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
+            f'upsample_bicubic2d_backward_out_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_deterministic_interpolate_bicubic(self, device):
@@ -1765,8 +1768,8 @@ class TestTorchDeviceType(TestCase):
                 input.grad = None
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
+        device_type = torch.device(device).type
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
             input,
@@ -1777,12 +1780,12 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad),
-            'upsample_trilinear3d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
+            f'upsample_trilinear3d_backward_out_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_ReflectionPad1d(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.ReflectionPad1d((1, 2))
         input = torch.randn(2, 3, 8, device=device, requires_grad=True)
         res = module(input)
@@ -1790,12 +1793,12 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'reflection_pad1d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
+            f'reflection_pad1d_backward_out_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_ReflectionPad3d(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.ReflectionPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 8, 8, 8, device=device, requires_grad=True)
         res = module(input)
@@ -1803,12 +1806,12 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'reflection_pad3d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
+            f'reflection_pad3d_backward_out_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_ReplicationPad1d(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.ReplicationPad1d((1, 2))
         input = torch.randn(2, 3, 4, device=device, requires_grad=True)
         res = module(input)
@@ -1816,12 +1819,12 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'replication_pad1d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'replication_pad1d_backward_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_ReplicationPad2d(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.ReplicationPad2d((1, 2, 3, 4))
         input = torch.randn(2, 3, 4, 4, device=device, requires_grad=True)
         res = module(input)
@@ -1831,8 +1834,8 @@ class TestTorchDeviceType(TestCase):
         # nondeterministic
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'replication_pad2d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'replication_pad2d_backward_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
         with DeterministicGuard(True):
             res = module(input)
@@ -1843,12 +1846,12 @@ class TestTorchDeviceType(TestCase):
         # not be raised
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'replication_pad2d_backward_cuda',
+            f'replication_pad2d_backward_{device_type}',
             False)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_ReplicationPad3d(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.ReplicationPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 4, 4, 4, device=device, requires_grad=True)
         res = module(input)
@@ -1856,12 +1859,12 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'replication_pad3d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'replication_pad3d_backward_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchDynamo("Warning is not raised.")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_NLLLoss(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.NLLLoss()
         input = torch.randn(2, 3, 5, 5, device=device)
         target = torch.rand(2, 5, 5, device=device).mul(3).floor().long()
@@ -1869,12 +1872,13 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: module(input, target),
-            'nll_loss2d_forward_out_cuda_template',
-            torch.device(device).type == 'cuda')
+            'nll_loss2d_forward_xpu' if device_type == 'xpu'
+            else 'nll_loss2d_forward_out_cuda_template',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_EmbeddingBag_max(self, device):
+        device_type = torch.device(device).type
         module = torch.nn.EmbeddingBag(
             4, 3, None, 2., False, 'max',
             _weight=torch.randn(4, 3, device=device, requires_grad=True))
@@ -1884,8 +1888,8 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'embedding_bag_backward_cuda_max',
-            torch.device(device).type == 'cuda')
+            f'embedding_bag_backward_{device_type}_max',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @onlyAccelerator
@@ -1964,8 +1968,8 @@ class TestTorchDeviceType(TestCase):
     # warn_only=True logs warning from the FallbackKernel: torch.ops.aten.put_.default, instead of as UserWarning:
     # [W Context.cpp:%(lineno)] Warning: put_ does not have a deterministic implementation
     @skipIfTorchInductor("warning is logged from the FallbackKernel: torch.ops.aten.put_.default when warn_only=True")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_put_accumulate(self, device):
+        device_type = torch.device(device).type
         a = torch.randn(10, device=device)
         indices = torch.tensor([0, 0], device=device)
         values = torch.tensor([0., 1.], device=device)
@@ -1974,21 +1978,22 @@ class TestTorchDeviceType(TestCase):
             self.check_nondeterministic_alert(
                 lambda: op_call(a, indices, values, accumulate=True),
                 'put_',
-                torch.device(device).type == 'cuda')
+                device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @dtypes(torch.float32)
     @dtypesIfCUDA(torch.float32, torch.int32)
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
+    @dtypesIfXPU(torch.float32, torch.int32)
     def test_nondeterministic_alert_histc(self, device, dtype):
+        device_type = torch.device(device).type
         a = torch.tensor([], device=device, dtype=dtype)
         for op_call in [torch.histc, torch.Tensor.histc]:
             self.check_nondeterministic_alert(
                 lambda: op_call(a, min=0, max=3),
-                '_histc_cuda with floating point input',
-                torch.device(device).type == 'cuda' and dtype.is_floating_point)
+                f'_histc_{device_type} with floating point input',
+                device_type in NONDETERMINISTIC_ALERT_DEVICES and dtype.is_floating_point)
 
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_bincount(self, device):
+        device_type = torch.device(device).type
         a = torch.tensor([], device=device, dtype=torch.long)
         weights = torch.tensor([], device=device)
 
@@ -1997,17 +2002,17 @@ class TestTorchDeviceType(TestCase):
             # given
             self.check_nondeterministic_alert(
                 lambda: op_call(a, weights),
-                '_bincount_cuda',
-                torch.device(device).type == 'cuda')
+                f'_bincount_{device_type}',
+                device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
             self.check_nondeterministic_alert(
                 lambda: op_call(a),
-                '_bincount_cuda',
+                f'_bincount_{device_type}',
                 False)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_grid_sample_2d(self, device):
+        device_type = torch.device(device).type
         input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, device=device)
         res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
@@ -2015,12 +2020,12 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'grid_sampler_2d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'grid_sampler_2d_backward_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_grid_sample_3d(self, device):
+        device_type = torch.device(device).type
         input = torch.empty(1, 1, 2, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, 3, device=device)
         res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
@@ -2028,8 +2033,8 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
-            'grid_sampler_3d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            f'grid_sampler_3d_backward_{device_type}',
+            device_type in NONDETERMINISTIC_ALERT_DEVICES)
 
     def test_invalid_shapes_grid_sampler(self, device):
         make_arg = partial(
@@ -3270,6 +3275,196 @@ class TestTorchDeviceType(TestCase):
         torch.cumsum(x, 0, out=y)
         self.assertFalse(y.is_contiguous())
         self.assertEqual(out, y, atol=0., rtol=0.)
+
+    @onlyCUDA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    def test_cumsum_cumprod_last_dim(self, device, dtype):
+        # On MI350 and MI450 these rows and 1-D lines cover each ROCm row-scan strategy: a group of
+        # lanes, a warp or a block per row, and long lines split into chunks. The inputs keep
+        # every result exact in `dtype` for any combine order: integers wrap around (odd factors for
+        # cumprod, so products never reach 0). Floating-point cumsum inputs are differences of a
+        # random sequence of integers that are exact in `dtype`, so every run of them sums to the
+        # difference of two of those integers, which is exact too (in each of the real and imaginary
+        # parts); over that range a wrong carry rarely cancels out. cumprod inputs are +-1 (+-1j).
+        shapes = [(8, 5), (5000, 300), (3, 5000), (3, 200_001), (5000,), (2_000_001,)]
+        for shape, op in product(shapes, (torch.cumsum, torch.cumprod)):
+            if dtype.is_floating_point or dtype.is_complex:
+                if op is torch.cumsum:
+                    high = int(2 / torch.finfo(dtype).eps)
+                    b = torch.randint(0, high, (2, *shape[:-1], shape[-1] + 1)).to(dtype)
+                    x = b[0, ..., 1:] - b[0, ..., :-1]
+                    if dtype.is_complex:
+                        x = x + 1j * (b[1, ..., 1:] - b[1, ..., :-1])
+                else:
+                    vals = torch.tensor([-1, 1] + ([1j, -1j] if dtype.is_complex else []), dtype=dtype)
+                    x = vals[torch.randint(len(vals), shape)]
+            elif op is torch.cumsum:
+                x = make_tensor(shape, dtype=dtype, device="cpu")
+            else:
+                x = torch.randint(0, 5, shape, dtype=dtype) * 2 + 1
+            expected = op(x, -1, dtype=dtype)
+            x = x.to(device)
+            self.assertEqual(op(x, -1, dtype=dtype), expected, atol=0, rtol=0)
+            # A one-element storage offset misaligns 16-byte vector accesses.
+            x_off = torch.empty(x.numel() + 1, dtype=dtype, device=device)[1:].view(shape)
+            x_off.copy_(x)
+            self.assertEqual(op(x_off, -1, dtype=dtype), expected, atol=0, rtol=0)
+            getattr(x_off, op.__name__ + "_")(-1)
+            self.assertEqual(x_off, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @dtypes(*floating_types())
+    def test_cumsum_cumprod_special_values(self, device, dtype):
+        # -inf, inf and nan on rows within one tile and across the tile and chunk boundaries of the
+        # ROCm row-scan kernels. Finite results stay exact in `dtype` for any combine order.
+        inf, nan = float("inf"), float("nan")
+        for n, op in product((300, 65536), (torch.cumsum, torch.cumprod)):
+            vals = torch.tensor([-1, 0, 1] if op is torch.cumsum else [-1, 1], dtype=dtype)
+            x = vals[torch.randint(len(vals), (4, n))]
+            x[0, :n // 2] = -inf
+            x[1, n // 3] = inf
+            x[2, 2 * n // 3] = nan
+            # inf + -inf and 0 * inf turn the rest of the row into nan.
+            x[3, n // 4] = inf if op is torch.cumsum else 0
+            x[3, n // 2] = -inf if op is torch.cumsum else inf
+            expected = op(x, 1)
+            x = x.to(device)
+            self.assertEqual(op(x, 1), expected, atol=0, rtol=0)
+            getattr(x, op.__name__ + "_")(1)
+            self.assertEqual(x, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double, torch.cfloat)
+    def test_cumsum_cumprod_no_spurious_overflow(self, device, dtype):
+        # Every run of these inputs has a finite sum and product that is exact in `dtype`, but
+        # folding elements that are not adjacent (e.g. all the 2^e first) overflows. 1-D and
+        # chunked last-dim lines on ROCm.
+        e = {torch.half: 9, torch.bfloat16: 120, torch.float: 120, torch.double: 1000, torch.cfloat: 120}[dtype]
+        for shape, op in product(((2_000_000,), (3, 200_000)), (torch.cumsum, torch.cumprod)):
+            if op is torch.cumsum:
+                pattern = [2.0**e] * 16 + [-2.0**e] * 16
+            else:
+                pattern = [2.0**e] + [1.0] * 15 + [2.0**-e] + [1.0] * 15
+            n = shape[-1]
+            line = torch.tensor(pattern, dtype=torch.double).repeat(n // len(pattern) + 1)[:n]
+            x = line.expand(shape).to(dtype).contiguous()
+            self.assertEqual(op(x.to(device), -1), op(x, -1), atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI350_ARCH + MI450_ARCH)
+    @largeTensorTest('12GB')
+    def test_cumsum_more_than_2_32_elements(self, device):
+        # The stock kernel gives each row to a single block, which is too slow for a unit test.
+        n = 2**31 + 16
+        # Random values make every chunk and tile carry visible modulo 256.
+        x = torch.randint(0, 256, (2, n), dtype=torch.uint8, device=device)
+        res = x.cumsum(1, dtype=torch.uint8)
+        # res is the cumsum modulo 256 iff it starts with x[:, 0] and each step adds x[:, i]. Checked
+        # in slices with elementwise ops, so no scan is involved and the temporaries stay small.
+        self.assertTrue(torch.equal(res[:, 0], x[:, 0]))
+        step = 2**27
+        for start in range(1, n, step):
+            end = min(start + step, n)
+            diff = res[:, start:end] - res[:, start - 1:end - 1]
+            self.assertTrue(torch.equal(diff, x[:, start:end]), f"wrong result in [{start}, {end})")
+
+    @onlyCUDA
+    @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.half, torch.bfloat16)
+    def test_cumsum_cumprod_last_dim_unaligned(self, device, dtype):
+        # Rows with an odd length that start one element into their storage, so that rows start at
+        # every offset within a dword. On ROCm the 1- and 2-byte elements are read and written as
+        # the whole dwords that cover them; long rows are also split into chunks. Runs out of
+        # place, in place and with out=, and checks that the elements on either side of the
+        # result, which share its first and last dwords, are left alone.
+        guard = 7
+        for shape in ((2_000_003,), (3, 100_003), (64, 257), (1000, 31), (1000, 33), (1000, 7), (1000, 3)):
+            if dtype.is_floating_point:
+                op = torch.cumprod
+                x = torch.tensor([-1, 1], dtype=dtype)[torch.randint(2, shape)]
+            else:
+                op = torch.cumsum
+                x = make_tensor(shape, dtype=dtype, device="cpu")
+            expected = op(x, -1, dtype=dtype)
+            n = x.numel()
+            buf = torch.full((n + 2,), guard, dtype=dtype, device=device)
+            x_off = buf[1:n + 1].view(shape)
+            x_off.copy_(x)
+            self.assertEqual(op(x_off, -1, dtype=dtype), expected, atol=0, rtol=0)
+            getattr(x_off, op.__name__ + "_")(-1)
+            self.assertEqual(x_off, expected, atol=0, rtol=0)
+            out_buf = torch.full((n + 2,), guard, dtype=dtype, device=device)
+            op(x.to(device), -1, dtype=dtype, out=out_buf[1:n + 1].view(shape))
+            self.assertEqual(out_buf[1:n + 1].view(shape), expected, atol=0, rtol=0)
+            for b in (buf, out_buf):
+                self.assertEqual(b[[0, -1]].tolist(), [guard, guard])
+
+    @onlyCUDA
+    @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
+    @dtypes(torch.int32, torch.int64, torch.float, torch.double, torch.cfloat)
+    def test_cumsum_many_short_rows(self, device, dtype):
+        # Enough rows that ROCm gives each row to a group of lanes, with row ends at every position
+        # within a lane's elements (8 for 4-byte types, 4 for 8-byte types; lengths 9 to 16), also
+        # in the first lane of a later tile (257 for 4-byte types, 129 and 257 for 8-byte types).
+        # (655360, 4) is 10 MiB or more: with the cache emptied it most likely gets an allocation of
+        # its own, so a read past the end of the last row faults. The results are exact in `dtype`.
+        shapes = [(655360, 4)] + [(40000, n) for n in (9, 10, 11, 12, 13, 14, 15, 16, 31, 63, 129, 131, 257, 262, 300)]
+        for shape in shapes:
+            if shape[0] == 655360:
+                torch.cuda.empty_cache()
+            x = torch.randint(-3, 4, shape).to(dtype)
+            expected = torch.cumsum(x, 1, dtype=dtype)
+            out = torch.empty(shape, dtype=dtype, device=device)
+            torch.cumsum(x.to(device), 1, dtype=dtype, out=out)
+            self.assertEqual(out, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI350_ARCH + MI450_ARCH)
+    @dtypes(torch.int16, torch.half)
+    def test_cumsum_cumprod_last_dim_odd_address(self, device, dtype):
+        # A 2-byte tensor at an odd address, which external memory can give (here through
+        # __cuda_array_interface__): its elements straddle dwords, so the ROCm row-scan kernels
+        # store them one at a time. Skipped on CUDA, which requires 2-byte accesses to be aligned.
+        class Interface:
+            def __init__(self, ptr, shape, typestr):
+                self.__cuda_array_interface__ = {"data": (ptr, False), "shape": shape, "typestr": typestr, "version": 2}
+
+        typestr = {torch.int16: "<i2", torch.half: "<f2"}[dtype]
+        guard = 0x5A
+        for shape in ((4, 33), (64, 257), (3, 100_003)):
+            n = shape[0] * shape[1]
+            raw = torch.full((2 * n + 2,), guard, dtype=torch.uint8, device=device)
+            t = torch.as_tensor(Interface(raw.data_ptr() + 1, shape, typestr), device=device)
+            x = torch.tensor([-1, 1], dtype=dtype)[torch.randint(2, shape)]
+            expected = torch.cumprod(x, -1, dtype=dtype)
+            t.copy_(x)
+            self.assertEqual(torch.cumprod(t, -1, dtype=dtype), expected, atol=0, rtol=0)
+            t.cumprod_(-1)
+            self.assertEqual(t, expected, atol=0, rtol=0)
+            self.assertEqual(raw[[0, -1]].tolist(), [guard, guard])
+
+    @onlyCUDA
+    @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI350_ARCH + MI450_ARCH)
+    @dtypes(torch.half, torch.bfloat16)
+    def test_cumsum_alignment_independent(self, device, dtype):
+        # These rows run the chunked last-dim path. A misaligned input switches it from vector to
+        # dword-aligned accesses, which must give the same bits, as must reruns. (CUB and hipCUB scan
+        # 1-D inputs with a look-back that can group partial sums differently from run to run.)
+        for shape in ((100_000,), (2_000_000,), (3, 200_000), (1, 16_777_216)):
+            x = torch.randn(shape, dtype=dtype, device=device)
+            ref = x.cumsum(-1)
+            x_off = torch.empty(x.numel() + 1, dtype=dtype, device=device)[1:].view(shape)
+            x_off.copy_(x)
+            self.assertEqual(x_off.cumsum(-1), ref, atol=0, rtol=0)
+            for _ in range(3):
+                self.assertEqual(x.cumsum(-1), ref, atol=0, rtol=0)
 
     def _test_cumminmax_helper(self, x, fn, expected_val, expected_ind):
         val, ind = fn(x, -1)
@@ -11008,7 +11203,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # FIXME: fix all the skipped ones below!
             test_namespace(torch.randn(1),  # noqa: F821
                            'as_strided_',
-                           re.compile('^clamp_(min|max)_?$'),
                            'is_distributed',
                            'is_nonzero',
                            'is_same_size',
