@@ -1043,22 +1043,22 @@ Keyword args:
 Example:
 
     >>> T = torch.rand(10, 10)
-    >>> t = torch.fft.ihfft2(t)
+    >>> t = torch.fft.ihfft2(T)
     >>> t.size()
     torch.Size([10, 6])
 
     Compared against the full output from :func:`~torch.fft.ifft2`, the
     Hermitian time-space signal takes up only half the space.
 
-    >>> fftn = torch.fft.ifft2(t)
-    >>> torch.allclose(fftn[..., :6], rfftn)
+    >>> fftn = torch.fft.ifft2(T)
+    >>> torch.allclose(fftn[..., :6], t)
     True
 
     The discrete Fourier transform is separable, so :func:`~torch.fft.ihfft2`
     here is equivalent to a combination of :func:`~torch.fft.ifft` and
     :func:`~torch.fft.ihfft`:
 
-    >>> two_ffts = torch.fft.ifft(torch.fft.ihfft(t, dim=1), dim=0)
+    >>> two_ffts = torch.fft.ifft(torch.fft.ihfft(T, dim=1), dim=0)
     >>> torch.allclose(t, two_ffts)
     True
 
@@ -1213,7 +1213,7 @@ Example:
     Compared against the full output from :func:`~torch.fft.ifftn`, we have all
     elements up to the Nyquist frequency.
 
-    >>> ifftn = torch.fft.ifftn(t)
+    >>> ifftn = torch.fft.ifftn(T)
     >>> torch.allclose(ifftn[..., :6], ihfftn)
     True
 
@@ -1221,7 +1221,7 @@ Example:
     here is equivalent to a combination of :func:`~torch.fft.ihfft` and
     :func:`~torch.fft.ifft`:
 
-    >>> two_iffts = torch.fft.ifft(torch.fft.ihfft(t, dim=1), dim=0)
+    >>> two_iffts = torch.fft.ifft(torch.fft.ihfft(T, dim=1), dim=0)
     >>> torch.allclose(ihfftn, two_iffts)
     True
 
