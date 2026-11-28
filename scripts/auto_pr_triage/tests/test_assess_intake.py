@@ -254,7 +254,7 @@ class MaintainerActivityTest(unittest.TestCase):
             github=mock.ANY, repo=REPOSITORY, login="maintainer"
         )
 
-    def test_label_and_team_review_request_are_activity(self) -> None:
+    def test_team_review_request_is_activity(self) -> None:
         events = [
             {
                 "event": "labeled",
@@ -282,9 +282,9 @@ class MaintainerActivityTest(unittest.TestCase):
                 author_login="author",
             )
 
-        self.assertEqual(activity, ("@maintainer", ("label_change", "review_request")))
+        self.assertEqual(activity, ("@maintainer", ("review_request",)))
 
-    def test_trigger_label_changes_are_not_activity(self) -> None:
+    def test_label_changes_are_not_activity(self) -> None:
         events = [
             {
                 "event": event,
@@ -292,7 +292,13 @@ class MaintainerActivityTest(unittest.TestCase):
                 "label": {"name": label},
             }
             for event in ("labeled", "unlabeled")
-            for label in ("open source", "bot-retriage")
+            for label in (
+                "open source",
+                "bot-retriage",
+                "module: cuda",
+                "bot-triage-error",
+                "missing actionable issue",
+            )
         ]
         with (
             mock.patch(
