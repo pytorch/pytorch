@@ -866,6 +866,24 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 3)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    def test_linear_unbacked_empty_rows(self):
+        # With an unbacked batch, 0 rows run the kernel compiled for 8, whose
+        # blocking divides by the number of row blocks.
+        mod = torch.nn.Linear(16, 32).eval()
+        x = torch.randn(8, 16)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        compiled = torch.compile(mod)
+        with verify(torch.float) as (atol, rtol):
+            self.assertEqual(compiled(x), mod(x), atol=atol, rtol=rtol)
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+            with torch.compiler.set_stance("fail_on_recompile"):
+                for rows in (0, 3):
+                    x = torch.randn(rows, 16)
+                    self.assertEqual(compiled(x), mod(x), atol=atol, rtol=rtol)
+
     @unittest.skipIf(
         not isinstance(torch._inductor.cpu_vec_isa.pick_vec_isa(), VecAMX),
         "AMX ISA support is required",

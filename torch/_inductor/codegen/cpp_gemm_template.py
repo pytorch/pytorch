@@ -56,6 +56,9 @@ GEMM_TEMPLATE_INIT_BLOCKING_BASIC_BLOCK = r"""
     constexpr int64_t Kr_blocks = (K + Kr - 1) / Kr;
 {%- if is_dynamic_M %}
     const int64_t M = {{kernel.size(GemmOut, 0)}};
+    if (M == 0) {
+        return;
+    }
     const int64_t Mr_blocks = (M + Mr - 1) / Mr;
 {%- else %}
     constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
