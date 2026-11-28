@@ -28,12 +28,12 @@ namespace at::cuda::tunable {
 namespace {
 
 template <typename T>
-int64_t CublasltBatchCount(const GemmParams<T>* /*params*/) {
+[[maybe_unused]] int64_t CublasltBatchCount(const GemmParams<T>* /*params*/) {
   return 0;
 }
 
 template <typename T>
-int64_t CublasltBatchCount(const GemmAndBiasParams<T>* /*params*/) {
+[[maybe_unused]] int64_t CublasltBatchCount(const GemmAndBiasParams<T>* /*params*/) {
   return 0;
 }
 
