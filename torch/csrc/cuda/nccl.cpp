@@ -177,6 +177,7 @@ static void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
         timeElapsed <= nccl_nonblocking_timeout(),
         "NCCL timeout when waiting for nonblocking call to become successful.");
     sched_yield(); // yield to other threads
+    std::lock_guard<std::mutex> lock(get_async_error_mutex());
     ncclCommGetAsyncError(to_nccl_comm(comm), &result);
   }
   if (result != ncclSuccess) {
@@ -204,6 +205,7 @@ static void NCCL_CHECK_TIMEOUT(
             timeElapsed <= nccl_nonblocking_timeout(),
             "NCCL timeout when waiting for nonblocking call to become successful.");
         sched_yield(); // yield to other threads
+        std::lock_guard<std::mutex> lock(get_async_error_mutex());
         ncclCommGetAsyncError(to_nccl_comm(comm), &result);
       } while (result == ncclInProgress);
       if (result != ncclSuccess) {
@@ -470,6 +472,11 @@ ncclComm_t comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank) {
 #else
   return nullptr;
 #endif
+}
+
+std::mutex& get_async_error_mutex() {
+  static std::mutex mutex;
+  return mutex;
 }
 
 void comm_destroy(ncclComm_t comm) {
