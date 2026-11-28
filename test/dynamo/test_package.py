@@ -796,6 +796,86 @@ print(eval(f"bbmod.{name}.{path}") is code)
         package.install(backends)
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
 
+    @parametrize(
+        "case",
+        ("reads_const", "returns_const", "mutates_input", "container_const"),
+    )
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_caching_precompile_assume_constant_result_tensor_bypasses(self, case):
+        @torch._dynamo.assume_constant_result
+        def get_const():
+            return torch.ones(4)
+
+        @torch._dynamo.assume_constant_result
+        def get_const_tuple():
+            return (torch.ones(4),)
+
+        if case == "reads_const":
+
+            def fn(x):
+                return x.sin() + get_const()
+
+            def make_args():
+                return (torch.ones(4),)
+
+        elif case == "returns_const":
+
+            def fn(x):
+                return x.sin(), get_const()
+
+            def make_args():
+                return (torch.ones(4),)
+
+        elif case == "container_const":
+
+            def fn(x):
+                return x.sin() + get_const_tuple()[0]
+
+            def make_args():
+                return (torch.ones(4),)
+
+        else:
+
+            def fn(x, index, src):
+                x.index_copy_(0, index, src)
+                return x + get_const()
+
+            def make_args():
+                return (torch.zeros(4), torch.tensor([0, 2]), torch.ones(2))
+
+        counter = torch._dynamo.testing.CompileCounter()
+        package = CompilePackage(fn)
+        compiled = torch._dynamo.optimize(counter, package=package)(fn)
+        ctx = DiskDynamoStore()
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(*make_args()), fn(*make_args()))
+        self.assertTrue(
+            any("assume_constant_result" in line for line in logs.output)
+        )
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.bypassed)
+        self.assertEqual(entry.guarded_codes, [])
+        self.assertEqual(package.cached_backends, {})
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        package.install(backends)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        reloaded_counter = torch._dynamo.testing.CompileCounter()
+        reloaded = torch._dynamo.optimize(reloaded_counter)(fn)
+        self.assertEqual(reloaded(*make_args()), fn(*make_args()))
+        self.assertEqual(reloaded_counter.frame_count, 1)
+
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(strict_precompile=True):
+            strict_package = CompilePackage(fn)
+            strict_compiled = torch._dynamo.optimize(counter, package=strict_package)(
+                fn
+            )
+            with self.assertRaisesRegex(PackageError, "assume_constant_result"):
+                strict_compiled(*make_args())
+
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_caching_precompile_native_forward_guard(self):
         mod = torch.nn.Module()
