@@ -2,7 +2,9 @@
 """End-to-end tests for the native-AOT bmm outer-product kernels @ CUDA.
 
 Compared exactly: K == 1 is a per-element product, with no accumulation order to differ
-from the reference. Tests needing the AOT library skip without it."""
+from the reference. Tests needing the AOT library skip without it. The AOT kernels are
+CUDA-only; the tests that hold without them (routing, declines, the JIT route) also run
+on XPU, which has the JIT override."""
 
 import contextlib
 import types
@@ -13,6 +15,7 @@ import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
+    expectedFailureXPU,
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
@@ -27,18 +30,19 @@ from torch.testing._internal.common_utils import (
 )
 
 
-def _ran_aot(fn) -> bool:
+def _ran_aot(fn, device) -> bool:
     # Both layers launch the same-named kernel, so attribution needs the JIT side
     # masked rather than a profiler name match.
     from torch.profiler import profile, ProfilerActivity
 
-    with profile(activities=[ProfilerActivity.CUDA]) as prof:
+    device_type = torch.device(device).type.upper()
+    with profile(activities=[getattr(ProfilerActivity, device_type)]) as prof:
         fn()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize(device)
     return any(
         "_bmm_outer_product_aot_kernel" in e.name
         for e in prof.events()
-        if e.device_type.name == "CUDA"
+        if e.device_type.name == device_type
     )
 
 
@@ -78,57 +82,59 @@ def _jit_masked():
             pn.triton.enable()
 
 
-@unittest.skipUnless(TEST_CUDA, "CUDA required")
-class TestNativeAotBmmOuter(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    def _outer(self, B, M, N, dtype=torch.float32, seed=0):
+class _BmmOuterInputs:
+    def _outer(self, device, B, M, N, dtype=torch.float32, seed=0):
         torch.manual_seed(seed)
-        a = torch.randn(B, M, 1, device="cuda", dtype=dtype)
-        b = torch.randn(B, 1, N, device="cuda", dtype=dtype)
+        a = torch.randn(B, M, 1, device=device, dtype=dtype)
+        b = torch.randn(B, 1, N, device=device, dtype=dtype)
         return a, b
 
-    def _uncovered_shapes(self):
+    def _uncovered_shapes(self, device):
         """No exported point serves these: an uncovered dtype, an N below the smallest
         exported tile, and a K > 1 matmul that is not an outer product."""
         return {
-            "fp16": self._outer(8, 48, 256, torch.float16),
-            "small N": self._outer(8, 48, 64),
+            "fp16": self._outer(device, 8, 48, 256, torch.float16),
+            "small N": self._outer(device, 8, 48, 64),
             "K>1 (not outer)": (
-                torch.randn(8, 48, 4, device="cuda"),
-                torch.randn(8, 4, 256, device="cuda"),
+                torch.randn(8, 48, 4, device=device),
+                torch.randn(8, 4, 256, device=device),
             ),
         }
 
-    def _declining_layouts(self):
+    def _declining_layouts(self, device):
         """Layouts the exported points bake out: they hint 16B alignment and a stride of
         1 innermost, so a kernel addressing these as if contiguous reads the wrong
         elements."""
         torch.manual_seed(7)
         return {
             "a inner stride 2": (
-                torch.randn(16, 48, 2, device="cuda")[:, :, :1],
-                torch.randn(16, 1, 256, device="cuda"),
+                torch.randn(16, 48, 2, device=device)[:, :, :1],
+                torch.randn(16, 1, 256, device=device),
             ),
             "b inner stride 2": (
-                torch.randn(16, 48, 1, device="cuda"),
-                torch.randn(16, 1, 512, device="cuda")[:, :, ::2],
+                torch.randn(16, 48, 1, device=device),
+                torch.randn(16, 1, 512, device=device)[:, :, ::2],
             ),
             "a offset 4B": (
-                torch.randn(16, 49, 1, device="cuda")[:, 1:, :],
-                torch.randn(16, 1, 256, device="cuda"),
+                torch.randn(16, 49, 1, device=device)[:, 1:, :],
+                torch.randn(16, 1, 256, device=device),
             ),
         }
+
+
+@unittest.skipUnless(TEST_CUDA, "CUDA required")
+class TestNativeAotBmmOuter(_BmmOuterInputs, TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     @skipIfNoNativeAot("bmm")
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     @parametrize("m", [48, 128])  # one M per BLOCK_M bucket
     def test_covered_buckets_route_to_aot(self, dtype, m):
-        a, b = self._outer(16, m, 256, dtype)
+        a, b = self._outer("cuda", 16, m, 256, dtype)
         ref = _reference(a, b)
         with _jit_masked():
             self.assertTrue(
-                _ran_aot(lambda: torch.bmm(a, b)),
+                _ran_aot(lambda: torch.bmm(a, b), "cuda"),
                 f"AOT kernel did not fire for {dtype} M={m}",
             )
             out = torch.bmm(a, b)
@@ -139,33 +145,14 @@ class TestNativeAotBmmOuter(TestCase):
     def test_n_tails_are_masked_and_exact(self, n):
         # BLOCK_N is 128 for every exported point, so each of these N values leaves a
         # partial tile: an unmasked store would write past the row or drop its tail.
-        a, b = self._outer(8, 48, n, seed=n)
+        a, b = self._outer("cuda", 8, 48, n, seed=n)
         ref = _reference(a, b)
         with _jit_masked():
-            self.assertTrue(_ran_aot(lambda: torch.bmm(a, b)), f"N={n} did not fire")
+            self.assertTrue(
+                _ran_aot(lambda: torch.bmm(a, b), "cuda"), f"N={n} did not fire"
+            )
             out = torch.bmm(a, b)
         self.assertEqual(out, ref, atol=0, rtol=0)
-
-    def test_layouts_the_kernels_do_not_serve_decline(self):
-        # Declining is not enough: the call must also reach aten intact.
-        for label, (a, b) in self._declining_layouts().items():
-            with _jit_masked():
-                self.assertFalse(
-                    _ran_aot(lambda a=a, b=b: torch.bmm(a, b)),
-                    f"{label} must not route to AOT",
-                )
-                out = torch.bmm(a, b)
-            self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
-
-    def test_mixed_dtypes_raise_instead_of_being_served(self):
-        a, b = self._outer(8, 48, 256)
-        b16 = self._outer(8, 48, 256, torch.bfloat16)[1]
-        with self.assertRaises(RuntimeError):
-            torch.bmm(a, b16)
-        with self.assertRaises(RuntimeError):
-            torch.bmm(
-                a, b, out=torch.empty(8, 48, 256, device="cuda", dtype=torch.bfloat16)
-            )
 
     @lazy_skip_if(
         lambda: not hasattr(torch.ops._native_aot, "covers_bmm"),
@@ -176,19 +163,19 @@ class TestNativeAotBmmOuter(TestCase):
         # a call the stub then declines loses both accelerated routes, so the two
         # answers have to agree shape for shape.
         cases = {
-            "covered f32": self._outer(16, 48, 256),
-            "covered bf16": self._outer(16, 48, 256, torch.bfloat16),
-            "small M": self._outer(16, 1, 256),
-            "large M": self._outer(4, 4096, 256),
-            "N tail": self._outer(8, 97, 129),
-            "f64": self._outer(8, 48, 256, torch.float64),
-            **self._uncovered_shapes(),
-            **self._declining_layouts(),
+            "covered f32": self._outer("cuda", 16, 48, 256),
+            "covered bf16": self._outer("cuda", 16, 48, 256, torch.bfloat16),
+            "small M": self._outer("cuda", 16, 1, 256),
+            "large M": self._outer("cuda", 4, 4096, 256),
+            "N tail": self._outer("cuda", 8, 97, 129),
+            "f64": self._outer("cuda", 8, 48, 256, torch.float64),
+            **self._uncovered_shapes("cuda"),
+            **self._declining_layouts("cuda"),
         }
         for label, (a, b) in cases.items():
             claimed = torch.ops._native_aot.covers_bmm(a, b)
             with _jit_masked():
-                fired = _ran_aot(lambda a=a, b=b: torch.bmm(a, b))
+                fired = _ran_aot(lambda a=a, b=b: torch.bmm(a, b), "cuda")
             self.assertEqual(
                 claimed,
                 fired,
@@ -211,7 +198,7 @@ class TestNativeAotBmmOuter(TestCase):
             b = torch.randn(16, 1, 256, device="cuda:1")
             ref = _reference(a, b)
             with _jit_masked():
-                self.assertTrue(_ran_aot(lambda: torch.bmm(a, b)))
+                self.assertTrue(_ran_aot(lambda: torch.bmm(a, b), "cuda"))
                 out = torch.bmm(a, b)
             self.assertEqual(torch.cuda.current_device(), 0)
             self.assertEqual(out.device, torch.device("cuda:1"))
@@ -230,22 +217,14 @@ class TestNativeAotBmmOuter(TestCase):
                 (192, True),
                 (1024, True),
             ):
-                a, b = self._outer(8, m, 128, seed=m)
+                a, b = self._outer("cuda", 8, m, 128, seed=m)
                 self.assertEqual(
-                    _ran_aot(lambda a=a, b=b: torch.bmm(a, b)),
+                    _ran_aot(lambda a=a, b=b: torch.bmm(a, b), "cuda"),
                     covered,
                     f"M={m}: expected covered={covered}",
                 )
                 out = torch.bmm(a, b)
                 self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
-
-    def test_uncovered_dtypes_and_small_n_avoid_aot(self):
-        with _jit_masked():
-            for label, (a, b) in self._uncovered_shapes().items():
-                self.assertFalse(
-                    _ran_aot(lambda a=a, b=b: torch.bmm(a, b)),
-                    f"{label} must not route to AOT",
-                )
 
     @skipIfNoNativeAot("bmm")
     @skipIfNoTritonDSL
@@ -255,7 +234,7 @@ class TestNativeAotBmmOuter(TestCase):
             _bmm_outer_product_kernel,
         )
 
-        a, b = self._outer(16, 48, 256, seed=42)
+        a, b = self._outer("cuda", 16, 48, 256, seed=42)
         kernel = _bmm_outer_product_kernel.jit_kernel
         before = _triton_cache_size(kernel)
         self.assertIsNotNone(before, "triton no longer exposes device_caches")
@@ -271,17 +250,52 @@ class TestNativeAotBmmOuter(TestCase):
         a = torch.randn(16, 1, 48, device="cuda").transpose(1, 2)
         b = torch.randn(16, 256, 1, device="cuda").transpose(1, 2)
         with _jit_masked():
-            self.assertTrue(_ran_aot(lambda: torch.bmm(a, b)))
+            self.assertTrue(_ran_aot(lambda: torch.bmm(a, b), "cuda"))
             out = torch.bmm(a, b)
         self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
 
-    def test_disabled_context_masks_aot(self):
-        a, b = self._outer(16, 48, 256, seed=4)
-        with torch.backends.python_native.triton.disabled():
-            self.assertFalse(_ran_aot(lambda: torch.bmm(a, b)))
 
-    def test_the_result_is_exact_whichever_layer_serves_it(self):
-        a, b = self._outer(16, 48, 256, seed=5)
+class TestNativeAotBmmOuterDevice(_BmmOuterInputs, TestCase):
+    # What must hold whether or not this device has AOT kernels embedded.
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_layouts_the_kernels_do_not_serve_decline(self, device):
+        # Declining is not enough: the call must also reach aten intact.
+        for label, (a, b) in self._declining_layouts(device).items():
+            with _jit_masked():
+                self.assertFalse(
+                    _ran_aot(lambda a=a, b=b: torch.bmm(a, b), device),
+                    f"{label} must not route to AOT",
+                )
+                out = torch.bmm(a, b)
+            self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
+
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5662
+    def test_mixed_dtypes_raise_instead_of_being_served(self, device):
+        a, b = self._outer(device, 8, 48, 256)
+        b16 = self._outer(device, 8, 48, 256, torch.bfloat16)[1]
+        with self.assertRaises(RuntimeError):
+            torch.bmm(a, b16)
+        with self.assertRaises(RuntimeError):
+            torch.bmm(
+                a, b, out=torch.empty(8, 48, 256, device=device, dtype=torch.bfloat16)
+            )
+
+    def test_uncovered_dtypes_and_small_n_avoid_aot(self, device):
+        with _jit_masked():
+            for label, (a, b) in self._uncovered_shapes(device).items():
+                self.assertFalse(
+                    _ran_aot(lambda a=a, b=b: torch.bmm(a, b), device),
+                    f"{label} must not route to AOT",
+                )
+
+    def test_disabled_context_masks_aot(self, device):
+        a, b = self._outer(device, 16, 48, 256, seed=4)
+        with torch.backends.python_native.triton.disabled():
+            self.assertFalse(_ran_aot(lambda: torch.bmm(a, b), device))
+
+    def test_the_result_is_exact_whichever_layer_serves_it(self, device):
+        a, b = self._outer(device, 16, 48, 256, seed=5)
         out = torch.bmm(a, b)
         self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
 
@@ -308,7 +322,7 @@ class TestNativeAotBmmOut(TestCase):
         storage = torch.full((2, 48, 128 + padding), -1, device=device, dtype=dtype)
         out = storage[:, :, :128]
         with _jit_masked():
-            self.assertTrue(_ran_aot(lambda: torch.bmm(a, b, out=out)))
+            self.assertTrue(_ran_aot(lambda: torch.bmm(a, b, out=out), device))
         self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
         self.assertEqual(storage[:, :, 128:], torch.full_like(storage[:, :, 128:], -1))
 
@@ -342,7 +356,7 @@ class TestNativeAotBmmDeclaration(TestCase):
 
 
 class TestNativeBmmJit(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfNoTritonDSL
     @parametrize("other_op_embedded", [False, True])
@@ -392,9 +406,14 @@ class TestNativeBmmJit(TestCase):
 
 
 instantiate_parametrized_tests(TestNativeAotBmmOuter)
+instantiate_device_type_tests(
+    TestNativeAotBmmOuterDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 instantiate_parametrized_tests(TestNativeAotBmmDeclaration)
 instantiate_device_type_tests(TestNativeAotBmmOut, globals(), only_for="cuda")
-instantiate_device_type_tests(TestNativeBmmJit, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestNativeBmmJit, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
