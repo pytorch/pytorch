@@ -471,14 +471,35 @@ def _create_delayed_compile_callback(
 ) -> Callable[..., Any]:
     def callback_fn(*args: Any, **kwargs: Any) -> convert_frame.ConvertFrameReturn:
         frame = args[0]
+        compiler_fn = callback._torchdynamo_orig_backend._torchdynamo_orig_backend  # type: ignore[union-attr]
+        wrapped_callback = _create_wrapped_callback(compiler_fn)
+        if (
+            convert_frame.get_frame_skip_reason(
+                frame, wrapped_callback._torchdynamo_orig_backend
+            )
+            is not None
+        ):
+            # Dynamo won't compile this frame (e.g. a frame entered while
+            # make_fx is tracing, whose locals are proxy/fake tensors), so
+            # don't record its locals as example inputs; let the wrapped
+            # callback apply its usual skip handling.
+            return wrapped_callback(*args, **kwargs)
+
         example_inputs = _get_or_add_example_inputs(frame)
 
         if len(example_inputs) == 1:
             if stance == "eager_then_compile":
+                # Run this call fully eagerly: frames it calls may still use
+                # code that is already compiled, but must not start new
+                # compiles. Otherwise any nested frame seen twice during this
+                # call (including torch internals such as a HOP's __call__)
+                # would be compiled as an entry point. Only this call is
+                # affected (apply_to_code=False), so later calls can compile.
                 return ConvertFrameReturn(
                     frame_exec_strategy=FrameExecStrategy(
-                        FrameAction.DEFAULT, FrameAction.DEFAULT
-                    )
+                        FrameAction.DEFAULT, FrameAction.RUN_ONLY
+                    ),
+                    apply_to_code=False,
                 )
             elif stance == "aot_eager_then_compile":
                 aot_eager_fn = get_compiler_fn("aot_eager")
@@ -486,8 +507,7 @@ def _create_delayed_compile_callback(
 
         dynamism = track_dynamism_across_examples(example_inputs)
         code_context.get_context(frame.f_code)["dynamism"] = dynamism
-        compiler_fn = callback._torchdynamo_orig_backend._torchdynamo_orig_backend  # type: ignore[union-attr]
-        return _create_wrapped_callback(compiler_fn)(*args, **kwargs)
+        return wrapped_callback(*args, **kwargs)
 
     # to prevent cache miss due to different backend
     callback_fn._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
