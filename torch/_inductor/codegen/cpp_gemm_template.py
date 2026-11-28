@@ -28,6 +28,7 @@ from .cpp_micro_gemm import (
     CppMicroBrgemm,
     CppMicroGemm,
     CppMicroGemmAMX,
+    CppMicroGemmBF16MMLA,
     CppMicroGemmFP32Vec,
     create_micro_gemm,
     is_int8_woq_gemm_small_m_dim_corner_case,
@@ -1689,6 +1690,8 @@ class CppGemmTemplate(CppTemplate):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
         if isinstance(micro_gemm, CppMicroBrgemm):
             counters["inductor"]["cpp_micro_brgemm_counter"] += 1
+        if isinstance(micro_gemm, CppMicroGemmBF16MMLA):
+            counters["inductor"]["cpp_micro_gemm_bf16_mmla_counter"] += 1
 
         L1_cache_size = torch.cpu.get_capabilities().get(
             "l1d_cache_size", 0
