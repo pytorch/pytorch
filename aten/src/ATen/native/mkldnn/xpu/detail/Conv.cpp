@@ -5,10 +5,151 @@
 
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#include <ATen/xpu/XPUGraphsUtils.h>
+#include <c10/core/GradMode.h>
+#include <c10/util/env.h>
+#include <c10/xpu/XPUStream.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
 
+#include <list>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+
 namespace at::native::onednn {
+
+namespace {
+// Opt-in (TORCH_XPU_CONV_WEIGHT_CACHE=1): inference convolutions pack each
+// weight once into the layout the primitive prefers; with plain weights jit:ir
+// re-lays them out inside every execution. A packed copy stays allocated until
+// its weight is freed and a later miss drops it, or until LRU eviction (extra
+// memory roughly equal to the conv weights). Entries are validated with the
+// weight's version counter, which writes through an alias with its own counter
+// (e.g. `w.data.mul_()`) do not bump, so such writes are not seen.
+class PackedWeightCache {
+ public:
+  static PackedWeightCache& instance() {
+    static PackedWeightCache c;
+    return c;
+  }
+
+  static bool enabled() {
+    static const bool on =
+        c10::utils::check_env("TORCH_XPU_CONV_WEIGHT_CACHE") == true;
+    return on;
+  }
+
+  // Inference tensors have no version counter, so in-place updates to them
+  // could not be detected; packing during graph capture would tie the cached
+  // buffer to the graph's memory pool.
+  static bool cacheable(const at::Tensor& weight) {
+    return !weight.is_inference() &&
+        at::xpu::currentStreamCaptureStatus() ==
+        c10::xpu::CaptureStatus::Executing;
+  }
+
+  at::Tensor get(
+      const at::Tensor& weight,
+      const dnnl::memory::desc& plain_md,
+      const dnnl::memory::desc& packed_md,
+      dnnl::engine& engine,
+      dnnl::stream& stream,
+      const std::vector<sycl::event>& deps) {
+    // Per stream, so a buffer is only freed on the stream that uses it.
+    std::string key = std::to_string(weight.device().index()) + ":" +
+        std::to_string(c10::xpu::getCurrentXPUStream().id()) + ":" +
+        std::to_string(reinterpret_cast<uintptr_t>(weight.const_data_ptr()));
+    // Not get_blob(): its bytes differ between equal descs from different
+    // primitive descriptors.
+    append_layout(key, plain_md);
+    append_layout(key, packed_md);
+    const int64_t version = weight._version();
+    c10::StorageImpl* storage = weight.storage().unsafeGetStorageImpl();
+
+    std::lock_guard<std::mutex> guard(mutex_);
+    auto it = map_.find(key);
+    if (it != map_.end() && it->second.version == version &&
+        it->second.storage.lock().get() == storage &&
+        it->second.packed_md == packed_md) {
+      lru_.splice(lru_.begin(), lru_, it->second.lru_it);
+      return it->second.packed;
+    }
+    if (it != map_.end()) {
+      erase(it);
+    }
+    // Drop entries whose weight has been freed.
+    for (auto e = map_.begin(); e != map_.end();) {
+      e = e->second.storage.expired() ? erase(e) : std::next(e);
+    }
+
+    at::Tensor packed = at::empty(
+        {static_cast<int64_t>(packed_md.get_size())},
+        weight.options().dtype(at::kByte));
+    auto src_m = make_onednn_memory(plain_md, engine, weight.const_data_ptr());
+    auto dst_m =
+        make_onednn_memory(packed_md, engine, packed.mutable_data_ptr());
+    dnnl::sycl_interop::execute(
+        dnnl::reorder(src_m, dst_m),
+        stream,
+        {{DNNL_ARG_FROM, src_m}, {DNNL_ARG_TO, dst_m}},
+        deps);
+
+    lru_.push_front(key);
+    map_.emplace(
+        key,
+        Entry{
+            weight.storage().getWeakStorageImpl(),
+            version,
+            packed_md,
+            packed,
+            lru_.begin()});
+    while (map_.size() > kCapacity) {
+      erase(map_.find(lru_.back()));
+    }
+    return packed;
+  }
+
+ private:
+  static constexpr size_t kCapacity = 1024;
+  struct Entry {
+    // weak: does not keep the weight alive; also pins the StorageImpl address
+    // so a new weight cannot alias a dead entry
+    c10::weak_intrusive_ptr<c10::StorageImpl> storage;
+    int64_t version;
+    dnnl::memory::desc packed_md;
+    at::Tensor packed;
+    std::list<std::string>::iterator lru_it;
+  };
+  using Map = std::unordered_map<std::string, Entry>;
+
+  static void append_layout(std::string& key, const dnnl::memory::desc& md) {
+    auto append = [&key](const dnnl::memory::dims& v) {
+      key += '|';
+      for (auto x : v) {
+        key += std::to_string(x) + ',';
+      }
+    };
+    key += '|' + std::to_string(static_cast<int>(md.get_data_type())) + ',' +
+        std::to_string(static_cast<int>(md.get_format_kind()));
+    append(md.get_dims());
+    append(md.get_padded_dims());
+    append(md.get_padded_offsets());
+    append(md.get_strides());
+    append(md.get_inner_blks());
+    append(md.get_inner_idxs());
+  }
+
+  Map::iterator erase(Map::iterator it) {
+    lru_.erase(it->second.lru_it);
+    return map_.erase(it);
+  }
+
+  std::mutex mutex_;
+  std::list<std::string> lru_;
+  Map map_;
+};
+} // namespace
 
 constexpr int src_batch_size_dim = 0;
 constexpr int weight_dst_channels_dim = 0;
@@ -119,12 +260,23 @@ sycl::event convolution(
 
   at::native::onednn::apply_tf32_if_allowed(pattr);
 
+  // No autograd graph is recorded with grad mode off, whatever requires_grad
+  // says (module parameters keep requires_grad=True under no_grad).
+  const bool inference = !at::GradMode::is_enabled();
+  const bool cache_weights = inference && PackedWeightCache::enabled() &&
+      PackedWeightCache::cacheable(weight);
+  auto weight_pd_md = cache_weights ? dnnl::memory::desc(
+                                          weight_md.get_dims(),
+                                          weight_md.get_data_type(),
+                                          dnnl::memory::format_tag::any)
+                                    : weight_md;
+
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
       engine,
-      dnnl::prop_kind::forward,
+      inference ? dnnl::prop_kind::forward_inference : dnnl::prop_kind::forward,
       dnnl::algorithm::convolution_direct,
       src_md,
-      weight_md,
+      weight_pd_md,
       bia_md,
       dst_md,
       _stride,
@@ -137,7 +289,15 @@ sycl::event convolution(
   at::Tensor src_blocked, weight_blocked, dst_blocked = dst;
 
   src_m = make_onednn_memory(src_md, engine, src.const_data_ptr());
-  weight_m = make_onednn_memory(weight_md, engine, weight.const_data_ptr());
+  if (cache_weights && conv_fwd_pd.weights_desc() != weight_md) {
+    weight_blocked = PackedWeightCache::instance().get(
+        weight, weight_md, conv_fwd_pd.weights_desc(), engine, stream, deps);
+    weight_m = make_onednn_memory(
+        conv_fwd_pd.weights_desc(), engine, weight_blocked.mutable_data_ptr());
+  } else {
+    weight_m = make_onednn_memory(
+        conv_fwd_pd.weights_desc(), engine, weight.const_data_ptr());
+  }
   dst_m = make_onednn_memory(dst_md, engine, dst.mutable_data_ptr());
 
   std::unordered_map<int, dnnl::memory> args;
