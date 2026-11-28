@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import product
 from typing import TypeVar
-from unittest import expectedFailure, mock, skip, skipUnless
+from unittest import expectedFailure, mock, skip
 from unittest.mock import patch
 
 import sympy
@@ -61,6 +61,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
 )
 from torch.testing._internal.common_device_type import (
+    Capability,
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
@@ -68,19 +69,21 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
-    IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED as TEST_ON_CPU,
-    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
+    IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED,
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
     largeTensorTest,
     preserves_device_selection,
+    requires_capabilities,
     skipCPUIf,
     skipCUDAIf,
+    skipIf,
     skipMPSIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     IS_LINUX,
     isRocmArchAnyOf,
     MI200_ARCH,
@@ -92,23 +95,18 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
 )
-from torch.testing._internal.inductor_utils import (
-    HAS_GPU,
-    HAS_MPS,
-    running_on_tdm_device,
-)
+from torch.testing._internal.inductor_utils import running_on_tdm_device
 from torch.utils._triton import has_triton, has_triton_tma_device
 
 
-# Use this decorator only when hitting Triton bugs on H100
-running_on_a100_only = skipUnless(
-    (
-        (torch.cuda.is_available() and has_triton())
-        and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip)
-    )
-    or (torch.xpu.is_available() and has_triton()),
-    "Requires Triton + A100 or Triton + ROCm or Triton + Intel GPU",
-)
+# These two cases hit Triton bugs on H100+, so they only run on A100, ROCm, or
+# an XPU with Triton. The device probe lives here because ACCELERATOR tests must
+# not call device-specific APIs directly (pytorch/test/REVIEW.md Rule 4).
+def _running_on_a100_rocm_or_xpu_with_triton() -> bool:
+    if torch.cuda.is_available() and has_triton():
+        return torch.cuda.get_device_capability() == (8, 0) or bool(torch.version.hip)
+    return torch.xpu.is_available() and has_triton()
+
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 
@@ -193,6 +191,19 @@ def skip_on_rocm(test_func):
     IS_ROCM = torch.cuda.is_available() and torch.version.hip
     decorated_func = skipCUDAIf(IS_ROCM, "Not supported on ROCM")(test_func)
     return decorated_func
+
+
+def _rocm_arch_and_xcc_count(device):
+    """Return (remap_by_default, xcc_count) for ROCm, (False, None) elsewhere.
+
+    gcnArchName and xcc_count are only exposed by torch.cuda.get_device_properties,
+    so this CUDA-specific probe lives here instead of inside an ACCELERATOR test
+    (pytorch/test/REVIEW.md Rule 4).
+    """
+    if torch.version.hip is None or torch.device(device).type != "cuda":
+        return False, None
+    props = torch.cuda.get_device_properties(device)
+    return props.gcnArchName.split(":")[0] in ("gfx942", "gfx950"), props.xcc_count
 
 
 def skip_on_xpu(test_func):
@@ -297,22 +308,26 @@ class DeviceConfig:
 
 
 device_configs = {}
-# Tests are skipped when no device is supported, so CPU as default is safe
-test_device = ("cpu",)
-if HAS_GPU:
-    if TEST_ON_CUDA:
-        if TEST_ON_CPU:
-            test_device = (
-                "cuda",
-                "cpu",
-            )
-        else:
-            test_device = ("cuda",)
-    elif TEST_ON_XPU:
-        torch._C._set_onednn_allow_tf32(True)
-        test_device = ("xpu",)
-elif HAS_MPS:
-    test_device = ("mps",)
+# Tests are skipped when no device is supported, so CPU as default is safe.
+# CPU flex-attention variants are registered only when the CPU platform supports
+# flex attention and the local accelerator is CUDA (or there is no accelerator,
+# i.e. a CPU-only host); other backends instantiate only themselves. Expressed
+# as an exclusion list because ACCELERATOR classes must not use only_for
+# (pytorch/test/REVIEW.md Rule 4); per-device skips stay on the decorators.
+_except_for_cpu = (
+    None
+    if (
+        not torch.accelerator.is_available()
+        or (
+            torch.accelerator.current_accelerator().type == "cuda"
+            and IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
+        )
+    )
+    else "cpu"
+)
+
+if TEST_ON_XPU:
+    torch._C._set_onednn_allow_tf32(True)
 
 
 class SubstringSet:
@@ -634,6 +649,8 @@ def _tdm_operand(name, stride, size=(2, 4, 128, 64), offset=0, dtype=torch.float
 # Host-side gate logic. Device capability is mocked, so these are not ROCm-only:
 # running them on CUDA and XPU builds is what keeps the gate honest there too.
 class TestFlexAttentionTDMOptions(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     _PREREQS = "torch._inductor.utils._gfx1250_device_prereqs"
 
     def test_flex_tdm_gate_checks_layout_and_offset(self):
@@ -945,6 +962,8 @@ def _check_int64_decode_narrows_coordinates(
     "requires gfx1250 with ROCm 7.14+ and TDM-capable Triton",
 )
 class TestFlexAttentionTDMEndToEnd(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # Neither length divides any default tile, so every descriptor block has a
     # masked tail and the bounds handling is always exercised.
     Q_LEN = 509
@@ -1317,8 +1336,10 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
             torch.testing.assert_close(actual.grad, expected.grad, atol=5e-2, rtol=5e-2)
 
 
-@large_tensor_test_class("2GB", device=test_device[0])
+@large_tensor_test_class("2GB")
 class TestFlexAttention(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     setUp = preserves_device_selection(InductorTestCase.setUp)
     setUpClass = classmethod(
         preserves_device_selection(InductorTestCase.setUpClass.__func__)
@@ -2208,7 +2229,10 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(score_mod, dtype, device=device)
         self.run_test_with_paged_attention(score_mod, dtype, device=device)
 
-    @running_on_a100_only
+    @skipIf(
+        not _running_on_a100_rocm_or_xpu_with_triton(),
+        "Requires Triton + A100 or Triton + ROCm or Triton + Intel GPU",
+    )
     @common_utils.parametrize("score_mod", test_score_mods)
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
@@ -2224,7 +2248,10 @@ class TestFlexAttention(InductorTestCase):
         )
         self.run_test_with_call(attention, dtype, device, B, H, 64, D, B, H, 64, D)
 
-    @running_on_a100_only
+    @skipIf(
+        not _running_on_a100_rocm_or_xpu_with_triton(),
+        "Requires Triton + A100 or Triton + ROCm or Triton + Intel GPU",
+    )
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
@@ -2457,10 +2484,8 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @skip_on_cpu
     @skip_on_mps  # hardcodes kernel_options={"BACKEND": "TRITON"}
+    @requires_capabilities(Capability.dtype.bf16)
     def test_kv_order_invariance_padded_causal(self, device):
-        if device == "cuda" and not PLATFORM_SUPPORTS_BF16:
-            self.skipTest("bf16 is required for this regression test")
-
         batch_size = 1
         q_heads = 16
         kv_heads = 4
@@ -3013,13 +3038,11 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @skip_on_cpu
     @expected_not_implemented_on_mps
+    @requires_capabilities(Capability.dtype.bf16)
     def test_bf16_score_mod_captured_grad_dtype(self, device):
         """
         Tests with tensors that require gradients with bf16 dtype in the score_mod
         """
-        if not PLATFORM_SUPPORTS_BF16:
-            self.skipTest("Platform does not support bf16")
-
         B_local, H_local, S_local, D_local = 2, 4, 32, 64
         dtype = torch.bfloat16
         x = torch.randn(
@@ -3350,12 +3373,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         run()
         torch._dynamo.reset()
         gc.collect()
-        if torch.cuda.is_available():
+        if (
+            torch.accelerator.is_available()
+            and torch.accelerator.current_accelerator().type == "cuda"
+        ):
             torch._C._cuda_clearCublasWorkspaces()
         torch.accelerator.empty_cache()
         torch._dynamo.reset()
         gc.collect()
-        if torch.cuda.is_available():
+        if (
+            torch.accelerator.is_available()
+            and torch.accelerator.current_accelerator().type == "cuda"
+        ):
             torch._C._cuda_clearCublasWorkspaces()
         torch.accelerator.empty_cache()
 
@@ -3436,8 +3465,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out1.backward(grad)
         out2 = torch.compile(m2)(q2, k2, v2)
         out2.backward(grad)
-        if device == "cuda":
-            torch.cuda.synchronize()
+        torch.accelerator.synchronize(device)
 
         pairs = [
             (out1, out2),
@@ -4501,8 +4529,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @skip_on_cpu
     @supported_platform
-    @skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
-    @skip_on_mps  # requires PLATFORM_SUPPORTS_FP8
+    @requires_capabilities(Capability.dtype.fp8)
+    @skip_on_mps  # requires the FP8 capability
     def test_mixed_dtypes_sqnr_per_tensor(self, device):
         query_ref = torch.testing.make_tensor(
             (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
@@ -4532,8 +4560,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @skip_on_cpu
     @supported_platform
-    @skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
-    @skip_on_mps  # requires PLATFORM_SUPPORTS_FP8
+    @requires_capabilities(Capability.dtype.fp8)
+    @skip_on_mps  # requires the FP8 capability
     def test_mixed_dtypes_sqnr_per_head(self, device):
         query_ref = torch.testing.make_tensor(
             (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
@@ -4831,7 +4859,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @skipUnless(IS_SM10X, "guards an sm_10x Triton miscompile")
+    @skipIf(not IS_SM10X, "guards an sm_10x Triton miscompile")
     @common_utils.parametrize("qk_head_dim", [64, 512])
     def test_head_dim_512_default_configs(self, device, qk_head_dim):
         # https://github.com/triton-lang/triton/issues/10309
@@ -5724,12 +5752,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out = torch.compile(flex_attention, fullgraph=True)(q, k, v)
             return torch.autograd.grad(out.sum(), (q, k, v))
 
-        remap_by_default = False
-        xcc_count = None
-        if torch.version.hip is not None and torch.device(device).type == "cuda":
-            props = torch.cuda.get_device_properties(device)
-            remap_by_default = props.gcnArchName.split(":")[0] in ("gfx942", "gfx950")
-            xcc_count = props.xcc_count
+        remap_by_default, xcc_count = _rocm_arch_and_xcc_count(device)
 
         # A stubbed count shows the default is read from the device, not assumed.
         class ThreeXccs:
@@ -5784,10 +5807,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @skip_on_mps
     @skip_on_xpu
+    @requires_capabilities(Capability.dtype.bf16)
     def test_backward_kernel_options_filtering(self, device):
-        if not PLATFORM_SUPPORTS_BF16:
-            self.skipTest("bf16 is required for this regression test")
-
         b, h, n, c = 1, 8, 234, 16
         block_size = 32
 
@@ -5951,113 +5972,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     @skip_on_mps
-    @skip_on_xpu
-    def test_flex_flash_honors_sparse_metadata_with_trivial_mask(self, device):
-        """FLASH should honor BlockMask metadata without relying on mask_mod."""
-        from torch._inductor.kernel.flex.flex_flash_attention import (
-            ensure_flash_available,
-        )
-
-        if not ensure_flash_available():
-            self.skipTest("flash-attn-4 is not available")
-        if torch.cuda.get_device_capability(device)[0] not in (10, 11):
-            self.skipTest("FA4 sparse block path in this test targets SM100+")
-
-        torch.manual_seed(0)
-        batch = 1
-        heads = 1
-        q_blocks = 2
-        kv_blocks = 2
-        q_block_size = 256
-        kv_block_size = 128
-        head_dim = 128
-        top_k = 1
-        q = torch.randn(
-            batch,
-            heads,
-            q_blocks * q_block_size,
-            head_dim,
-            device=device,
-            dtype=torch.bfloat16,
-        )
-        k = torch.randn(
-            batch,
-            heads,
-            kv_blocks * kv_block_size,
-            head_dim,
-            device=device,
-            dtype=torch.bfloat16,
-        )
-        v = torch.randn(
-            batch,
-            heads,
-            kv_blocks * kv_block_size,
-            head_dim,
-            device=device,
-            dtype=torch.bfloat16,
-        )
-
-        selected = torch.tensor(
-            [[[[0], [1]]]],
-            device=device,
-            dtype=torch.int32,
-        )
-        num_blocks = torch.full(
-            selected.shape[:-1], top_k, device=device, dtype=torch.int32
-        )
-        zero_num_blocks = torch.zeros_like(num_blocks)
-        zero_indices = torch.zeros(
-            *selected.shape[:-1], kv_blocks, device=device, dtype=torch.int32
-        )
-        sparse_indices = torch.zeros_like(zero_indices)
-        sparse_indices[..., :top_k] = selected
-
-        block_map = torch.zeros(
-            batch, heads, q_blocks, kv_blocks, device=device, dtype=torch.bool
-        )
-        block_map.scatter_(-1, selected.long(), True)
-        dense_mask = block_map.repeat_interleave(q_block_size, -2).repeat_interleave(
-            kv_block_size, -1
-        )
-        ref = (
-            torch.softmax(
-                (q @ k.transpose(-2, -1) / math.sqrt(head_dim)).masked_fill(
-                    ~dense_mask, -float("inf")
-                ),
-                dim=-1,
-            )
-            @ v
-        )
-
-        block_masks = {
-            "full": BlockMask.from_kv_blocks(
-                kv_num_blocks=zero_num_blocks,
-                kv_indices=zero_indices,
-                full_kv_num_blocks=num_blocks,
-                full_kv_indices=sparse_indices,
-                BLOCK_SIZE=(q_block_size, kv_block_size),
-                seq_lengths=(q_blocks * q_block_size, kv_blocks * kv_block_size),
-            ),
-            "partial": BlockMask.from_kv_blocks(
-                kv_num_blocks=num_blocks,
-                kv_indices=sparse_indices,
-                BLOCK_SIZE=(q_block_size, kv_block_size),
-                seq_lengths=(q_blocks * q_block_size, kv_blocks * kv_block_size),
-            ),
-        }
-        flash = torch.compile(
-            functools.partial(flex_attention, kernel_options={"BACKEND": "FLASH"}),
-            dynamic=False,
-        )
-        for name, block_mask in block_masks.items():
-            with self.subTest(name=name):
-                out = flash(q, k, v, block_mask=block_mask)
-                torch.cuda.synchronize()
-                self.assertEqual(out, ref, atol=5e-2, rtol=5e-2)
-
-    @supported_platform
-    @skip_on_cpu
-    @skip_on_mps
     def test_backend_auto_matches_triton_large(self, device):
         """BACKEND='AUTO' should follow Triton heuristics on large shapes."""
         make_tensor = functools.partial(
@@ -6138,35 +6052,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.assertEqual(decode_out.shape, (1, 2, 64, 64))
         torch.testing.assert_close(default_out, decode_out, atol=3e-3, rtol=3e-3)
-
-    def test_unbacked_flex_decoding_eligibility_falls_back(self, device):
-        from torch._inductor.kernel.flex.flex_decoding import _use_flex_decoding
-        from torch._inductor.sizevars import SizeVarAllocator
-        from torch._inductor.virtualized import V
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        class FakeBuffer:
-            def __init__(self, size):
-                self.size = size
-
-            def get_size(self):
-                return self.size
-
-        shape_env = ShapeEnv()
-        seq_len = shape_env.create_unbacked_symint().node.expr
-        shape_env.var_to_hint_override[seq_len] = 64
-        graph = mock.Mock(sizevars=SizeVarAllocator(shape_env))
-
-        with V.set_graph_handler(graph):
-            self.assertFalse(
-                _use_flex_decoding(
-                    FakeBuffer([1, 2, seq_len, 64]),
-                    FakeBuffer([1, 1, 1, 1]),
-                    FakeBuffer([1, 2, seq_len, 64]),
-                    {},
-                    False,
-                )
-            )
 
     def test_backward_fake_symbolic_query_key_batch_metadata(self, device):
         from torch._dynamo.source import LocalSource
@@ -8992,6 +8877,8 @@ class GraphModule(torch.nn.Module):
 
 
 class TestBlockMask(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     setUpClass = classmethod(
         preserves_device_selection(InductorTestCase.setUpClass.__func__)
     )
@@ -9769,20 +9656,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             lambda msg: f"{msg}\nExpected output shape {expected_shape}, but got {result.shape}",
         )
 
-    @supported_platform
-    @skip_on_xpu
-    @skip_on_mps  # uses torch.cuda.CUDAGraph; CUDA-only
-    def test_create_is_cuda_graphable(self, device):
-        def mask_mod(b, h, q, kv):
-            return q >= kv
-
-        g = torch.cuda.CUDAGraph()
-
-        with torch.cuda.graph(g):
-            create_block_mask(mask_mod, None, None, 256, 256)
-
-        g.replay()
-
     @common_utils.parametrize("compile", [False, True])
     @supported_platform
     @expected_not_implemented_on_mps  # no backward yet
@@ -10443,8 +10316,10 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 )
 
 
-@large_tensor_test_class("2GB", device=test_device[0])
+@large_tensor_test_class("2GB")
 class TestPagedAttention(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _check_equal(
         self,
         golden_out: torch.Tensor,
@@ -10940,16 +10815,6 @@ ROCM_FLAKY_LEARNABLE_BIAS_CASES = {
 }
 
 
-supports_learnable_bias = unittest.skipUnless(
-    (
-        (torch.xpu.is_available() and has_triton())
-        or (torch.cuda.is_available() and has_triton())
-        and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip)
-    ),
-    "Requires Triton + A100 or Triton + ROCm",
-)
-
-
 def _skip_rocm_flaky_learnable_bias(test_name):
     return common_utils.decorateIf(
         unittest.skip(
@@ -10968,9 +10833,10 @@ def _skip_rocm_flaky_learnable_bias(test_name):
     )
 
 
-@supports_learnable_bias
-@large_tensor_test_class("2GB", device=test_device[0])
+@large_tensor_test_class("2GB")
 class TestLearnableBiases(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         self.dtype = torch.float32
@@ -11055,6 +10921,7 @@ class TestLearnableBiases(InductorTestCase):
         ):
             self._gold_check(eager, compiled, gold, name)
 
+    @supported_platform
     @_skip_rocm_flaky_learnable_bias("relative_1d_bias")
     @skip_on_cpu
     @common_utils.parametrize(
@@ -11091,6 +10958,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @supported_platform
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11125,6 +10993,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @supported_platform
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11160,6 +11029,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @supported_platform
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11196,6 +11066,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @supported_platform
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11229,6 +11100,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @supported_platform
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11264,6 +11136,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @supported_platform
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11297,6 +11170,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @supported_platform
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11334,6 +11208,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @supported_platform
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11374,6 +11249,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @supported_platform
     @_skip_rocm_flaky_learnable_bias("symmetric_bias")
     @skip_on_cpu
     @common_utils.parametrize(
@@ -11414,6 +11290,7 @@ class TestLearnableBiases(InductorTestCase):
                 (query, key, value, bias),
             )
 
+    @supported_platform
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11448,6 +11325,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @supported_platform
     @_skip_rocm_flaky_learnable_bias("head_specific_gate")
     @skip_on_cpu
     @common_utils.parametrize(
@@ -11484,6 +11362,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, gate_score),
         )
 
+    @supported_platform
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11533,6 +11412,7 @@ class TestLearnableBiases(InductorTestCase):
             ],
         )
 
+    @supported_platform
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11585,6 +11465,7 @@ class TestLearnableBiases(InductorTestCase):
         if not torch.any(bias.grad != 0):
             raise AssertionError("Gradient for bias is 0")
 
+    @supported_platform
     @skip_on_cpu
     def test_backprop_error_case(self, device):
         @torch.compile()
@@ -11616,6 +11497,7 @@ class TestLearnableBiases(InductorTestCase):
         if not (y.grad.norm() > 0):
             raise AssertionError(f"Expected y.grad.norm() > 0, got {y.grad.norm()}")
 
+    @supported_platform
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11695,16 +11577,19 @@ class TestLearnableBiases(InductorTestCase):
             lambda msg: f"{msg}\nExpected shape {query.shape}, got {out.shape}",
         )
 
+    @supported_platform
     @skip_on_cpu
     @skip_on_mps  # uses mode="max-autotune-no-cudagraphs"; Triton/CUDA-only
     def test_flex_attention_with_dynamic_max_autotune(self, device):
         self._test_flex_attention_with_dynamic_max_autotune(device)
 
+    @supported_platform
     @skip_on_cpu
     @torch._inductor.config.patch("graph_partition", True)
     def test_flex_attention_with_dynamic_max_autotune_graph_partition(self, device):
         self._test_flex_attention_with_dynamic_max_autotune(device)
 
+    @supported_platform
     @skip_on_cpu
     def test_flex_attention_logging(self, device):
         from torch._inductor.select_algorithm import get_flex_attention_log_filename
@@ -11861,6 +11746,7 @@ class TestLearnableBiases(InductorTestCase):
                         if i > 0:
                             self.assertLessEqual(choices[0]["time"], choice["time"])
 
+    @supported_platform
     @skip_on_cpu
     def test_inspect_bug(self, device):
         # https://github.com/pytorch/pytorch/issues/139374
@@ -12128,40 +12014,207 @@ class TestLearnableBiases(InductorTestCase):
             )
 
 
+class TestFlexAttentionFlashCuda(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    def test_flex_flash_honors_sparse_metadata_with_trivial_mask(self, device):
+        """FLASH should honor BlockMask metadata without relying on mask_mod."""
+        from torch._inductor.kernel.flex.flex_flash_attention import (
+            ensure_flash_available,
+        )
+
+        if not ensure_flash_available():
+            self.skipTest("flash-attn-4 is not available")
+        if torch.cuda.get_device_capability(device)[0] not in (10, 11):
+            self.skipTest("FA4 sparse block path in this test targets SM100+")
+
+        torch.manual_seed(0)
+        batch = 1
+        heads = 1
+        q_blocks = 2
+        kv_blocks = 2
+        q_block_size = 256
+        kv_block_size = 128
+        head_dim = 128
+        top_k = 1
+        q = torch.randn(
+            batch,
+            heads,
+            q_blocks * q_block_size,
+            head_dim,
+            device=device,
+            dtype=torch.bfloat16,
+        )
+        k = torch.randn(
+            batch,
+            heads,
+            kv_blocks * kv_block_size,
+            head_dim,
+            device=device,
+            dtype=torch.bfloat16,
+        )
+        v = torch.randn(
+            batch,
+            heads,
+            kv_blocks * kv_block_size,
+            head_dim,
+            device=device,
+            dtype=torch.bfloat16,
+        )
+
+        selected = torch.tensor(
+            [[[[0], [1]]]],
+            device=device,
+            dtype=torch.int32,
+        )
+        num_blocks = torch.full(
+            selected.shape[:-1], top_k, device=device, dtype=torch.int32
+        )
+        zero_num_blocks = torch.zeros_like(num_blocks)
+        zero_indices = torch.zeros(
+            *selected.shape[:-1], kv_blocks, device=device, dtype=torch.int32
+        )
+        sparse_indices = torch.zeros_like(zero_indices)
+        sparse_indices[..., :top_k] = selected
+
+        block_map = torch.zeros(
+            batch, heads, q_blocks, kv_blocks, device=device, dtype=torch.bool
+        )
+        block_map.scatter_(-1, selected.long(), True)
+        dense_mask = block_map.repeat_interleave(q_block_size, -2).repeat_interleave(
+            kv_block_size, -1
+        )
+        ref = (
+            torch.softmax(
+                (q @ k.transpose(-2, -1) / math.sqrt(head_dim)).masked_fill(
+                    ~dense_mask, -float("inf")
+                ),
+                dim=-1,
+            )
+            @ v
+        )
+
+        block_masks = {
+            "full": BlockMask.from_kv_blocks(
+                kv_num_blocks=zero_num_blocks,
+                kv_indices=zero_indices,
+                full_kv_num_blocks=num_blocks,
+                full_kv_indices=sparse_indices,
+                BLOCK_SIZE=(q_block_size, kv_block_size),
+                seq_lengths=(q_blocks * q_block_size, kv_blocks * kv_block_size),
+            ),
+            "partial": BlockMask.from_kv_blocks(
+                kv_num_blocks=num_blocks,
+                kv_indices=sparse_indices,
+                BLOCK_SIZE=(q_block_size, kv_block_size),
+                seq_lengths=(q_blocks * q_block_size, kv_blocks * kv_block_size),
+            ),
+        }
+        flash = torch.compile(
+            functools.partial(flex_attention, kernel_options={"BACKEND": "FLASH"}),
+            dynamic=False,
+        )
+        for name, block_mask in block_masks.items():
+            with self.subTest(name=name):
+                out = flash(q, k, v, block_mask=block_mask)
+                torch.cuda.synchronize()
+                self.assertEqual(out, ref, atol=5e-2, rtol=5e-2)
+
+
+class TestBlockMaskCuda(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @supported_platform
+    @skip_on_xpu
+    @skip_on_mps  # uses torch.cuda.CUDAGraph; CUDA-only
+    def test_create_is_cuda_graphable(self, device):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        g = torch.cuda.CUDAGraph()
+
+        with torch.cuda.graph(g):
+            create_block_mask(mask_mod, None, None, 256, 256)
+
+        g.replay()
+
+
+class TestFlexDecodingEligibility(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_unbacked_flex_decoding_eligibility_falls_back(self):
+        from torch._inductor.kernel.flex.flex_decoding import _use_flex_decoding
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class FakeBuffer:
+            def __init__(self, size):
+                self.size = size
+
+            def get_size(self):
+                return self.size
+
+        shape_env = ShapeEnv()
+        seq_len = shape_env.create_unbacked_symint().node.expr
+        shape_env.var_to_hint_override[seq_len] = 64
+        graph = mock.Mock(sizevars=SizeVarAllocator(shape_env))
+
+        with V.set_graph_handler(graph):
+            self.assertFalse(
+                _use_flex_decoding(
+                    FakeBuffer([1, 2, seq_len, 64]),
+                    FakeBuffer([1, 1, 1, 1]),
+                    FakeBuffer([1, 2, seq_len, 64]),
+                    {},
+                    False,
+                )
+            )
+
+
+instantiate_device_type_tests(TestFlexAttentionFlashCuda, globals(), only_for="cuda")
 instantiate_device_type_tests(
     TestFlexAttention,
     globals(),
-    only_for=test_device,
+    except_for=_except_for_cpu,
     allow_xpu=True,
     allow_mps=True,
 )
 instantiate_device_type_tests(
     TestPagedAttention,
     globals(),
-    only_for=test_device,
+    except_for=_except_for_cpu,
     allow_xpu=True,
     allow_mps=True,
 )
 instantiate_device_type_tests(
     TestBlockMask,
     globals(),
-    only_for=(test_device[0] if (HAS_GPU or HAS_MPS) else "cuda",),
+    except_for="cpu",
     allow_xpu=True,
     allow_mps=True,
 )
+instantiate_device_type_tests(TestBlockMaskCuda, globals(), only_for="cuda")
 instantiate_device_type_tests(
-    TestLearnableBiases, globals(), only_for=test_device, allow_xpu=True
+    TestLearnableBiases,
+    globals(),
+    except_for=_except_for_cpu,
+    allow_xpu=True,
 )
-# Register on the primary local device only. Hardcoding ("cuda",) generates no
+# Register on accelerators only. Hardcoding ("cuda",) generates no
 # class at all on a CPU/XPU/MPS-only build, so the suite reports zero tests
 # rather than a skip, and coverage becomes indistinguishable from absence.
-# Passing all of test_device is also wrong: it includes "cpu" alongside "cuda",
+# Passing every device type is also wrong: it includes "cpu" alongside "cuda",
 # and running_on_tdm_device() is host-global, so the CPU class would clear the
 # class-level skip on a gfx1250 host and then run these tests on CPU.
 instantiate_device_type_tests(
     TestFlexAttentionTDMEndToEnd,
     globals(),
-    only_for=(test_device[0],),
+    except_for="cpu",
     allow_xpu=True,
     allow_mps=True,
 )

@@ -368,7 +368,6 @@
   "test/inductor/test_embedding.py",
   "test/inductor/test_extension_backend.py",
   "test/inductor/test_external_callables.py",
-  "test/inductor/test_flex_attention.py",
   "test/inductor/test_flex_aux_vectorization.py",
   "test/inductor/test_flex_decoding.py",
   "test/inductor/test_flex_flash.py",
