@@ -441,8 +441,10 @@ AOTI_TORCH_EXPORT AOTITorchError torch_string_from_pyobject(
     void* py_obj,
     StringHandle* ret); // returns new reference
 
-// Decode data[0, length) as UTF-8 into a Python str. data is borrowed and only
-// needs to stay alive for the call; invalid UTF-8 errors.
+// Decode data[0, length) as strict UTF-8 into an owned Python str, preserving
+// embedded NUL bytes. data is borrowed only for the call; it may be nullptr
+// when length is 0, but must be non-null otherwise. The output is a new Python
+// reference which the caller releases or transfers; invalid UTF-8 errors.
 AOTI_TORCH_EXPORT AOTITorchError torch_string_to_pyobject(
     const char* data,
     size_t length,

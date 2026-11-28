@@ -107,6 +107,8 @@ runtime and must be called with the GIL held. If you call them from a context th
 may run without the GIL (for example a boxed `STABLE_TORCH_LIBRARY` kernel),
 acquire it first.
 
+See the [C++ Python object interop reference](https://docs.pytorch.org/cppdocs/api/stable/python-interop.html) for detailed conversion contracts.
+
 ### Performance overhead
 
 Using the stable ABI adds a small host-side overhead to each op call. The overhead is negligible next to a sizable GPU kernel and disappears after warmup under graph capture such as CUDA Graphs, but it can be noticeable in eager mode for kernels that are already fast. See [dispatcher overhead](dispatcher-overhead) and [shim overhead](shim-overhead).

@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/python_compat.h>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 // Utilities for handling Python strings. Note that PyString, when defined, is
 // the same as PyBytes.
@@ -62,6 +63,14 @@ inline PyObject* THPUtils_packString(const char* str) {
 inline PyObject* THPUtils_packString(const std::string& str) {
   return PyUnicode_FromStringAndSize(
       str.c_str(), static_cast<Py_ssize_t>(str.size()));
+}
+
+// Decode borrowed UTF-8 bytes into a new owning Python reference, or nullptr
+// with a Python error set. The bytes are copied; embedded NULs are preserved.
+// Requires the GIL, size <= PY_SSIZE_T_MAX, and non-null data unless empty.
+inline PyObject* THPUtils_packString(std::string_view str) {
+  return PyUnicode_FromStringAndSize(
+      str.data(), static_cast<Py_ssize_t>(str.size()));
 }
 
 inline PyObject* THPUtils_internString(const std::string& str) {
