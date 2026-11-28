@@ -30,6 +30,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM,
+    PLATFORM_SUPPORTS_CK_GEMM,
     SM90OrLater,
     SM100OrLater,
 )
@@ -1419,7 +1420,12 @@ class TestMatmulCuda(InductorTestCase):
 
     @skipCUDAIfNotRocm
     @skipXPU
-    # Fails with triton 3.7
+    # The flag follows TORCH_CK_GEMM_ARCH_LIST, but _grouped_mm in GroupedBlas.cpp hardcodes
+    # {gfx942, gfx950} for ck_tile and gfx90a for ck. Keep the default list in sync with those.
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_GEMM,
+        "CK GEMM is not supported on this platform",
+    )
     @parametrize("backend", ["ck", "ck_tile"])
     def test_grouped_gemm_rocm_ck_flag(self, backend):
         if ProfilerActivity.CUDA not in supported_activities():
