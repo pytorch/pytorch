@@ -12,7 +12,9 @@ import json
 import logging
 import os
 import pickle
+import re
 import shutil
+import sysconfig
 import tempfile
 import threading
 import types
@@ -605,7 +607,14 @@ def _own_triton_cache(settings: contextlib.ExitStack) -> str | None:
     # The module's directory may since have been deleted; a serving host then
     # rebuilds it, as it does when this process never loaded one.
     module = getattr(loaded, "__file__", None)
-    if module is not None and (module := Path(module)).is_file():
+    suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    if (
+        module is not None
+        and suffix
+        and (module := Path(module)).name.endswith(suffix)
+        and re.fullmatch(r"[A-Z2-7]+", module.parent.name) is not None
+        and module.is_file()
+    ):
         entry = Path(root) / module.parent.name
         entry.mkdir(exist_ok=True)
         shutil.copy2(module, entry / module.name)

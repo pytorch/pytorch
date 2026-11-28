@@ -8751,6 +8751,81 @@ class TestPrecompileRuntimeCache(TestCase):
                 root = pathlib.Path(_runtime_cache._capture.cache_root)
                 self.assertFalse((root / "utils_key").exists())
 
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_skips_non_cache_driver_module(self):
+        from triton.backends import backends
+        from triton.runtime import driver
+
+        from torch.compiler import _runtime_cache
+
+        suffix = sysconfig.get_config_var("EXT_SUFFIX")
+        self.assertTrue(suffix)
+        backend = next(iter(backends.values()))
+        with tempfile.TemporaryDirectory() as directory:
+            prebuilt = pathlib.Path(directory, "_C", "cuda_utils", "__init__.py")
+            prebuilt.parent.mkdir(parents=True)
+            prebuilt.write_text("# prebuilt driver utils\n")
+
+            non_cache = pathlib.Path(directory, "non_cache_key", f"cuda_utils{suffix}")
+            non_cache.parent.mkdir(parents=True)
+            non_cache.write_bytes(b"non-cache driver utils")
+
+            with mock.patch.object(backend.driver, "is_active", return_value=True):
+                prebuilt_loaded = types.SimpleNamespace(__file__=str(prebuilt))
+                prebuilt_utils = types.SimpleNamespace(
+                    load_binary=types.MethodType(len, prebuilt_loaded)
+                )
+                with (
+                    mock.patch.object(
+                        driver, "_active", types.SimpleNamespace(utils=prebuilt_utils)
+                    ),
+                    _runtime_cache.capture_scope(),
+                ):
+                    root = pathlib.Path(_runtime_cache._capture.cache_root)
+                    self.assertEqual(list(root.iterdir()), [])
+
+                non_cache_loaded = types.SimpleNamespace(__file__=str(non_cache))
+                non_cache_utils = types.SimpleNamespace(
+                    load_binary=types.MethodType(len, non_cache_loaded)
+                )
+                with (
+                    mock.patch.object(
+                        driver, "_active", types.SimpleNamespace(utils=non_cache_utils)
+                    ),
+                    _runtime_cache.capture_scope(),
+                ):
+                    root = pathlib.Path(_runtime_cache._capture.cache_root)
+                    self.assertEqual(list(root.iterdir()), [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_scope_copies_cached_driver_module(self):
+        from triton.backends import backends
+        from triton.runtime import driver
+
+        from torch.compiler import _runtime_cache
+
+        suffix = sysconfig.get_config_var("EXT_SUFFIX")
+        self.assertTrue(suffix)
+        backend = next(iter(backends.values()))
+        with tempfile.TemporaryDirectory() as directory:
+            cached = pathlib.Path(directory, "ABCDEF234567", f"cuda_utils{suffix}")
+            cached.parent.mkdir(parents=True)
+            cached.write_bytes(b"cached driver utils")
+
+            loaded = types.SimpleNamespace(__file__=str(cached))
+            utils = types.SimpleNamespace(load_binary=types.MethodType(len, loaded))
+            with (
+                mock.patch.object(backend.driver, "is_active", return_value=True),
+                mock.patch.object(
+                    driver, "_active", types.SimpleNamespace(utils=utils)
+                ),
+                _runtime_cache.capture_scope(),
+            ):
+                root = pathlib.Path(_runtime_cache._capture.cache_root)
+                copied = root / "ABCDEF234567" / f"cuda_utils{suffix}"
+                self.assertTrue(copied.is_file())
+                self.assertEqual(copied.read_bytes(), b"cached driver utils")
+
     def test_failed_write_leaves_the_paths_and_a_new_capture_retries(self):
         with tempfile.TemporaryDirectory() as directory:
             source = os.path.join(directory, "m.py")
@@ -9585,9 +9660,13 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertEqual(compiled, [])
             [root] = roots
             self.assertTrue(list(root.glob("*/*.autotune.json")))
-            # The driver utility module this process loaded before the capture.
+            # The driver utility module this process loaded before the capture,
+            # unless the backend uses a prebuilt driver module.
             suffix = sysconfig.get_config_var("EXT_SUFFIX")
-            self.assertTrue(list(root.glob(f"*/*_utils{suffix}")))
+            utils = getattr(triton.runtime.driver._active, "utils", None)
+            loaded = getattr(getattr(utils, "load_binary", None), "__self__", None)
+            if getattr(loaded, "__file__", "").endswith(suffix):
+                self.assertTrue(list(root.glob(f"*/*_utils{suffix}")))
             self.assertEqual(
                 (knobs.cache.dir, os.environ["TRITON_CACHE_DIR"]), previous
             )
