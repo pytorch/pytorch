@@ -160,6 +160,10 @@ todo_include_todos = True
 #
 html_theme = "pytorch_sphinx_theme2"
 
+# Share only the Python docs CSS directory, not its full static asset tree.
+html_static_path = ["../../source/_static/css"]
+html_css_files = ["pydata-theme-fixes.css"]
+
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
