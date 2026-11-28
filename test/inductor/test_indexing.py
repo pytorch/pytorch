@@ -8,9 +8,11 @@ from types import SimpleNamespace
 import sympy
 
 import torch
-from torch._dynamo.source import ConstantSource
+from torch._dynamo.source import ConstantSource, LocalSource
+from torch._guards import tracing, TracingContext
 from torch._inductor import config
 from torch._inductor.codegen.cpp import cexpr
+from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
@@ -24,10 +26,14 @@ from torch._inductor.sizevars import (
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
+    expr_fits_within_32bit,
     run_and_get_code,
     run_and_get_kernels,
     run_and_get_triton_code,
 )
+from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -62,6 +68,72 @@ REDUCTION_INVARIANT_X_LOAD = r"tl\.load\([^\n]*\[XBLOCK, 1\]"
 REDUCTION_INVARIANT_YX_LOAD = r"tl\.load\([^\n]*\[YBLOCK, 1, 1\]"
 DENSE_X_INDEX_LOAD = r"tl\.load\([^\n]*tl\.broadcast_to\(x\d+, \[XBLOCK, R0_BLOCK\]\)"
 REDUCTION_DEPENDENT_LOAD = r"tl\.load\([^\n]*r0_"
+
+
+@instantiate_parametrized_tests
+class TestIndexingGuards(InductorTestCase):
+    def make_graph(self, *, unbacked=False):
+        shape_env = ShapeEnv()
+        if unbacked:
+            sym = shape_env.create_unbacked_symint()
+            expr = sym.node.expr
+        else:
+            source = LocalSource("n")
+            expr = shape_env.create_symbol(8, source, dynamic_dim=DimDynamic.DYNAMIC)
+            sym = shape_env.create_symintnode(expr, hint=8, source=source)
+        graph = SimpleNamespace(
+            sizevars=SizeVarAllocator(shape_env), is_backward=True, fx_wrapper=False
+        )
+        return graph, sym, expr
+
+    def test_late_guard_cannot_justify_int32(self):
+        graph, _, expr = self.make_graph()
+        shape_env = graph.sizevars.shape_env
+        shape_env.freeze()
+        shape_env.guard_or_defer_runtime_assert(expr <= 1000, "late guard")
+        self.assertTrue(graph.sizevars.statically_known_true(768 * expr <= 2**31 - 1))
+        context = TracingContext(FakeTensorMode(shape_env=shape_env))
+        with tracing(context), V.set_graph_handler(graph):
+            self.assertFalse(SIMDScheduling.can_use_32bit_indexing(768 * expr, []))
+            shape_env.freeze()
+            self.assertFalse(SIMDScheduling.can_use_32bit_indexing(768 * expr, []))
+
+    @parametrize(
+        "assertion_config",
+        [None, "do_not_emit_runtime_assertions", "unsafe_skip_scalar_range_asserts"],
+    )
+    def test_declared_unbacked_bound_allows_int32(self, assertion_config):
+        # A user-declared bound (torch._check / mark_unbacked(max=...)) is trusted
+        # even when runtime asserts are turned off.
+        graph, _, expr = self.make_graph(unbacked=True)
+        shape_env = graph.sizevars.shape_env
+        shape_env.guard_or_defer_runtime_assert(expr <= 1000, "bound")
+        patches = {assertion_config: True} if assertion_config else {}
+        with V.set_graph_handler(graph), config.patch(patches):
+            self.assertTrue(expr_fits_within_32bit(2 * expr))
+            self.assertTrue(expr_fits_within_32bit(ModularIndexing(expr, 1, 32)))
+            self.assertTrue(expr_fits_within_32bit(1000))
+            self.assertFalse(expr_fits_within_32bit(2**22 * expr))
+
+    def test_frozen_keeps_guards_from_before_freeze(self):
+        graph, _, expr = self.make_graph()
+        shape_env = graph.sizevars.shape_env
+        int_max = 2**31 - 1
+        with V.set_graph_handler(graph):
+            # A dispatch guard installed before the freeze still protects int32.
+            graph.sizevars.check_leq(768 * expr, int_max)
+            shape_env.freeze()
+            self.assertTrue(expr_fits_within_32bit(768 * expr))
+            self.assertFalse(expr_fits_within_32bit(1536 * expr))
+
+    def test_aoti_cannot_use_unbounded_hint(self):
+        graph, _, expr = self.make_graph()
+        with V.set_graph_handler(graph), V.set_aot_compilation(True):
+            self.assertFalse(expr_fits_within_32bit(768 * expr))
+            graph.sizevars.shape_env.guard_or_defer_runtime_assert(
+                expr <= 1000, "bound"
+            )
+            self.assertTrue(expr_fits_within_32bit(768 * expr))
 
 
 @instantiate_parametrized_tests
