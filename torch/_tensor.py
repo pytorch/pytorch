@@ -1602,15 +1602,21 @@ class Tensor(torch._C.TensorBase):
 
         Args:
             stream (integer or None): An optional Python integer representing a
-                pointer to a CUDA stream. The current stream is synchronized with
-                this stream before the capsule is created, and since the capsule
-                shares its storage with the tensor this makes it safe to access from
-                both streams.  If -1 is passed then no synchronization is performed.
+                pointer to a CUDA stream. This stream waits on the current stream
+                after the capsule (including any copy) is created, and
+                since the capsule shares its storage with the tensor this makes it
+                safe to access from both streams.  If -1 is passed then no
+                synchronization is performed.
                 If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
                 synchronization. This API intentionally slightly deviates from the DLPack
                 guidance: the default stream is -1 (stream-preserving; no cross-stream sync),
                 because many from_dlpack implementations intend stream preservation.
-                For non-CUDA devices, -1 is treated the same as None.
+                On XPU the integer is a ``sycl::queue`` pointer. XPU has no default
+                stream, so None means no synchronization there, and 0, 1 and 2 are
+                rejected. The queue must be in-order, share PyTorch's SYCL context,
+                be on the tensor's device and stay valid during the call; the
+                integer is dereferenced, so an invalid pointer crashes.
+                For other non-CUDA devices, -1 is treated the same as None.
 
             max_version (tuple[int, int] or None): An optional Python tuple with
                 2 integers, representing the maximum version the caller supports. If
@@ -1666,6 +1672,9 @@ class Tensor(torch._C.TensorBase):
                 f"Current device: {torch.cuda.current_device()}."
             )
 
+        # (consumer, producer). The wait is enqueued after the export, so it also
+        # covers a copy=True clone.
+        sync_streams: tuple[torch.Stream, torch.Stream] | None = None
         if stream is not None and type(stream) is not int:
             # Stream pointers in CUDA/ROCm are uniquely numbered and can
             # be retrieved from their integer value.
@@ -1696,9 +1705,17 @@ class Tensor(torch._C.TensorBase):
             # Only synchronize on different streams
             current_stream = torch.cuda.current_stream()
             if stream != current_stream:
-                event = torch.cuda.Event()
-                event.record(current_stream)
-                stream.wait_event(event)
+                sync_streams = (stream, current_stream)
+        elif self.device.type == "xpu" and stream not in (None, -1):
+            # stream is a sycl::queue* that gets dereferenced: reject null and the CUDA
+            # magic values. Other bad pointers crash, as with torch.cuda.ExternalStream.
+            if stream in (0, 1, 2):
+                raise BufferError(f"unsupported stream on XPU: {stream}.")
+            device = self.device
+            current_stream = torch.xpu.current_stream(device)
+            if stream != current_stream.sycl_queue:
+                stream = torch.xpu.get_stream_from_external(stream, device)
+                sync_streams = (stream, current_stream)
         elif self.device.type == "cpu":
             if stream is not None and stream != -1:
                 raise AssertionError("stream should be None on cpu.")
@@ -1726,11 +1743,16 @@ class Tensor(torch._C.TensorBase):
                     "read_only export requires the versioned DLPack protocol; "
                     "pass max_version=(1, 0) or higher"
                 )
-            return _C._to_dlpack(self, dl_device=dl_device, copy=copy)
+            capsule = _C._to_dlpack(self, dl_device=dl_device, copy=copy)
+        else:
+            capsule = _C._to_dlpack_versioned(
+                self, dl_device=dl_device, copy=copy, read_only=read_only
+            )
 
-        return _C._to_dlpack_versioned(
-            self, dl_device=dl_device, copy=copy, read_only=read_only
-        )
+        if sync_streams is not None:
+            consumer_stream, producer_stream = sync_streams
+            consumer_stream.wait_stream(producer_stream)
+        return capsule
 
     def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):

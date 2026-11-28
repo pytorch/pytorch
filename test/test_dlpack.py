@@ -10,15 +10,19 @@ from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
     dtypesIfMPS,
+    expectedFailure,
+    expectedFailureHPU,
+    expectedFailureMPS,
+    expectedFailureXLA,
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCUDA,
     onlyNativeDeviceTypes,
+    onlyXPU,
     skipCUDAIf,
     skipCUDAIfNotRocm,
     skipMeta,
     skipMPS,
-    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -332,7 +336,6 @@ class TestTorchDlPackDevice(TestCase):
 
     @onlyAccelerator
     @skipMPS
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
         stream_a = torch.Stream()
@@ -350,7 +353,6 @@ class TestTorchDlPackDevice(TestCase):
 
     @onlyAccelerator
     @skipMPS
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     @dtypes(
         torch.float8_e5m2,
         torch.float8_e5m2fnuz,
@@ -433,6 +435,35 @@ class TestTorchDlPackDevice(TestCase):
             x.__dlpack__(stream=default_stream_id)
         # check that the default stream has work (a pending cudaStreamWaitEvent)
         self.assertFalse(torch.cuda.default_stream().query())
+
+    # These backends do not implement DLPack producer stream synchronization.
+    @onlyAccelerator
+    @expectedFailureHPU
+    @expectedFailureMPS
+    @expectedFailureXLA
+    @expectedFailure("openreg")
+    @parametrize("copy", [None, True], name_fn=lambda c: "copy" if c else "no_copy")
+    def test_dlpack_stream_handshake(self, device, copy):
+        # 256 MiB, so the producer is still copying it when the streams are queried
+        x = torch.ones(2**26, device=device)
+        consumer, producer = torch.Stream(device), torch.Stream(device)
+        # A fresh XPU pool queue is slow on first use, which can outlast the copy.
+        consumer.wait_stream(producer)
+        torch.accelerator.synchronize()
+        with producer:
+            # With copy=True the producer starts idle, so only the export's own clone
+            # keeps it busy and a wait enqueued before that clone would not block.
+            y = x if copy else x.clone()
+            capsule = y.__dlpack__(stream=consumer.native_handle, copy=copy)
+            # Query the consumer first: if it waits on the producer, it cannot become
+            # idle before the producer does, so the second query cannot false-fail.
+            consumer_idle = consumer.query()
+            producer_busy = not producer.query()
+        torch.accelerator.synchronize()
+        if not producer_busy:
+            self.skipTest("inconclusive: the producer finished before the queries")
+        self.assertFalse(consumer_idle)
+        self.assertEqual(torch.from_dlpack(capsule), x)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -1011,6 +1042,34 @@ class TestTorchDlPackDevice(TestCase):
 instantiate_parametrized_tests(TestTorchDlPack)
 instantiate_device_type_tests(
     TestTorchDlPackDevice, globals(), allow_mps=True, allow_xpu=True
+)
+
+
+class TestTorchDlPackXPU(TestCase):
+    hw_classification = HardwareClassification.XPU
+
+    @onlyXPU
+    @parametrize("max_version", [None, (1, 0)])
+    def test_dlpack_xpu_streams(self, device, max_version):
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        current = torch.xpu.current_stream(device)
+        other = torch.xpu.Stream(device)
+        for stream, copy in (
+            (None, None),
+            (-1, None),
+            (current.sycl_queue, None),
+            (other.sycl_queue, None),
+            (other.sycl_queue, True),
+        ):
+            capsule = x.__dlpack__(stream=stream, max_version=max_version, copy=copy)
+            self.assertEqual(torch.from_dlpack(capsule), x)
+        for stream in (0, 1, 2):
+            with self.assertRaisesRegex(BufferError, f"stream on XPU: {stream}"):
+                x.__dlpack__(stream=stream, max_version=max_version)
+
+
+instantiate_device_type_tests(
+    TestTorchDlPackXPU, globals(), only_for="xpu", allow_xpu=True
 )
 
 
