@@ -4,6 +4,7 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/native/DispatchStub.h>
@@ -33,7 +34,6 @@
 #include <ATen/ops/_nested_from_padded.h>
 #include <ATen/ops/_nested_tensor_softmax_with_shape.h>
 #include <ATen/ops/_scaled_dot_product_attention_math.h>
-#include <ATen/ops/_scaled_dot_product_attention_math_for_mps.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_native.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
@@ -622,14 +622,48 @@ at::Tensor preprocess_mask(
     const at::Tensor& value) {
   constexpr int mem_eff_alignment = 8;
   at::Tensor result_mask = mask;
-  if (!aligned_tensor<mem_eff_alignment>(mask)) {
+  // The padding is for the CUDA kernels; the Metal ones take any strided mask.
+  if (query.device().type() != DeviceType::MPS && !aligned_tensor<mem_eff_alignment>(mask)) {
     result_mask = pad_bias<mem_eff_alignment>(mask);
   }
-  return result_mask.expand_symint(
-      {query.sym_size(0),
-       query.sym_size(1),
-       query.sym_size(2),
-       key.sym_size(2)});
+  // Per-dim sizes, as nested tensors have no sym_sizes()
+  c10::SymDimVector shape;
+  for (const auto i : c10::irange(query.dim() - 1)) {
+    shape.push_back(query.sym_size(i));
+  }
+  shape.push_back(key.sym_size(-2));
+  return result_mask.expand_symint(shape);
+}
+
+// Expands query, key and value to their common batch dims (all but the last
+// three), which the vmap batch rules of the fused ops rely on when folding the
+// vmap dim into the leading one.
+std::tuple<at::Tensor, at::Tensor, at::Tensor> expand_batch_dims(
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const std::optional<at::Tensor>& mask) {
+  // A nested tensor's batch dim is its ragged one, which can not broadcast
+  if (query.is_nested() || key.is_nested() || value.is_nested()) {
+    return {query, key, value};
+  }
+  auto batch_dims = [](const at::Tensor& t) {
+    return t.sym_sizes().slice(0, std::max<int64_t>(t.dim() - 3, 0));
+  };
+  auto batch = infer_size_symdimvector(batch_dims(query), batch_dims(key));
+  batch = infer_size_symdimvector(batch, batch_dims(value));
+  if (mask.has_value()) {
+    batch = infer_size_symdimvector(batch, batch_dims(*mask));
+  }
+  auto expand = [&](const at::Tensor& t) {
+    if (batch_dims(t) == c10::SymIntArrayRef(batch)) {
+      return t;
+    }
+    auto shape = batch;
+    shape.append(t.sym_sizes().end() - 3, t.sym_sizes().end());
+    return t.expand_symint(shape);
+  };
+  return {expand(query), expand(key), expand(value)};
 }
 // FlashAttentionV2 requires that head dimension be a multiple of 8
 // This was previously done within the kernel, however
@@ -877,13 +911,13 @@ Tensor scaled_dot_product_attention(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
     case SDPBackend::efficient_attention: {
+      auto [q, k, v] = expand_batch_dims(query_, key, value, attn_mask);
       if (attn_mask.has_value()) {
-        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);
+        attn_mask.value() = preprocess_mask(attn_mask.value(), q, k, v);
       }
-      bool compute_logsumexp = should_compute_logsumexp_with_attn_mask(
-          query_, key, value, attn_mask);
+      bool compute_logsumexp = should_compute_logsumexp_with_attn_mask(q, k, v, attn_mask);
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
-          query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
+          q, k, v, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
       return std::get<0>(std::move(out_and_lse));
     }
     case SDPBackend::overrideable: {
@@ -892,19 +926,6 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(std::move(out_lse_softmax));
     }
     case SDPBackend::math: {
-      const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
-      if (query_device_type == c10::kMPS && !(at::GradMode::is_enabled() && any_inputs_require_grad)) {
-        return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
-            query_,
-            key,
-            value,
-            attn_mask,
-            dropout_p,
-            is_causal,
-            std::nullopt, /*dropout_mask*/
-            scale,
-            enable_gqa));
-      }
       return std::get<0>(at::_scaled_dot_product_attention_math(
           query_,
           key,

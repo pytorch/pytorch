@@ -3426,8 +3426,6 @@ def use_nv_universal_gemm_template(
     mat_b: IRNode,
     offs: IRNode | None = None,
     g: _IntLike | None = None,
-    *,
-    allow_symbolic_shapes: bool = False,
 ) -> bool:
     r"""
     Return True if we can use the NVIDIA Universal GEMM Template.
@@ -3439,8 +3437,6 @@ def use_nv_universal_gemm_template(
         4. Max autotune or max autotune gemm is enabled
         5. Not in AOT Inductor mode (requires runtime JIT compilation)
         6. Base pointers are 16-byte aligned
-        7. Shape dimensions are static, unless the caller passes
-           allow_symbolic_shapes=True
 
     Note:
         - This check installs no guards and does not check kernel-specific
@@ -3469,12 +3465,6 @@ def use_nv_universal_gemm_template(
         return False
 
     if not (config.max_autotune or config.max_autotune_gemm):
-        return False
-
-    dims_to_check = [m, n, k]
-    if g is not None:
-        dims_to_check.append(g)
-    if not allow_symbolic_shapes and has_free_symbols(dims_to_check):
         return False
 
     # Base pointer must be 16-byte aligned. cutlass.operators can't check this at
