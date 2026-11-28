@@ -1902,19 +1902,22 @@ void GraphTask::init_to_execute(
     // (0) `is_needed` above corresponds to `exec_info_[fn].needed_`
     Node* output = output_edge.function.get();
     auto& info = exec_info_[output];
-    if (accumulate_grad) {
-      // if called through `.backward()` we directly set `needed_` for all the
-      // outputs to true
+    if (accumulate_grad && dynamic_cast<AccumulateGrad*>(output)) {
+      // if called through `.backward()` we directly set `needed_` for the
+      // AccumulateGrad outputs to true, since they must run to accumulate
       info.needed_ = true;
     } else {
-      // otherwise it is `.grad()` and we set exec_info[fn].captures_ instead
+      // otherwise we set exec_info[fn].captures_ instead. This covers `.grad()`
+      // and `.backward(inputs=...)` with a non-leaf input, whose .grad is
+      // populated by a tensor pre-hook so the node itself does not need to run.
       // In terms of populating the rest of exec_info though, you can basically
       // think of this as the same as setting `needed_` is true directly.
       if (!info.captures_) {
         info.captures_ = std::make_unique<std::vector<ExecInfo::Capture>>();
       }
-      info.captures_->emplace_back(output_edge.input_nr, output_idx++);
+      info.captures_->emplace_back(output_edge.input_nr, output_idx);
     }
+    ++output_idx;
   }
   captured_vars_.resize(output_idx);
 
