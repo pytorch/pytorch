@@ -614,6 +614,26 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(fn(x), x + 1)
             self.assertNotIn("delete_value", mod.__dict__)
 
+    def test_delete_global_crossfile_created_then_store_read(self):
+        # eager sees the final store; the inlined _load_global must consult
+        # pending mutations before answering from builtins, otherwise a
+        # caller catching NameError takes the wrong branch
+        import mock_store_global_crossfile_inline as m
+
+        def fn(x):
+            try:
+                return x + m.rebound_created_then_store_read()
+            except NameError:
+                return x - 1
+
+        x = torch.ones(2, 2)
+        m.__dict__.pop("rebound_value", None)
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        self.assertEqual(opt_fn(x), x + 2)
+        self.assertEqual(m.rebound_value, 2)
+        m.__dict__.pop("rebound_value", None)
+
     def test_delete_global_crossfile_missing(self):
         with crossfile_globals() as mod:
 

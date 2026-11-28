@@ -6678,6 +6678,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # root frame instruction translator, to enforce consistency.
             super()._load_global(inst)
         elif name not in self.f_globals:
+            # A store earlier in this trace lives in side effects until the
+            # frame exits, so the module __dict__ read above can miss it while
+            # eager would see it. Consult pending mutations before falling
+            # back to builtins, matching the root-frame handler.
+            _, fglobals_vt, _ = self.get_globals_source_and_value(name)
+            if self.output.side_effects.has_pending_mutation_of_attr(
+                fglobals_vt, name
+            ):
+                if self._global_deleted_in_trace(fglobals_vt, name):
+                    return self.load_builtin(inst)
+                self.push(self.output.side_effects.load_attr(fglobals_vt, name))
+                return
             self.load_builtin(inst)
         else:
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
