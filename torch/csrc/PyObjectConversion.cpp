@@ -97,6 +97,13 @@ struct NoopPyObjectConversion final : PyObjectConversionInterface {
       const override {
     TORCH_CHECK(false, kNoImplMsg);
   }
+  at::Generator generator_from_pyobject(PyObject* /*obj*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  PyObject* generator_to_pyobject(
+      const at::Generator& /*generator*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
 };
 
 const NoopPyObjectConversion noop_impl;

@@ -5,10 +5,12 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/CPUGeneratorImpl.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/stable/c/shim.h>
 
 #include <cstring>
+#include <memory>
 
 TEST(TorchPyObjectConversion, NoopErrorsWithoutLibtorchPython) {
   // from_pyobject: the no-op errors before touching py_obj, so a dummy non-null
@@ -262,6 +264,31 @@ TEST(TorchPyObjectConversion, ListItemsValidatedBeforePythonConversion) {
   EXPECT_NE(
       std::strstr(message, "items must not be null unless length is 0"),
       nullptr);
+}
+
+TEST(TorchPyObjectConversion, GeneratorNoopErrorsWithoutLibtorchPython) {
+  int dummy = 0;
+  AtenGeneratorHandle generator_out = nullptr;
+  expect_noop_error(torch_generator_from_pyobject(&dummy, &generator_out));
+  EXPECT_EQ(generator_out, nullptr);
+
+  std::unique_ptr<AtenGeneratorOpaque, decltype(&torch_delete_generator)>
+      generator(
+          torch::aot_inductor::generator_pointer_to_generator_handle(
+              new at::Generator(at::detail::createCPUGenerator())),
+          torch_delete_generator);
+  void* py_out = nullptr;
+  expect_noop_error(torch_generator_to_pyobject(generator.get(), &py_out));
+  EXPECT_EQ(py_out, nullptr);
+}
+
+TEST(TorchPyObjectConversion, GeneratorHandleValidatedBeforePythonConversion) {
+  void* py_out = nullptr;
+  EXPECT_EQ(torch_generator_to_pyobject(nullptr, &py_out), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+  const char* message = torch_exception_get_what_without_backtrace();
+  ASSERT_NE(message, nullptr);
+  EXPECT_NE(std::strstr(message, "generator must not be null"), nullptr);
 }
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0

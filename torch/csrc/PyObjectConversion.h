@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/Generator.h>
 #include <ATen/core/Tensor.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
@@ -134,6 +135,15 @@ struct TORCH_API PyObjectConversionInterface {
   // borrowed; the list takes its own references. The GIL must be held.
   virtual PyObject* new_list_pyobject(PyObject* const* items, size_t length)
       const = 0;
+
+  // Read the at::Generator out of a Python torch.Generator (or a subclass); the
+  // result shares its GeneratorImpl. The GIL must be held.
+  virtual at::Generator generator_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python torch.Generator sharing the GeneratorImpl of
+  // the given defined at::Generator. The GIL must be held.
+  virtual PyObject* generator_to_pyobject(
+      const at::Generator& generator) const = 0;
 };
 
 // Install the conversion implementation. Called once by libtorch_python when it
