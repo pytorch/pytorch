@@ -118,10 +118,24 @@ static_assert(
 // Thread-safe: uses NCCLComm wrapper's getAsyncError() which acquires mutex
 // before calling ncclCommGetAsyncError to prevent race conditions between
 // watchdog and main threads.
+// The wait is driven by the communicator's async state, not (only) by the
+// return value of cmd: some NCCL entry points (e.g. ncclCommSplit /
+// ncclCommShrink called standalone in nonblocking mode) can return
+// ncclSuccess while the work they enqueued still has the tracked communicator
+// in ncclInProgress state, so gating the poll loop on the return value alone
+// would skip the wait entirely. Poll until the communicator reports
+// ncclSuccess (or a real error).
 #define C10D_NCCL_CHECK_TIMEOUT_BASE(                                         \
     cmd, commWrapper, failureReason, yield_fn)                                \
   do {                                                                        \
     ncclResult_t result = cmd;                                                \
+    if (result == ncclSuccess) {                                              \
+      /* cmd may return success while the communicator is still in progress;  \
+       */                                                                     \
+      /* read the actual state before deciding there is nothing to wait for.  \
+       */                                                                     \
+      commWrapper->getAsyncError(&result);                                    \
+    }                                                                         \
     auto startTimepoint = std::chrono::steady_clock::now();                   \
     auto timeout = nccl_nonblocking_timeout();                                \
     while (result == ncclInProgress) {                                        \

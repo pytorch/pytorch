@@ -242,6 +242,13 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   //   as of NCCL 2.23, the ptr value of child comm will not be filled until the
   //   state of parent comm is ncclSuccess. This may change in the future. See:
   //   https://github.com/NVIDIA/nccl/issues/1472
+  //   and https://github.com/NVIDIA/nccl/issues/2509
+  // Note: current NCCL releases return ncclSuccess (not ncclInProgress) from a
+  // standalone nonblocking ncclCommSplit while the parent is still in
+  // ncclInProgress state (NVIDIA/nccl#2509), so the wait must be driven by the
+  // parent's async state rather than by the call's return value --
+  // C10D_NCCL_CHECK_TIMEOUT_SLEEP polls the parent's state even when the call
+  // returned ncclSuccess.
   C10D_NCCL_CHECK_TIMEOUT_SLEEP(
       ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
       source, // wait on parent comm
@@ -300,7 +307,13 @@ std::shared_ptr<NCCLComm> NCCLComm::shrink(
           shrinkFlags),
       source->getNcclCommFailureReason());
 
-  // Wait for the child communicator to be ready
+  // Wait for the parent (source) communicator to leave ncclInProgress. A
+  // standalone nonblocking ncclCommShrink returns ncclSuccess while the
+  // shrink still runs as a background job on the parent, and the child comm
+  // handle (*newcomm) is only stored by that background job once it
+  // completes (NVIDIA/nccl#2509). Waiting on the parent's async state (not
+  // on the call's return value) also guarantees comm->ncclComm_ is non-NULL
+  // before it is used below.
   source->waitReady(true);
   comm->initialized_ = true;
 
