@@ -37,6 +37,7 @@ from quantization.core.test_workflow_ops import TestFusedObsFakeQuant  # noqa: F
 # 3. Quantized Tensor
 from quantization.core.test_quantized_tensor import TestQuantizedTensor  # noqa: F401
 # 4. Modules
+from quantization.core import test_workflow_module
 from quantization.core.test_workflow_module import TestFakeQuantize  # noqa: F401
 from quantization.core.test_workflow_module import TestObserver  # noqa: F401
 from quantization.core.test_quantized_module import TestStaticQuantizedModule  # noqa: F401
@@ -153,6 +154,18 @@ try:
     from quantization.core.experimental.test_floatx import TestFloat8DtypeCPUOnlyCPU  # noqa: F401
 except ImportError as e:
     log.warning(e)
+
+# Collect workflow test variants for every instantiated device type.
+globals().update(
+    {
+        name: cls
+        for name, cls in vars(test_workflow_module).items()
+        if name.startswith((
+            "TestObserverAccelerator",
+            "TestFakeQuantizeAccelerator",
+        ))
+    }
+)
 
 if __name__ == '__main__':
     run_tests()
