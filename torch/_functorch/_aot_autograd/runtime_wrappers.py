@@ -783,6 +783,8 @@ class _RuntimeForwardEpilogue:
                 else:
                     if not meta.mutates_data:
                         raise AssertionError("expected meta.mutates_data to be True")
+                in_inf = meta.mutations_under_inference_mode
+                copy_ctx = torch.inference_mode() if in_inf else _NULL_CONTEXT
                 if meta.is_leaf and original_inpt.requires_grad:
                     # We can hit this situation in this case:
                     #   def f(x):
@@ -796,7 +798,8 @@ class _RuntimeForwardEpilogue:
                     # if all of the mutations to the leaf input were non-autograd-tracking mutations
                     # (aka mutations under no_grad(), or on detached views).
                     # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
-                    original_inpt.detach().copy_(updated_inpt)
+                    with copy_ctx:
+                        original_inpt.detach().copy_(updated_inpt)
                 else:
                     # Check if we have stream index information for this mutated input
                     if (
@@ -809,7 +812,8 @@ class _RuntimeForwardEpilogue:
                             "Mutations on inputs with user-specified streams are not yet supported. "
                             "See: https://github.com/pytorch/pytorch/issues/172522"
                         )
-                    original_inpt.copy_(updated_inpt)
+                    with copy_ctx:
+                        original_inpt.copy_(updated_inpt)
 
     def _replay_output_aliases(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
@@ -1103,7 +1107,8 @@ def _create_runtime_wrapper(
         )
         buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
         wrote_body = False
-        with buf.indent():
+        with buf.indent(), contextlib.ExitStack() as inf_stack:
+            in_inf_block = False
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
                 meta = runtime_metadata.input_info[inpt_idx]
                 if not meta.mutates_data and not meta.mutates_metadata:
@@ -1111,6 +1116,12 @@ def _create_runtime_wrapper(
                 wrote_body = True
                 oi = f"orig_inputs[{inpt_idx}]"
                 ui = f"updated_inputs[{i}]"
+                close_inf = (
+                    meta.mutates_metadata or not meta.mutations_under_inference_mode
+                )
+                if in_inf_block and close_inf:
+                    inf_stack.close()
+                    in_inf_block = False
                 if meta.mutates_storage_metadata:
                     u = buf.fresh_name("_u")
                     if trace_joint:
@@ -1137,6 +1148,10 @@ def _create_runtime_wrapper(
                             raise AssertionError(
                                 f"expected mutates_data for input {inpt_idx}"
                             )
+                    if meta.mutations_under_inference_mode and not in_inf_block:
+                        buf.writeline("with torch.inference_mode():")
+                        inf_stack.enter_context(buf.indent())
+                        in_inf_block = True
                     if meta.is_leaf:
                         buf.writeline(
                             f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"

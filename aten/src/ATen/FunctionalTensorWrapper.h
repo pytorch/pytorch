@@ -88,6 +88,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   void mark_mutation_during_no_grad_or_inference_mode() {
     functional_storage_impl()->mark_mutation_during_no_grad_or_inference_mode();
   }
+  void mark_mutation_during_inference_mode() {
+    functional_storage_impl()->mark_mutation_during_inference_mode();
+  }
   // Are all the mutations happening to the tensor hidden from autograd
   bool are_all_mutations_hidden_from_autograd() const {
     return functional_storage_impl()->are_all_mutations_hidden_from_autograd();
@@ -97,6 +100,10 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool are_all_mutations_under_no_grad_or_inference_mode() const {
     return functional_storage_impl()
         ->are_all_mutations_under_no_grad_or_inference_mode();
+  }
+  // Did all mutations happen under inference_mode
+  bool are_all_mutations_under_inference_mode() const {
+    return functional_storage_impl()->are_all_mutations_under_inference_mode();
   }
 
   void maybe_mark_symbolic(functionalization::ViewMeta* meta) {
@@ -369,6 +376,9 @@ TORCH_API bool are_all_mutations_hidden_from_autograd(
 TORCH_API bool are_all_mutations_under_no_grad_or_inference_mode(
     const Tensor& functional_tensor);
 
+TORCH_API bool are_all_mutations_under_inference_mode(
+    const Tensor& functional_tensor);
+
 // These two methods are XLA-specific logic and are no-ops
 // for the normal functionalization flow.
 TORCH_API void propagate_xla_data(
@@ -422,6 +432,13 @@ void set_sizes_strides_offset(
 
 TORCH_API bool getFunctionalizationReapplyViewsTLS();
 TORCH_API void setFunctionalizationReapplyViewsTLS(bool reapply_views);
+
+// True while Python functionalization runs an op with c10::InferenceMode
+// temporarily disabled, so that mutations are still attributed to
+// inference_mode. See Note [Suppressing c10::InferenceMode during
+// functionalization] in torch/_subclasses/functional_tensor.py.
+TORCH_API bool getFunctionalizationInInferenceModeTLS();
+TORCH_API void setFunctionalizationInInferenceModeTLS(bool in_inference_mode);
 
 class TORCH_API FunctionalizationReapplyViewsGuard {
  public:

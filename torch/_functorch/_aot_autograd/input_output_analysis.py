@@ -185,6 +185,9 @@ def create_synthetic_base_metadata(
             m.input_info[x].mutations_under_no_grad_or_inference_mode
             for x in outer_indices
         )
+        mutations_under_inference_mode = all(
+            m.input_info[x].mutations_under_inference_mode for x in outer_indices
+        )
 
         mutation_inductor_storage_resize = all(
             m.input_info[x].mutation_inductor_storage_resize for x in outer_indices
@@ -215,6 +218,7 @@ def create_synthetic_base_metadata(
             is_leaf=any_leaf,
             requires_grad=requires_grad,
             keep_input_mutations=m.keep_input_mutations,
+            mutations_under_inference_mode=mutations_under_inference_mode,
         )
         input_infos.append(inpt_info)
 

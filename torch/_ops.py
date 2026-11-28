@@ -235,6 +235,7 @@ class OperatorBase:
         self, fn: Callable[Concatenate["BaseFunctionalizeAPI", _P], _T]
     ) -> Callable[Concatenate["BaseFunctionalizeAPI", _P], _T]:
         from torch._subclasses.functional_tensor import (
+            _suppress_inference_mode_for_functionalization,
             CppFunctionalizeAPI,
             FunctionalTensorMode,
             FunctorchFunctionalizeAPI,
@@ -258,6 +259,10 @@ class OperatorBase:
                 allowed_subclasses=(FakeTensor, FunctionalTensor),
             ):
                 return NotImplemented
+            if torch.is_inference_mode_enabled():
+                # See Note [Suppressing c10::InferenceMode during functionalization]
+                with _suppress_inference_mode_for_functionalization():
+                    return fn(PythonFunctionalizeAPI(mode), *args, **kwargs)
             return fn(PythonFunctionalizeAPI(mode), *args, **kwargs)
 
         def functionalize_functorch_fn(
