@@ -213,6 +213,11 @@ case "$tag" in
     if [[ $tag =~ "benchmarks" ]]; then
       INDUCTOR_BENCHMARKS=yes
     fi
+    # MoRI supports gfx942 and gfx950; only the noble image runs distributed
+    # tests on them.
+    if [[ $tag =~ "noble" ]]; then
+      MORI=yes
+    fi
     ;;
   pytorch-linux-noble-rocm-preview-py3.11)
     ANACONDA_PYTHON_VERSION=3.11
@@ -222,6 +227,7 @@ case "$tag" in
     USE_MSLK=1
     TRITON=yes
     KATEX=yes
+    MORI=yes
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.11
@@ -451,6 +457,7 @@ build_image() {
        --build-arg "USE_MSLK=${USE_MSLK:-}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "TRITON=${TRITON}" \
+       --build-arg "MORI=${MORI:-}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \
        --build-arg "TVM=${TVM}" \

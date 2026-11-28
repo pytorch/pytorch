@@ -108,6 +108,14 @@ COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/rocm-origami.txt rocm-origami.txt
 RUN bash -c 'source /etc/rocm_env.sh && source common_utils.sh && env_run pip install "rocm-origami==$(cat rocm-origami.txt)"' && rm -f common_utils.sh rocm-origami.txt
 
+# Install MoRI
+ARG MORI
+COPY ./common/install_rocm_mori.sh install_rocm_mori.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/rocm-mori.txt rocm-mori.txt
+RUN if [ -n "${MORI}" ]; then bash ./install_rocm_mori.sh; fi
+RUN rm install_rocm_mori.sh common_utils.sh rocm-mori.txt
+
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
