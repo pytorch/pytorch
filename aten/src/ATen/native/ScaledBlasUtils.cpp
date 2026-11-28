@@ -485,8 +485,8 @@ void validate_scaled_mm_v2_inputs(
     TORCH_CHECK_NOT_IMPLEMENTED(
         swizzle_a[0] == SwizzleType::SWIZZLE_128 &&
             swizzle_b[0] == SwizzleType::SWIZZLE_128,
-        "NVFP4 block scaling on ROCm requires gfx1250 with ROCm 10.0 and SWIZZLE_128 scales. "
-        "Pass swizzle_a=swizzle_b=SwizzleType.SWIZZLE_128 and scales in the gfx1250 order.");
+        "NVFP4 block scaling on ROCm requires gfx1250/gfx1250-strict with ROCm 10.0 and SWIZZLE_128 scales. "
+        "Pass swizzle_a=swizzle_b=SwizzleType.SWIZZLE_128 and scales in the gfx1250/gfx1250-strict order.");
     if (num_args_a == 2) {
       TORCH_CHECK_VALUE(
           swizzle_a[1] == SwizzleType::NO_SWIZZLE && swizzle_b[1] == SwizzleType::NO_SWIZZLE,
@@ -565,7 +565,7 @@ void validate_scaled_mm_v2_inputs(
         is_mx_32_8
         ? "; SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)"
         : is_mx_128
-        ? "; SWIZZLE_128 block scales require gfx1250 with ROCm 7.14"
+        ? "; SWIZZLE_128 block scales require gfx1250 or gfx1250-strict with ROCm 7.14"
         : "";
     // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime
     // to keep aten-cpu free of GPU-conditional compilation. Formulas mirror

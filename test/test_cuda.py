@@ -44,6 +44,7 @@ from torch.testing._internal.common_cuda import (
     BF16X9_API_SUPPORTED,
     blas_library_context,
     CUDA_DEVICE_IS_INTEGRATED,
+    gcn_arch_matches,
     has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     PLATFORM_SUPPORTS_WORKQUEUE_CONFIG,
@@ -1228,7 +1229,7 @@ print("RETRIED")
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
                 if ROCM_VERSION >= (10, 3):
                     archs.extend(["gfx1170", "gfx1171"])
-                archs.append("gfx1250")
+                archs.extend(["gfx1250", "gfx1250-strict"])
                 # blasDefaultBackend() only prefers hipblaslt when every visible
                 # device matches, so device 0 alone is not enough.
                 gcn_arch_names = [
@@ -1236,7 +1237,8 @@ print("RETRIED")
                     for i in range(torch.cuda.device_count())
                 ]
                 hipblaslt_preferred = all(
-                    any(arch in name for arch in archs) for name in gcn_arch_names
+                    any(gcn_arch_matches(name, arch) for arch in archs)
+                    for name in gcn_arch_names
                 )
                 if hipblaslt_preferred:
                     self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
@@ -1328,7 +1330,7 @@ print("RETRIED")
             gcn_arch = str(
                 torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
             )
-            if gcn_arch in ["gfx942", "gfx950", "gfx1250"]:
+            if gcn_arch in ["gfx942", "gfx950", "gfx1250", "gfx1250-strict"]:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -15504,7 +15506,7 @@ class TestCompileKernel(TestCase):
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
             gcn_arch = get_device_properties().gcnArchName.split(":", 1)[0]
-            if gcn_arch == "gfx1250":
+            if gcn_arch in ("gfx1250", "gfx1250-strict"):
                 max_smem = 320 * 1024
             elif gcn_arch == "gfx950":
                 max_smem = 160 * 1024

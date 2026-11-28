@@ -194,22 +194,44 @@ def blas_library_context(backend):
     finally:
         torch.backends.cuda.preferred_blas_library(prev_backend)
 
+# Same rule as CUDAHooks::isGPUArch: an unanchored substring match on
+# gcnArchName. The match stops when the next character is '-'. A ':'
+# feature suffix still belongs to the matched target, so "gfx1250"
+# matches "gfx1250:xnack-" and not "gfx1250-strict". Family prefixes
+# such as "gfx94" still match. evaluate_gfx_arch_within matches the
+# offload target exactly after splitting on ':', so "gfx94" does not
+# match "gfx942" there.
+def gcn_arch_matches(gcn_name, arch):
+    start = 0
+    while True:
+        found = gcn_name.find(arch, start)
+        if found < 0:
+            return False
+        end = found + len(arch)
+        if end >= len(gcn_name) or gcn_name[end] != "-":
+            return True
+        start = found + 1
+
+
 def evaluate_gfx_arch_within(arch_list):
     if not torch.cuda.is_available():
         return False
     gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
     effective_arch = os.environ.get('PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE', gcn_arch_name)
-    # gcnArchName can be complicated strings like gfx90a:sramecc+:xnack-
-    # Hence the matching should be done reversely
-    return any(arch in effective_arch for arch in arch_list)
+    # gcnArchName is "<offload-target>:<features>", for example
+    # gfx90a:sramecc+:xnack-. Match the offload target exactly.
+    # "gfx1250" does not match gfx1250-strict, and a family prefix such
+    # as "gfx94" does not match gfx942.
+    target = effective_arch.split(":", 1)[0]
+    return target in arch_list
 
 # Per-generation gfx targets, ordered oldest -> newest. Each "OrLater" helper
 # below unions its own generation with every newer one, so the predicates are
 # nested by construction: CDNA5OrLater => CDNA3OrLater => CDNA2OrLater.
 _CDNA2_ARCHS = ["gfx90a"]
 _CDNA3_ARCHS = ["gfx942", "gfx950"]
-# GFX1250 (CDNA 5)
-_CDNA5_ARCHS = ["gfx1250"]
+# GFX1250 / gfx1250-strict (CDNA 5)
+_CDNA5_ARCHS = ["gfx1250", "gfx1250-strict"]
 # GFX11 (RDNA 3 and RDNA 3.5)
 _RDNA3_ARCHS = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153"]
 # GFX11.7 uses the GFX12-style 128-bit WMMA interface.
@@ -231,14 +253,16 @@ def RDNA3OrLater():
 
 # Archs that take the opportunistic_fastAtomicAdd path (packed 2x16 atomics + DPP
 # lane coalescing) in ScatterGatherKernel.cu. Keep in sync with that kernel's arch
-# gate; this is intentionally not CDNA3OrLater (gfx1250 uses plain fastAtomicAdd).
+# gate; this is intentionally not CDNA3OrLater (gfx1250/gfx1250-strict use
+# plain fastAtomicAdd).
 def gfx_arch_supports_opportunistic_fastatomics():
     return evaluate_gfx_arch_within(["gfx942", "gfx950"])
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        # gfx1250 and gfx1250-strict use the AOTriton gfx1250 GPU image.
-        # "gfx1250" already matches gfx1250-strict by substring; listed for explicitness.
+        # gfx1250-strict uses the AOTriton gfx1250 image.
+        # The arch match is exact, so list strict itself; "gfx1250" does
+        # not cover it.
         # The CK FAv3/AITER codegen is not wired for gfx1250
         # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250", "gfx1250-strict"]
@@ -273,8 +297,9 @@ def evaluate_platform_sdpa_supports_hdim512():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
-        # gfx1250 and gfx1250-strict use the AOTriton gfx1250 GPU image.
-        # "gfx1250" already matches gfx1250-strict by substring; listed for explicitness.
+        # gfx1250-strict uses the AOTriton gfx1250 image.
+        # The arch match is exact, so list strict itself; "gfx1250" does
+        # not cover it.
         # The CK FAv3/AITER codegen is not wired for gfx1250
         # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250", "gfx1250-strict"]
@@ -368,13 +393,11 @@ def evaluate_platform_supports_fp8():
                 # gfx120 and gfx95 only support OCP, so gate them on 6.5.
                 archs.extend(['gfx95', 'gfx120'])
             if ROCM_VERSION >= (7, 14):
-                archs.append('gfx1250')
+                archs.extend(['gfx1250', 'gfx1250-strict'])
             if ROCM_VERSION >= (10, 3):
                 archs.extend(["gfx1170", "gfx1171"])
-            for arch in archs:
-                if arch in torch.cuda.get_device_properties(0).gcnArchName:
-                    return True
-            return False
+            gcn_name = torch.cuda.get_device_properties(0).gcnArchName
+            return any(gcn_arch_matches(gcn_name, arch) for arch in archs)
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     if torch.xpu.is_available():
@@ -387,12 +410,11 @@ def evaluate_platform_supports_fp8_grouped_gemm():
         if torch.version.hip:
             if "USE_MSLK" not in torch.__config__.show():
                 return False
-            # gfx1250 omitted: MSLK only builds gfx942/gfx950 kernels (see the arch
-            # filter in aten/src/ATen/CMakeLists.txt). Add gfx1250 here once MSLK does.
+            # gfx1250/gfx1250-strict omitted: MSLK only builds gfx942/gfx950
+            # kernels (see aten/src/ATen/CMakeLists.txt). Add them once MSLK does.
             archs = ['gfx942', 'gfx950']
-            for arch in archs:
-                if arch in torch.cuda.get_device_properties(0).gcnArchName:
-                    return True
+            gcn_name = torch.cuda.get_device_properties(0).gcnArchName
+            return any(gcn_arch_matches(gcn_name, arch) for arch in archs)
         else:
             return SM90OrLater and not SM100OrLater
     if torch.xpu.is_available():
@@ -406,7 +428,12 @@ def evaluate_platform_supports_mx_gemm():
         if torch.version.hip:
             if ROCM_VERSION >= (7, 0):
                 gcn_name = torch.cuda.get_device_properties(0).gcnArchName
-                return 'gfx950' in gcn_name or ('gfx1250' in gcn_name and ROCM_VERSION >= (7, 14))
+                if gcn_arch_matches(gcn_name, 'gfx950'):
+                    return True
+                # gcn_arch_matches("gfx1250") stops at '-', so name strict too.
+                return ROCM_VERSION >= (7, 14) and any(
+                    gcn_arch_matches(gcn_name, arch) for arch in _CDNA5_ARCHS
+                )
         else:
             return SM100OrLater
     if torch.xpu.is_available():
@@ -447,7 +474,7 @@ def hipsparselt_supported_archs():
     # aten/src/ATen/native/sparse/cuda/cuSPARSELtOps.cpp. Gating on a wider set
     # than the runtime supports turns a skip into a hard TORCH_CHECK failure.
     if ROCM_VERSION >= (7, 14):
-        return ['gfx942', 'gfx950', 'gfx1250']
+        return ['gfx942', 'gfx950', 'gfx1250', 'gfx1250-strict']
     elif ROCM_VERSION >= (7, 12):
         return ['gfx942', 'gfx950']
     return []
@@ -704,7 +731,7 @@ def rocm_mx_swizzle(mat_dtype):
     if evaluate_gfx_arch_within(["gfx950"]):
         min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
         return version >= min_version
-    if evaluate_gfx_arch_within(["gfx1250"]):
+    if evaluate_gfx_arch_within(["gfx1250", "gfx1250-strict"]):
         return version >= (7, 14)
     return False
 
@@ -720,7 +747,7 @@ def mx_scale_swizzle(scale, mat_dtype, block_size=32):
     if torch.version.hip:
         if not rocm_mx_swizzle(mat_dtype):
             return scale
-        if evaluate_gfx_arch_within(["gfx1250"]):
+        if evaluate_gfx_arch_within(["gfx1250", "gfx1250-strict"]):
             return to_mx_swizzled_gfx1250(scale, block_size)
         return to_blocked(scale, swizzle_32_8=True)
     if scale.device.type == "xpu":

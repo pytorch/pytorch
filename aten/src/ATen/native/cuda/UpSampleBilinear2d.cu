@@ -101,7 +101,7 @@ int64_t plane_kernel_min_pixels_per_sm() {
   if (hooks.isGPUArch({"gfx942"})) {
     return 256;
   }
-  if (hooks.isGPUArch({"gfx1250"})) {
+  if (hooks.isGPUArch({"gfx1250", "gfx1250-strict"})) {
     return 768;
   }
   return 0;

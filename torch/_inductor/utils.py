@@ -2748,8 +2748,8 @@ def _descriptor_shape_fits_in_int32(
 
 
 def is_gfx1250_arch(arch: str) -> bool:
-    """Return True only for gfx1250, including feature-suffixed GCN names."""
-    return arch.split(":", 1)[0] == "gfx1250"
+    """Return True for gfx1250 peer targets, including feature suffixes."""
+    return arch.split(":", 1)[0] in ("gfx1250", "gfx1250-strict")
 
 
 # The torch.version attributes are process-constant, so the parse happens once.
@@ -6183,8 +6183,7 @@ def _gfx1250_scale_swizzle_cached(rocm_version: str) -> tuple[bool, bool]:
         version = tuple(int(x) for x in rocm_version.split("-")[0].split("."))
     except ValueError:
         return False, False
-    arch = _rocm_native_device_arch_name("cuda").split(":", 1)[0]
-    if not arch.startswith("gfx1250"):
+    if not is_gfx1250_arch(_rocm_native_device_arch_name("cuda")):
         return False, False
     return version >= (7, 14), version >= (10, 0)
 
