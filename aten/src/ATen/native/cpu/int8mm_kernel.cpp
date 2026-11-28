@@ -561,6 +561,6 @@ bool int_mm_fallback_kernel(
 } // anonymous namespace
 
 ALSO_REGISTER_AVX512_DISPATCH(int8pack_mm_stub, &int8pack_mm_kernel)
-ALSO_REGISTER_AVX512_DISPATCH(int_mm_fallback_stub, &int_mm_fallback_kernel)
+REGISTER_DISPATCH(int_mm_fallback_stub, &int_mm_fallback_kernel)
 
 } // at::native
