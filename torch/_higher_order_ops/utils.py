@@ -187,6 +187,9 @@ class _VmapCombineFnWrapper:
         unbatched xs), the stale markers would silently reinterpret a batch axis as
         data. Passing ``expected_out_dims`` makes the wrapper raise a clear error on
         the first call instead, before the divergence corrupts a later level.
+      - ``__call__`` runs a GraphModule ``combine_fn`` through an interpreter, so
+        re-traced nodes keep their meta (annotate regions, recompute tags).
+        ``create_hop_joint_graph`` relies on this when scan runs under vmap.
     """
 
     def __init__(
@@ -208,7 +211,10 @@ class _VmapCombineFnWrapper:
 
     def __call__(self, *args: Any) -> Any:
         outputs, per_slice_out_dims = restore_vmap(
-            self.combine_fn, self.in_dims, self.batch_size, self.randomness
+            _maybe_run_with_interpreter(self.combine_fn),
+            self.in_dims,
+            self.batch_size,
+            self.randomness,
         )(*args)
         outputs = pytree.tree_map(
             lambda out, bdim: out.movedim(bdim, -1) if bdim is not None else out,

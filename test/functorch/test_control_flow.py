@@ -11035,39 +11035,109 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
             functional_f(example_init, example_inputs)
 
     @skipIfTorchDynamo("don't test compile on compile")
-    def test_scan_joint_graph_keeps_node_meta(self):
+    @parametrize("use_vmap", [False, True])
+    def test_scan_joint_graph_keeps_node_meta(self, use_vmap):
         # Scan re-traces its body twice to build the joint graph that min-cut
         # partitions. An annotate() region set in the body must survive both.
+        # Under vmap, scan's batch rule hands the joint-graph builder a wrapper
+        # around the body graph, not the graph itself.
         from torch.fx.traceback import annotate
 
         def body(carry, x):
             with annotate({"region": "keep"}):
                 y = carry.sin()
-            return y * x, y.new_zeros(())
+                z = x + 1
+            return y * z, y.new_zeros(())
 
-        def f(init, xs):
-            return scan(body, init, xs)[0]
+        if use_vmap:
 
-        init = torch.randn(4, requires_grad=True)
-        xs = torch.randn(3, 4, requires_grad=True)
+            def f(init, xs):
+                return torch.func.vmap(
+                    lambda i, x: scan(body, i, x)[0], in_dims=(1, 2)
+                )(init, xs)
+
+            init = torch.randn(4, 2, requires_grad=True)
+            xs = torch.randn(3, 4, 2, requires_grad=True)
+        else:
+
+            def f(init, xs):
+                return scan(body, init, xs)[0]
+
+            init = torch.randn(4, requires_grad=True)
+            xs = torch.randn(3, 4, requires_grad=True)
+
         backend = AotEagerAndRecordGraphs()
         out = torch.compile(f, backend=backend, fullgraph=True)(init, xs)
-        self.assertEqual(out, f(init, xs))
+        init_e = init.detach().clone().requires_grad_()
+        xs_e = xs.detach().clone().requires_grad_()
+        out_e = f(init_e, xs_e)
+        self.assertEqual(out, out_e)
         out.sum().backward()
+        out_e.sum().backward()
+        self.assertEqual(init.grad, init_e.grad)
+        self.assertEqual(xs.grad, xs_e.grad)
 
-        # The forward and backward bodies are min-cut's output. The backward
-        # one recomputes the sin, and the copy must keep the region too.
+        # The forward and backward bodies are min-cut's output, and each holds
+        # an annotated node: min-cut recomputes the add in the backward body.
+        # Without vmap it recomputes the sin too; under vmap it saves the sin.
+        # Every copy must keep the region.
+        sin = torch.ops.aten.sin.default
         for gm in (*backend.fw_graphs, *backend.bw_graphs):
             (scan_node,) = gm.graph.find_nodes(
                 op="call_function", target=torch.ops.higher_order.scan
             )
             body_gm = getattr(gm, scan_node.args[0].target)
-            sins = body_gm.graph.find_nodes(
-                op="call_function", target=torch.ops.aten.sin.default
-            )
-            self.assertGreater(len(sins), 0)
-            for sin in sins:
-                self.assertEqual(sin.meta.get("custom"), {"region": "keep"})
+            nodes = [
+                n
+                for n in body_gm.graph.nodes
+                if n.target in (sin, torch.ops.aten.add.Tensor)
+            ]
+            self.assertGreater(len(nodes), 0)
+            if not use_vmap:
+                self.assertTrue(any(n.target == sin for n in nodes))
+            for n in nodes:
+                self.assertEqual(n.meta.get("custom"), {"region": "keep"})
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_associative_scan_keeps_node_meta_under_vmap(self):
+        # associative_scan's batch rule uses the same wrapper as scan's. An
+        # annotate() region in combine_fn must survive vmap + compile.
+        from torch.fx.traceback import annotate
+
+        def combine(a, b):
+            with annotate({"region": "keep"}):
+                s = a[0] + b[0]
+            return (s, a[1] + b[1])
+
+        def f(lhs, rhs):
+            return torch.func.vmap(
+                lambda l, r: associative_scan(combine, (l, r), dim=1)[0]
+            )(lhs, rhs)
+
+        lhs = torch.randn(8, 4, 5, requires_grad=True)
+        rhs = torch.randn(8, 4, 5, requires_grad=True)
+        backend = AotEagerAndRecordGraphs()
+        out = torch.compile(f, backend=backend, fullgraph=True)(lhs, rhs)
+        lhs_e = lhs.detach().clone().requires_grad_()
+        rhs_e = rhs.detach().clone().requires_grad_()
+        out_e = f(lhs_e, rhs_e)
+        self.assertEqual(out, out_e)
+        out.sum().backward()
+        out_e.sum().backward()
+        self.assertEqual(lhs.grad, lhs_e.grad)
+        self.assertEqual(rhs.grad, rhs_e.grad)
+
+        # The combine is inlined into the forward graph. Its only add is the
+        # annotated one (the unused second output is dropped), so every add
+        # there must keep the region. The backward graph's adds are gradient
+        # sums, not copies of the combine, so it is not checked.
+        (fw_gm,) = backend.fw_graphs
+        adds = fw_gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.add.Tensor
+        )
+        self.assertGreater(len(adds), 0)
+        for add in adds:
+            self.assertEqual(add.meta.get("custom"), {"region": "keep"})
 
     @skipIfTorchDynamo("don't test compile on compile")
     def test_hop_joint_graph_keeps_node_meta_of_plain_fn(self):
@@ -11137,6 +11207,52 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
         sin = torch.ops.aten.sin.default
         self.assertIn(sin, saved_by_forward_body(CheckpointPolicy.MUST_SAVE))
         self.assertNotIn(sin, saved_by_forward_body(CheckpointPolicy.PREFER_RECOMPUTE))
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_recompute_tag_steers_partition_under_vmap(self):
+        # Same as test_scan_recompute_tag_steers_partition, under vmap. The
+        # batched forward body saves permuted copies, never the sin itself, so
+        # check the backward body: it recomputes the sin only when allowed.
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        def body(carry, x):
+            y = carry.sin()
+            return y.cos() * x, y.new_zeros(())
+
+        def f(init, xs):
+            return torch.func.vmap(lambda i, x: scan(body, i, x)[0], in_dims=(1, 2))(
+                init, xs
+            )
+
+        def sins_in_backward_body(policy):
+            torch._dynamo.reset()
+            record = AotEagerAndRecordGraphs()
+
+            def backend(gm, example_inputs):
+                # Tag the sin in Dynamo's body graph, before AOTAutograd runs.
+                for mod in gm.modules():
+                    if mod is not gm and isinstance(mod, torch.fx.GraphModule):
+                        for node in mod.graph.nodes:
+                            if node.target in (torch.sin, "sin"):
+                                node.meta["recompute"] = policy
+                return record(gm, example_inputs)
+
+            init = torch.randn(4, 2, requires_grad=True)
+            xs = torch.randn(3, 4, 2, requires_grad=True)
+            torch.compile(f, backend=backend, fullgraph=True)(init, xs).sum().backward()
+            (bw_gm,) = record.bw_graphs
+            (scan_node,) = bw_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(bw_gm, scan_node.args[0].target)
+            return body_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.sin.default
+            )
+
+        self.assertEqual(sins_in_backward_body(CheckpointPolicy.MUST_SAVE), [])
+        self.assertNotEqual(
+            sins_in_backward_body(CheckpointPolicy.PREFER_RECOMPUTE), []
+        )
 
     @skipIfTorchDynamo("don't test compile on compile")
     def test_scan_recompute_tag_on_complex_symint(self):
