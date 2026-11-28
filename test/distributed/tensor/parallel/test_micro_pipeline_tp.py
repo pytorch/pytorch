@@ -407,9 +407,8 @@ class MicroPipelineTPTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_fuse_all_gather_matmul_view_optimization(self):
-        """When batch=1 and gather_dim=1, _maybe_view_chunk_cat uses a view
-        (no data movement), so the all_gather is optimized away entirely and
-        there is no all_gather+matmul pattern to fuse."""
+        """When batch=1 and gather_dim=1, _maybe_view_chunk_cat uses a view/reshape
+        instead of split+cat, and Inductor still fuses the all_gather+matmul."""
         group = dist.group.WORLD
 
         def func(A_shard: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
@@ -418,7 +417,7 @@ class MicroPipelineTPTest(TestCase):
 
         # batch=1: after all_gather, shape[0] == world_size == group_size,
         # so the view optimization in _maybe_view_chunk_cat applies.
-        # Shard is [1, 32, 32], all_gather gives [2, 32, 32], view to [1, 64, 32].
+        # Shard is [1, 32, 32], all_gather gives [2, 32, 32], reshape to [1, 64, 32].
         A_shard = torch.rand(1, 32, 32, device=device_type)
         B = torch.rand(32, 16, device=device_type)
 
@@ -426,7 +425,79 @@ class MicroPipelineTPTest(TestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, A_shard, B)
 
-        self.assertNotIn("fused_all_gather_matmul", code)
+        self.assertIn("fused_all_gather_matmul", code)
+        self.assertNotIn("all_gather_into_tensor", code)
+
+    @fresh_cache()
+    def test_fuse_all_gather_matmul_reshape_reassembly(self):
+        group = dist.group.WORLD
+
+        for A_shape, gather_dim, return_A in [
+            ((1, 32, 32), 1, False),
+            ((1, 32, 32), 1, True),
+            ((1, 1, 16, 32), 2, False),
+        ]:
+            def func(A_shard: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+                A = all_gather_single(A_shard, gather_dim=gather_dim, group=group)
+                out = A @ B
+                return (A, out) if return_A else out
+
+            A_shard = torch.rand(*A_shape, device="cpu")
+            B = torch.rand(32, 16, device="cpu")
+            gm = _make_post_grad_fx(func, A_shard, B)
+
+            matches = find_all_gather_patterns(gm.graph)
+            self.assertEqual(len(matches), 1)
+            self.assertEqual(matches[0].gather_dim, gather_dim)
+
+            with (
+                _test_mode(),
+                mock.patch("torch.distributed.is_nccl_available", return_value=True),
+            ):
+                micro_pipeline_tp_pass(gm.graph)
+
+            graph_str = str(gm.graph)
+            self.assertIn("fused_all_gather_matmul", graph_str)
+            self.assertNotIn("all_gather_into_tensor", graph_str)
+
+    @fresh_cache()
+    def test_fuse_all_gather_matmul_reshape_negative_cases(self):
+        group = dist.group.WORLD
+
+        # Multi-dim user reshape must not be misclassified as gather_dim > 0.
+        def func_multi_dim_reshape(
+            A_shard: torch.Tensor, B: torch.Tensor
+        ) -> torch.Tensor:
+            A = all_gather_single(A_shard, gather_dim=0, group=group)
+            return A.reshape(1, 2, 1024) @ B
+
+        A_shard = torch.rand(1, 32, 32, device="cpu")
+        B = torch.rand(1024, 16, device="cpu")
+        gm = _make_post_grad_fx(func_multi_dim_reshape, A_shard, B)
+        matches = find_all_gather_patterns(gm.graph)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0].gather_dim, 0)
+        self.assertIs(
+            matches[0].res_node.target,
+            torch.ops._c10d_functional.wait_tensor.default,
+        )
+
+        # Non-singleton leading dim before gather_dim must not match reshape reassembly.
+        def func_non_singleton_leading(
+            A_shard: torch.Tensor, B: torch.Tensor
+        ) -> torch.Tensor:
+            A = all_gather_single(A_shard, gather_dim=0, group=group)
+            return A.reshape(1, 4, 1024) @ B
+
+        A_shard_2 = torch.rand(2, 32, 32, device="cpu")
+        gm_2 = _make_post_grad_fx(func_non_singleton_leading, A_shard_2, B)
+        matches_2 = find_all_gather_patterns(gm_2.graph)
+        self.assertEqual(len(matches_2), 1)
+        self.assertEqual(matches_2[0].gather_dim, 0)
+        self.assertIs(
+            matches_2[0].res_node.target,
+            torch.ops._c10d_functional.wait_tensor.default,
+        )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
