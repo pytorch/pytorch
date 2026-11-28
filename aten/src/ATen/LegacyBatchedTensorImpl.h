@@ -78,6 +78,14 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   // bt.actualDim(2) -> Error
   int64_t actualDim(int64_t dim, bool wrap_dim = true) const;
 
+  // Replaces value() and the batch dims, and recomputes this tensor's sizes,
+  // strides, and storage offset from them. This is used by batching rules for
+  // in-place view operations (e.g. squeeze_), which change the metadata of a
+  // BatchedTensor in-place. `value` should be a view of the old value(). We
+  // don't modify the old value() in-place because it may be shared with other
+  // tensors (e.g. the input to vmap, or a BatchedTensor from an outer vmap).
+  void unsafe_set_value(Tensor value, BatchDims bdims);
+
   // We have to override this because we opted into CustomStrides
   IntArrayRef strides_custom() const override;
   // Override a bunch of methods inherited from TensorImpl to return error
@@ -94,6 +102,7 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
  private:
   // see NOTE: [BatchedTensorImpl levels invariant]
   void checkInvariants() const;
+  void refreshTensorMetadata();
   const char* tensorimpl_type_name() const override;
 
   Tensor value_;
