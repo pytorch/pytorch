@@ -336,6 +336,23 @@ class CooperativeReductionTests(TestCase):
         ]
         self.run_and_check(fn, inps, expect_kernel_count=2)
 
+    def test_large_xnumel_falls_back(self):
+        # Reducing dim=0 on [15, 1048575] leaves xnumel=~1M. Cooperative launch
+        # with XBLOCK=1 would request ~1M CTAs and fail with CUDA invalid
+        # argument; the heuristic must refuse cooperative for large x.
+        # https://github.com/pytorch/pytorch/issues/204790
+        def fn(x):
+            return x.sum(dim=0)
+
+        x = torch.ones(15, 1048575, device=GPU_TYPE, dtype=torch.float32)
+        expected = fn(x)
+        result, (source_code,) = run_and_get_code(
+            torch.compile(fn, fullgraph=True), x
+        )
+        self.assertEqual(result, expected)
+        self.assertNotIn("@triton_heuristics.cooperative_reduction", source_code)
+        self.assertNotIn("cooperative_reduction_grid", source_code)
+
 
 @config.patch("triton.persistent_reductions", not config.triton.persistent_reductions)
 class NoPersistCooperativeReductionTests(CooperativeReductionTests):
