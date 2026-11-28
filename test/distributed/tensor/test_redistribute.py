@@ -45,8 +45,10 @@ from torch.distributed.tensor._redistribute import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _MaskPartial, _StridedShard
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -70,6 +72,7 @@ funcol = torch.ops.c10d_functional
 
 
 class RedistributeTest(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 4
 
     @parametrize("dtype", [torch.float32, torch.cfloat])
@@ -1179,6 +1182,7 @@ instantiate_parametrized_tests(RedistributeTest)
 
 
 class MultiDimRedistributeTest(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 8
 
     def test_multi_dim_mesh(self):
@@ -1267,6 +1271,7 @@ class MultiDimRedistributeTest(DTensorContinuousTestBase):
 
 
 class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 8
 
     def _extract_redistribute_trace_from_debug_mode(self, s: str) -> str:
@@ -1826,6 +1831,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
 
 
 class DistributeWithStridedShardTest(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 8
 
     def _extract_redistribute_trace_from_debug_mode(self, s: str) -> str:
@@ -2101,6 +2107,8 @@ class DistributeWithStridedShardTest(DTensorContinuousTestBase):
 class TransformInfoTest(TestCase):
     """Tests for _TransformInfo._comm_type_key method."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_comm_type_key(self):
         """Test _comm_type_key returns correct keys for different placement transforms."""
         # Comm ops: return comm type string
@@ -2149,6 +2157,8 @@ class OptimizeFlattenedReductionsTest(TestCase):
 
     Uses fake process group since these tests don't perform actual communications.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def setUpClass(cls):
@@ -2766,6 +2776,7 @@ class MultiDimRedistributeOptimizationTest(DTensorContinuousTestBase):
     on multi-dimensional meshes, including the flattened mesh optimization.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 8
 
     def test_multi_dim_redistribute(self):
@@ -3016,6 +3027,7 @@ class FlattenedReductionIntegrationTest(DTensorContinuousTestBase):
     when flattened meshes are available.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 8
 
     def test_merging_reductions(self):
@@ -3121,6 +3133,7 @@ class UnevenFlattenedReduceScatterTest(DTensorContinuousTestBase):
     optimization doesn't properly handle padding/unpadding.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 6  # 2 x 3 mesh
 
     def test_partial_partial_to_shard_shard_uneven(self):
@@ -3244,6 +3257,8 @@ class RedistributeBackwardDtypeTest(TestCase):
     tracer captures the dtype of each ``_c10d_functional`` collective.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -3298,6 +3313,23 @@ class RedistributeBackwardDtypeTest(TestCase):
         self.assertEqual(tracer.dtypes_for("reduce_scatter_tensor"), [torch.float32])
         self.assertEqual(local.grad.dtype, torch.float32)
 
+
+instantiate_device_type_tests(MultiDimRedistributeTest, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    DistributeWithDeviceOrderTest, globals(), except_for="cpu"
+)
+instantiate_device_type_tests(
+    DistributeWithStridedShardTest, globals(), except_for="cpu"
+)
+instantiate_device_type_tests(
+    MultiDimRedistributeOptimizationTest, globals(), except_for="cpu"
+)
+instantiate_device_type_tests(
+    FlattenedReductionIntegrationTest, globals(), except_for="cpu"
+)
+instantiate_device_type_tests(
+    UnevenFlattenedReduceScatterTest, globals(), except_for="cpu"
+)
 
 if __name__ == "__main__":
     run_tests()
