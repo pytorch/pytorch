@@ -292,8 +292,8 @@ class SuperVariable(VariableTracker):
                             unimplemented(
                                 gb_type="Specialization-dependent super method error",
                                 context=f"dict.{name}",
-                                explanation="CPython specialization can change the receiver named in the argument error.",
-                                hints=["Bind the method before calling it."],
+                                explanation="The arguments to this direct super() call are invalid. CPython specialization can change the receiver named in its TypeError.",
+                                hints=["To catch TypeError, bind the method first."],
                                 skip_frame=True,
                                 apply_to_code=False,
                             )

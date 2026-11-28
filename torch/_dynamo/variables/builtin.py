@@ -3047,26 +3047,24 @@ class BuiltinVariable(TypeVariable):
         return pynumber_invert(tx, a)
 
     @classmethod
-    def check_format_slots(builtin, tx, field, names):
-        if builtin.has_pending_format_slots(tx, names):
+    def check_format_slots(cls, tx, field, names):
+        if cls.has_pending_format_slots(tx, names):
             owner = field._class_vt(tx)
             if isinstance(owner, UserDefinedClassVariable):
                 for name in names:
                     if owner.pending_setattr_owner(tx, name):
-                        builtin.unsupported_format(
-                            field, f"pending class mutation: {name}"
-                        )
-        cls = field.python_type()
-        if id(cls) in tx.output.created_enum_classes:
+                        cls.unsupported_format(field, f"pending class mutation: {name}")
+        typ = field.python_type()
+        if id(typ) in tx.output.created_enum_classes:
             if _method_identity_guards_filtered(tx):
-                builtin.unsupported_format(field, "Enum identity guards are filtered")
-            global_name = tx.output.install_global_by_id("__compiled_enum", cls)
+                cls.unsupported_format(field, "Enum identity guards are filtered")
+            global_name = tx.output.install_global_by_id("__compiled_enum", typ)
             source = GlobalSource(global_name)
             # EnumMeta copies slots onto new classes, including slots inherited from a base.
-            mro = get_type_mro_no_user_code(cls)
-            owners = [(b, _mro_entry_source(cls, source, i)) for i, b in enumerate(mro)]
+            mro = get_type_mro_no_user_code(typ)
+            owners = [(b, _mro_entry_source(typ, source, i)) for i, b in enumerate(mro)]
         else:
-            owners = ((cls, field.cls_source),) if field.cls_source else ()
+            owners = ((typ, field.cls_source),) if field.cls_source else ()
         for owner, source in owners:
             for name in names:
                 if attr := mro_attr_source(tx, owner, source, name):
@@ -3075,11 +3073,10 @@ class BuiltinVariable(TypeVariable):
 
     @staticmethod
     def has_pending_format_slots(tx, names=(*_FORMAT_SLOTS, "__float__")):
-        mutations = tx.output.side_effects.store_attr_mutations
         return any(
             isinstance(owner, UserDefinedClassVariable)
             and not attrs.keys().isdisjoint(names)
-            for owner, attrs in mutations.items()
+            for owner, attrs in tx.output.side_effects.store_attr_mutations.items()
         )
 
     @staticmethod
@@ -3091,7 +3088,7 @@ class BuiltinVariable(TypeVariable):
             hints=["Format this value outside the compiled region."],
         )
 
-    def _format_object(self, tx, value, spec, *, guarded, native, nonempty):
+    def _format_object(self, tx, value, spec, guarded, nonempty):
         lookup = value.lookup_class_mro_attr
         reject = functools.partial(self.unsupported_format, value)
         formatter = lookup("__format__")
@@ -3109,38 +3106,32 @@ class BuiltinVariable(TypeVariable):
         impl = lookup("__str__")
         constant = value.is_python_constant()
         custom_str = base and impl is not base.__repr__ and impl is not str.__str__
-        if base and text == "" and not native:
+        if base and text == "":
             if base is object and torch._C._dynamo.utils.is_instancemethod(impl):
                 return StringFormatVariable.create(tx, "{}", [value], {})
             if not constant or custom_str:
                 return generic_str(tx, value)
         if constant:
-            if base is None or (base is datetime.date and text != ""):
-                reject("unsupported __format__ slot")
-            if not guarded:
-                reject("missing class source for __format__")
+            if not guarded or base is None or (base is datetime.date and text != ""):
+                reject("missing or unsupported __format__ slot")
             if text is None and not nonempty and custom_str:
                 reject("dynamic format spec may invoke __str__")
             if base is int and (text is None or text.endswith(tuple("eEfFgG%"))):
                 self.check_format_slots(tx, value, ("__float__",))
                 if lookup("__float__") is not int.__float__:
                     reject("custom __float__ in integer format")
-            native = True
-        elif base is datetime.date and nonempty:
+        elif base is datetime.date and (nonempty or text):
             # date.__format__ calls strftime, which in turn calls timetuple.
             names = ("__getattribute__", "strftime", "timetuple")
             self.check_format_slots(tx, value, names)
-            native = (
-                guarded
-                and value._dict_is_c_descriptor()
-                and all(lookup(n) is getattr(datetime.date, n) for n in names)
-            )
-            if native:
-                for name in names[1:]:
-                    if value.lookup_instance_dict(tx, name) is not None:
-                        reject(f"instance overrides {name}")
-                    value.get_source_by_walking_mro(tx, name)
-        if not native and value.python_type() is not decimal.Decimal:
+            defaults = all(lookup(n) is getattr(base, n) for n in names)
+            if not (guarded and value._dict_is_c_descriptor() and defaults):
+                reject("cannot defer a formatting callback")
+            for name in names[1:]:
+                if value.lookup_instance_dict(tx, name) is not None:
+                    reject(f"instance overrides {name}")
+                value.get_source_by_walking_mro(tx, name)
+        else:
             reject("cannot defer a formatting callback")
         return StringFormatVariable.create(tx, "{0:{1}}", [value, spec], {})
 
@@ -3151,18 +3142,31 @@ class BuiltinVariable(TypeVariable):
         if isinstance(value, FakeIdVariable):
             value.guard_as_python_constant()
         if isinstance(value, UserDefinedObjectVariable):
-            lookup = value.lookup_class_mro_attr
-            slots = _FORMAT_SLOTS if spec is not None else ("__repr__",)
-            if conv == "s":
-                slots = _STR_SLOTS
+            typ, clock = value.python_type(), value.value
+            slots = {None: _FORMAT_SLOTS, "s": _STR_SLOTS}.get(conv, ("__repr__",))
             guarded = self.check_format_slots(tx, value, slots)
+            lookup = value.lookup_class_mro_attr
             defaults = all(lookup(n) is vars(object)[n] for n in slots)
-            native = guarded and defaults and type(value.python_type()) is type
-            if spec is not None:
-                return self._format_object(
-                    tx, value, spec, guarded=guarded, native=native, nonempty=nonempty
-                )
-            native = native or value.python_type() is decimal.Decimal
+            native = guarded and defaults and type(typ) is type
+            if type(clock) is datetime.time or type(clock) is datetime.datetime:
+                tz = generic_getattr(tx, value, "tzinfo")
+                if not tz.is_constant_match(None):
+                    # Even a builtin timezone can hold user-defined names and offsets.
+                    zone = clock.tzinfo
+                    if (
+                        type(zone) is not datetime.timezone
+                        or type(zone.utcoffset(None)) is not datetime.timedelta
+                        or type(zone.tzname(None)) is not str
+                        or not tz.source
+                        or _method_identity_guards_filtered(tx)
+                    ):
+                        self.unsupported_format(value, "cannot defer a tzinfo callback")
+                    install_guard(tz.source.make_guard(GuardBuilder.ID_MATCH))
+                native = True
+            elif typ is decimal.Decimal or typ is datetime.date:
+                native = True
+            if spec is not None and not native:
+                return self._format_object(tx, value, spec, guarded, nonempty)
         elif type(value) in (ListVariable, TupleVariable, ConstDictVariable):
             if spec is not None and not spec.is_constant_match(""):
                 self.unsupported_format(value, "nonempty container format spec")
@@ -3174,9 +3178,7 @@ class BuiltinVariable(TypeVariable):
                 elif type(value) is ConstDictVariable:
                     value.install_dict_order_guard(tx)
                     opening, closing, entry = "{{", "}}", "{}: {}"
-                    seq = itertools.chain.from_iterable(
-                        (k.vt, v) for k, v in seq.items()
-                    )
+                    seq = (item for k, v in seq.items() for item in (k.vt, v))
                 if recursive:
                     return const(opening[0] + "..." + closing[-1])
                 convert = "a" if conv == "a" else "r"
@@ -3186,30 +3188,26 @@ class BuiltinVariable(TypeVariable):
             return render(tx, template, items, {})
         elif isinstance(value, variables.GetAttrVariable):
             obj = value.obj
-            attr = mro_lookup(torch.Tensor, value.name)
+            descriptors = (types.FunctionType, types.MethodDescriptorType)
             native = isinstance(obj, TensorVariable) and isinstance(
-                attr, types.MethodDescriptorType
+                mro_lookup(obj.python_type(), value.name), descriptors
             )
         else:
-            native = (
-                isinstance(value, ConstantVariable)
-                or id(value.python_type()) in _FORMAT_ATOM_IDS
-            )
+            typ = maybe_get_python_type(value)
+            native = isinstance(value, ConstantVariable) or id(typ) in _FORMAT_ATOM_IDS
         if native:
             if spec is not None:
                 return render(tx, "{0:{1}}", [value, spec], {})
             return render(tx, f"{{!{conv}}}", [value], {})
         if spec is not None:
-            slot = mro_lookup(value.python_type(), "__format__")
+            slot = mro_lookup(maybe_get_python_type(value), "__format__")
             if not spec.is_constant_match("") or slot is not object.__format__:
                 self.unsupported_format(value, "cannot defer a formatting callback")
-        convert = generic_str if conv in (None, "s") else generic_repr
-        text = convert(tx, value)
+        text = (generic_str if conv in (None, "s") else generic_repr)(tx, value)
         if conv == "a":
             codec = [const("ascii"), const("backslashreplace")]
-            return text.call_method(tx, "encode", codec, {}).call_method(
-                tx, "decode", [], {}
-            )
+            encoded = text.call_method(tx, "encode", codec, {})
+            return encoded.call_method(tx, "decode", [], {})
         return text
 
     def _expand_format(self, tx, template, args, kwargs):
@@ -3237,9 +3235,7 @@ class BuiltinVariable(TypeVariable):
                         raise ValueError(f"cannot switch from {auto} to {manual}")
                     position = None
                 if isinstance(key, int) and key >= len(args):
-                    raise IndexError(
-                        f"Replacement index {key} out of range for positional args tuple"
-                    )
+                    f"{{{key}}}".format(*args)  # raise CPython's positional index error
                 field = args[key] if isinstance(key, int) else kwargs[key]
                 for is_attr, index in path:
                     if is_attr:
@@ -3271,13 +3267,12 @@ class BuiltinVariable(TypeVariable):
         if self.fn is format:
             if kwargs or len(args) > 1:
                 return None
-            spec = args[0] if args else ConstantVariable.create("")
             if isinstance(_format_string, FakeIdVariable):
                 _format_string.guard_as_python_constant()
-            if (
-                isinstance(_format_string, UserDefinedObjectVariable)
-                and spec.python_type() is str
-            ):
+            if not isinstance(_format_string, UserDefinedObjectVariable):
+                return None
+            spec = args[0] if args else ConstantVariable.create("")
+            if spec.python_type() is str:
                 return self._format_field(tx, _format_string, spec)
             return None
         if _format_string.python_type() is str and (
