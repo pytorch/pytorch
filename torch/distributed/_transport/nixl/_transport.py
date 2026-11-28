@@ -41,6 +41,14 @@ if TYPE_CHECKING:
 _MAX_NOTIFICATION_SIZE = 4 << 10
 
 
+def _supported(device: torch.device) -> bool:
+    # CPU, or this process's accelerator.
+    if device.type == "cpu":
+        return True
+    accelerator = torch.accelerator.current_accelerator()
+    return accelerator is not None and device.type == accelerator.type
+
+
 def _load_backend() -> Any:
     try:
         return import_module("nixl")
@@ -70,6 +78,9 @@ class NIXLTransport(Transport):
     arriving notifications, so a thread polls transfers that carry a
     notification, and ``wait_notifications`` polls for incoming ones with
     backoff.
+
+    Tensors must be on CPU or the current accelerator; which accelerators work
+    depends on the NIXL build.
     """
 
     def __init__(
@@ -84,8 +95,8 @@ class NIXLTransport(Transport):
         timeout: float = 30.0,
     ) -> None:
         super().__init__(device)
-        if self.device is not None and self.device.type not in ("cpu", "cuda"):
-            raise ValueError("NIXL transport requires a CPU or CUDA device")
+        if self.device is not None and not _supported(self.device):
+            raise ValueError("NIXL transport requires a CPU or accelerator device")
         if not plugin:
             raise ValueError("plugin cannot be empty")
         if num_threads < 0:
@@ -323,8 +334,8 @@ class NIXLTransport(Transport):
         if tensor.numel() == 0:
             raise ValueError("cannot register an empty tensor")
         self._check_device(tensor.device)
-        if tensor.device.type not in ("cpu", "cuda"):
-            raise ValueError("NIXL transport requires CPU or CUDA tensors")
+        if not _supported(tensor.device):
+            raise ValueError("NIXL transport requires CPU or accelerator tensors")
         length = tensor.numel() * tensor.element_size()
         key = tensor.data_ptr(), length, str(tensor.device)
         if registration := self._registrations.get(key):
@@ -337,7 +348,7 @@ class NIXLTransport(Transport):
             tensor.data_ptr(),
             length,
             max(tensor.get_device(), 0),
-            "VRAM" if tensor.is_cuda else "DRAM",
+            "DRAM" if tensor.device.type == "cpu" else "VRAM",
         )
         self._registrations[key] = registration
         _live_transports.add(self)
