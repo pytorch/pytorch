@@ -307,7 +307,7 @@ def max_clock_rate(device: int | None = None):
         try:
             return nvsmi(["clocks.max.sm"])[0]
         except FileNotFoundError:
-            import pynvml  # type: ignore[import]
+            from torch.cuda import _nvml as pynvml
 
             handle = torch.cuda._get_pynvml_handler()
             try:
