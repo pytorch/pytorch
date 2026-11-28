@@ -138,9 +138,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             if operation in ("call_values", "unpack", "empty_unpack"):
                 hooks = module._forward_hooks
                 values = hooks.values()
-                if operation != "call_values":
-                    values = [*values]
-                for hook in values:
+                for hook in values if operation == "call_values" else [*values]:
                     x = hook(module, (x,), x)
                 if operation == "call_values":
                     return x
@@ -220,7 +218,8 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     @parametrize("kind", [dict, OrderedDict])
     @parametrize("spoof", [False, True])
     @parametrize("method", ["__len__", "__bool__"])
-    def test_empty_hook_subclass_truth_protocol(self, kind, spoof, method):
+    @parametrize("backward", [False, True])
+    def test_empty_hook_subclass_truth_protocol(self, kind, spoof, method, backward):
         class Meta(type):
             __hash__ = type.__hash__
 
@@ -231,30 +230,25 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             def items(self):
                 return [(1, add_two)]
 
-        setattr(Hooks, method, lambda self: True)
-        module = torch.nn.Identity()
-        module._forward_hooks = Hooks()
-        compiled = torch.compile(lambda x, m: m(x), backend="eager", fullgraph=True)
-        x = torch.ones(1)
-        self.assertEqual(compiled(x, module), x + 2)
-
-    @torch._dynamo.config.patch(skip_nnmodule_hook_guards=False, compiled_autograd=True)
-    def test_empty_backward_hook_subclass_guard(self):
-        class Hooks(dict):
-            def __bool__(self):
-                return True
-
             def values(self):
                 return [lambda module, grads: (3 * grads[0],)]
 
+        setattr(Hooks, method, lambda self: True)
         module = torch.nn.Identity()
-        x = torch.ones(1, requires_grad=True)
-        fn, counter = self.compile_counted(lambda x, m: 2 * m(x))
-        for hooks, multiplier in (({}, 2), (Hooks(), 6)):
-            module._backward_pre_hooks = hooks
-            (grad,) = torch.autograd.grad(fn(x, module).sum(), x)
-            self.assertEqual(grad, x * multiplier)
-        self.assertEqual(counter.frame_count, 2)
+        field = "_backward_pre_hooks" if backward else "_forward_hooks"
+        x = torch.ones(1, requires_grad=backward)
+        with torch._dynamo.config.patch(
+            skip_nnmodule_hook_guards=not backward, compiled_autograd=backward
+        ):
+            compiled, counter = self.compile_counted(lambda x, m: m(x))
+            cases = (({}, 1), (Hooks(), 3)) if backward else ((Hooks(), 3),)
+            for hooks, expected in cases:
+                setattr(module, field, hooks)
+                actual = compiled(x, module)
+                if backward:
+                    (actual,) = torch.autograd.grad(actual.sum(), x)
+                self.assertEqual(actual, x * expected)
+            self.assertEqual(counter.frame_count, len(cases))
 
     _hook_copies = (lambda h: h.copy(), lambda h: h | {}, lambda h: {} | h)
 
@@ -528,7 +522,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
 
         opt, cnt = self.compile_counted(lambda x, module: module(x))
         x = torch.ones(1)
-
         if global_hook:
             self.addCleanup(hook_api.register_module_forward_pre_hook(hook).remove)
 
@@ -547,24 +540,25 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             check(not with_kwargs)
         self.assertEqual(cnt.frame_count, 2)
 
-    def test_hook_flag_mutated_before_dispatch(self):
+    def test_hook_flag_mutated_between_dispatches(self):
         def fn(x, module):
+            before = module(x)
             module._forward_hooks_with_kwargs.clear()
-            return module(x)
+            return before, module(x)
 
         compiled, counter = self.compile_counted(fn)
         for _ in range(2):
             module = torch.nn.Identity()
             module.register_forward_hook(hook_arity, with_kwargs=True)
-            self.assertEqual(compiled(torch.ones(1), module), torch.ones(1) * 10 + 1)
+            x = torch.ones(1)
+            self.assertEqual(compiled(x, module), (x * 10 + 2, x * 10 + 1))
             self.assertFalse(module._forward_hooks_with_kwargs)
         self.assertEqual(counter.frame_count, 1)
 
     def test_cross_module_hook_flags_fallback(self):
-        def fn(x, first, second):
-            return x + sum(
-                key in second._forward_hooks_with_kwargs for key in first._forward_hooks
-            )
+        def fn(x, src, dst):
+            flags = dst._forward_hooks_with_kwargs
+            return x + sum(k in flags for k in src._forward_hooks)
 
         first, second = torch.nn.Identity(), torch.nn.Identity()
         first._forward_hooks[1] = identity_forward_hook
@@ -580,9 +574,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     def test_hook_membership_guard_objects(self, suppressed):
         def prime(ctx):
             tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
-            module = ctx.get_local(
-                "module"
-            )._i_will_not_complain_if_bc_breaks_VariableTracker()
+            module = tx.symbolic_locals["module"]
             hooks = generic_getattr(tx, module, "_forward_hooks")
             flags = generic_getattr(tx, module, "_forward_hooks_with_kwargs")
             with torch._guards.TracingContext.get().guards_context.skip_guard_install():
@@ -833,10 +825,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             subtest(lambda d: 1 in ({0: True}.keys() | d), name="view_union"),
             subtest(lambda d: 1 in {1: True}.keys() & d, name="view_intersection"),
             subtest(lambda d: 1 in d | {0: True}.keys(), name="reverse_view_union"),
-            subtest(
-                lambda d: 1 in pytree.tree_map(lambda value: True, d),
-                name="tree_map",
-            ),
+            subtest(lambda d: 1 in pytree.tree_map(lambda _: True, d), name="tree_map"),
             subtest(
                 lambda d: 1 in pytree.tree_map_with_path(lambda path, value: True, d),
                 name="tree_map_with_path",

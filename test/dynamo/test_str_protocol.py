@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
-    subtest,
 )
 
 
@@ -597,10 +596,8 @@ class FStringMutationTests(TestCase):
     @parametrize(
         "format_kind",
         (
-            # TODO: Preserve formatting order without breaking fullgraph
-            # reorderable logging, which relies on deferred tensor formatting.
-            subtest("plain", decorators=[unittest.expectedFailure]),
-            subtest("plain_with_spec", decorators=[unittest.expectedFailure]),
+            "plain",
+            "plain_with_spec",
             "str",
             "repr",
             "ascii",
