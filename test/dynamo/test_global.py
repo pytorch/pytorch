@@ -1011,6 +1011,18 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                         self.assertEqual(opt_fn(x), expected(x))
                         self.assertNotIn("_dg_a", globals())
 
+    def test_delete_global_module_dict_context(self):
+        me = sys.modules[__name__]
+        with mock.patch.dict(globals(), {"_dg_a": 1}):
+
+            def fn(x):
+                global _dg_a
+                del _dg_a
+                return x + ("_dg_a" in me.__dict__)
+
+            with self.assertRaisesRegex(Unsupported, "module __dict__ of"):
+                torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(2, 2))
+
     @parametrize("shape", ("attr", "setitem", "update", "setdefault"))
     def test_delete_global_module_write_after(self, shape):
         me = sys.modules[__name__]
