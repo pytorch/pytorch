@@ -1683,7 +1683,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                 with self.subTest(dynamic=dynamic, case=name):
                     torch._dynamo.reset()
                     cnt = CompileCounterWithBackend("aot_eager")
-                    opt_f = torch.compile(f, backend=cnt, fullgraph=True, dynamic=dynamic)
+                    opt_f = torch.compile(
+                        f, backend=cnt, fullgraph=True, dynamic=dynamic
+                    )
 
                     b1 = torch.arange(10.0)
                     b1_ref = b1.clone()

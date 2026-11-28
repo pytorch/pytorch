@@ -1892,7 +1892,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     other_arg_indices: list[int] = field(default_factory=list)
     # Source indices (into aot_config.aot_autograd_arg_pos_to_source) of aliased
     # inputs whose concrete int storage_offset is baked into synthetic-base views.
-    # Re-used in post_compile so both cache misses and AOTAutogradCache hits
+    # Reused in post_compile so both cache misses and AOTAutogradCache hits
     # install Dynamo STORAGE_OFFSET guards.
     concrete_storage_offset_source_indices: list[int] = field(default_factory=list)
 
@@ -1930,9 +1930,9 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             ):
                 continue
             install_guard(
-                TensorPropertySource(
-                    source, TensorProperty.STORAGE_OFFSET
-                ).make_guard(GuardBuilder.EQUALS_MATCH),
+                TensorPropertySource(source, TensorProperty.STORAGE_OFFSET).make_guard(
+                    GuardBuilder.EQUALS_MATCH
+                ),
                 recompile_hint="storage_offset changed for aliased mutated input",
             )
 
@@ -2025,7 +2025,9 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         for group in self.base_groups.values():
             for orig_idx in group:
                 view_tensor = flat_args[orig_idx]
-                if not isinstance(view_tensor.storage_offset(), int):
+                if not isinstance(view_tensor, Tensor) or not isinstance(
+                    view_tensor.storage_offset(), int
+                ):
                     continue
                 desc = flat_args_descs[orig_idx]
                 source_idx = (
