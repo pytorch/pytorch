@@ -345,7 +345,7 @@ class LBFGS(Optimizer):
         state["func_evals"] += 1
 
         flat_grad = self._gather_flat_grad()
-        opt_cond = flat_grad.abs().max() <= tolerance_grad
+        opt_cond = flat_grad.numel() == 0 or flat_grad.abs().max() <= tolerance_grad
 
         # optimal condition
         if opt_cond:
