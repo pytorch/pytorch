@@ -726,6 +726,68 @@ class TestBenchmarker(TestCase):
         self.assertEqual(cuda_graph_calls, 1)
         self.assertEqual(callable_calls, [])
 
+    @parametrize(
+        "estimation_timings, benchmark_timings, expected",
+        (
+            ((-3.0,), (-2.0, 0.0, 0.5, 0.25), 0.25),
+            ((0.0,), (-1.0, 0.0, 0.0, 0.0), float("inf")),
+        ),
+    )
+    def test_benchmark_gpu_skips_non_positive_event_timings(
+        self, estimation_timings, benchmark_timings, expected
+    ):
+        # HIP on Windows can report negative or zero elapsed times (#193658)
+        from torch._inductor.runtime import benchmarking as _bench
+
+        class FakeBuffer:
+            def zero_(self):
+                pass
+
+        class FakeDeviceInterface:
+            def synchronize(self):
+                pass
+
+        class FakeEvent:
+            def __init__(self, elapsed_ms=None):
+                self.elapsed_ms = elapsed_ms
+
+            def record(self):
+                pass
+
+            def elapsed_time(self, other):
+                return self.elapsed_ms
+
+        class FakeInductorBenchmarker(InductorBenchmarker):
+            def get_device_cache_size(self, device_type=None):
+                return 4
+
+            def get_event_pairs(self, iters, device_type=None):
+                requested_iters.append(iters)
+                return [(FakeEvent(t), FakeEvent()) for t in timings_per_phase.pop(0)]
+
+        timings_per_phase = [estimation_timings, benchmark_timings]
+        requested_iters = []
+        with (
+            patch.object(
+                _bench, "get_interface_for_device", return_value=FakeDeviceInterface()
+            ),
+            patch.object(_bench.torch, "empty", return_value=FakeBuffer()),
+        ):
+            result = FakeInductorBenchmarker().benchmark_gpu(
+                lambda: None,
+                estimation_iters=len(estimation_timings),
+                memory_warmup_iters=1,
+                benchmark_iters=len(benchmark_timings),
+                is_vetted_benchmarking=True,
+                device_type="cuda",
+            )
+
+        self.assertEqual(result, expected)
+        # an invalid estimate must not shrink the number of benchmark iterations
+        self.assertEqual(
+            requested_iters, [len(estimation_timings), len(benchmark_timings)]
+        )
+
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @parametrize(
         "hip_value, expected_buffer_size_bytes",
