@@ -1074,6 +1074,85 @@ def reinplace_inplaceable_ops_core(
     def all_can_inplace(node, mutated_args):
         return all(can_inplace(node, arg) for arg in mutated_args)
 
+    def reinplace_into_scatter_base(node, inplaceable_op, replacements):
+        """
+        Reinplaces an indexed write into a view that is scattered straight back:
+            view = view_ops(base)
+            out = index_put(view, ...)
+            res = _generalized_scatter(base, out, view_ops)
+        After index_put_(view, ...), base holds res, so res is replaced by base.
+        This is the scatter reinplaced into base with its write moved up to
+        node, so it needs can_inplace(scatter, base) and no use of base in
+        between. base must be a graph input (in a chain of such writes into
+        one input, e.g. a stacked KV cache, the earlier scatters have already
+        been replaced by it), and that input's only copy_ must write res, or a
+        later scatter into res, back to it.
+        """
+        index_put_ops = (aten.index_put.default, aten._unsafe_index_put.default)
+        if node.target not in index_put_ops or len(node.users) != 1:
+            return False
+        (scatter,) = node.users
+        if scatter.target is not _generalized_scatter or scatter.args[1] is not node:
+            return False
+        base, _, scatter_view_ops = scatter.args
+        view = node.args[0]
+        view_ops = []
+        while view is not base:
+            if not (
+                isinstance(view, torch.fx.Node)
+                and isinstance(view.target, torch._ops.OpOverload)
+                and _is_view_op(view.target)
+            ):
+                return False
+            view_ops.append(ViewOp(view.target, args=view.args[1:], kwargs=view.kwargs))
+            view = view.args[0]
+        if view_ops[::-1] != scatter_view_ops:
+            return False
+
+        if base.op not in ("placeholder", "get_attr"):
+            return False
+        copies = [u for u in base.users if u.target is aten.copy_.default]
+        if len(copies) != 1 or copies[0].args[0] is not base:
+            return False
+        (copy_node,) = copies
+        src = copy_node.args[1]
+        while (
+            src is not scatter
+            and isinstance(src, torch.fx.Node)
+            and src.target is _generalized_scatter
+        ):
+            src = src.args[0]
+        if src is not scatter:
+            return False
+        if not (
+            can_inplace(scatter, base)
+            and inplaceable_op.extra_check(node)
+            and not cannot_refresh_lowering_metadata(scatter, base)
+        ):
+            return False
+        # No read or write of base between node and the scatter.
+        if any_use_of_views_after_node(
+            node,
+            storage_to_nodes[get_node_storage(base)],
+            copy_node=scatter,
+            mutated_arg=None,
+        ):
+            return False
+        # Once copy_node has run, res's storage holds what copy_node wrote.
+        if copy_node.args[1] is not scatter and any_use_of_views_after_node(
+            copy_node,
+            storage_to_nodes[get_node_storage(scatter)],
+            copy_node=None,
+            mutated_arg=None,
+        ):
+            return False
+
+        replacements[scatter] = base
+        # copy_node, if it copies res into the input, is now a self-copy.
+        if copy_node.args[1] is scatter:
+            replacements[copy_node] = base
+        return True
+
     def log_inplace_results(
         node_name,
         old_tensors_to_clone,
@@ -1435,6 +1514,9 @@ def reinplace_inplaceable_ops_core(
                         "reinplaced scatter %s into an auto_functionalized_v2 base",
                         node,
                     )
+            elif reinplace_into_scatter_base(node, inplaceable_op, replacements):
+                node.target = inplaceable_op.inplace_op
+                changed_nodes.add(node)
         elif node.target is torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
             kwargs = node.kwargs
