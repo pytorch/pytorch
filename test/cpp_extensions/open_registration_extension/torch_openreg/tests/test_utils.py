@@ -74,6 +74,37 @@ class TestDLPack(TestCase):
         self.assertEqual(x_t.shape, y.shape)
         self.assertEqual(x_t, y)
 
+    def test_dlpack_routes_through_from_blob_privateuse1_hook(self):
+        """DLPack import ultimately calls at::from_blob(); OpenRegHooksInterface
+        opts into PrivateUse1HooksInterface::fromBlobPrivateUse1(), so
+        importing an "openreg" tensor via DLPack must go through it -- this
+        is the exact mechanism a real out-of-tree backend (e.g. torch_npu)
+        would use to avoid forking ATen's DLConvertor.cpp."""
+        before = torch.ops.openreg._from_blob_hook_call_count()
+
+        x = torch.randn(2, 3, device="openreg")
+        capsule = torch.utils.dlpack.to_dlpack(x)
+        y = torch.from_dlpack(capsule)
+
+        after = torch.ops.openreg._from_blob_hook_call_count()
+        self.assertEqual(after, before + 1)
+
+        # Values/shape/device must still round-trip correctly through the
+        # custom hook, exactly as the pre-existing DLPack tests require.
+        self.assertEqual(x.shape, y.shape)
+        self.assertEqual(x.device, y.device)
+        self.assertEqual(x.cpu(), y.cpu())
+
+        # Non-contiguous / non-zero-storage_offset case, exercising the
+        # strides + storage_offset plumbing through the hook.
+        before = torch.ops.openreg._from_blob_hook_call_count()
+        x_view = torch.randn(4, 5, device="openreg")[1:, 1:]
+        capsule2 = torch.utils.dlpack.to_dlpack(x_view)
+        y_view = torch.from_dlpack(capsule2)
+        after = torch.ops.openreg._from_blob_hook_call_count()
+        self.assertEqual(after, before + 1)
+        self.assertEqual(x_view.cpu(), y_view.cpu())
+
 
 if __name__ == "__main__":
     run_tests()

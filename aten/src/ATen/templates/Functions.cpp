@@ -37,6 +37,26 @@ Tensor TensorMaker::make_tensor() {
      data_ptr = makeDataPtrFromContext();
    }
 
+   // Backends registered under the PrivateUse1 dispatch key may need a
+   // custom TensorImpl/StorageImpl subclass (e.g. to attach backend-specific
+   // storage descriptors), which the generic path below cannot produce.
+   // This is strictly opt-in: hasCustomFromBlob() defaults to false, so
+   // backends that don't override it (including no PrivateUse1 backend
+   // being registered at all) fall through to the unchanged default path.
+   if (device_->type() == c10::DeviceType::PrivateUse1 &&
+       at::isPrivateUse1HooksRegistered() &&
+       at::detail::getPrivateUse1Hooks().hasCustomFromBlob()) {
+     return at::detail::getPrivateUse1Hooks().fromBlobPrivateUse1(
+         std::move(data_ptr),
+         size_bytes,
+         sizes_,
+         strides_,
+         storage_offset_,
+         opts_,
+         resizeable_,
+         allocator_);
+   }
+
    TORCH_CHECK(!resizeable_ || allocator_ != nullptr, "Must specify an allocator with allocator() if you want to use resizeable_storage()");
    Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr), /*allocator=*/allocator_, /*resizable=*/resizeable_};
 
