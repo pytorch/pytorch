@@ -10,45 +10,47 @@ from torch._inductor.autoheuristic.autoheuristic_utils import AHContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_gpu_shared_memory
-from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_A100, IS_H100
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, skipIfXpu
+from torch.testing._internal.inductor_utils import HAS_TRITON, IS_A100, IS_H100
 
 
 class AutoHeuristicTest(TestCase):
-    def count_lines_in_file(self, file_path):
-        with open(file_path) as file:
-            line_count = sum(1 for line in file)
-        return line_count
+    hw_classification = HardwareClassification.GENERIC
 
-    def run_mm(self):
+    @inductor_config.patch(deterministic=True)
+    def test_use_autoheuristic_pad_mm_enabled_in_deterministic_mode(self):
+        inductor_config.autoheuristic_use.pad_mm = None
+        """pad_mm set to None; with deterministic=True, use_autoheuristic should return True."""
+        self.assertTrue(inductor_config.use_autoheuristic("pad_mm"))
+
+
+class AutoHeuristicTestBase(TestCase):
+    def run_mm(self, device):
         def f(a, b):
             return torch.mm(a, b)
 
         cf = torch.compile(f)
-        a = torch.randn(2047, 2048, device=GPU_TYPE, dtype=torch.float16)
-        b = torch.randn(2048, 2048, device=GPU_TYPE, dtype=torch.float16)
+        a = torch.randn(2047, 2048, device=device, dtype=torch.float16)
+        b = torch.randn(2048, 2048, device=device, dtype=torch.float16)
         cf(a, b)
+
+
+class AutoHeuristicTestDevice(AutoHeuristicTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def count_lines_in_file(self, file_path):
+        with open(file_path) as file:
+            line_count = sum(1 for line in file)
+        return line_count
 
     def get_path_to_autoheuristic_log(self, name):
         device_name = AutoHeuristic.get_device_identifier()
         path = cache_dir() + "/autoheuristic/" + device_name + "/" + name + ".txt"
         return path
 
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
-    def test_autoheuristic_pad_mm_default(self):
-        # this test ensures that data is not collected for pad_mm when autoheuristic config is set to its default value
-        self.run_mm()
-        self.assertFalse(os.path.exists(self.get_path_to_autoheuristic_log("pad_mm")))
-
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
-    @inductor_config.patch("autoheuristic_collect.pad_mm", False)
-    def test_autoheuristic_pad_mm_off(self):
-        # this test ensures that data is not collected for pad_mm when autoheuristic_collect does not contain "pad_mm"
-        self.run_mm()
-        self.assertFalse(os.path.exists(self.get_path_to_autoheuristic_log("pad_mm")))
-
-    def assert_autoheuristic_collected_data(self):
-        self.run_mm()
+    def assert_autoheuristic_collected_data(self, device):
+        self.run_mm(device)
         AutoHeuristic.get_device_identifier()
         path = self.get_path_to_autoheuristic_log("pad_mm")
         self.assertTrue(os.path.exists(path))
@@ -58,20 +60,36 @@ class AutoHeuristicTest(TestCase):
         self.assertEqual(num_lines, 4)
 
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
-    @inductor_config.patch("autoheuristic_collect.pad_mm", True)
-    def test_autoheuristic_pad_mm_collect_data(self):
-        # this test ensures that data is collected for pad_mm when autoheuristic_collect.pad_mm=True
-        self.assert_autoheuristic_collected_data()
+    def test_autoheuristic_pad_mm_default(self, device):
+        # this test ensures that data is not collected for pad_mm when autoheuristic config is set to its default value
+        self.run_mm(device)
+        self.assertFalse(os.path.exists(self.get_path_to_autoheuristic_log("pad_mm")))
+
+    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
+    @inductor_config.patch("autoheuristic_collect.pad_mm", False)
+    def test_autoheuristic_pad_mm_off(self, device):
+        # this test ensures that data is not collected for pad_mm when autoheuristic_collect does not contain "pad_mm"
+        self.run_mm(device)
+        self.assertFalse(os.path.exists(self.get_path_to_autoheuristic_log("pad_mm")))
 
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @inductor_config.patch("autoheuristic_collect.pad_mm", True)
-    def test_autoheuristic_pad_mm_collect_data2(self):
+    def test_autoheuristic_pad_mm_collect_data(self, device):
         # this test ensures that data is collected for pad_mm when autoheuristic_collect.pad_mm=True
-        self.assert_autoheuristic_collected_data()
+        self.assert_autoheuristic_collected_data(device)
 
     @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
+    @inductor_config.patch("autoheuristic_collect.pad_mm", True)
+    def test_autoheuristic_pad_mm_collect_data2(self, device):
+        # this test ensures that data is collected for pad_mm when autoheuristic_collect.pad_mm=True
+        self.assert_autoheuristic_collected_data(device)
+
+
+class AutoHeuristicTestCuda(AutoHeuristicTestBase):
+    hw_classification = HardwareClassification.CUDA
+
     @patch.dict(os.environ, {"TORCHINDUCTOR_AUTOHEURISTIC_COLLECT": "test"})
-    def test_autoheuristic(self):
+    def test_autoheuristic(self, device):
         # test basic functionality of autoheuristic
         def fallback():
             return "fallback"
@@ -120,27 +138,24 @@ class AutoHeuristicTest(TestCase):
             self.assertEqual("5,b,2", lines[3].rstrip())
             self.assertEqual("5,c,3", lines[4].rstrip())
 
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @unittest.skipIf(not IS_A100, "heuristic only run on A100")
     @inductor_config.patch("autoheuristic_use.pad_mm", True)
-    def test_autoheuristic_a100(self):
+    def test_autoheuristic_a100(self, device):
         # Make sure heuristic does not break anything
         # TODO (AlnisM): Find a way to check whether heuristic is used
-        self.run_mm()
+        self.run_mm(device)
 
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @unittest.skipIf(not IS_H100, "heuristic only run on H100")
     @inductor_config.patch("autoheuristic_use.pad_mm", True)
-    def test_autoheuristic_h100(self):
+    def test_autoheuristic_h100(self, device):
         # Make sure heuristic does not break anything
         # TODO (AlnisM): Find a way to check whether heuristic is used
-        self.run_mm()
+        self.run_mm(device)
 
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
     @unittest.skipIf(not IS_H100 and not IS_A100, "heuristic only run on H100")
     @inductor_config.patch(deterministic=True)
     @inductor_config.patch("autoheuristic_use.pad_mm", True)
-    def test_pad_mm_autoheuristic_deterministic_mode(self):
+    def test_pad_mm_autoheuristic_deterministic_mode(self, device):
         """Test that pad_mm AutoHeuristics works in deterministic mode."""
         from torch._dynamo.utils import counters
 
@@ -151,8 +166,8 @@ class AutoHeuristicTest(TestCase):
 
         cf = torch.compile(f)
         # Use shapes that would normally trigger padding but aren't well-aligned
-        a = torch.randn(2047, 2048, device=GPU_TYPE, dtype=torch.float16)
-        b = torch.randn(2048, 2049, device=GPU_TYPE, dtype=torch.float16)
+        a = torch.randn(2047, 2048, device=device, dtype=torch.float16)
+        b = torch.randn(2048, 2049, device=device, dtype=torch.float16)
 
         # Run the compiled function
         result = cf(a, b)
@@ -166,13 +181,7 @@ class AutoHeuristicTest(TestCase):
         # because AutoHeuristics makes the decision without benchmarking
         self.assertEqual(counters["inductor"]["pad_mm_bench"], 0)
 
-    @inductor_config.patch(deterministic=True)
-    def test_use_autoheuristic_pad_mm_enabled_in_deterministic_mode(self):
-        inductor_config.autoheuristic_use.pad_mm = None
-        """pad_mm set to None; with deterministic=True, use_autoheuristic should return True."""
-        self.assertTrue(inductor_config.use_autoheuristic("pad_mm"))
-
-    def test_autoheuristic_init_no_cuda(self):
+    def test_autoheuristic_init_no_cuda(self, device):
         """AutoHeuristic.__init__ must not crash in non-CUDA environments."""
 
         def fallback():
@@ -193,6 +202,11 @@ class AutoHeuristicTest(TestCase):
         self.assertEqual(ah.metadata.device_capa, (0, 0))
 
 
+instantiate_device_type_tests(
+    AutoHeuristicTestDevice, globals(), allow_xpu=True, except_for="cpu"
+)
+instantiate_device_type_tests(AutoHeuristicTestCuda, globals(), only_for="cuda")
+
 if __name__ == "__main__":
-    if HAS_GPU:
+    if HAS_TRITON:
         run_tests()
