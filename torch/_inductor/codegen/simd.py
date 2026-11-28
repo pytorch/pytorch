@@ -82,9 +82,9 @@ from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import (
+    BenchmarkedMultiKernel,
     ConditionalMultiKernel,
     leaf_kernels,
-    MultiKernel,
     MultiKernelBase,
     SizeHintMultiKernel,
 )
@@ -4213,7 +4213,7 @@ class SIMDScheduling(BaseScheduling):
         nodes_to_mark,
         config_patch_schedule=None,
     ) -> None:
-        MultiKernel.merge_workspaces_inplace(kernels)
+        BenchmarkedMultiKernel.merge_workspaces_inplace(kernels)
         config_patches = self._collect_config_patches(
             config_patch_schedule or combined_schedule
         )
@@ -4227,8 +4227,8 @@ class SIMDScheduling(BaseScheduling):
             )
             kernel.code_hash = code_hash(src_code)
 
-        final_kernel: SIMDKernel | MultiKernel = (
-            MultiKernel(kernels) if len(kernels) > 1 else kernels[0]
+        final_kernel: SIMDKernel | BenchmarkedMultiKernel = (
+            BenchmarkedMultiKernel(kernels) if len(kernels) > 1 else kernels[0]
         )
         with V.set_kernel_handler(final_kernel):
             for sn in nodes_to_mark:
@@ -4999,7 +4999,7 @@ class SIMDScheduling(BaseScheduling):
         *,
         optimization_hint_overrides: dict[sympy.Symbol, int] | None = None,
         must_keep_buffers: OrderedSet[str] | None = None,
-    ) -> SIMDKernel | MultiKernel:
+    ) -> SIMDKernel | BenchmarkedMultiKernel:
         """Build step of codegen_node_schedule: pick the tiling, create the kernel
         objects (one kernel, or a multi-kernel over several leaf kernels) and generate
         each leaf's body: the Triton source lines for the nodes' loads, compute and
@@ -5042,7 +5042,7 @@ class SIMDScheduling(BaseScheduling):
                 self.codegen_node_schedule_with_kernel(
                     kernel_features.node_schedule, kernel
                 )
-        return MultiKernel(kernels) if len(kernels) > 1 else kernels[0]
+        return BenchmarkedMultiKernel(kernels) if len(kernels) > 1 else kernels[0]
 
     def _define_node_schedule_kernels(
         self, kernels: list[SIMDKernel], node_schedule: list[NodeScheduleEntry]
@@ -5057,7 +5057,7 @@ class SIMDScheduling(BaseScheduling):
         Runs once, after all the leaves exist: the merged workspace size is part of
         each source.
         """
-        MultiKernel.merge_workspaces_inplace(kernels)
+        BenchmarkedMultiKernel.merge_workspaces_inplace(kernels)
 
         # Collect config_patches from operations (e.g., decomposition ops with
         # coordinate_descent_tuning) and apply during kernel codegen
@@ -5416,7 +5416,7 @@ class SIMDScheduling(BaseScheduling):
             if only_gen_src_code:
                 return "\n\n".join(src_codes)
 
-            MultiKernel.merge_workspaces_inplace(list(kernels.values()))
+            BenchmarkedMultiKernel.merge_workspaces_inplace(list(kernels.values()))
             multi_kernel = SizeHintMultiKernel(kernels)
             node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
             self.codegen_comment(node_schedule, multi_kernel.kernel_name)

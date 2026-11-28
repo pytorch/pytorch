@@ -636,7 +636,7 @@ class DeferredTritonCallWrapper:
         """
         prefix = wrapper.prefix
         if self.kernel_name.startswith("multi_kernel_"):
-            # MultiKernel will select one kernel after running the autotune block
+            # BenchmarkedMultiKernel will select one kernel after running the autotune block
             self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
         # Defer compilation to runtime if autotune_at_compile_time is False (JIT only).

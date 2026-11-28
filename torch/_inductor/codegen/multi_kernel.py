@@ -41,7 +41,7 @@ class MultiKernelState:
 
     def define_dispatcher(self, multi_kernel: "DispatchedMultiKernel") -> str:
         """Register a multi-kernel whose sub-kernel is picked at run time by a
-        dispatcher object in the generated module (MultiKernel,
+        dispatcher object in the generated module (BenchmarkedMultiKernel,
         SizeHintMultiKernel; see DispatchedMultiKernel), and return its name.
 
         Multi-kernels of the same type with the same sub-kernels share one name.
@@ -129,7 +129,7 @@ class MultiKernelBase:
 
     Here is a concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
 
-    Subclasses decide how the launched sub-kernel is picked: MultiKernel and
+    Subclasses decide how the launched sub-kernel is picked: BenchmarkedMultiKernel and
     SizeHintMultiKernel are DispatchedMultiKernels, picked at run time by
     MultiKernelCall / SizeHintMultiKernelCall.
     ConditionalMultiKernel checks a size condition on every launch, inline in
@@ -325,9 +325,7 @@ class DispatchedMultiKernel(MultiKernelBase):
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
 
 
-# TODO: rename to BenchmarkedMultiKernel (keeping a MultiKernel alias): it benchmarks
-# the sub-kernels once and keeps the fastest, unlike ConditionalMultiKernel.
-class MultiKernel(DispatchedMultiKernel):
+class BenchmarkedMultiKernel(DispatchedMultiKernel):
     """Benchmarks the sub-kernels on the first call and keeps the fastest."""
 
     def __init__(self, kernels):
@@ -344,6 +342,10 @@ class MultiKernel(DispatchedMultiKernel):
             for kernel_name in kernel_names:
                 buf.writeline(f"{kernel_name},")
         buf.writeline("], arg_index=arg_index)")
+
+
+# The previous name, still imported by code outside torch.
+MultiKernel = BenchmarkedMultiKernel
 
 
 class MultiKernelCall:
@@ -633,7 +635,7 @@ class ConditionalMultiKernel(MultiKernelBase):
     """
     Launches the first sub-kernel whose condition holds.
 
-    Unlike MultiKernel, the sub-kernels are not interchangeable: each one is only
+    Unlike BenchmarkedMultiKernel, the sub-kernels are not interchangeable: each one is only
     correct when its condition holds, so the wrapper checks the conditions on every
     launch instead of benchmarking once. Every input must match some condition: the
     last condition is True, or the conditions together must be provably exhaustive,

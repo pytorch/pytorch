@@ -679,7 +679,7 @@ class InductorChoices:
 
         # If multi_kernel is enabled, we do more aggressive persistent reduction.
         # This may result in some persistent reductions slower than the
-        # corresponding non-persistent reductions. MultiKernel will do benchmarking
+        # corresponding non-persistent reductions. BenchmarkedMultiKernel will do benchmarking
         # to pick the faster one.
         if config.triton.multi_kernel:
             threshold *= 16
