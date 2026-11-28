@@ -208,6 +208,84 @@ class TestOptimRenewed(TestCase):
         else:
             self.assertIsNone(optimizer.step())
 
+    @parametrize("shape", [(0,), (0, 3), (3, 0), (2, 0, 3)])
+    @parametrize("with_nonempty", [False, True])
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_with_empty_params(
+        self, device, dtype, optim_info, shape, with_nonempty
+    ):
+        optim_cls = optim_info.optim_cls
+        if optim_cls.__name__ == "Muon" and len(shape) != 2:
+            self.skipTest("Muon only supports 2D parameters")
+
+        optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info
+        )
+        if (
+            _get_device_type(device) == "cpu"
+            and "foreach" in optim_info.supported_impls
+        ):
+            # CPU foreach uses the slow path and is not included by the helper.
+            foreach_inputs = optim_info.optim_inputs_func(device=device)
+            for optim_input in foreach_inputs:
+                optim_input.kwargs["foreach"] = True
+            optim_inputs += foreach_inputs
+        mixed_dtypes = optim_cls.__name__ == "Adafactor" and with_nonempty
+        for optim_input in optim_inputs:
+            kwargs = optim_input.kwargs
+            params = [Parameter(torch.empty(shape, device=device, dtype=dtype))]
+            if with_nonempty:
+                param_shape = (4,) if mixed_dtypes else (2, 3)
+                params.append(
+                    Parameter(torch.ones(param_shape, device=device, dtype=dtype))
+                )
+            if mixed_dtypes:
+                # Small float16 vector gradients expose group-order-dependent epsilon reuse.
+                params.insert(
+                    0, Parameter(torch.empty(shape, device=device, dtype=torch.float16))
+                )
+                params.append(
+                    Parameter(torch.ones(4, device=device, dtype=torch.float16))
+                )
+            if kwargs.get("differentiable", False):
+                params = [p.detach() for p in params]
+            optimizer = optim_cls(params, **kwargs)
+
+            def closure(params):
+                sign = (
+                    -1
+                    if optim_info.step_requires_closure
+                    and kwargs.get("maximize", False)
+                    else 1
+                )
+                for p in params:
+                    grad = sign * (5e-4 if mixed_dtypes else 2) * p.detach()
+                    p.grad = (
+                        grad.to_sparse()
+                        if optim_info.only_supports_sparse_grads
+                        else grad
+                    )
+                return sign * sum(p.square().sum() for p in params)
+
+            if with_nonempty:
+                nonempty_params = [p for p in params if p.numel() != 0]
+                reference = [p.detach().clone() for p in nonempty_params]
+                reference_optimizer = optim_cls(reference, **kwargs)
+            # Run enough steps to cover RAdam's rectified update.
+            for _ in range(7):
+                optimizer.step(functools.partial(closure, params))
+                if with_nonempty:
+                    reference_optimizer.step(functools.partial(closure, reference))
+                    self.assertEqual(nonempty_params, reference)
+                    for p, ref in zip(nonempty_params, reference):
+                        state_param = (
+                            params[0] if optim_info.step_requires_closure else p
+                        )
+                        self.assertEqual(
+                            optimizer.state[state_param], reference_optimizer.state[ref]
+                        )
+            self.assertEqual(params[0].shape, shape)
+
     @parametrize("contiguous", [True, False])
     @parametrize("with_lrsched", [True, False])
     @optims(optim_db, dtypes=[torch.float32])

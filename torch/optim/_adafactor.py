@@ -365,6 +365,10 @@ def _single_tensor_adafactor(
         lr = _to_scalar(lr)
 
     for i, param in enumerate(params):
+        if param.numel() == 0:
+            state_steps[i] += 1
+            continue
+
         grad = grads[i] if not maximize else -grads[i]
         step_t = state_steps[i]
         row_var = row_vars[i]
@@ -427,9 +431,18 @@ def _group_tensors_by_device_dtype_and_is_multidim(
     tuple[torch.device | None, torch.dtype | None, bool],
     list[list[Tensor | None]],
 ]:
-    """Groups tensors by device, dtype, AND multidimensionality -- whether the tensor
+    """Groups nonempty tensors by device, dtype, AND multidimensionality -- whether the tensor
     has multiple dims or just one dim (is a vector). This allows the foreach impl of
     Adafactor to assume that every group of params will either be factored or not."""
+    nonempty_indices = []
+    for i, tensor in enumerate(tensorlists[1]):
+        if tensor is None:
+            raise AssertionError("grad should not be None")
+        if tensor.numel() != 0:
+            nonempty_indices.append(i)
+    if not nonempty_indices:
+        return {}
+    tensorlists = [[ts[i] for i in nonempty_indices] for ts in tensorlists]
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(tensorlists)
     ultra_grouped_tensors: dict[
         tuple[torch.device | None, torch.dtype | None, bool],
@@ -486,6 +499,10 @@ def _multi_tensor_adafactor(
         raise AssertionError("Grad scaling should occur outside of optimizer.step()")
 
     lr = _to_scalar(lr)
+
+    for i, param in enumerate(params):
+        if param.numel() == 0:
+            state_steps[i] += 1
 
     grouped_tensors = _group_tensors_by_device_dtype_and_is_multidim(
         [params, grads, row_vars, col_vars, variances, state_steps]  # type: ignore[list-item]
