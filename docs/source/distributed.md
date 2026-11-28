@@ -632,13 +632,12 @@ With `nccl` and `nccl-lazy`:
   every rank satisfies this.
 - **Put sources.** The source of {meth}`~torch.distributed.distributed_c10d.Window.put` must be contiguous and lie
   in an allocator segment that has a window on the same process group, e.g. a slice of this window's
-  tensor. `backend.register_mem_pool(pool, symm=True)` gives every segment the
-  pool allocates afterwards a symmetric window, so any tensor allocated from
-  the pool after the call is a valid source. Each new segment is then
-  registered collectively, so all ranks must allocate the same sizes in the
-  same order, and allocation raises if no transport supports symmetric memory.
-  Segments that already exist are upgraded too, but without such a transport
-  they only log a warning and are not valid sources.
+  tensor. In a pool created with
+  `torch.cuda.MemPool(backend.allocator(symm=True))`, every segment
+  gets a symmetric window as it is allocated, so any tensor allocated from the
+  pool is a valid source. Each segment is then registered collectively, so all
+  ranks must allocate the same sizes in the same order, and allocation raises
+  if no transport supports symmetric memory.
 - **Registration.** A window holds one tensor at a time; call
   {meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` before registering another.
   {func}`~torch.distributed.distributed_c10d._new_window` with a tensor
@@ -646,16 +645,12 @@ With `nccl` and `nccl-lazy`:
 - **Signals.** Each {meth}`~torch.distributed.distributed_c10d.Window.put` also signals the destination rank; see
   {meth}`~torch.distributed.distributed_c10d.Window.wait_signal` for how signals are counted.
 - **Teardown.** {meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` only drops the window's
-  bookkeeping; the segment stays registered with NCCL until the allocator
-  frees it, and every rank must free its segments in the same order or
-  teardown can hang. To avoid this, register the pool with
-  `backend.register_mem_pool` (either `symm` value) and tear down in this order on every rank:
-  synchronize outstanding window work, call `tensor_deregister` on every
-  window backed by the pool, call `backend.deregister_mem_pool(pool)`, free
-  the tensors and pool, then call
-  {func}`~torch.distributed.distributed_c10d.destroy_process_group`. Deregistering the pool
-  tears down its segment windows immediately, so windows backed by it must not
-  be used afterwards.
+  bookkeeping; the segment stays registered with NCCL until the pool frees
+  it, and every rank must free its segments in the same order or teardown can
+  hang. To avoid this, tear down in this order on every rank: synchronize
+  outstanding window work, call `tensor_deregister` on every window backed by
+  the pool, free the pool's tensors and then the pool, then call
+  {func}`~torch.distributed.distributed_c10d.destroy_process_group`.
 - **Limitations.** {meth}`~torch.distributed.distributed_c10d.Window.map_remote_tensor` only supports the local
   rank and requires the default `owning=True` registration, and
   {meth}`~torch.distributed.distributed_c10d.Window.get_attr` always reports `SEPARATE`.
@@ -679,9 +674,8 @@ rank, world_size = dist.get_rank(), dist.get_world_size()
 assert dist._supports_window()
 
 backend = dist.get_backend_impl(device=device)
-pool = torch.cuda.MemPool(backend.mem_allocator)
-# Each segment later allocated from the pool becomes a symmetric window.
-backend.register_mem_pool(pool, symm=True)
+# Each segment allocated from the pool becomes a symmetric window.
+pool = torch.cuda.MemPool(backend.allocator(symm=True))
 count = 1024
 with torch.cuda.use_mem_pool(pool):
     # Collective: a new segment is registered on every rank, so all ranks must
@@ -705,8 +699,7 @@ assert buf[prev_rank * count : (prev_rank + 1) * count].eq(prev_rank).all()
 
 # Collective, stream-ordered (does not block the host).
 win.tensor_deregister()
-# Collective: tear down the segments' NCCL windows before freeing them.
-backend.deregister_mem_pool(pool)
+# Collective: freeing the pool's segments tears down their NCCL windows.
 del win, src, buf, pool
 dist.destroy_process_group()
 ```
