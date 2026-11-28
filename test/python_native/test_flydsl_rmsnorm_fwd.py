@@ -167,7 +167,14 @@ class TestFlyDSLRMSNorm(TestCase):
         got_dx, got_dw = grads()
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
         self.assertEqual(got_dx, ref_dx)
-        self.assertEqual(got_dw, ref_dw)
+        # The reference is whatever ATen kernel runs with the override disabled. On ROCm that is the cached-row
+        # RMSNorm forward, which reduces in a different order than FlyDSL, so the saved rstd can differ in the
+        # last bit on some rows and dgamma sums that difference over all M rows. Compare dgamma relative to its
+        # magnitude there for float32; the 16-bit gradients are rounded to the same value and still compare exactly.
+        if torch.version.hip and dtype == torch.float32:
+            self.assertEqual(got_dw, ref_dw, rtol=0, atol=1e-6 * ref_dw.abs().max().item())
+        else:
+            self.assertEqual(got_dw, ref_dw)
 
     @parametrize("eps_kind", ("negative", "nan"))
     def test_invalid_eps_falls_back_without_compiling(self, eps_kind):
