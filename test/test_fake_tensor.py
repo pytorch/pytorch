@@ -72,7 +72,10 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    TEST_CUDNN,
+)
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -91,6 +94,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfCppFakeTensor,
     skipIfCrossRef,
+    skipIfRocm,
     skipIfTorchDynamo,
     skipIfWindows,
     subtest,
@@ -124,6 +128,42 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 # A conv with cpu inputs and xpu weights dispatches to aten::_slow_conv2d_forward, which
 # is unimplemented on XPU, so the expected device-mismatch error never surfaces.
 XPU_SLOW_CONV2D_SKIP = "XPU lacks aten::_slow_conv2d_forward for mixed cpu/xpu conv, see https://github.com/intel/torch-xpu-ops/issues/5125"
+
+
+def _ctc_args(
+    T=50,
+    il=None,
+    tl=(10, 20, 30),
+    tgt_dtype=torch.int,
+    tgt_device=None,
+    lp_dtype=torch.float,
+    lp_contiguous=True,
+    contiguous=True,
+    tensor_lengths=False,
+    blank=0,
+):
+    N, C, S = len(tl), 20, sum(tl)
+    tgt_device = tgt_device or ("cuda" if tensor_lengths else "cpu")
+
+    log_probs = torch.randn(N, T, C, device="cuda", dtype=lp_dtype).log_softmax(-1)
+    log_probs = log_probs.transpose(0, 1)
+    if lp_contiguous:
+        log_probs = log_probs.contiguous()
+    targets = torch.randint(1, C, (2 * S,), dtype=tgt_dtype, device=tgt_device)
+
+    targets = targets[:S] if contiguous else targets[::2]
+
+    il = il if il is not None else [T] * N
+
+    if tensor_lengths:
+        il = torch.tensor(il, dtype=torch.int, device="cuda")
+        tl = torch.tensor(tl, dtype=torch.int, device="cuda")
+
+    return log_probs, targets, il, tl, blank
+
+
+def _fake_args(mode, args):
+    return [mode.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
 
 
 def expectedFailurePropagateRealTensors(fn):
@@ -3451,6 +3491,84 @@ assert not torch.cuda.is_initialized()
             0,
             msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
         )
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, "requires cuDNN")
+    @parametrize(
+        "kwargs,expected",
+        [
+            subtest(({}, True), name="eligible"),
+            subtest(({"T": 300, "tl": (10, 20, 255)}, True), name="tl_255"),
+            subtest(({"T": 300, "tl": (10, 20, 256)}, False), name="tl_256"),
+            subtest(({"tl": (10, 20, 60)}, False), name="tl_gt_il"),
+            subtest(({"il": (50, 49, 50)}, False), name="short_input"),
+            subtest(({"tgt_dtype": torch.long}, False), name="int64_targets"),
+            subtest(({"tgt_device": "cuda"}, False), name="cuda_targets"),
+            subtest(({"contiguous": False}, False), name="noncontiguous_targets"),
+            subtest(({"lp_dtype": torch.double}, False), name="double_log_probs"),
+            subtest(({"blank": 1}, False), name="nonzero_blank"),
+        ],
+    )
+    def test_use_cudnn_ctc_loss(self, kwargs, expected):
+        args = _ctc_args(**kwargs)
+        self.assertEqual(torch._use_cudnn_ctc_loss(*args), expected)
+        with FakeTensorMode(allow_fallback_kernels=False) as mode:
+            fake_args = _fake_args(mode, args)
+            self.assertEqual(torch._use_cudnn_ctc_loss(*fake_args), expected)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, "requires cuDNN")
+    def test_use_cudnn_ctc_loss_reads_cudnn_flag(self):
+        args = _ctc_args()
+        with FakeTensorMode(allow_fallback_kernels=False) as mode:
+            fake_args = _fake_args(mode, args)
+            self.assertTrue(torch._use_cudnn_ctc_loss(*fake_args))
+            # same args, so this would hit the cached True without the bypass
+            with torch.backends.cudnn.flags(enabled=False):
+                self.assertFalse(torch._use_cudnn_ctc_loss(*fake_args))
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, "requires cuDNN")
+    @parametrize(
+        "kwargs,expected",
+        [
+            subtest(({}, True), name="eligible"),
+            subtest(({"T": 300, "tl": (10, 20, 256)}, False), name="tl_256"),
+            subtest(({"tl": (10, 20, 60)}, False), name="tl_gt_il"),
+        ],
+    )
+    def test_use_cudnn_ctc_loss_tensor_lengths(self, kwargs, expected):
+        args = _ctc_args(tensor_lengths=True, **kwargs)
+        self.assertEqual(torch._use_cudnn_ctc_loss(*args), expected)
+        # the fake impl only knows the lengths' values under propagate_real_tensors
+        if not torch._functorch.config.fake_tensor_propagate_real_tensors:
+            expected = False
+        with FakeTensorMode(allow_fallback_kernels=False) as mode:
+            fake_args = _fake_args(mode, args)
+            self.assertEqual(torch._use_cudnn_ctc_loss(*fake_args), expected)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, "requires cuDNN")
+    @parametrize(
+        "kwargs",
+        [
+            subtest({}, name="list_lengths"),
+            subtest({"tensor_lengths": True}, name="tensor_lengths"),
+            subtest({"tensor_lengths": True, "tgt_device": "cpu"}, name="cpu_targets"),
+            subtest(
+                {"tensor_lengths": True, "tgt_device": "cpu", "contiguous": False},
+                name="strided_cpu_targets",
+            ),
+        ],
+    )
+    @parametrize("lp_contiguous", [False, True])
+    def test_cudnn_ctc_loss(self, kwargs, lp_contiguous):
+        args = (*_ctc_args(lp_contiguous=lp_contiguous, **kwargs), True, False)
+        real_out = torch._cudnn_ctc_loss(*args)
+        with FakeTensorMode(allow_fallback_kernels=False) as mode:
+            fake_out = torch._cudnn_ctc_loss(*_fake_args(mode, args))
+        for r, f in zip(real_out, fake_out, strict=True):
+            prims.utils.compare_tensor_meta(f, r, check_strides=True)
 
 
 instantiate_parametrized_tests(TestFakeTensorCUDA)
