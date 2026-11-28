@@ -240,5 +240,46 @@ class TestGroupTensorsByDeviceAndDtype(TestCase):
         self.assertGreater(cnts.op_count, 0, "Expected tensor operations to be traced")
 
 
+class TestReimportedCPolyfills(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def import_fresh_c_module(self, name):
+        try:
+            from test.support import import_helper
+        except ImportError:
+            self.skipTest("requires CPython's test.support")
+        return import_helper.import_fresh_module(name, fresh=[f"_{name}"])
+
+    def test_bisect(self):
+        fresh_bisect = self.import_fresh_c_module("bisect")
+
+        def fn():
+            values = [(1, "a"), (3, "c")]
+            left = fresh_bisect.bisect_left(a=values, x=2, key=lambda item: item[0])
+            fresh_bisect.insort_left(values, (2, "b"), key=lambda item: item[0])
+            right = fresh_bisect.bisect_right(values, 2, key=lambda item: item[0])
+            fresh_bisect.insort_right(values, (2, "d"), key=lambda item: item[0])
+            return left, right, values
+
+        expected = fn()
+        self.assertEqual(expected, (1, 2, [(1, "a"), (2, "b"), (2, "d"), (3, "c")]))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
+
+    def test_heapq(self):
+        fresh_heapq = self.import_fresh_c_module("heapq")
+
+        def fn():
+            heap = [3, 1, 2]
+            fresh_heapq.heapify(heap)
+            popped = fresh_heapq.heappushpop(heap, 4)
+            max_heap = [3, 2]
+            maximum = fresh_heapq._heappop_max(max_heap)
+            return popped, heap, maximum, max_heap
+
+        expected = fn()
+        self.assertEqual(expected, (1, [2, 3, 4], 3, [2]))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
+
+
 if __name__ == "__main__":
     run_tests()
