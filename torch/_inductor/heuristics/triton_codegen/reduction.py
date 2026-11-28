@@ -303,6 +303,12 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     warp_size=warp_size,
                 )
 
+        tuned_configs = self._get_tuned_configs(
+            make_config, size_hints, inductor_meta, triton_meta, register_intensive
+        )
+        if tuned_configs:
+            return tuned_configs
+
         contiguous_rblock = (
             4096 if scalar_accumulators and "y" in size_hints else MAX_R0_BLOCK
         )
@@ -605,6 +611,12 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         """Extra candidate configs to try for the INNER reduction hint."""
         return []
 
+    def _get_tuned_configs(
+        self, make_config, size_hints, inductor_meta, triton_meta, register_intensive
+    ):
+        """Measured configs that replace the generated ones, or None to keep them."""
+        return None
+
     def _persistent_xblock_vals(self) -> list[int]:
         """XBLOCK values for persistent reduction."""
         return [1, 8, 32, 128]
@@ -782,6 +794,21 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 # ------------------------------------------------------------------
 
 
+# (XBLOCK, R0_BLOCK, num_warps)
+_GFX950_REDUCTION_CONFIGS = (
+    (32, 16, 8),
+    (32, 256, 8),
+    (32, 32, 8),
+    (2, 1024, 4),
+    (32, 64, 4),
+    (1, 8192, 8),
+    (64, 128, 8),
+    (1, 2048, 4),
+    (16, 128, 8),
+    (64, 64, 8),
+)
+
+
 @register_codegen_heuristic("reduction", "hip", register=torch.version.hip is not None)
 class ROCmReductionHeuristic(ReductionHeuristic):
     """Reduction configs for ROCm/HIP devices."""
@@ -789,6 +816,29 @@ class ROCmReductionHeuristic(ReductionHeuristic):
     def _max_r0_block(self, device_major: int | None) -> int:
         # gfx major is not an NVIDIA SM version, so keep the default cap.
         return 2048
+
+    def _get_tuned_configs(
+        self, make_config, size_hints, inductor_meta, triton_meta, register_intensive
+    ):
+        # Kernels with a planned R0_BLOCK or a combo-kernel tile cap keep the
+        # generated configs, as does deterministic mode, which picks one config
+        # by rule instead of benchmarking the list.
+        if (
+            triton_meta["device"].cc != "gfx950"
+            or len(size_hints) != 2
+            or inductor_meta.get("strict_reduction_rblock") is not None
+            or inductor_meta.get("max_persistent_rblock")
+            or inductor_meta.get("deterministic")
+            or inductor_meta.get("force_filter_reduction_configs")
+            or inductor_meta.get("are_deterministic_algorithms_enabled")
+        ):
+            return None
+        return [
+            make_config(
+                x, r, num_warps=num_warps, register_intensive=register_intensive
+            )
+            for x, r, num_warps in _GFX950_REDUCTION_CONFIGS
+        ]
 
     def _get_outer_config(
         self,
