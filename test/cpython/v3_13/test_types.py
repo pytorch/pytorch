@@ -1108,6 +1108,7 @@ class UnionTests(CPythonTestCase):
             str | _SpecialForm()
 
     @cpython_only
+    @unittest.skipUnless(hasattr(sys, 'gettotalrefcount'), 'Cannot get total reference count.')
     def test_or_type_operator_reference_cycle(self):
         if not hasattr(sys, 'gettotalrefcount'):
             self.skipTest('Cannot get total reference count.')

@@ -54,6 +54,14 @@ parametrize_pytree_module = parametrize(
 GlobalPoint = namedtuple("GlobalPoint", ["x", "y"])
 
 
+class GlobalPair(tuple):
+    # Not a namedtuple class, but _register_namedtuple accepts it.
+    __slots__ = ()
+
+    def __new__(cls, a, b):
+        return super().__new__(cls, (a, b))
+
+
 class GlobalDummyType:
     def __init__(self, x, y):
         self.x = x
@@ -1190,6 +1198,47 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         ):
             python_pytree.treespec_dumps(spec)
 
+    @parametrize(
+        "tree",
+        [
+            subtest(namedtuple("Empty", [])(), name="empty_namedtuple"),
+            subtest(GlobalPair(1, 2), name="tuple_subclass"),
+        ],
+    )
+    def test_pytree_serialize_registered_namedtuple(self, tree):
+        cls = type(tree)
+        python_pytree._register_namedtuple(
+            cls, serialized_type_name=f"test_pytree.{cls.__name__}"
+        )
+        self.addCleanup(python_pytree._deregister_pytree_node, cls)
+        self.addCleanup(python_pytree.treespec_loads.cache_clear)
+        spec = python_pytree.tree_structure(tree)
+        self.assertEqual(
+            python_pytree.treespec_loads(python_pytree.treespec_dumps(spec)), spec
+        )
+
+    @parametrize(
+        "name,hint",
+        [
+            subtest(("builtins.tuple", "edited or is corrupt"), name="tuple"),
+            subtest(("torch.Size", "edited or is corrupt"), name="torch_size"),
+            subtest(("collections.namedtuple", "edited or is corrupt"), name="factory"),
+            subtest(("test_pytree.Data", "_register_namedtuple"), name="dataclass"),
+        ],
+    )
+    def test_pytree_deserialize_namedtuple_class_check(self, name, hint):
+        import json
+
+        @dataclass
+        class Data:
+            x: int
+
+        python_pytree.register_dataclass(Data, serialized_type_name="test_pytree.Data")
+        self.addCleanup(python_pytree._deregister_pytree_node, Data)
+        node = {"type": "collections.namedtuple", "context": name, "children_spec": []}
+        with self.assertRaisesRegex(TypeError, f"not a namedtuple class.*{hint}"):
+            python_pytree.treespec_loads(json.dumps([1, node]))
+
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:
             def __init__(self, x, y):
@@ -1412,6 +1461,73 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         python_pytree._deregister_pytree_node(MyDict)
         register()
         python_pytree._deregister_pytree_node(MyDict)
+
+    def test_deregister_pytree_node_keeps_other_types(self):
+        # Removing a type must not remove the name of another type, whether the
+        # two were registered without a name or under the same name.
+        @dataclass(frozen=True)
+        class First:
+            pass
+
+        @dataclass(frozen=True)
+        class Second:
+            pass
+
+        def deregister(cls):
+            if cls in python_pytree.SUPPORTED_NODES:
+                python_pytree._deregister_pytree_node(cls)
+
+        for cls in (First, Second):
+            python_pytree.register_constant(cls)
+            self.addCleanup(deregister, cls)
+        # The name that stands for types without a name names none of them.
+        no_name = python_pytree.NO_SERIALIZED_TYPE_NAME_FOUND
+        self.assertNotIn(no_name, python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE)
+        python_pytree._deregister_pytree_node(First)
+        python_pytree._deregister_pytree_node(Second)
+        self.assertNotIn(Second, python_pytree.SUPPORTED_NODES)
+
+        name = "test_pytree.test_deregister_pytree_node_keeps_other_types"
+        for cls in (First, Second):
+            python_pytree.register_pytree_node(
+                cls,
+                lambda x: ([], None),
+                lambda children, context: None,
+                serialized_type_name=name,
+            )
+            self.addCleanup(deregister, cls)
+        python_pytree._deregister_pytree_node(First)
+        self.assertIs(python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE[name], Second)
+
+    def test_register_pytree_node_again_replaces_its_name(self):
+        # Registering a type again drops its old name, unless another type
+        # took that name in between.
+        class First:
+            pass
+
+        class Second:
+            pass
+
+        def register(cls, name):
+            python_pytree._private_register_pytree_node(
+                cls,
+                lambda x: ([], None),
+                lambda children, context: cls(),
+                serialized_type_name=f"test_pytree.register_again.{name}",
+            )
+
+        names = python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE
+        register(First, "a")
+        self.addCleanup(python_pytree._deregister_pytree_node, First)
+        with self.assertWarnsRegex(UserWarning, "Overwriting"):
+            register(First, "b")
+        self.assertNotIn("test_pytree.register_again.a", names)
+
+        register(Second, "b")
+        self.addCleanup(python_pytree._deregister_pytree_node, Second)
+        with self.assertWarnsRegex(UserWarning, "Overwriting"):
+            register(First, "c")
+        self.assertIs(names["test_pytree.register_again.b"], Second)
 
     @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182645")
     def test_constant(self):

@@ -9,8 +9,8 @@ from os import getenv
 from pathlib import Path
 from tempfile import gettempdir
 from threading import Lock
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
-from typing_extensions import assert_never, override, Self
+from typing import Any, assert_never, Generic, Self, TYPE_CHECKING, TypeVar
+from typing_extensions import override
 
 from torch.utils._filelock import FileLock
 

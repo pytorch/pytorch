@@ -11,12 +11,14 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._higher_order_ops.map import _unstack_pytree
-from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
+from torch._subclasses import UnsupportedFakeTensorException
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     FakeTensorMode,
     is_fake_tensor,
     maybe_get_fake_constant,
     maybe_get_fake_mode,
+    unset_fake_temporarily,
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx.experimental.proxy_tensor import PythonKeyTracer
@@ -74,7 +76,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             self.graph = torch.fx.Graph()
             self.graph.set_codegen(codegen)
             self.tensor_attrs: dict[str, torch.Tensor] = {}  # type: ignore[assignment]
-            self.fake_tensor_mode: FakeTensorMode | None = None
+            self.fake_tensor_mode: FakeTensorMode | CppFakeTensorMode | None = None
             self.submodules: dict[torch.nn.Module, str] = {}
 
         def trace(self) -> None:  # type: ignore[override]
@@ -296,7 +298,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
         self.tracer = self.ExportTracer(self, CodeGen())
-        self.fake_tensor_mode: FakeTensorMode | None = None
+        self.fake_tensor_mode: FakeTensorMode | CppFakeTensorMode | None = None
         self._initialized = True
         self.node_debug_str: str | None = None
 
@@ -348,18 +350,19 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     return constant
                 return fake
             elif tensor_meta := node.meta.get("tensor_meta"):
-                if self.fake_tensor_mode is None:
+                fake_mode = self.fake_tensor_mode
+                if fake_mode is None:
                     raise AssertionError("fake_tensor_mode must not be None")
-                return FakeTensor(
-                    self.fake_tensor_mode,
-                    torch.empty(
+                with unset_fake_temporarily():
+                    meta_tensor = torch.empty(
                         tensor_meta.shape,
                         dtype=tensor_meta.dtype,
                         device="meta",
                         requires_grad=tensor_meta.requires_grad,
                         memory_format=tensor_meta.memory_format,
-                    ),
-                    torch.device("cpu"),
+                    )
+                return fake_mode.fake_tensor_converter.from_meta_and_device(
+                    fake_mode, meta_tensor, torch.device("cpu")
                 )
             elif len(node.users) == 0:
                 return None

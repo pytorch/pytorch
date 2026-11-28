@@ -10,7 +10,7 @@ namespace at {
 inline int64_t divup(int64_t x, int64_t y) {
   int64_t n = 0;
   // x + y - 1 overflows for large x or y, and silently rounds down
-  if (C10_UNLIKELY(c10::add_overflows(x, y - 1, &n))) {
+  if (c10::add_overflows(x, y - 1, &n)) [[unlikely]] {
     return x / y + (x % y > 0);
   }
   return n / y;
@@ -37,7 +37,7 @@ namespace internal {
 // Initialise num_threads lazily at first parallel call
 inline void lazy_init_num_threads() {
   thread_local bool init = false;
-  if (C10_UNLIKELY(!init)) {
+  if (!init) [[unlikely]] {
     at::init_num_threads();
     init = true;
   }

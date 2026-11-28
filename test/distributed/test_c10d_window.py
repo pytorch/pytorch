@@ -18,6 +18,7 @@ if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
+from torch._C._distributed_c10d import HookOpName
 from torch.distributed.distributed_c10d import (
     PutOptions,
     SignalOptions,
@@ -43,12 +44,12 @@ class AbstractWindowTest:
         return torch.device(f"{self.device_type}:{self.rank}")
 
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         return cls.backend_name
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        if cls.device_type == "cuda":
+        if cls.device_type.fget(cls) == "cuda":
             torch.cuda.set_device(rank)
         super()._init_pg(rank, world_size, rdvz_file)
 
@@ -241,6 +242,41 @@ class AbstractWindowTest:
         self._init_backend()
         self._window_ring_put(1024, torch.float, False, True)
 
+    def test_new_window_fires_hooks(self):
+        self._init_backend()
+        pg = dist.group.WORLD
+        pre = []
+        post = []
+        pg.register_pre_hook(
+            0,
+            lambda args: pre.append(
+                (
+                    args.name,
+                    args.op_id,
+                    len(args.input_tensors) + len(args.output_tensors),
+                    args.root,
+                    args.async_op,
+                )
+            ),
+        )
+        pg.register_post_hook(0, post.append)
+        try:
+            window = dist._new_window()
+        finally:
+            pg.unregister_pre_hook(0)
+            pg.unregister_post_hook(0)
+
+        self.assertEqual(len(pre), 1)
+        name, op_id, num_tensors, root, async_op = pre[0]
+        self.assertEqual(name, HookOpName.NEW_WINDOW)
+        self.assertEqual((num_tensors, root, async_op), (0, -1, False))
+        self.assertEqual(len(post), 1)
+        args = post[0]
+        self.assertEqual((args.name, args.op_id), (HookOpName.NEW_WINDOW, op_id))
+        self.assertIsNone(args.work)
+        self.assertIsNone(args.group)
+        self.assertIs(args.window, window)
+
     def test_map_remote_tensor_local(self):
         self._init_backend()
         pool = self._make_pool()
@@ -372,10 +408,11 @@ class AbstractWindowTest:
 
 def _make_window_test_class(backend_name, device_type):
     class WindowTest(AbstractWindowTest, MultiProcContinuousTest):
-        pass
+        @property
+        def device_type(self) -> str:
+            return device_type
 
     WindowTest.backend_name = backend_name
-    WindowTest.device_type = device_type
     class_name = backend_name.replace("-", " ").title().replace(" ", "")
     WindowTest.__name__ = f"{class_name}WindowTest"
     WindowTest.__qualname__ = WindowTest.__name__

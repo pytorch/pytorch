@@ -17,6 +17,7 @@ from torch._C._functorch import (
 )
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
+    _fake_mode_handler,
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
@@ -415,6 +416,9 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     return pytree.tree_unflatten(merged_outs, true_out_spec)
 
 
+cond_op.py_impl(DispatchKey.Fake)(_fake_mode_handler(cond_fake_tensor_mode))
+
+
 def check_tensor_meta_match(
     t1: torch.Tensor, t2: torch.Tensor, attr_names: tuple[str, ...], msg_prefix: str
 ) -> None:
@@ -713,12 +717,27 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         can_auto_functionalize,
         do_auto_functionalize_v2,
     )
-    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
+    from torch._higher_order_ops.utils import (
+        _check_alias,
+        _check_alias_and_mutation,
+        HopInstance,
+    )
 
     hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
     # For now, we only support auto-functionalization for cond when using python
     # functionalization mode
     if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        # Auto-functionalization supports operand mutation, but not aliasing that it
+        # does not repair: returning a mutated operand is fine, since the output then
+        # aliases the clone inserted for that base, while returning an operand that is
+        # not mutated leaves the output aliasing the caller's tensor.
+        # _check_alias_and_mutation is skipped on this path because it would also
+        # reject the mutation, so check aliasing only.  This re-traces both branches;
+        # see the PR discussion for why the maps gen_schema computed are not reused.
+        unwrapped_inputs = ctx.unwrap_tensors(inputs)
+        pre_dispatch = ctx.mode.pre_dispatch
+        for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
+            _check_alias(branch, unwrapped_inputs, branch_name, pre_dispatch)
         return do_auto_functionalize_v2(
             ctx.mode,
             hop_instance,

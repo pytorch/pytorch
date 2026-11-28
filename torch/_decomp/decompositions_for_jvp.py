@@ -90,7 +90,7 @@ def _register_jit_decomposition_for_jvp(decomp, use_python=False):
         f_str = get_function_def(sig)
         graph = torch.jit.CompilationUnit(f_str).wrapped_decomp.graph
     else:
-        graph = torch.jit.script(decomp_fn).graph
+        graph = torch.jit._script.script(decomp_fn).graph
     torch.jit._register_decomposition(decomp, graph)
 
 

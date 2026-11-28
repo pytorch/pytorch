@@ -85,6 +85,12 @@ struct EighParams {
   bool upper; // UPLO: true read upper triangle, false read lower
 };
 
+struct EigParams {
+  int64_t n;
+  bool compute_eigenvectors;
+  bool stage_h;
+};
+
 // Per-thread small-matrix inverse kernel: up to this size one thread inverts a
 // whole matrix from registers. LU.metal instantiates exact sizes 1..4 and
 // static_asserts the list against this constant. Strides are in elements.
@@ -99,6 +105,12 @@ struct LUSmallInvParams {
   index_t X_rstride;
   index_t X_cstride;
 };
+
+// lu_solve walks the factor in diagonal tiles of this many rows.
+C10_METAL_CONSTEXPR uint32_t kLUSolveTS = 32;
+// Tail tiles up to this many rows use trsmDiagSolveLU's direct instantiation.
+// It skips tile padding but costs rows^2 per column: wins at 16, loses at 31.
+C10_METAL_CONSTEXPR uint32_t kLUSolveDirectMaxRows = kLUSolveTS / 2;
 
 // for LU streaming-panel kernels
 C10_METAL_CONSTEXPR unsigned kLUStreamNT = 256;

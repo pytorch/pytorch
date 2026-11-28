@@ -77,4 +77,56 @@ typedef svfloat64_t vls_float64_t
 #define ALL_F64_TRUE_MASK svreinterpret_f64_s64(ALL_S64_TRUE_MASK)
 #define ALL_F64_FALSE_MASK svreinterpret_f64_s64(ALL_S64_FALSE_MASK)
 
+namespace at::vec {
+inline namespace CPU_CAPABILITY {
+
+// VecBool<T> on SVE: a predicate with one element per lane of Vectorized<T>.
+// It is a class only so that it can have operators, which svbool_t does not
+// get on every compiler; it converts to and from svbool_t implicitly.
+template <typename T>
+struct SveVecBool {
+  vls_pred_t p;
+
+  SveVecBool(svbool_t p) : p(p) {}
+  operator svbool_t() const {
+    return p;
+  }
+  // The lanes of the matching Vectorized<T>: ~ must not set the bits of a
+  // predicate that do not belong to any lane.
+  static svbool_t all() {
+    if constexpr (sizeof(T) == 1) {
+      return svptrue_b8();
+    } else if constexpr (sizeof(T) == 2) {
+      return svptrue_b16();
+    } else if constexpr (sizeof(T) == 4) {
+      return svptrue_b32();
+    } else {
+      return svptrue_b64();
+    }
+  }
+  int64_t zero_mask() const {
+    return Vectorized<T>(*this).zero_mask();
+  }
+};
+
+template <typename T>
+inline SveVecBool<T> operator&(SveVecBool<T> a, SveVecBool<T> b) {
+  return svand_b_z(SveVecBool<T>::all(), a, b);
+}
+template <typename T>
+inline SveVecBool<T> operator|(SveVecBool<T> a, SveVecBool<T> b) {
+  return svorr_b_z(SveVecBool<T>::all(), a, b);
+}
+template <typename T>
+inline SveVecBool<T> operator^(SveVecBool<T> a, SveVecBool<T> b) {
+  return sveor_b_z(SveVecBool<T>::all(), a, b);
+}
+template <typename T>
+inline SveVecBool<T> operator~(SveVecBool<T> a) {
+  return svnot_b_z(SveVecBool<T>::all(), a);
+}
+
+} // namespace CPU_CAPABILITY
+} // namespace at::vec
+
 #endif // defined(CPU_CAPABILITY_SVE256)

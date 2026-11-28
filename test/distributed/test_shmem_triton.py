@@ -9,7 +9,6 @@ import torch.distributed._symmetric_memory as symm_mem
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
-    skip_if_rocm_multiprocess,
 )
 
 
@@ -25,9 +24,11 @@ if (
 
 
 import triton.language as tl
+from triton.compiler.errors import CompilationError
 
 import torch.distributed as dist
 import torch.distributed._symmetric_memory._shmem_triton as shmem_triton
+from torch._C._distributed_c10d import _ShmemCompareOp, _ShmemSignalOp
 from torch._inductor.runtime.triton_compat import triton
 from torch.distributed._symmetric_memory._shmem_triton import requires_shmem
 from torch.testing._internal.common_utils import (
@@ -35,6 +36,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocmVersionLessThan,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import IS_H100, requires_triton
@@ -279,6 +281,27 @@ def my_broadcast_kernel(
 
 
 @requires_shmem
+@triton.jit(do_not_specialize=["team"])
+def my_collective_status_kernel(team, dst, src, nelems, status, OP: tl.constexpr):
+    if OP == "alltoall":
+        ret = shmem_backend.alltoall(team, dst, src, nelems)
+    else:
+        ret = shmem_backend.broadcast(team, dst, src, nelems, 0)
+    tl.store(status, ret)
+
+
+@requires_shmem
+@triton.jit
+def my_collective_constexpr_team_kernel(
+    dst, src, nelems, TEAM: tl.constexpr, OP: tl.constexpr
+):
+    if OP == "alltoall":
+        shmem_backend.alltoall(TEAM, dst, src, nelems)
+    else:
+        shmem_backend.broadcast(TEAM, dst, src, nelems, 0)
+
+
+@requires_shmem
 @triton.jit
 def my_reduce_kernel(
     team_handle,
@@ -454,14 +477,12 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
         # Use the signal pad attached to the output symmetric memory handle
         # as the flag buffer for signaling completion.
-        flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
+        flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(7)
 
         peer = 1 - rank
-        NVSHMEM_SIGNAL_SET = (
-            0 if TEST_WITH_ROCM else 9
-        )  # value defined by NVSHMEM for atomic set
-        SIGNAL_VAL = 1 + NVSHMEM_SIGNAL_SET  # Signal completion value
-        NVSHMEM_CMP_EQ = 0  # compare equal for signal wait until
+        NVSHMEM_SIGNAL_SET = int(_ShmemSignalOp.SET)
+        SIGNAL_VAL = 1
+        NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
 
         # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
         dist.barrier()
@@ -515,14 +536,16 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
         # Use the signal pad attached to the output symmetric memory handle
         # as the flag buffer for signaling completion.
-        flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
+        INITIAL_SIGNAL_VAL = 7
+        flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(
+            INITIAL_SIGNAL_VAL
+        )
 
         peer = 1 - rank
-        # NVSHMEM_SIGNAL_ADD = 10  (nvshmem_common.h)
-        # ROCSHMEM_SIGNAL_ADD = 1 (rocshmem_common.hpp enum ROCSHMEM_SIGNAL_OPS)
-        NVSHMEM_SIGNAL_ADD = 1 if TEST_WITH_ROCM else 10
-        SIGNAL_VAL = val + NVSHMEM_SIGNAL_ADD
-        NVSHMEM_CMP_EQ = 0
+        NVSHMEM_SIGNAL_ADD = int(_ShmemSignalOp.ADD)
+        SIGNAL_VAL = 16
+        EXPECTED_SIGNAL_VAL = INITIAL_SIGNAL_VAL + SIGNAL_VAL
+        NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
 
         # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
         dist.barrier()
@@ -543,13 +566,16 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             my_signal_wait_until_kernel[(1, 1, 1)](
                 flag,
                 cmp_op=NVSHMEM_CMP_EQ,
-                cmp_val=SIGNAL_VAL,
+                cmp_val=EXPECTED_SIGNAL_VAL,
             )
             torch.testing.assert_close(
                 out, val * torch.ones(numel, dtype=dtype, device=self.device)
             )
             torch.testing.assert_close(
-                flag, torch.tensor([SIGNAL_VAL], dtype=torch.int64, device=self.device)
+                flag,
+                torch.tensor(
+                    [EXPECTED_SIGNAL_VAL], dtype=torch.int64, device=self.device
+                ),
             )
 
     @requires_triton()
@@ -562,7 +588,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
         rank = self.rank
         peer = 1 - rank
-        NVSHMEM_CMP_EQ = 0  # equal comparison
+        NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
         FLAG_INITIAL_VALUE = 0
         FLAG_FINAL_VALUE = 42
 
@@ -611,8 +637,8 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         peer = 1 - rank
 
         # NVSHMEM constants from documentation
-        NVSHMEM_CMP_EQ = 0  # equal comparison
-        NVSHMEM_SIGNAL_SET = 0 if TEST_WITH_ROCM else 9  # atomic set operation
+        NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
+        NVSHMEM_SIGNAL_SET = int(_ShmemSignalOp.SET)
 
         # Message configuration
         msg_size_bytes = 8
@@ -703,7 +729,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag_update_val = torch.tensor(
             [flag_val], dtype=torch.int32, device=self.device
         )
-        NVSHMEM_CMP_EQ = 0  # compare equal
+        NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
 
         # Barrier so the local flag init cannot erase the peer's incoming write.
         dist.barrier()
@@ -763,7 +789,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         symm_mem.rendezvous(out, group=group_name)
         symm_mem.rendezvous(flag, group=group_name)
 
-        NVSHMEM_CMP_EQ = 0
+        NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)
 
         dist.barrier()
         if rank == 1:
@@ -861,17 +887,16 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.tensor([expected_remote], device=self.device, dtype=dtype),
         )
 
-    @skip_if_rocm_multiprocess
+    @skipIfRocmVersionLessThan((10, 2))
     @requires_triton()
     @requires_h100()
-    def test_triton_alltoall(self) -> None:
+    @parametrize("nelems_per_pe", [2, 64, 1024])
+    def test_triton_alltoall(self, nelems_per_pe: int) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
         world_size = dist.get_world_size()
         rank = self.rank
-        # Each PE will send 2 int64 elements to every other PE
-        nelems_per_pe = 2
         dtype = torch.int64
         # Source buffer: contains data for all PEs
         # Layout: [data_for_pe0, data_for_pe1, ...]
@@ -907,17 +932,16 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             actual = dst[i * nelems_per_pe : (i + 1) * nelems_per_pe]
             torch.testing.assert_close(actual, torch.full_like(actual, expected))
 
-    @skip_if_rocm_multiprocess
+    @skipIfRocmVersionLessThan((10, 2))
     @requires_triton()
     @requires_h100()
-    def test_triton_broadcast(self) -> None:
+    @parametrize("nelems", [2, 64, 1024])
+    def test_triton_broadcast(self, nelems: int) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
         rank = self.rank
 
-        # Configuration
-        nelems = 4  # number of elements
         dtype = torch.int64
 
         # Source buffer - only root will have meaningful data
@@ -928,8 +952,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
 
         if rank == pe_root:
             # Root fills with specific pattern
-            for i in range(nelems):
-                src[i] = 100 + i
+            src.copy_(torch.arange(100, 100 + nelems, dtype=dtype))
         else:
             # Non-root PEs have dummy data
             src.fill_(-1)
@@ -955,10 +978,51 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         dist.barrier()
 
         # Verify results - all ranks should have the root's data
-        expected = [100 + i for i in range(nelems)]
-        torch.testing.assert_close(
-            dst, torch.tensor(expected, device=self.device, dtype=dtype)
+        expected = torch.arange(100, 100 + nelems, dtype=dtype, device=self.device)
+        torch.testing.assert_close(dst, expected)
+
+    @skip_but_pass_in_sandcastle_if(not TEST_WITH_ROCM, "rocSHMEM-only team check")
+    @skipIfRocmVersionLessThan((10, 2))
+    @requires_triton()
+    @parametrize("op", ["alltoall", "broadcast"])
+    def test_triton_rocshmem_runtime_nonworld_team(self, op: str) -> None:
+        self._init_device()
+        group_name = dist.distributed_c10d._get_default_group().group_name
+        nelems = 4
+        numel = nelems * self.world_size
+        src = symm_mem.empty(numel, dtype=torch.int64, device=self.device).fill_(1)
+        dst = symm_mem.empty(numel, dtype=torch.int64, device=self.device).fill_(-1)
+        symm_mem.rendezvous(src, group=group_name)
+        symm_mem.rendezvous(dst, group=group_name)
+        status = torch.zeros(1, dtype=torch.int32, device=self.device)
+        dist.barrier()
+        my_collective_status_kernel[(1,)](
+            1, dst, src, nelems, status, OP=op, launch_cooperative_grid=True
         )
+        dist.barrier()
+        self.assertNotEqual(status.item(), 0)
+        self.assertEqual(dst, torch.full_like(dst, -1))
+
+    @skip_but_pass_in_sandcastle_if(not TEST_WITH_ROCM, "rocSHMEM-only team check")
+    @skipIfRocmVersionLessThan((10, 2))
+    @requires_triton()
+    @parametrize("op", ["alltoall", "broadcast"])
+    def test_triton_rocshmem_constexpr_nonworld_team(self, op: str) -> None:
+        self._init_device()
+        buf = torch.empty(4, dtype=torch.int64, device=self.device)
+        with self.assertRaises(CompilationError) as cm:
+            my_collective_constexpr_team_kernel[(1,)](buf, buf, 4, TEAM=1, OP=op)
+        # Triton wraps errors raised in a nested @triton.jit call in a
+        # CompilationError that only carries the call site; the reason is on
+        # the __cause__ chain.
+        msgs = []
+        exc = cm.exception
+        while exc is not None:
+            msgs.append(str(exc))
+            exc = exc.__cause__
+        msg = "\n".join(msgs)
+        self.assertIn(f"Unsupported rocSHMEM {op} team: 1", msg)
+        self.assertIn("Only team 0 is supported", msg)
 
     @requires_triton()
     @requires_h100()

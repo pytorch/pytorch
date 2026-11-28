@@ -5,6 +5,7 @@ import torch
 from torch._inductor.codegen.aoti_hipify_utils import maybe_hipify_code_wrapper
 from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 TEST_CODES = [
@@ -28,6 +29,8 @@ HIP_CODES = [
 
 
 class TestCppWrapperHipify(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_hipify_basic_declaration(self) -> None:
         if len(TEST_CODES) != len(HIP_CODES):
             raise AssertionError(
@@ -62,6 +65,49 @@ class TestCppWrapperHipify(TestCase):
                 }                                              \\
             } while (0);
 
+            static inline void setKernelSharedMemory(
+                    hipFunction_t func,
+                    uint32_t sharedMemBytes) {
+                if (sharedMemBytes == 0) {
+                    return;
+                }
+            #if !defined(USE_ROCM)
+                hipDevice_t device;
+                CUDA_DRIVER_CHECK(hipCtxGetDevice(&device));
+                int sharedOptin = 0;
+                CUDA_DRIVER_CHECK(hipDeviceGetAttribute(
+                    &sharedOptin,
+                    CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+                    device
+                ));
+                int sharedStatic = 0;
+                CUDA_DRIVER_CHECK(hipFuncGetAttribute(
+                    &sharedStatic, hipFuncAttributeSharedSizeBytes, func
+                ));
+                if (torch::aot_inductor::sharedMemoryLimit(
+                        sharedMemBytes + static_cast<uint32_t>(sharedStatic),
+                        sharedOptin,
+                        device,
+                        hipDeviceGetAttribute) > sharedOptin) {
+                    CUDA_DRIVER_CHECK(hipFuncSetAttribute(
+                        func,
+                        static_cast<hipFuncAttribute_t>(
+                            torch::aot_inductor::kFuncAttrSharedMemoryMode),
+                        torch::aot_inductor::kSharedMemoryModeAllowOversized
+                    ));
+                    return;
+                }
+            #endif
+                CUDA_DRIVER_CHECK(hipFuncSetAttribute(
+                    func,
+                    hipFuncAttributeMaxDynamicSharedMemorySize,
+                    sharedMemBytes
+                ))
+                if (sharedMemBytes > 49152) {
+                    CUDA_DRIVER_CHECK(hipFuncSetCacheConfig(func, hipFuncCachePreferShared))
+                }
+            }
+
             static inline hipFunction_t loadKernel(
                     std::string filePath,
                     const std::string &funcName,
@@ -81,16 +127,7 @@ class TestCppWrapperHipify(TestCase):
                     loaded_modules->push_back(mod);
                 }
                 CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
-                if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(hipFuncSetAttribute(
-                        func,
-                        hipFuncAttributeMaxDynamicSharedMemorySize,
-                        sharedMemBytes
-                    ))
-                }
-                if (sharedMemBytes > 49152) {
-                    CUDA_DRIVER_CHECK(hipFuncSetCacheConfig(func, hipFuncCachePreferShared))
-                }
+                setKernelSharedMemory(func, sharedMemBytes);
                 return func;
             }
 
@@ -106,16 +143,7 @@ class TestCppWrapperHipify(TestCase):
                     loaded_modules->push_back(mod);
                 }
                 CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
-                if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(hipFuncSetAttribute(
-                        func,
-                        hipFuncAttributeMaxDynamicSharedMemorySize,
-                        sharedMemBytes
-                    ))
-                }
-                if (sharedMemBytes > 49152) {
-                    CUDA_DRIVER_CHECK(hipFuncSetCacheConfig(func, hipFuncCachePreferShared))
-                }
+                setKernelSharedMemory(func, sharedMemBytes);
                 return func;
             }
 

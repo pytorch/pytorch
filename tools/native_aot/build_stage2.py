@@ -153,13 +153,12 @@ def _report_probe_failure(expr: str, stderr: str, returncode: int) -> None:
 def _arch_list() -> str:
     """The arch list THIS build targets, as the CONFIGURE resolved it.
 
-    Read from the file cmake/Codegen.cmake records, because that is the only place
-    the resolved value exists: EnvVarForwarding forwards the environment into the
-    cache only when the variable is undefined (so -D wins), and Dependencies.cmake
-    then shadows the cache with the environment for the rest of the configure. Either
-    source read alone is therefore wrong for one of the two kinds of build. Reading
-    the record also means a developer who changes the environment without
-    reconfiguring gets the list the build COMPILED for, not the one they now intend.
+    Read from the file cmake/Codegen.cmake records, because that is what the
+    configure resolved: EnvVarForwarding FORCEs a set environment variable into the
+    cache (the environment wins over -D), and an unset one leaves the cache value,
+    from -D or an earlier configure, in effect. Reading the record means a developer
+    who changes the environment without reconfiguring gets the list the build
+    COMPILED for, not the one they now intend.
 
     Recorded-but-empty is not the same as no record: it means the configure resolved
     no arch list, and the on-device path takes over. Absent means nothing configured
@@ -528,6 +527,7 @@ def require_runtimes() -> None:
         dists = sorted(
             {d for k in gaps for d in toolchains.get_toolchain(k).RUNTIME_DISTS}
         )
+        dists = [d + ">=13.2,<14" if d == "cuda-bindings" else d for d in dists]
         detail = "; ".join(
             f"{k} needs {', '.join(ms)}" for k, ms in sorted(gaps.items())
         )
@@ -573,10 +573,10 @@ def _refuse_settings_drift(before: dict[str, str] | None) -> None:
     """Refuse a reconfigure that changed a setting the environment forwards.
 
     EnvVarForwarding FORCEs every BUILD_*/USE_*/CMAKE_* environment variable (and the
-    names in its alias lists, TORCH_CUDA_ARCH_LIST among them) into the cache, so a
-    stage-2 run in another environment than the build silently relinks torch_cuda
-    against other settings. Those variables are the whole surface: nothing else here
-    can change the configuration.
+    names in its passthrough and alias lists, TORCH_CUDA_ARCH_LIST among them) into
+    the cache, so a stage-2 run in another environment than the build silently
+    relinks torch_cuda against other settings. Those variables are the whole surface:
+    nothing else here can change the configuration.
     """
     after = _forwarded_settings()
     if after is None:

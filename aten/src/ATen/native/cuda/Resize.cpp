@@ -95,7 +95,7 @@ const Tensor& resize_cuda_(
     self_->empty_tensor_restride(memory_format);
   }
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+  if (at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory()) [[unlikely]] {
     at::native::fill_resize_deterministic_(self, static_cast<int64_t>(old_storage_nbytes));
   }
   return self;

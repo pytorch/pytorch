@@ -212,7 +212,7 @@ inline void free_impl(PtrInfo::iterator& it) {
 
     C10_CUDA_CHECK(cudaFreeAsync(it->first, creation_stream.stream));
 
-    if (C10_UNLIKELY(capture_underway)) {
+    if (capture_underway) [[unlikely]] {
       // See Note [Avoid dangling free streams during CUDA graph capture]
       capture_free_streams.insert(creation_stream);
     }
@@ -263,7 +263,7 @@ inline void free_impl(PtrInfo::iterator& it) {
     // but this forces a potentially false dependency of creation_stream.stream
     // on all the recorded_streams.
 
-    if (C10_UNLIKELY(capture_underway)) {
+    if (capture_underway) [[unlikely]] {
       // See Note [Avoid dangling free streams during CUDA graph capture]
       capture_free_streams.emplace(
           dummy_unifying_free_stream.stream, dummy_unifying_free_stream.device);
@@ -283,7 +283,7 @@ void freeAsync(void* ptr) {
   auto it = ptr_info.find(ptr);
   TORCH_INTERNAL_ASSERT(it != ptr_info.end(), "ptr not found in ptr_info");
 
-  if (C10_UNLIKELY(capture_underway)) {
+  if (capture_underway) [[unlikely]] {
     if (!it->second.captured) {
       TORCH_WARN_ONCE(
           "freeAsync() was called on an uncaptured allocation during graph capture "
@@ -304,7 +304,7 @@ void freeAsync(void* ptr) {
       ungraphed_ptrs_defer_free_until_no_capture.push_back(ptr);
       return;
     }
-  } else if (C10_UNLIKELY(it->second.captured)) {
+  } else if (it->second.captured) [[unlikely]] {
     TORCH_WARN(
         "Attempting uncaptured free of a captured allocation with address ",
         ptr,

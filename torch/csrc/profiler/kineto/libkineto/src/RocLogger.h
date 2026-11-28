@@ -41,6 +41,14 @@ enum CorrelationDomain {
   end,
   size = end
 };
+
+// The HIP memset or memcpy API call a GPU row implements: a fill/copy kernel
+// the runtime dispatched for it (rocclr), or an SDMA copy.
+enum RuntimeInternalApi : uint32_t {
+  RuntimeInternalNone = 0,
+  RuntimeInternalMemset = 1,
+  RuntimeInternalMemcpy = 2,
+};
 } // namespace RocLogger
 
 class ApiIdList {
@@ -76,6 +84,7 @@ typedef enum {
   ROCTRACER_ACTIVITY_COPY,
   ROCTRACER_ACTIVITY_MALLOC,
   ROCTRACER_ACTIVITY_ASYNC,
+  ROCTRACER_ACTIVITY_MEMSET,
   ROCTRACER_ACTIVITY_NONE
 } rocprof_activity_types;
 
@@ -208,6 +217,27 @@ struct rocprofMallocRow : public rocprofRow {
   size_t size;
 };
 
+// A HIP memset API call.  Its correlation id identifies the fill kernels the
+// runtime dispatches for it; their bytes and stream come from here.
+struct rocprofMemsetRow : public rocprofRow {
+  rocprofMemsetRow(
+      uint64_t id,
+      uint32_t domain,
+      uint32_t cid,
+      uint32_t pid,
+      uint32_t tid,
+      uint64_t begin,
+      uint64_t end,
+      size_t size,
+      hipStream_t stream,
+      rocprof_activity_types type = ROCTRACER_ACTIVITY_MEMSET)
+      : rocprofRow(id, domain, cid, pid, tid, begin, end, type),
+        size(size),
+        stream(stream) {}
+  size_t size;
+  hipStream_t stream;
+};
+
 struct rocprofAsyncRow : public rocprofBase {
   rocprofAsyncRow(
       uint64_t id,
@@ -232,4 +262,22 @@ struct rocprofAsyncRow : public rocprofBase {
   uint64_t queue;
   uint64_t stream{0};
   std::string kernelName;
+  // Launch dimensions, captured from the kernel dispatch record itself.
+  // grid: number of workgroups, workgroup: threads per workgroup.
+  uint32_t gridX{0};
+  uint32_t gridY{0};
+  uint32_t gridZ{0};
+  uint32_t workgroupX{0};
+  uint32_t workgroupY{0};
+  uint32_t workgroupZ{0};
+  // Set when this row implements a HIP memset or memcpy API call.  A kernel
+  // dispatch is then reported under the API the user called (CUPTI parity)
+  // instead of as a user kernel; for a memcpy, its op holds a
+  // ROCPROFILER_MEMORY_COPY_* direction instead of a kernel dispatch
+  // operation.
+  RocLogger::RuntimeInternalApi internalApi{RocLogger::RuntimeInternalNone};
+  // The API call's byte count, on one of its GPU rows only.
+  size_t internalBytes{0};
+  // The API call has several GPU rows.
+  bool internalSplit{false};
 };

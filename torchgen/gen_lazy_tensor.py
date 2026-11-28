@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from collections import namedtuple
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -123,10 +124,14 @@ def parse_native_functions_keys(
 def validate_shape_inference_header(
     shape_inference_hdr: str, expected_shape_infr_decls: list[str]
 ) -> None:
+    string_view_type = re.compile(r"(?<![\w:])(?:::)?(?:c10|std)::string_view\b")
     try:
         with open(shape_inference_hdr) as f:
             shape_infr_decls = f.read()
-            shape_infr_decl_lines = set(shape_infr_decls.split("\n"))
+            shape_infr_decl_lines = {
+                string_view_type.sub("::std::string_view", line)
+                for line in shape_infr_decls.split("\n")
+            }
     except OSError as e:
         raise AssertionError(
             f"Unable to read from the specified shape_inference_hdr file: {shape_inference_hdr}"
@@ -135,7 +140,9 @@ def validate_shape_inference_header(
     # TODO(whc) add a check for shape inference functions that have meta kernels implement and should be retired.
 
     missing_decls = [
-        decl for decl in expected_shape_infr_decls if decl not in shape_infr_decl_lines
+        decl
+        for decl in expected_shape_infr_decls
+        if string_view_type.sub("::std::string_view", decl) not in shape_infr_decl_lines
     ]
     if missing_decls:
         raise Exception(  # noqa: TRY002

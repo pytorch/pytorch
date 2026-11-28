@@ -169,8 +169,10 @@ reference_functions = dict(
     softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.softmax, *args, **kwargs),
     log_softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.log_softmax, *args, **kwargs),
     softmin=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.nn.functional.softmin, *args, **kwargs),
+    # TODO: torch.masked.normalize still defaults to eps=1e-12; give it F.normalize's
+    # default (torch.finfo(norm.dtype).eps) and drop this pin.
     normalize=lambda *args, **kwargs: apply_masked_normalization_along_dim(
-        torch.nn.functional.normalize, *args, **dict(kwargs, dim_position=1)),
+        torch.nn.functional.normalize, *args, **{'eps': 1e-12, **kwargs, 'dim_position': 1}),
 )
 
 masked_ops = [op for op in op_db if op.name.startswith('masked.')]
@@ -260,8 +262,18 @@ class mask_layouts(_TestParametrizer):
 
             test(self, layout, device, dtype, op, sample_inputs_generator())
 
+        def decorators(params):
+            layout, op = params['layout'], params['op']
+            if torch.device(params['device']).type in ('cpu', 'cuda') and (
+                layout == torch.sparse_coo and not op.supports_sparse
+                or layout == torch.sparse_csr and not op.supports_sparse_csr
+            ):
+                layout_name = str(layout).lstrip('torch.')
+                return [unittest.skip(f"{op.name} does not support inputs with {layout_name} layout")]
+            return []
+
         for layout in (torch.strided, torch.sparse_coo, torch.sparse_csr):
-            yield (wrap, str(layout).lstrip('torch.'), {'layout': layout}, lambda _: [])
+            yield (wrap, str(layout).lstrip('torch.'), {'layout': layout}, decorators)
 
 
 class TestMasked(TestCase):

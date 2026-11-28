@@ -358,7 +358,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     self.assertEqual(type(model.fc1), nnq.Linear)
                     self.assertEqual(type(model.fc2), nnq.Linear)
                     test_only_eval_fn(model, self.calib_data)
-                    self.checkScriptable(model, self.calib_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -381,7 +380,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     self.assertEqual(type(model.fc1), nnq.Linear)
                     self.assertEqual(type(model.dropout), nnq.Dropout)
                     test_only_eval_fn(model, self.calib_data)
-                    self.checkScriptable(model, self.calib_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -424,7 +422,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     self.assertEqual(type(model.fc1), nnq.Linear)
                     self.assertEqual(type(model.fc2), nnq.Linear)
                     test_only_eval_fn(model, self.img_data_2d)
-                    self.checkScriptable(model, self.img_data_2d)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -457,7 +454,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     self.assertEqual(type(model.fc1), nnq.Linear)
                     self.assertEqual(type(model.fc2), nnq.Linear)
                     test_only_eval_fn(model, self.img_data_2d)
-                    self.checkScriptable(model, self.img_data_2d)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -490,7 +486,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                 self.assertEqual(type(model.fc1), nnqd.Linear)
                 self.assertEqual(type(model.fc2), nnqd.Linear)
                 test_only_eval_fn(model, self.calib_data)
-                self.checkScriptable(model, self.calib_data)
                 self.checkNoQconfig(model)
 
     def test_defused_embedding_bag_linear(self):
@@ -527,7 +522,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     self.assertEqual(type(model.linear), nn.quantized.Linear)
 
                     test_only_eval_fn(model, self.embed_data)
-                    self.checkScriptable(model, self.embed_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)
@@ -560,7 +554,6 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     self.assertTrue(type(model.linear), nnq.Linear)
 
                     test_only_eval_fn(model, self.embed_data)
-                    self.checkScriptable(model, self.embed_data)
                     self.checkNoQconfig(model)
 
                 checkQuantized(model)

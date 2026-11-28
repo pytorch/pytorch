@@ -24,9 +24,6 @@ from torch.utils.data.datapipes.iter.grouping import (
     GrouperIterDataPipe as Grouper,
     UnBatcherIterDataPipe as UnBatcher,
 )
-from torch.utils.data.datapipes.iter.routeddecoder import (
-    RoutedDecoderIterDataPipe as RoutedDecoder,
-)
 from torch.utils.data.datapipes.iter.selecting import FilterIterDataPipe as Filter
 from torch.utils.data.datapipes.iter.sharding import (
     ShardingFilterIterDataPipe as ShardingFilter,
@@ -52,7 +49,6 @@ __all__ = [
     "IterableWrapper",
     "Mapper",
     "Multiplexer",
-    "RoutedDecoder",
     "Sampler",
     "ShardingFilter",
     "Shuffler",

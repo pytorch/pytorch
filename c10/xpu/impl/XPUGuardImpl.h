@@ -120,7 +120,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
               flag & EventFlag::TIMING
             }}));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_creation(
           c10::kXPU, reinterpret_cast<uintptr_t>(*xpu_event));
     }
@@ -133,7 +133,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       return;
 
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_deletion(
           c10::kXPU, reinterpret_cast<uintptr_t>(event));
     }
@@ -201,7 +201,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     *event = reinterpret_cast<void*>(xpu_event);
 
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_record(
           c10::kXPU,
           reinterpret_cast<uintptr_t>(xpu_event),
@@ -217,7 +217,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const XPUStream xpu_stream(stream);
     xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_wait(
           c10::kXPU,
           reinterpret_cast<uintptr_t>(xpu_event),
@@ -326,7 +326,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       return;
     auto* xpu_event = reinterpret_cast<sycl::event*>(event);
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_synchronization(
           c10::kXPU, reinterpret_cast<uintptr_t>(xpu_event));
     }
@@ -335,7 +335,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   void synchronizeDevice(const c10::DeviceIndex device_index) const override {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_device_synchronization(c10::kXPU);
     }
     c10::xpu::syncStreamsOnDevice(device_index);

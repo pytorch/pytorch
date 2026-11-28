@@ -13,6 +13,7 @@
 #include <ATen/ops/mps_convolution_backward_native.h>
 #include <ATen/ops/mps_convolution_transpose_backward_native.h>
 #include <fmt/format.h>
+#include <utility>
 
 #include <algorithm>
 #include <limits>
@@ -129,7 +130,7 @@ static Tensor conv3d_to_ndhwc(const Tensor& tensor) {
   }
   const auto channels = tensor.size(1);
   const int64_t spatial_size = tensor.size(2) * tensor.size(3) * tensor.size(4);
-  if (channels <= 8 || spatial_size > std::numeric_limits<int32_t>::max()) {
+  if (channels <= 8 || !std::in_range<int32_t>(spatial_size)) {
     return tensor.contiguous(MemoryFormat::ChannelsLast3d);
   }
   const auto source = tensor.contiguous();
@@ -315,11 +316,10 @@ static void conv3d_metal_forward(const Tensor& input_t,
   // The MPP path addresses one (batch, depth) activation plane and one output
   // plane with int32 tensor extents; larger planes run the long-indexed
   // simdgroup kernel.
-  constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
-  const bool use_long_index = input_channels * input_height * input_width > kInt32Max ||
-      output_channels * output_height * output_width > kInt32Max;
+  const bool use_long_index = !std::in_range<int32_t>(input_channels * input_height * input_width) ||
+      !std::in_range<int32_t>(output_channels * output_height * output_width);
   const int64_t input_channels_per_group = input_channels / groups;
-  TORCH_CHECK(weight_t.size(2) * weight_t.size(3) * weight_t.size(4) * input_channels_per_group <= kInt32Max,
+  TORCH_CHECK(std::in_range<int32_t>(weight_t.size(2) * weight_t.size(3) * weight_t.size(4) * input_channels_per_group),
               "conv3d: kernel volume times channels per group exceeds int32");
   const bool use_mpp = !use_long_index && has_mpp();
 
@@ -512,7 +512,6 @@ static Conv1dKernel conv1d_pick_kernel(const Tensor& input,
                                        int64_t dilation,
                                        int64_t groups) {
   using namespace mps;
-  constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
   // matmul2d on M1/M2 misreads operands whose row stride exceeds this many elements.
   constexpr int64_t kPreApple9MppMaxStride = std::numeric_limits<uint16_t>::max();
   const auto channels = input.size(1);
@@ -522,7 +521,8 @@ static Conv1dKernel conv1d_pick_kernel(const Tensor& input,
   const auto out_channels = output.size(1);
   const auto out_length = output.size(3);
   // Conv2DParams sizes are int32, as are matmul2d offsets within a batch.
-  if ((length + 2 * padding) * channels > kInt32Max || out_channels * out_length > kInt32Max) {
+  if (!std::in_range<int32_t>((length + 2 * padding) * channels) ||
+      !std::in_range<int32_t>(out_channels * out_length)) {
     return Conv1dKernel::Conv3d;
   }
   // Depthwise, or a single-channel conv whose output can't fill a 64x64 matmul2d tile.
@@ -805,7 +805,32 @@ static Tensor mps_convolution_2d_large_kernel(const Tensor& input_t,
       mtl_dispatch1DJob(computeEncoder, PSO, nThreads);
     }
   });
-  return output;
+  return output.contiguous(conv_backward_memory_format(input_t, weight_t));
+}
+
+static bool mpsgraph_depthwise_overflows(const Tensor& input,
+                                         const Tensor& weight,
+                                         IntArrayRef stride,
+                                         IntArrayRef dilation,
+                                         int64_t groups) {
+  const auto kernel_height = weight.size(2);
+  const auto kernel_width = weight.size(3);
+  const bool is_depthwise = weight.size(1) == 1 && (groups > 1 || weight.size(0) == 1);
+  const bool is_dilated = dilation[0] > 1 || dilation[1] > 1;
+  const bool has_large_stride = std::max(stride[0], stride[1]) > kMPSGraphDepthwiseMaxStride;
+  const bool has_many_taps = kernel_height * kernel_width * stride[0] * stride[1] > kMPSGraphDepthwiseMaxTaps;
+  const bool uses_untiled_kernel = is_packed_channels_last_2d(input) && groups >= kMPSGraphDepthwiseUntiledChannels;
+  if (!is_depthwise || is_dilated || has_large_stride || has_many_taps || kernel_height == 1 || uses_untiled_kernel) {
+    return false;
+  }
+  static const bool full_tile_overflows = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
+  const int64_t tile_element_size = weight.scalar_type() == kHalf ? sizeof(c10::Half) : sizeof(float);
+  return std::ranges::any_of(kMPSGraphDepthwiseTileOutputs, [&](const auto& outputs) {
+    const auto tile_width = outputs[0] * stride[1] + kernel_width - 1;
+    const auto tile_height = outputs[1] * stride[0] + kernel_height - 1;
+    const auto tile_bytes = tile_width * tile_height * outputs[2] * tile_element_size;
+    return full_tile_overflows ? tile_bytes >= kMPSGraphDepthwiseTileBytes : tile_bytes > kMPSGraphDepthwiseTileBytes;
+  });
 }
 
 static Tensor _mps_convolution_impl(const Tensor& input_t,
@@ -815,9 +840,12 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     IntArrayRef stride,
                                     IntArrayRef dilation,
                                     int64_t groups,
-                                    std::optional<IntArrayRef> input_shape) {
+                                    std::optional<IntArrayRef> input_shape,
+                                    Tensor output_t = {}) {
   // MPSGraph 2D conv miscomputes the output once a filter spatial dim reaches 256; use a Metal kernel instead.
-  if (input_t.dim() == 4 && (weight_t.size(2) >= 256 || weight_t.size(3) >= 256)) {
+  const bool has_large_filter = weight_t.size(2) >= 256 || weight_t.size(3) >= 256;
+  const bool overflows = mpsgraph_depthwise_overflows(input_t, weight_t, stride, dilation, groups);
+  if (input_t.dim() == 4 && (has_large_filter || overflows)) {
     const auto outH = (input_t.size(2) + 2 * padding[0] - dilation[0] * (weight_t.size(2) - 1) - 1) / stride[0] + 1;
     const auto outW = (input_t.size(3) + 2 * padding[1] - dilation[1] * (weight_t.size(3) - 1) - 1) / stride[1] + 1;
     // Degenerate shapes fall through to the normal path's shape check.
@@ -846,14 +874,16 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto output_t =
-      at::empty(input_shape.has_value() ? input_shape.value()
-                                        : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
-                input->scalar_type(),
-                std::nullopt,
-                kMPS,
-                std::nullopt,
-                is_channels_last ? (is3DConv ? kChannelsLast3d : kChannelsLast) : kContiguous);
+  if (!output_t.defined()) {
+    output_t = at::empty(input_shape.has_value()
+                             ? input_shape.value()
+                             : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
+                         input->scalar_type(),
+                         std::nullopt,
+                         kMPS,
+                         std::nullopt,
+                         is_channels_last ? (is3DConv ? kChannelsLast3d : kChannelsLast) : kContiguous);
+  }
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -880,6 +910,14 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   }
   if (is1DConv) {
     conv1d_metal_forward(input_t, weight_t, bias_opt, padding[1], stride[1], dilation[1], groups, output_t);
+    return output_t;
+  }
+  if (input_t.size(0) > UINT16_MAX) {
+    const auto inputs = input_t.split(UINT16_MAX);
+    const auto outputs = output_t.split(UINT16_MAX);
+    for (size_t i = 0; i < inputs.size(); i++) {
+      _mps_convolution_impl(inputs[i], weight_t, bias_opt, padding, stride, dilation, groups, std::nullopt, outputs[i]);
+    }
     return output_t;
   }
 
@@ -1057,6 +1095,17 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{grad_input_t, "result", 0};
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
+  if (!is3DConv && grad_output_t.size(0) > UINT16_MAX) {
+    const auto grad_outputs = grad_output_t.split(UINT16_MAX);
+    const auto grad_inputs = grad_input_t.split(UINT16_MAX);
+    for (size_t i = 0; i < grad_outputs.size(); i++) {
+      const auto chunk_size = grad_inputs[i].sizes();
+      const auto chunk = mps_convolution_backward_input(
+          chunk_size, grad_outputs[i], weight_t, padding, stride, dilation, groups, bias_defined, output_memory_format);
+      grad_inputs[i].copy_(chunk);
+    }
+    return grad_input_t;
+  }
 
   // Contig scratch when graph emits NCDHW but grad_input is CL3d -- covers
   // the macOS-14 fallback and the 3D NCDHW fallback on macOS 15+.
@@ -1212,6 +1261,27 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   // grad_weight allocation: 2D follows the caller-supplied layout; 3D always
   // stays contiguous OIDHW (the graph already transposes DHWIO -> OIDHW).
   const bool allocate_grad_weight_cl = output_memory_format == kChannelsLast && !is3DConv;
+
+  // MPSGraph's 2D and 3D convolution weight gradients go wrong once the batch
+  // reaches 2^16 (#96225), so accumulate over batch chunks below that.
+  constexpr int64_t kMaxBatch = std::numeric_limits<uint16_t>::max();
+  if (input_t.size(0) > kMaxBatch) {
+    const int64_t N = input_t.size(0);
+    auto acc = at::zeros(weight_size, grad_output_t.options());
+    for (int64_t i = 0; i < N; i += kMaxBatch) {
+      int64_t end = std::min(i + kMaxBatch, N);
+      acc += mps_convolution_backward_weights(weight_size,
+                                              grad_output_t.narrow(0, i, end - i),
+                                              input_t.narrow(0, i, end - i),
+                                              padding,
+                                              stride,
+                                              dilation,
+                                              groups,
+                                              bias_defined,
+                                              output_memory_format);
+    }
+    return acc;
+  }
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.

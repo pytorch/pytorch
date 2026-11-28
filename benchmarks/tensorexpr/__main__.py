@@ -2,22 +2,7 @@ import argparse
 import itertools
 import os
 
-# from . import conv
-# from . import normalization
-# from . import pooling
-from . import (  # noqa: F401
-    attention,
-    benchmark,
-    broadcast,
-    concat,
-    elementwise,
-    matmul,
-    reduction,
-    rnn_eltwise,
-    softmax,
-    swish,
-    tensor_engine,
-)
+import torch
 
 
 def main():
@@ -69,118 +54,34 @@ Works only with Python3.\n A few examples:
         help="the underlying tensor engine. only pt for now",
     )
     parser.add_argument(
-        "--jit-mode",
-        "--jit_mode",
-        type=str,
-        default="trace",
-        help="the jit mode to use: one of {trace, none}",
-    )
-    parser.add_argument(
-        "--cuda-pointwise-loop-levels",
-        "--cuda_pointwise_loop_levels",
-        type=int,
-        default=None,
-        help="num of loop levesl for Cuda pointwise operations: 2 or 3",
-    )
-    parser.add_argument(
-        "--cuda-pointwise-block-count",
-        "--cuda_pointwise_block_count",
-        type=int,
-        default=None,
-        help="num of block for Cuda pointwise operations",
-    )
-    parser.add_argument(
-        "--cuda-pointwise-block-size",
-        "--cuda_pointwise_block_size",
-        type=int,
-        default=None,
-        help="num of blocks for Cuda pointwise operations",
-    )
-    parser.add_argument(
-        "--cuda-fuser",
-        "--cuda_fuser",
-        type=str,
-        default="te",
-        help="The Cuda fuser backend to use: one of {te, nvf, old, none}",
-    )
-    parser.add_argument(
         "--output",
         type=str,
         default="stdout",
         help="The output format of the benchmark run {stdout[default], json}",
     )
     parser.add_argument(
-        "--print-ir",
-        action="store_true",
-        help="Print the IR graph of the Fusion.",
-    )
-    parser.add_argument(
-        "--print-kernel",
-        action="store_true",
-        help="Print generated kernel(s).",
-    )
-    parser.add_argument(
         "--no-dynamic-shape",
         action="store_true",
         help="Disable shape randomization in dynamic benchmarks.",
     )
-    parser.add_argument(
-        "--cpu-fusion",
-        "--cpu_fusion",
-        default=False,
-        action="store_true",
-        help="Enable CPU fusion.",
-    )
-    parser.add_argument(
-        "--cat-wo-conditionals",
-        "--cat_wo_conditionals",
-        default=False,
-        action="store_true",
-        help="Enable CAT wo conditionals.",
-    )
-
     args = parser.parse_args()
 
-    if args.cuda_fuser == "te":
-        import torch
-
-        torch._C._jit_set_profiling_executor(True)
-        torch._C._jit_set_texpr_fuser_enabled(True)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-        torch._C._get_graph_executor_optimize(True)
-    elif args.cuda_fuser == "old":
-        import torch
-
-        torch._C._jit_set_profiling_executor(False)
-        torch._C._jit_set_texpr_fuser_enabled(False)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-    elif args.cuda_fuser == "nvf":
-        import torch
-
-        torch._C._jit_set_profiling_executor(True)
-        torch._C._jit_set_texpr_fuser_enabled(False)
-        torch._C._jit_set_nvfuser_enabled(True)
-        torch._C._get_graph_executor_optimize(True)
-    else:
-        raise ValueError(f"Undefined fuser: {args.cuda_fuser}")
-
-    if args.cpu_fusion:
-        import torch
-
-        torch._C._jit_override_can_fuse_on_cpu(True)
-    else:
-        import torch
-
-        torch._C._jit_override_can_fuse_on_cpu(False)
-
-    if args.cat_wo_conditionals:
-        import torch
-
-        torch._C._jit_cat_wo_conditionals(True)
-    else:
-        import torch
-
-        torch._C._jit_cat_wo_conditionals(False)
+    # from . import conv
+    # from . import normalization
+    # from . import pooling
+    from . import (  # noqa: F401
+        attention,
+        benchmark,
+        broadcast,
+        concat,
+        elementwise,
+        matmul,
+        reduction,
+        rnn_eltwise,
+        softmax,
+        swish,
+        tensor_engine,
+    )
 
     def set_global_threads(num_threads):
         os.environ["OMP_NUM_THREADS"] = str(num_threads)
@@ -226,7 +127,6 @@ Works only with Python3.\n A few examples:
         ):
             bench = bench_cls(mode, device, dtype, *config)
             bench.output_type = args.output
-            bench.jit_mode = args.jit_mode
             if not bench.is_supported():
                 if allow_skip:
                     continue
@@ -265,7 +165,6 @@ Works only with Python3.\n A few examples:
         ):
             bench = bench_cls(mode, device, dtype, *config)
             bench.output_type = args.output
-            bench.jit_mode = args.jit_mode
             if not bench.is_supported():
                 if allow_skip:
                     continue
@@ -323,7 +222,6 @@ Works only with Python3.\n A few examples:
                             pass
                     # TODO: output dtype in the config and  parse it back from the str
                     bench = bench_cls(config[0], config[1], torch.float32, *config[2:])
-                    bench.jit_mode = args.jit_mode
                     bench.output_type = args.output
                     bench.run(args)
 

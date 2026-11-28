@@ -1353,7 +1353,7 @@ script_func_map: dict[Callable, ScriptFn] = {}
 
 def process_func(func: Callable):
     if func not in script_func_map:
-        scripted_func = torch.jit.script(func)
+        scripted_func = torch.jit._script.script(func)
 
         torch._C._jit_pass_inline(scripted_func.graph)
 

@@ -99,8 +99,8 @@ def _require_n_major(tensor, what):
 
 
 def interleaved_supports_config(config):
-    """SM100 only; under swap_ab the lane pairs would be M-adjacent, not N-adjacent."""
-    return config.device_capacity == 10 and not config.swap_ab
+    """SM100/SM110; under swap_ab the lane pairs would be M-adjacent, not N-adjacent."""
+    return config.device_capacity in (10, 11) and not config.swap_ab
 
 
 class InterleavedMainStore(TileStore):
@@ -119,7 +119,7 @@ class InterleavedMainStore(TileStore):
         return interleaved_supports_config(config)
 
     def config_support_error(self, configs):
-        return "interleaved main outputs require an SM100 config without swap_ab"
+        return "interleaved main outputs require an SM100/SM110 config without swap_ab"
 
     def to_params(self, gemm, args):
         _require_n_major(getattr(args, self.name), "interleaved main output")
@@ -161,7 +161,7 @@ class InterleavedTileLoad(TileLoad):
         return interleaved_supports_config(config)
 
     def config_support_error(self, configs):
-        return "interleaved captures require an SM100 config without swap_ab"
+        return "interleaved captures require an SM100/SM110 config without swap_ab"
 
     def to_params(self, gemm, args):
         _require_n_major(getattr(args, self.name), "interleaved capture")

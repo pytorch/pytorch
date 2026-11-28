@@ -29,7 +29,6 @@ from torch._inductor.codegen.common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
-from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
     to_cutlass_scale_mode,
@@ -52,6 +51,7 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
     CuTeDSLEpilogueSource,
 )
 from torch._inductor.virtualized import V
+from torch._native.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -76,6 +76,7 @@ def _local_reduce_source_constant(field: str) -> str:
 
 def _normalize_epilogue_input_tensor(value: Any, permute=None) -> Any:
     import torch
+    from torch._subclasses.fake_tensor import is_fake_tensor
 
     if not isinstance(value, torch.Tensor):
         return value
@@ -88,6 +89,8 @@ def _normalize_epilogue_input_tensor(value: Any, permute=None) -> Any:
         value = value.expand(8, 1).contiguous()
     elif not value.is_contiguous():
         value = value.contiguous()
+    if not is_fake_tensor(value) and value.data_ptr() % 16:
+        value = value.clone()
     return value
 
 
@@ -640,9 +643,15 @@ def _create_gemm_arguments(
             )
 
         case "SCALED_GEMM":
+            from cutlass.operators import ScaleSwizzleMode
             from cutlass.operators.arguments import ScaledOperand
 
             a, b, scale_a, scale_b = input_tensors
+            # Swizzled scales have a flat ABI; the matrix shapes determine their logical layout.
+            if swizzle_mode_a == ScaleSwizzleMode.Swizzle32x4x4:
+                scale_a = scale_a.reshape(-1)
+            if swizzle_mode_b == ScaleSwizzleMode.Swizzle32x4x4:
+                scale_b = scale_b.reshape(-1)
             scaled_a = ScaledOperand(a, scale_a, scale_mode_a, swizzle_mode_a)
             scaled_b = ScaledOperand(b, scale_b, scale_mode_b, swizzle_mode_b)
             kwargs: dict[str, Any] = {"accumulator_type": accumulator_type}
@@ -889,9 +898,9 @@ def _update_reuse_args_tensors(
     if variant_name == "SCALED_GEMM":
         a, b, scale_a, scale_b = input_tensors
         redirect(args.A.quantized.tensor, a)
-        redirect(args.A.scale.tensor, scale_a)
+        redirect(args.A.scale.tensor, scale_a.reshape(args.A.scale.shape))
         redirect(args.B.quantized.tensor, b)
-        redirect(args.B.scale.tensor, scale_b)
+        redirect(args.B.scale.tensor, scale_b.reshape(args.B.scale.shape))
         redirect(args.out.tensor, out)
     else:
         # GEMM: dense mm and the EFC bias/epilogue addmm path.
@@ -1676,8 +1685,17 @@ class NVUniversalGemmKernel(Kernel):
                     logical_axis = (
                         1 - reduction.axis if self.swap_ab else reduction.axis
                     )
-                    squeeze_dim = -1 if logical_axis == 1 else -2
-                    reduce_ptr = f"{reduce_ptr}.squeeze({squeeze_dim})"
+                    a_name, b_name = input_tensor_names[:2]
+                    rows = f"{a_name}.shape[-2]"
+                    cols = f"{b_name}.shape[-1]"
+                    if logical_axis == 0:
+                        rows = f"{rows} // {reduction.group}"
+                    else:
+                        cols = f"{cols} // {reduction.group}"
+                    # Keep both matrix dimensions so singleton groups transpose.
+                    reduce_ptr = (
+                        f"{reduce_ptr}.view(*{a_name}.shape[:-2], {rows}, {cols})"
+                    )
 
                 def feed_output_ptr(output_name: str | None) -> str:
                     if output_name is None:

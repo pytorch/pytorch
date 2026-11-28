@@ -25,12 +25,15 @@ static_assert(
     "exceeds the Metal threadgroup size limit");
 
 // Prefill tiles (padded head dims); PrefillAttention.h and MppAttention.h
-// instantiate the kernels for each. Head dims above 256 (the widest tile) run
-// on 128 (kChunkTile): the QK dim in 128-wide chunks, V/O in 128-wide column
-// slabs, one launch per slab.
+// instantiate the kernels for each. Head dims above the widest tile run on
+// 128 (kChunkTile): the QK dim in 128-wide chunks, V/O in 128-wide column
+// slabs. The 256 MPP tile (kMppWideTile) is register-bound on Apple10, where
+// the chunked 128 tile runs faster, so it only serves an exact 256 head dim
+// on earlier GPUs.
 C10_METAL_CONSTEXPR ::c10::metal::array<int, 9> kPrefillTiles =
     {32, 64, 72, 80, 96, 128, 160, 192, 256};
-C10_METAL_CONSTEXPR ::c10::metal::array<int, 4> kMppTiles = {64, 96, 128, 256};
+C10_METAL_CONSTEXPR ::c10::metal::array<int, 3> kMppTiles = {64, 96, 128};
+C10_METAL_CONSTEXPR int kMppWideTile = 256;
 C10_METAL_CONSTEXPR int kChunkTile = 128;
 
 // A prefill threadgroup takes a block of query rows and loops over the keys in
@@ -85,6 +88,13 @@ struct PrefillAttnMaskParams {
 METAL_FUNC float mask_log2e(float m) {
   const float m2 = m * M_LOG2E_F;
   return m2 == -INFINITY && m != -INFINITY ? -FLT_MAX : m2;
+}
+// Softmax logsumexp of a row from its exp2-domain running max and sum. A fully
+// masked row gets +inf, so exp(score - lse) is 0 for it in the backward.
+METAL_FUNC float prefill_lse(float max_score2, float sum_score) {
+  return max_score2 == -INFINITY
+      ? INFINITY
+      : (max_score2 + metal::log2(sum_score)) * M_LN2_F;
 }
 #define instantiate_kernel(name, func, ...) \
   template [[host_name(                     \

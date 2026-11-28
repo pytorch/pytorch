@@ -40,6 +40,14 @@ void radix_sort_pairs_impl(
     const OpaqueType<value_size> *values_in, OpaqueType<value_size> *values_out,
     int64_t n, bool descending, int64_t begin_bit, int64_t end_bit);
 
+#if defined(USE_ROCM)
+template<typename key_t, int value_size>
+void radix_sort_pairs_onesweep_impl(
+    const key_t *keys_in, key_t *keys_out,
+    const OpaqueType<value_size> *values_in, OpaqueType<value_size> *values_out,
+    int64_t n, int64_t begin_bit, int64_t end_bit);
+#endif
+
 }  // namespace detail
 
 // The backends take a 64-bit item count, but most callers here (randperm,
@@ -69,6 +77,25 @@ void radix_sort_pairs(
       reinterpret_cast<opaque_t*>(values_out),
       n, descending, begin_bit, end_bit);
 }
+
+#if defined(USE_ROCM)
+// Ascending radix_sort_pairs that always uses rocPRIM's onesweep algorithm.
+// rocPRIM's default config switches to merge sort for n <= 1,048,576 when keys
+// are wider than 2 bytes. Only (int32_t key, 4-byte value) is instantiated.
+template<typename key_t, typename value_t>
+void radix_sort_pairs_onesweep(
+    const key_t *keys_in, key_t *keys_out,
+    const value_t *values_in, value_t *values_out,
+    int64_t n, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8) {
+  using opaque_t = detail::OpaqueType<sizeof(value_t)>;
+  static_assert(sizeof(value_t) == alignof(value_t), "Expected value_t to be size-aligned");
+  detail::radix_sort_pairs_onesweep_impl(
+      keys_in, keys_out,
+      reinterpret_cast<const opaque_t*>(values_in),
+      reinterpret_cast<opaque_t*>(values_out),
+      n, begin_bit, end_bit);
+}
+#endif
 
 template<typename key_t>
 void radix_sort_keys(

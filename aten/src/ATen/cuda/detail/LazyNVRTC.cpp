@@ -166,6 +166,7 @@ CUDA_STUB3(cuLinkComplete, CUlinkState, void **, size_t *)
 CUDA_STUB3(cuFuncSetAttribute, CUfunction, CUfunction_attribute, int)
 CUDA_STUB3(cuFuncGetAttribute, int*, CUfunction_attribute, CUfunction)
 CUDA_STUB3(cuPointerGetAttribute, void*, CUpointer_attribute, CUdeviceptr)
+CUDA_STUB4(cuLaunchKernelEx, const CUlaunchConfig*, CUfunction, void**, void**)
 
 
 #if defined(CUDA_VERSION)

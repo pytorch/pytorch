@@ -6,6 +6,11 @@ orphan: true
 
 # Distributed Autograd Design
 
+```{warning}
+`torch.distributed.rpc` is deprecated since 2.16 and will be removed in a future
+version. See {ref}`distributed-rpc-framework` for alternatives.
+```
+
 This note will present the detailed design for distributed autograd and walk
 through the internals of the same. Make sure you're familiar with
 {ref}`autograd-mechanics` and the {ref}`distributed-rpc-framework` before
