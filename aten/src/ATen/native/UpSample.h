@@ -9,6 +9,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cpu/utils.h>
+#include <c10/util/irange.h>
 
 /**
  * Note [compute_scales_value]
@@ -63,6 +64,29 @@ inline std::optional<double> get_scale_value(std::optional<c10::ArrayRef<double>
   return scales->at(idx);
 }
 
+// Memory format for the output of a forward bilinear, bicubic or lanczos upsampling op.
+// suggest_memory_format() also requires the stride of a size-1 batch dimension to fit the layout, so
+// e.g. `hwc_image.permute(2, 0, 1)[None]` would be reported as contiguous when really it's channels-last.
+// Only for uint8 CPU inputs, whose AVX2 / NEON kernels need a channels-last output; for other dtypes,
+// other modes and other devices, a channels-last output is slower for these inputs.
+inline c10::MemoryFormat output_memory_format(const Tensor& input) {
+  auto memory_format = input.suggest_memory_format();
+  if (memory_format != c10::MemoryFormat::Contiguous || !input.is_cpu() || input.scalar_type() != at::kByte ||
+      input.dim() != 4 || input.size(0) != 1) {
+    return memory_format;
+  }
+  auto sizes = input.sizes();
+  c10::DimVector strides(input.strides().begin(), input.strides().end());
+  strides[0] = 1;
+  for (const auto i : c10::irange(1, input.dim())) {
+    strides[0] = std::max(strides[0], strides[i] * sizes[i]);
+  }
+  if (c10::is_channels_last_strides_2d(sizes, strides)) {
+    return c10::MemoryFormat::ChannelsLast;
+  }
+  return memory_format;
+}
+
 } // namespace upsample
 
 using scale_t = std::optional<double>;
@@ -79,6 +103,7 @@ using upsampling_trilinear3d = void(*)(const Tensor& output, const Tensor& input
 using upsampling_bicubic2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 using _upsampling_bicubic2d_aa = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 using _upsampling_lanczos2d_aa = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
+using _upsampling_inter_area2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
 DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel)
 DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_kernel)
 DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel)
@@ -104,6 +129,7 @@ DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_kernel)
 DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_backward_kernel)
 DECLARE_DISPATCH(_upsampling_lanczos2d_aa, _upsample_lanczos2d_aa_kernel)
 DECLARE_DISPATCH(_upsampling_lanczos2d_aa, _upsample_lanczos2d_aa_backward_kernel)
+DECLARE_DISPATCH(_upsampling_inter_area2d, _upsample_inter_area2d_kernel)
 
 [[maybe_unused]] inline std::array<int64_t, 3> upsample_1d_common_check(
     IntArrayRef input_size,

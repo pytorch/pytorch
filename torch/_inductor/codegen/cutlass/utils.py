@@ -183,6 +183,24 @@ def try_import_cutlass() -> bool:
     return False
 
 
+def is_cutlass_arch_supported(device_type: str) -> bool:
+    if device_type != "cuda":
+        return device_type == "xpu"
+
+    from ..cuda.compile_utils import _cuda_arch_number
+
+    arch = get_cuda_arch()
+    if arch is None:
+        return False
+    try:
+        capability = _cuda_arch_number(arch)
+    except ValueError:
+        return False
+    # Keys of cc_map; cutlass_cppgen is deprecated, so this set is frozen:
+    # https://github.com/NVIDIA/cutlass/blob/098de2a652cf8f00fd70b2df54051c7eccbb855a/python/cutlass_cppgen/backend/evt/passes/util.py
+    return capability in (80, 86, 89, 90, 100, 101, 103)
+
+
 def _normalize_xpu_arch(arch: str) -> str:
     if arch.startswith("Xe"):
         return arch[2:]

@@ -1,0 +1,23 @@
+# Owner(s): ["module: ci"]
+#
+# "unstable" in the name is required for CI tooling to treat jobs as non-blocking.
+name: experimental-unstable
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/experimental-unstable.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  placeholder:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo ok

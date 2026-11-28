@@ -1729,7 +1729,7 @@ void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& inpu
   cusolverDnParams_t params = nullptr;
   TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
 
-  Tensor A_fortran = input.mT().contiguous();
+  Tensor A_fortran = cloneBatchedColumnMajor(input);
   auto* A_data = A_fortran.data_ptr<scalar_t>();
   const auto A_stride = matrixStride(A_fortran);
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();

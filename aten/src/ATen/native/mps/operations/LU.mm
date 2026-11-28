@@ -320,11 +320,16 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
   const auto uB = static_cast<uint32_t>(Bnum);
   const auto N = un + uk;
 
+  using namespace std::string_view_literals;
   auto pivotPSO = lib.getPipelineStateForFunc(fmt::format("luApplyPivotsRHS_{}", tname));
   auto fwdPSO = lib.getPipelineStateForFunc(
       fmt::format("trsmDiagSolveLU_{}_{}", tname, adjoint ? "lower_nonunit" : "lower_unit"));
   auto backPSO = lib.getPipelineStateForFunc(
       fmt::format("trsmDiagSolveLU_{}_{}", tname, adjoint ? "upper_unit" : "upper_nonunit"));
+  auto fwdTailPSO = lib.getPipelineStateForFunc(
+      fmt::format("trsmDiagSolveLU_{}_{}_direct", tname, adjoint ? "lower_nonunit"sv : "lower_unit"sv));
+  auto backTailPSO = lib.getPipelineStateForFunc(
+      fmt::format("trsmDiagSolveLU_{}_{}_direct", tname, adjoint ? "upper_unit"sv : "upper_nonunit"sv));
   auto gemmBigPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_64_64_4") : nil;
   auto gemmSmallPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_32_64_2") : nil;
   auto gemmSimdPSO = (!useMpp && !isComplex) ? lib.getPipelineStateForFunc("gemmSimdLU") : nil;
@@ -385,15 +390,15 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
       if (!adjoint) {
         pivotApply(false);
       }
-      for (auto p0 = 0u; p0 < un; p0 += 32) {
-        const auto pw = std::min(32u, un - p0);
-        trsm(fwdPSO, p0, pw);
+      for (auto p0 = 0u; p0 < un; p0 += kLUSolveTS) {
+        const auto pw = std::min(kLUSolveTS, un - p0);
+        trsm(pw > kLUSolveDirectMaxRows ? fwdPSO : fwdTailPSO, p0, pw);
         gemm(p0 + pw, un, p0, pw);
       }
-      for (auto pb = un ? (static_cast<int64_t>(un) - 1) / 32 * 32 : int64_t{0}; pb >= 0; pb -= 32) {
+      for (auto pb = (static_cast<int64_t>(un) - 1) / kLUSolveTS * kLUSolveTS; pb >= 0; pb -= kLUSolveTS) {
         const auto p0 = static_cast<uint32_t>(pb);
-        const auto pw = std::min(32u, un - p0);
-        trsm(backPSO, p0, pw);
+        const auto pw = std::min(kLUSolveTS, un - p0);
+        trsm(pw > kLUSolveDirectMaxRows ? backPSO : backTailPSO, p0, pw);
         gemm(0, p0, p0, pw);
       }
       if (adjoint) {

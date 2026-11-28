@@ -693,11 +693,7 @@ class TpSetattroTests(TestCase):
 
         self._check(fn, torch.ones(3))
 
-    @unittest.expectedFailure
     def test_readonly_member_raises_inside_region(self):
-        # MemberDescriptorVariable.tp_descr_set_impl has no model for
-        # __globals__ and records the write for replay, so the AttributeError
-        # fires after the region instead of inside the user's try block.
         def fn(x, f):
             try:
                 f.__globals__ = {}
