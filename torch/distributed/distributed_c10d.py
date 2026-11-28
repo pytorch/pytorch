@@ -5458,6 +5458,8 @@ def gather(
 
     This function requires all tensors to be the same size on each process.
 
+    Complex tensors are supported.
+
     Args:
         tensor (Tensor): Input tensor.
         gather_list (list[Tensor], optional): List of appropriately,
@@ -5523,6 +5525,11 @@ def gather(
     group_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=False)
     my_group_rank = group.rank()
     _validate_output_list_for_rank(my_group_rank, group_dst, gather_list)
+    gather_list = [
+        t if not t.is_complex() else torch.view_as_real(t) for t in gather_list
+    ]
+    tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
+
     if group_dst == my_group_rank:
         output_tensors = [gather_list]
     else:
