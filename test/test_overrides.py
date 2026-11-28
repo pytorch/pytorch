@@ -1895,6 +1895,33 @@ class TestTorchFunctionMode(TestCase):
             state = _is_torch_function_all_disabled()
             self.assertFalse(state)
 
+    @skipIfTorchDynamo(msg="checks eager-mode behavior of autograd hooks")
+    def test_subclass_dispatch_in_autograd_hooks(self):
+        calls = []
+
+        class A(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                calls.append(func.__name__)
+                return super().__torch_function__(func, types, args, kwargs)
+
+        def hook(_):
+            calls.append("hook")
+            torch.add(A(torch.ones(3)), 1)
+
+        def enabled_hook(_):
+            with torch._C._EnableTorchFunction():
+                hook(_)
+
+        not_dispatched = ["sum", "backward", "hook"]
+        dispatched = ["sum", "backward", "hook", "add"]
+        for register in ("register_hook", "register_post_accumulate_grad_hook"):
+            for fn, expected in ((hook, not_dispatched), (enabled_hook, dispatched)):
+                x = A(torch.randn(3)).requires_grad_()
+                getattr(x, register)(fn)
+                calls.clear()
+                x.sum().backward()
+                self.assertEqual(calls, expected)
 
     def test_subclass_hash(self):
         class DiagTensor(torch.Tensor):

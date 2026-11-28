@@ -957,6 +957,55 @@ as was the case before version 1.7.0. Failing to do this may cause ``func``
 to recurse back into ``__torch_function__`` and therefore cause infinite
 recursion.
 
+### Autograd hooks and ``__torch_function__`` dispatch
+
+``Tensor.__torch_function__`` calls ``func`` with ``__torch_function__``
+dispatch to subclasses turned off, by running it under
+``torch._C.DisableTorchFunctionSubclass()``. This is how
+``super().__torch_function__`` avoids dispatching to your subclass a second
+time for the same call.
+
+The same applies to ``backward()``. {meth}`torch.Tensor.backward` and
+{func}`torch.autograd.backward` are themselves overridable functions, so when you
+call one on an instance of your subclass, your ``__torch_function__`` is called
+once with ``backward`` as ``func``. The autograd engine then runs with subclass
+dispatch disabled. PyTorch operations performed by Python code that the engine
+calls, such as tensor hooks, post-accumulate-grad hooks and the ``backward`` of a
+custom {class}`torch.autograd.Function`, are not dispatched to your subclass's
+``__torch_function__``. Operations that the engine runs in C++ are never visible
+to ``__torch_function__``.
+
+A Tensor-like type that is not a subclass of {class}`torch.Tensor` is not
+affected. If it calls ``backward()`` on the plain tensor it wraps, no
+``__torch_function__`` call is involved, so dispatch stays enabled inside hooks.
+
+If your subclass needs to see the operations inside a hook, re-enable dispatch
+there with ``torch._C._EnableTorchFunction()``:
+
+```{code-block} python
+:dedent: 2
+
+  def post_accum_hook(param):
+      with torch._C._EnableTorchFunction():
+          param + LoggingTensor(torch.ones_like(param))
+
+  x = LoggingTensor(torch.randn(3, requires_grad=True))
+  x.register_post_accumulate_grad_hook(post_accum_hook)
+
+```
+
+The context managers that control this dispatch live in ``torch._C``:
+
+* ``torch._C.DisableTorchFunctionSubclass()`` turns off ``__torch_function__``
+  dispatch to Tensor subclasses and Tensor-likes. Active
+  {class}`torch.overrides.TorchFunctionMode` instances still run.
+* ``torch._C.DisableTorchFunction()`` turns off ``__torch_function__`` dispatch
+  entirely, including modes.
+* ``torch._C._EnableTorchFunction()`` turns dispatch back on inside its block,
+  whichever of the two above is active, and restores the previous state on exit.
+
+These are not part of the documented public API and may change without notice.
+
 ### Extending {mod}`torch` with a {class}`Tensor` wrapper type
 
 Another useful case is a type that wraps a {class}`Tensor`, either as an
