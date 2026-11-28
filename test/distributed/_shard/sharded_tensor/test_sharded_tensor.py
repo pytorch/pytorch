@@ -1848,12 +1848,15 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             ],
         )
         h, w = 10, 20
-        # CUDA sharded tensor should return a new ShardedTensor, but same
-        # local shards(no movements)
+        # A copied conversion returns a new ShardedTensor whose shard data is
+        # copied on the same device (no cross-device movement).
         st_cuda = sharded_tensor.zeros(spec, h, w)
-        new_st_cuda = st_cuda.to(torch.device(device_type, self.rank))
+        new_st_cuda = st_cuda.to(torch.device(device_type, self.rank), copy=True)
         self.assertTrue(st_cuda is not new_st_cuda)
-        self.assertTrue(st_cuda.local_tensor() is new_st_cuda.local_tensor())
+        self.assertEqual(st_cuda.local_tensor(), new_st_cuda.local_tensor())
+        self.assertEqual(
+            new_st_cuda.local_tensor().device, st_cuda.local_tensor().device
+        )
 
         gloo_pg = dist.new_group(backend="gloo")
 
@@ -1861,7 +1864,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st_cpu = sharded_tensor.zeros(cpu_spec, h, w, process_group=gloo_pg)
         # test ability to move st to GPU
         spec_before_move = st_cpu.sharding_spec()
-        new_st_gpu = st_cpu.to(device_type)
+        new_st_gpu = st_cpu.to(torch.device(device_type, self.rank))
         # check the spec is still ChunkShardingSpec
         spec_after_move = new_st_gpu.sharding_spec()
         self.assertIsInstance(spec_after_move, ChunkShardingSpec)
