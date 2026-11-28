@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 from dataclasses import dataclass
-from functools import cache
+from functools import cache, partial
 from typing import Any, TYPE_CHECKING
 from typing_extensions import TypeVarTuple
 
 from . import _registry
-from ._utils import _empty_with_matching_layout
+from ._utils import _empty_with_matching_layout, _FP8_DTYPES
 
 
 if TYPE_CHECKING:
@@ -68,18 +69,51 @@ def _fa4_import_module(module_path: str) -> ModuleType:
     return module
 
 
+@cache
+def _fa4_tensorwise_scales_cls(module: ModuleType) -> type | None:
+    """FA4's ``TensorwiseScales`` if ``_flash_attn_fwd`` takes ``scales=``, None if it takes ``q_descale=``."""
+    parameters = inspect.signature(module._flash_attn_fwd).parameters
+    if "scales" in parameters:
+        # TensorwiseScales lives where _flash_attn_fwd is defined, also when `module` only re-exports it.
+        return importlib.import_module(
+            module._flash_attn_fwd.__module__
+        ).TensorwiseScales
+    if "q_descale" in parameters:
+        return None
+    raise RuntimeError(
+        f"{module.__name__}._flash_attn_fwd takes no fp8 descales; fp8 needs flash-attn-4 >= 4.0.0b10"
+    )
+
+
 def _fa4_register_kernels() -> Library:
     lib = Library("aten", "IMPL", "CUDA")
     lib.impl("_flash_attention_forward", _fa4_flash_attention_forward_impl, "CUDA")
+    # The flash .quantized ops take the descales right after return_debug_mask, as these impls do,
+    # so one impl serves both overloads.
+    lib.impl(
+        "_flash_attention_forward.quantized",
+        partial(_fa4_flash_attention_forward_impl, quantized=True),
+        "CUDA",
+    )
     lib.impl(
         "_flash_attention_forward_no_dropout_inplace",
         _fa4_flash_attention_forward_no_dropout_inplace_impl,
+        "CUDA",
+    )
+    lib.impl(
+        "_flash_attention_forward_no_dropout_inplace.quantized",
+        partial(_fa4_flash_attention_forward_no_dropout_inplace_impl, quantized=True),
         "CUDA",
     )
     lib.impl("_flash_attention_backward", _fa4_flash_attention_backward_impl, "CUDA")
     lib.impl(
         "_scaled_dot_product_flash_attention",
         _fa4_scaled_dot_product_flash_attention_forward_impl,
+        "CUDA",
+    )
+    lib.impl(
+        "_scaled_dot_product_flash_attention.quantized",
+        _fa4_scaled_dot_product_flash_attention_forward_quantized_impl,
         "CUDA",
     )
     lib.impl(
@@ -95,13 +129,15 @@ def _fa4_common_support_error(
     tensors: tuple[torch.Tensor, ...],
     cum_seq_q: torch.Tensor | None,
     require_fp32: tuple[tuple[str, torch.Tensor], ...] = (),
+    query_dtypes: tuple[torch.dtype, ...] = (torch.float16, torch.bfloat16),
 ) -> str | None:
     if not all(t.is_cuda for t in tensors):
         return "inputs must be CUDA tensors"
     if len({t.device for t in tensors}) != 1:
         return "inputs must share device"
-    if query.dtype not in (torch.float16, torch.bfloat16):
-        return "query dtype must be float16 or bfloat16"
+    if query.dtype not in query_dtypes:
+        names = " or ".join(str(dtype).removeprefix("torch.") for dtype in query_dtypes)
+        return f"query dtype must be {names}"
     for name, tensor in require_fp32:
         if tensor.dtype != torch.float32:
             return f"{name} dtype must be float32"
@@ -127,6 +163,7 @@ def _fa4_forward_support_error(
     cum_seq_q: torch.Tensor | None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
+    quantized: bool = False,
 ) -> str | None:
     if dropout_p != 0.0:
         return "dropout_p must be 0"
@@ -144,10 +181,15 @@ def _fa4_forward_support_error(
         return f"paged KV (block_table) not supported on SM {major}0"
     if num_splits is not None and num_splits > 1 and major != 10:
         return f"SplitKV (num_splits > 1) not supported on SM {major}0"
+    if quantized and major != 10:
+        return f"fp8 not supported on SM {major}0"
+    if quantized and not query.dtype == key.dtype == value.dtype:
+        return "query, key and value must share one fp8 dtype"
     error = _fa4_common_support_error(
         query,
         (query, key, value),
         cum_seq_q,
+        query_dtypes=_FP8_DTYPES if quantized else (torch.float16, torch.bfloat16),
     )
     if error is not None:
         if error == "inputs must share device":
@@ -212,6 +254,9 @@ def _fa4_run_forward(
     out: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if _FA4_MODULE_PATH is None:
         raise RuntimeError("FA4 not registered")
@@ -238,6 +283,13 @@ def _fa4_run_forward(
         "num_splits": num_splits,
         "out": out,
     }
+    if any(t is not None for t in (q_descale, k_descale, v_descale)):
+        tensorwise_scales_cls = _fa4_tensorwise_scales_cls(module)
+        if tensorwise_scales_cls is not None:
+            kwargs["scales"] = tensorwise_scales_cls(q_descale, k_descale, v_descale)
+        else:
+            # flash-attn-4 releases before 4.0.0b39 take the descales as separate arguments.
+            kwargs.update(q_descale=q_descale, k_descale=k_descale, v_descale=v_descale)
     out, lse, *_ = module._flash_attn_fwd(query, key, value, **kwargs)
     return out, lse.contiguous()
 
@@ -292,6 +344,9 @@ def _fa4_flash_attention_forward_impl(
     dropout_p: float,
     is_causal: bool,
     return_debug_mask: bool,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
     *,
     scale: float | None = None,
     window_size_left: int | None = None,
@@ -302,6 +357,7 @@ def _fa4_flash_attention_forward_impl(
     block_table: torch.Tensor | None = None,
     compute_auxiliary: bool = True,
     num_splits: int | None = None,
+    quantized: bool = False,
 ):
     error = _fa4_forward_support_error(
         query,
@@ -314,6 +370,7 @@ def _fa4_flash_attention_forward_impl(
         cum_seq_q,
         block_table,
         num_splits,
+        quantized,
     )
     if error is not None:
         raise RuntimeError(f"FA4 flash_attention forward unsupported: {error}")
@@ -333,11 +390,14 @@ def _fa4_flash_attention_forward_impl(
         out,
         block_table,
         num_splits,
+        q_descale,
+        k_descale,
+        v_descale,
     )
     if compute_auxiliary:
         rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
         philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
-        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+        debug_mask = torch.empty(0, dtype=out.dtype, device=query.device)
     else:
         rng_state = None
         philox_offset = None
@@ -357,6 +417,9 @@ def _fa4_flash_attention_forward_no_dropout_inplace_impl(
     dropout_p: float,
     is_causal: bool,
     return_debug_mask: bool,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
     *,
     scale: float | None = None,
     window_size_left: int | None = None,
@@ -365,6 +428,7 @@ def _fa4_flash_attention_forward_no_dropout_inplace_impl(
     alibi_slopes: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
+    quantized: bool = False,
 ):
     _, lse, _, _, _ = _fa4_flash_attention_forward_impl(
         query,
@@ -386,6 +450,10 @@ def _fa4_flash_attention_forward_no_dropout_inplace_impl(
         block_table=block_table,
         compute_auxiliary=False,
         num_splits=num_splits,
+        q_descale=q_descale,
+        k_descale=k_descale,
+        v_descale=v_descale,
+        quantized=quantized,
     )
     return lse
 
@@ -462,6 +530,10 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
     return_debug_mask: bool = False,
     *,
     scale: float | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
+    quantized: bool = False,
 ):
     error = _fa4_forward_support_error(
         query,
@@ -472,12 +544,17 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         None,
         None,
         None,
+        quantized=quantized,
     )
     if error is not None:
         raise RuntimeError(f"FA4 SDPA forward unsupported: {error}")
     q, k, v = _transpose_dense(query, key, value)
 
-    out_bhsd = _empty_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
+    out_bhsd = _empty_with_matching_layout(
+        query,
+        (*query.shape[:-1], value.size(-1)),
+        dtype=torch.bfloat16 if quantized else None,
+    )
     out_bshd = out_bhsd.transpose(1, 2)
 
     max_q_flash = q.size(1)
@@ -495,6 +572,10 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         return_debug_mask,
         scale=scale,
         out=out_bshd,
+        q_descale=q_descale,
+        k_descale=k_descale,
+        v_descale=v_descale,
+        quantized=quantized,
     )
     max_q = query.size(2)
     max_k = key.size(2)
@@ -508,6 +589,38 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         rng_state,
         philox_offset,
         debug_mask,
+    )
+
+
+def _fa4_scaled_dot_product_flash_attention_forward_quantized_impl(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    q_descale: torch.Tensor | None,
+    k_descale: torch.Tensor | None,
+    v_descale: torch.Tensor | None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    *,
+    scale: float | None = None,
+):
+    """``.quantized`` SDPA overload: fp8 query, key and value; writes a bf16 output.
+
+    Its schema puts the descales before ``dropout_p``, so it can't be a ``partial`` of the default impl.
+    """
+    return _fa4_scaled_dot_product_flash_attention_forward_impl(
+        query,
+        key,
+        value,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale=scale,
+        q_descale=q_descale,
+        k_descale=k_descale,
+        v_descale=v_descale,
+        quantized=True,
     )
 
 

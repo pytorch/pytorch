@@ -14,6 +14,10 @@ from torch.nn.attention import (
     restore_flash_attention_impl,
     sdpa_kernel,
 )
+from torch.nn.attention.experimental._scaled_dot_product_attention_quantized import (
+    _scaled_dot_product_attention_quantized,
+)
+from torch.testing._internal.common_cuda import IS_SM10X
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -244,6 +248,62 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
         finally:
             torch.use_deterministic_algorithms(False)
             _fa4._fa4_import_module.cache_clear()
+
+    @unittest.skipUnless(
+        _fa4_dependencies_available() and IS_SM10X,
+        "FA4's fp8 forward needs FA4 and an SM100-family GPU",
+    )
+    @parametrize("dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    @parametrize("is_causal", [False, True])
+    def test_fp8_sdpa_matches_dequantized_reference(self, device, dtype, is_causal):
+        torch.manual_seed(0)
+        batch, num_heads, num_kv_heads, seq_len, head_dim = 2, 8, 2, 256, 128
+        heads_per_kv_head = num_heads // num_kv_heads
+        # Powers of two, so the dequantized reference inputs are exact.
+        descales = {
+            "q_descale": torch.tensor([[0.5, 2.0], [1.0, 4.0]], device=device),
+            "k_descale": torch.tensor([[2.0, 1.0], [0.5, 4.0]], device=device),
+            "v_descale": torch.tensor([[1.0, 0.5], [2.0, 1.0]], device=device),
+        }
+        # Max error per unit of v_descale: FA4 rounds P to the fp8 dtype for P @ V.
+        # e5m2 has one mantissa bit less than e4m3, so its rounding step and bound are twice e4m3's.
+        bound = {torch.float8_e4m3fn: 0.25, torch.float8_e5m2: 0.5}[dtype]
+
+        def fp8_randn(heads):
+            shape = (batch, heads, seq_len, head_dim)
+            return torch.randn(shape, device=device, dtype=torch.bfloat16).to(dtype)
+
+        def dequantize(x, descale):
+            per_head = descale.repeat_interleave(x.size(1) // descale.size(1), dim=1)
+            return x.float() * per_head[:, :, None, None]
+
+        q, k, v = fp8_randn(num_heads), fp8_randn(num_kv_heads), fp8_randn(num_kv_heads)
+        with torch.no_grad():
+            out = _scaled_dot_product_attention_quantized(
+                q, k, v, is_causal=is_causal, **descales
+            )
+            with sdpa_kernel(SDPBackend.MATH):
+                expected = F.scaled_dot_product_attention(
+                    dequantize(q, descales["q_descale"]),
+                    dequantize(k, descales["k_descale"]),
+                    dequantize(v, descales["v_descale"]),
+                    is_causal=is_causal,
+                    enable_gqa=True,
+                )
+
+        self.assertEqual(out.dtype, torch.bfloat16)
+        self.assertEqual(out.shape, q.shape)
+        # Max error per (batch, KV head) block.
+        error = (
+            (out.float() - expected)
+            .abs()
+            .unflatten(1, (num_kv_heads, heads_per_kv_head))
+            .amax(dim=(2, 3, 4))
+        )
+        self.assertTrue(
+            (error <= bound * descales["v_descale"]).all(),
+            f"max error per (batch, KV head): {error}",
+        )
 
 
 instantiate_device_type_tests(TestFlashAttentionFA4, globals(), only_for="cuda")
