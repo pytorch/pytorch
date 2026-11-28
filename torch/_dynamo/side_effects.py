@@ -739,6 +739,23 @@ class SideEffects:
             self.store_attr_mutations.get(item)
         )
 
+    def is_noop_global_delete(
+        self, item: VariableTracker, name: str, value: VariableTracker
+    ) -> bool:
+        """Whether a pending delete leaves the original global namespace unchanged."""
+        if not isinstance(value, variables.DeletedVariable):
+            return False
+        output_graph = self.output_graph_weakref()
+        if output_graph is None:
+            return False
+        if isinstance(item, variables.NewGlobalVariable):
+            return name not in output_graph.global_scope
+        if isinstance(item, variables.PythonModuleVariable):
+            namespace = item.value.__dict__
+            deleted = output_graph.deleted_globals_by_dict.get(id(namespace))
+            return deleted is not None and name in deleted[1] and name not in namespace
+        return False
+
     def has_pending_mutation_of_attr(
         self,
         item: VariableTracker,
@@ -2063,6 +2080,8 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                 ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
                 side_effect_occurred = True
         elif isinstance(value, variables.DeletedVariable):
+            if side_effects.is_noop_global_delete(var, name, value):
+                continue
             if isinstance(var, variables.CellVariable):
                 # Cells created during inlining (no local_name) are rebuilt via
                 # make_cell(), which leaves None in the cell; existing cells

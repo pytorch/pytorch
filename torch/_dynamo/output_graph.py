@@ -1120,6 +1120,13 @@ class OutputGraph(OutputGraphCommon):
 
         potential_side_effects = []
         for var in self.side_effects._get_modified_vars():
+            if self.deleted_globals_by_dict:
+                mutations = self.side_effects.store_attr_mutations.get(var)
+                if mutations and all(
+                    self.side_effects.is_noop_global_delete(var, name, value)
+                    for name, value in mutations.items()
+                ):
+                    continue
             if hasattr(var, "mutation_type"):
                 mut_type = var.mutation_type
                 # Skip codegen-specific mutations that never materialize as
