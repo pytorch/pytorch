@@ -9,7 +9,7 @@ import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
                                                   TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
                                                   numpy_to_torch_dtype_dict, skipIfTorchDynamo, HardwareClassification,
-                                                  instantiate_parametrized_tests, parametrize)
+                                                  instantiate_parametrized_tests, parametrize, dtype_name)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests,
                                                         dtypes, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
@@ -1108,7 +1108,7 @@ class TestTypePromotionDevice(TestCase):
 
 
 class TestTypePromotion(TestCase):
-    """Dtype promotion tests that don't require any accelerator."""
+    """Pure dtype-algebra tests that don't require any accelerator."""
     hw_classification = HardwareClassification.GENERIC
 
     @float_double_default_dtype
@@ -1132,16 +1132,17 @@ class TestTypePromotion(TestCase):
                                                torch.float8_e5m2, torch.float8_e4m3fn):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
-    # NB: skip uint16,32,64 as PyTorch doesn't implement promotion for them
-    numpy_dtypes = [d for d in numpy_to_torch_dtype_dict.values() if d not in (torch.uint16, torch.uint32, torch.uint64)]
-
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
-    @parametrize("array_dtype", numpy_dtypes)
-    @parametrize("torch_type", numpy_dtypes)
-    def test_numpy_array_binary_ufunc_promotion(self, array_dtype, torch_type):
+    # NB: skip uint16,32,64 as PyTorch doesn't implement promotion for them
+    @parametrize("dtypes", list(itertools.product(
+        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64},
+        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64})),
+        name_fn=lambda dtypes: "_".join(map(dtype_name, dtypes)))
+    def test_numpy_array_binary_ufunc_promotion(self, dtypes):
         import operator
-        np_type = torch_to_numpy_dtype_dict[array_dtype]
+        np_type = torch_to_numpy_dtype_dict[dtypes[0]]
+        torch_type = dtypes[1]
 
         t = torch.tensor((1,), dtype=torch_type)
         a = np.array((1,), dtype=np_type)
