@@ -19,8 +19,10 @@ def for_each_grouped_tile_static(
     block_n: fx.Constexpr,
     persistent: fx.Constexpr,
     tile_body,
+    num_xcd: fx.Constexpr = 1,
+    group_m: fx.Constexpr = 1,
 ):
-    """N-fast grid-stride traversal with constexpr groups and column count.
+    """Grid-stride traversal with optional XCD gathering and row grouping.
 
     Load boundaries once per workgroup, and walk only actual tiles. The callback
     must finish LDS accesses and drain vector memory operations before returning.
@@ -61,16 +63,34 @@ def for_each_grouped_tile_static(
             bid_m = arith.select(hit, slot - cumulative[i], bid_m)
             row_base = arith.select(hit, starts[i], row_base)
             row_end = arith.select(hit, ends[i], row_end)
+        if const_expr(group_m > 1):
+            num_rows = (row_end - row_base + block_m - 1) >> row_shift
+            first_m = (bid_m // group_m) * group_m
+            remaining = num_rows - first_m
+            group_size = arith.select(remaining < group_m, remaining, fx.Int32(group_m))
+            within = (bid_m % group_m) * num_pid_n + bid_n
+            bid_m = first_m + within % group_size
+            bid_n = within // group_size
         tile_body(group, bid_m, bid_n, row_end - row_base, row_base)
 
+    worker = fx.Int32(fx.block_idx.x)
+    grid = fx.Int32(fx.grid_dim.x)
+    if const_expr(num_xcd > 1):
+        # Consecutive physical workgroups are distributed across XCDs. Give
+        # each XCD consecutive logical workers, preserving the grid stride.
+        worker = arith.select(
+            grid % num_xcd == 0,
+            (worker % num_xcd) * (grid // num_xcd) + worker // num_xcd,
+            worker,
+        )
     if const_expr(persistent):
         for tile in range(
-            fx.Int32(fx.block_idx.x),
+            worker,
             cumulative[-1] * num_pid_n,
-            fx.Int32(fx.grid_dim.x),
+            grid,
         ):
             visit(tile)
     else:
-        tile = fx.Int32(fx.block_idx.x)
+        tile = worker
         if tile < cumulative[-1] * num_pid_n:
             visit(tile)
