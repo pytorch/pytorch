@@ -336,6 +336,9 @@ def _single_tensor_muon(
         raise ValueError("Complex parameters are not supported")
 
     for i, param in enumerate(params):
+        if param.numel() == 0:
+            continue
+
         grad = grads[i]
         if grad.ndim != 2:
             raise ValueError("Param gradient must be a 2D matrix")
