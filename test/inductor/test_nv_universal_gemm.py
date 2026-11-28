@@ -429,10 +429,14 @@ class TestNVUniversalGemmPDLMetadata(TestCase):
             tiling={}, features=MagicMock(), tiling_scores={}, node_schedule=[]
         )
         for is_first in (True, False):
-            with self.subTest(is_first=is_first):
+            # The mocked kernel has no graph to build an int32 and an int64 version in.
+            with (
+                self.subTest(is_first=is_first),
+                config.patch(dual_index_dtype_kernels=False),
+            ):
                 expected = kernel(f"source_{is_first}")
                 scheduling.kernel_type = MagicMock(return_value=expected)
-                source, actual = scheduling._codegen_standalone_kernel(
+                (source,), actual = scheduling._codegen_standalone_kernel(
                     node_info, False, is_first
                 )
                 self.assertEqual(source, f"source_{is_first}")
