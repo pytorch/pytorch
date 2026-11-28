@@ -75,7 +75,7 @@ class TestLaneSplitValidation(TestCase):
 
 
 class TestRecursiveLaneSplit(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize("persistent", [False, True])
     @parametrize("rank", [2, 3])
@@ -92,7 +92,12 @@ class TestRecursiveLaneSplit(TestCase):
         ],
     )
     def test_storage_bits(self, device, rank, factor, dtype, persistent):
-        if not is_triton_fp8_dtype_supported(dtype, device):
+        # is_triton_fp8_dtype_supported only asks Triton about CUDA devices, and
+        # Intel's Triton has no fnuz float8 formats.
+        if not is_triton_fp8_dtype_supported(dtype, device) or (
+            self.device_type == "xpu"
+            and dtype in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+        ):
             self.skipTest(f"Triton does not support {dtype} on this device")
         prefix = (4,) if rank == 2 else (2, 2)
         shape = (*prefix, factor)
@@ -227,7 +232,7 @@ class NestedLaneTestCase(TestCase):
 
 
 class TestPitchedLaneSources(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize(
         "mode", ["escape", "dynamic", "misaligned", "cross_row", "input_mutation"]
@@ -470,7 +475,7 @@ class TestNestedAsmLaneInputs(NestedLaneTestCase):
 
 
 class TestNestedLaneForwarding(NestedLaneTestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize("persistent", [False, True])
     @unittest.skipUnless(
@@ -602,7 +607,7 @@ class TestNestedLaneForwarding(NestedLaneTestCase):
 
 
 class TestNestedLaneSplits(NestedLaneTestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize("persistent", [False, True])
     @parametrize("lanes", [(1,), (0, 1, 2, 3)])
@@ -630,12 +635,20 @@ class TestNestedLaneSplits(NestedLaneTestCase):
 
 
 # The inline asm strings are PTX or AMDGCN.
-instantiate_device_type_tests(TestRecursiveLaneSplit, globals(), only_for="cuda")
 instantiate_device_type_tests(TestNestedAsmLaneInputs, globals(), only_for="cuda")
 
-instantiate_device_type_tests(TestPitchedLaneSources, globals(), only_for=GPU_TYPE)
-instantiate_device_type_tests(TestNestedLaneForwarding, globals(), only_for=GPU_TYPE)
-instantiate_device_type_tests(TestNestedLaneSplits, globals(), only_for=GPU_TYPE)
+instantiate_device_type_tests(
+    TestRecursiveLaneSplit, globals(), only_for=GPU_TYPE, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestPitchedLaneSources, globals(), only_for=GPU_TYPE, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestNestedLaneForwarding, globals(), only_for=GPU_TYPE, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestNestedLaneSplits, globals(), only_for=GPU_TYPE, allow_xpu=True
+)
 
 
 if __name__ == "__main__":
