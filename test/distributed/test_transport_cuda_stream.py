@@ -1,15 +1,18 @@
 # Owner(s): ["oncall: distributed"]
 
 import asyncio
+import ctypes
 import gc
 import multiprocessing
 import os
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
+from torch.distributed._transport._cuda_stream import _check, _CudaStreamOrdering
 from torch.distributed._transport.nixl import NIXLTransport
 from torch.distributed._transport.nixl._memory import NIXLRemoteBuffer
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -188,6 +191,95 @@ def _callback_worker(fail, capture=False):
         if not done.query():
             raise AssertionError("missing callback completion")
     transport.close()
+
+
+def _close_worker(capture):
+    torch.cuda.set_device(0)
+    stream, replay, unrelated = (torch.cuda.Stream() for _ in range(3))
+    ordering = _CudaStreamOrdering(stream)
+    gate = torch.zeros(1, dtype=torch.int32, pin_memory=True)
+    flag = ctypes.c_uint32.from_address(gate.data_ptr())
+    own_done, unrelated_done = torch.cuda.Event(), torch.cuda.Event()
+    entered, release = threading.Event(), threading.Event()
+
+    async def transfer():
+        entered.set()
+        if not await asyncio.to_thread(release.wait, 10):
+            raise TimeoutError("test did not release the transfer")
+
+    if capture:
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            ordering.enqueue(transfer, None)
+        with torch.cuda.stream(replay):
+            graph.replay()
+            own_done.record()
+    else:
+        ordering.enqueue(transfer, None)
+        own_done.record(stream)
+        _check(
+            ordering._driver.cuStreamWaitValue32_v2(
+                unrelated.cuda_stream, gate.data_ptr(), 1, 0
+            ),
+            "cuStreamWaitValue32",
+        )
+        unrelated_done.record(unrelated)
+
+    closing_started = threading.Event()
+
+    def close():
+        closing_started.set()
+        ordering.close()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        try:
+            if not entered.wait(5):
+                raise AssertionError("transfer did not start")
+            closing = executor.submit(close)
+            if not closing_started.wait(5):
+                raise AssertionError("close did not start")
+            try:
+                closing.result(timeout=0.1)
+            except FutureTimeoutError:
+                pass
+            else:
+                raise AssertionError("close did not wait for its pending transfer")
+            release.set()
+            closing.result(timeout=5)
+            if not own_done.query():
+                raise AssertionError("close returned before stream work completed")
+            if not capture and unrelated_done.query():
+                raise AssertionError("unrelated stream unexpectedly completed")
+        finally:
+            release.set()
+            flag.value = 1
+    torch.cuda.synchronize()
+    ordering.close()
+
+
+@unittest.skipUnless(
+    os.getenv("TORCH_TEST_CUDA_TRANSPORT") == "1" and torch.cuda.is_available(),
+    "requires TORCH_TEST_CUDA_TRANSPORT=1 and a GPU",
+)
+class TestCudaStreamClose(TestCase):
+    def test_eager_close_ignores_unrelated_stream(self):
+        self._check_close(False)
+
+    def test_close_waits_for_graph_replayed_on_another_stream(self):
+        self._check_close(True)
+
+    def _check_close(self, capture):
+        process = multiprocessing.get_context("spawn").Process(
+            target=_close_worker, args=(capture,)
+        )
+        process.start()
+        try:
+            process.join(30)
+            self.assertEqual(process.exitcode, 0)
+        finally:
+            if process.is_alive():
+                process.kill()
+            process.join()
 
 
 @unittest.skipUnless(
