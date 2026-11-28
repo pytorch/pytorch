@@ -80,8 +80,10 @@ class FakeTensorProp(torch.fx.Interpreter):
                 if not (isinstance(operand, torch.fx.Node) and "val" in operand.meta):
                     raise AssertionError("Expected Node with 'val' in meta")
                 example_inputs.append(operand.meta["val"])
+            # fetch_attr walks dotted targets; a flat getattr cannot resolve
+            # the qualified paths that nested regions produce.
             return FakeTensorProp(
-                getattr(self.module, n.args[0].target), mode=self._mode
+                self.fetch_attr(n.args[0].target), mode=self._mode
             ).propagate(*example_inputs)
 
         result = super().run_node(n)

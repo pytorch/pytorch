@@ -443,12 +443,31 @@ def record_original_output_strides(gm: GraphModule) -> None:
     output_node.meta["original_output_strides"] = output_strides
 
 
+def _get_subgraph_module(gm: GraphModule, node: torch.fx.Node) -> GraphModule:
+    """Resolve the subgraph module an invoke_subgraph node refers to.
+
+    The get_attr target is a qualified path as reported by named_modules()
+    (nested regions register subgraphs inside subgraphs), so it can contain
+    dots that a flat getattr cannot walk.
+    """
+    subgraph_node = node.args[0]
+    if not (
+        isinstance(subgraph_node, torch.fx.Node)
+        and isinstance(subgraph_node.target, str)
+    ):
+        raise AssertionError(f"Expected get_attr Node, got {subgraph_node}")
+    subgraph = gm.get_submodule(subgraph_node.target)
+    if not isinstance(subgraph, GraphModule):
+        raise AssertionError(f"Expected GraphModule, got {type(subgraph)}")
+    return subgraph
+
+
 def _recursive_record_original_output_strides(gm: GraphModule) -> None:
     # invoke_subgraph HOP requires output strides to be respected
     for node in gm.graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.invoke_subgraph
     ):
-        subgraph = getattr(gm, node.args[0].target)
+        subgraph = _get_subgraph_module(gm, node)
         _recursive_record_original_output_strides(subgraph)
 
     record_original_output_strides(gm)
@@ -459,7 +478,7 @@ def _recursive_record_user_visible_output_idxs(gm: GraphModule) -> None:
     for node in gm.graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.invoke_subgraph
     ):
-        subgraph = getattr(gm, node.args[0].target)
+        subgraph = _get_subgraph_module(gm, node)
 
         for node in subgraph.graph.find_nodes(op="output"):
             node.meta["user_visible_output_idxs"] = [

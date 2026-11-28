@@ -1000,6 +1000,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def qualify_name(self, name: str) -> str:
         """Prepend the given name with the graph name if any."""
+        # A subgraph name can be a qualified module path (nested regions
+        # register subgraphs inside subgraphs), but the result is emitted as
+        # a Python identifier in the wrapper code, so flatten the separator.
+        name = name.replace(".", "_")
         if self.name is not None:
             return f"{self.name}_{name}"
         return name

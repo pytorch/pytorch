@@ -78,6 +78,12 @@ def hoist_submodules(gm: GraphModule, subgraph: GraphModule) -> dict[str, str]:
     name_map: dict[str, str] = {}
     existing_names = {name for name, _ in gm.named_children()}
     for child_name, child_mod in list(subgraph.named_children()):
+        if getattr(gm, child_name, None) is child_mod:
+            # gm already holds this exact module under this name. Minting a
+            # suffixed alias would leave get_attr nodes that still reference
+            # child_name pointing at a name gm no longer answers for.
+            name_map[child_name] = child_name
+            continue
         new_name = child_name
         counter = 0
         while new_name in existing_names:
