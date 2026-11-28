@@ -631,7 +631,10 @@ class TestNestedLaneSplits(NestedLaneTestCase):
 
 # The inline asm strings are PTX or AMDGCN.
 instantiate_device_type_tests(TestRecursiveLaneSplit, globals(), only_for="cuda")
-instantiate_device_type_tests(TestNestedAsmLaneInputs, globals(), only_for="cuda")
+# combine_inputs_asm() also has a vISA branch for Intel GPUs.
+instantiate_device_type_tests(
+    TestNestedAsmLaneInputs, globals(), only_for=GPU_TYPE, allow_xpu=True
+)
 
 instantiate_device_type_tests(TestPitchedLaneSources, globals(), only_for=GPU_TYPE)
 instantiate_device_type_tests(TestNestedLaneForwarding, globals(), only_for=GPU_TYPE)
