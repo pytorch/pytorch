@@ -94,7 +94,7 @@ static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwargs)
+static PyObject * THPVariable_size(PyObject* self, PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -102,10 +102,10 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   });
   auto& self_ = THPVariable_Unpack(self);
   ParsedArgs<3> parsed_args;
-  auto r = parser.parse(self, args, kwargs, parsed_args);
+  auto r = parser.parse(self, args, nargs, kwnames, parsed_args);
 
   if(r.has_torch_function()){
-    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+    return handle_torch_function(r, self, args, nargs, kwnames, THPVariableClass, "torch.Tensor");
   }
   if (!r.toInt64Optional(0).has_value()) {
     return THPSize_NewFromSymSizes(self_);
@@ -119,7 +119,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* kwargs)
+static PyObject * THPVariable_stride(PyObject* self, PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -127,10 +127,10 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   });
   auto& self_ = THPVariable_Unpack(self);
   ParsedArgs<3> parsed_args;
-  auto r = parser.parse(self, args, kwargs, parsed_args);
+  auto r = parser.parse(self, args, nargs, kwnames, parsed_args);
 
   if(r.has_torch_function()){
-    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+    return handle_torch_function(r, self, args, nargs, kwnames, THPVariableClass, "torch.Tensor");
   }
 
   if (r.toInt64Optional(0).has_value()) {
@@ -1084,7 +1084,7 @@ static PyObject * THPVariable_bool_scalar(PyObject* self, PyObject* args) {
   return THPVariable_is_nonzero(self, args);
 }
 
-static PyObject * THPVariable___eq__(PyObject* self_, PyObject* args, PyObject* kwargs)
+static PyObject * THPVariable___eq__(PyObject* self_, PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames)
 {
   HANDLE_TH_ERRORS
 #ifdef USE_NUMPY
@@ -1094,9 +1094,9 @@ static PyObject * THPVariable___eq__(PyObject* self_, PyObject* args, PyObject* 
     }, /*traceable=*/true);
 
     ParsedArgs<1> parsed_args;
-    auto _r = parser.parse(self_, args, kwargs, parsed_args);
+    auto _r = parser.parse(self_, args, nargs, kwnames, parsed_args);
     if(_r.has_torch_function()) {
-      return handle_torch_function(_r, self_, args, kwargs, THPVariableClass, "torch.Tensor");
+      return handle_torch_function(_r, self_, args, nargs, kwnames, THPVariableClass, "torch.Tensor");
     }
     switch (_r.idx) {
       case 0: {
@@ -1114,17 +1114,17 @@ static PyObject * THPVariable___eq__(PyObject* self_, PyObject* args, PyObject* 
     }
   }
 #endif
-  return THPVariable_eq(self_, args, kwargs);
+  return THPVariable_eq(self_, args, nargs, kwnames);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 // Wrapper converts a raised TypeError into returning NotImplemented
 // Used to implement binary arithmetic operators
-template <PyObject* (*Func)(PyObject*, PyObject*, PyObject*)>
-static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, PyObject* kwargs) {
+template <PyObject* (*Func)(PyObject*, PyObject* const*, Py_ssize_t, PyObject*)>
+static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames) {
 
-  PyObject* ret = Func(self, args, kwargs);
+  PyObject* ret = Func(self, args, nargs, kwnames);
   if (!ret && PyErr_ExceptionMatches(PyExc_TypeError)) {
     PyErr_Clear();
     Py_INCREF(Py_NotImplemented);
@@ -1235,30 +1235,30 @@ static PyObject* THPVariable_set_(
 // being registered through native_functions.yaml, and be tagged cpp / JIT
 PyMethodDef variable_methods[] = {
   // These magic methods are all implemented on python object to wrap NotImplementedError
-  {"__add__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_add>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__radd__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_add>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__iadd__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_add_>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__rmul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_mul>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__mul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_mul>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__imul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_mul_>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__sub__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_sub>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__isub__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_sub_>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__div__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_div>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__truediv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_div>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__floordiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_floor_divide>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__idiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_div_>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__ifloordiv__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_floor_divide_>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__mod__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__imod__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder_>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__eq__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable___eq__>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__ne__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_ne>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__lt__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_lt>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__le__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_le>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__gt__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_gt>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__ge__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_ge>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__rand__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_and>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__ror__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_or>), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"__rxor__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_xor>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__add__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_add>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__radd__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_add>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__iadd__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_add_>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__rmul__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_mul>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__mul__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_mul>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__imul__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_mul_>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__sub__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_sub>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__isub__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_sub_>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__div__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_div>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__truediv__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_div>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__floordiv__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_floor_divide>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__idiv__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_div_>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__ifloordiv__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_floor_divide_>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__mod__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__imod__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_remainder_>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__eq__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable___eq__>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__ne__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_ne>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__lt__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_lt>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__le__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_le>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__gt__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_gt>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__ge__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_ge>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__rand__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_and>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__ror__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_or>), METH_FASTCALL | METH_KEYWORDS, nullptr},
+  {"__rxor__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_xor>), METH_FASTCALL | METH_KEYWORDS, nullptr},
   {"__bool__", THPVariable_bool_scalar, METH_NOARGS, nullptr},
   {"__float__", THPVariable_float_scalar, METH_NOARGS, nullptr},
   {"__complex__", THPVariable_complex_scalar, METH_NOARGS, nullptr},
@@ -1267,7 +1267,7 @@ PyMethodDef variable_methods[] = {
   {"__index__", THPVariable_index_scalar, METH_NOARGS, nullptr},
   {"__nonzero__", THPVariable_bool_scalar, METH_NOARGS, nullptr},
   {"__invert__", THPVariable_invert, METH_NOARGS, nullptr},
-  {"__matmul__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_matmul>), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__matmul__", castPyCFunctionFastWithKeywords(TypeError_to_NotImplemented_<THPVariable_matmul>), METH_FASTCALL | METH_KEYWORDS, nullptr},
   {"_is_view", THPVariable__is_view, METH_NOARGS, nullptr},
   {"apply_", THPVariable_apply_, METH_O, nullptr},
   {"bfloat16", castPyCFunctionWithKeywords(THPVariable_bfloat16), METH_VARARGS | METH_KEYWORDS, nullptr},
@@ -1307,10 +1307,10 @@ PyMethodDef variable_methods[] = {
   {"requires_grad_", castPyCFunctionWithKeywords(THPVariable_requires_grad_), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"short", castPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"size", castPyCFunctionWithKeywords(THPVariable_size), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"size", castPyCFunctionFastWithKeywords(THPVariable_size), METH_FASTCALL | METH_KEYWORDS, nullptr},
   {"untyped_storage", THPVariable_storage, METH_NOARGS, nullptr},
   {"storage_offset", THPVariable_storage_offset, METH_NOARGS, nullptr},
-  {"stride", castPyCFunctionWithKeywords(THPVariable_stride), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"stride", castPyCFunctionFastWithKeywords(THPVariable_stride), METH_FASTCALL | METH_KEYWORDS, nullptr},
   {"to", castPyCFunctionWithKeywords(THPVariable_to), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"tolist", THPVariable_tolist, METH_NOARGS, nullptr},
   {"type", castPyCFunctionWithKeywords(THPVariable_type), METH_VARARGS | METH_KEYWORDS, nullptr},
