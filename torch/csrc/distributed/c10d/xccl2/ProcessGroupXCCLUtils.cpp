@@ -251,22 +251,12 @@ void ProcessGroupXCCL::timeoutWatchdog() noexcept {
       }
       if (comm_state_ != CommState::NORMAL &&
           abort_process_on_timeout_or_error_) {
-        // Log the error and abort the process.  We cannot abort the XCCL
-        // communicator as it is not safe to call XCCL operations from
-        // multiple threads at the same time.
-        if (comm_state_ == CommState::TIMEOUT) {
-          TC_LOG(ERROR, this)
-              << "Aborting process due to timeout on rank " << rank_
-              << " - timeout watchdog detected operation timeout";
-        } else if (comm_state_ == CommState::ERROR) {
-          TC_LOG(ERROR, this)
-              << "Aborting process due to error on rank " << rank_
-              << " - timeout watchdog detected operation error. ";
-        }
-
-        runAbortHooks();
-
-        ::abort();
+        // Do not abort the XCCL communicator here: it is not safe to call
+        // XCCL operations from multiple threads at the same time.
+        abortProcess(
+            comm_state_ == CommState::TIMEOUT
+                ? "timeout - timeout watchdog detected operation timeout"
+                : "error - timeout watchdog detected operation error");
       }
     }
   } catch (const std::exception& e) {
@@ -295,9 +285,7 @@ void ProcessGroupXCCL::checkAndAbortIfTimedOutOrError() {
     // abort_process_on_timeout_or_error_ is false the caller gets an exception
     // while peers may still be blocked in the collective.
     if (abort_process_on_timeout_or_error_) {
-      TC_LOG(ERROR, this) << "Aborting process due to timeout";
-      runAbortHooks();
-      ::abort();
+      abortProcess("timeout");
     } else {
       TORCH_CHECK(false, "XCCL operation timed out");
     }
