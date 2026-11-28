@@ -569,7 +569,7 @@ AOTITorchError aoti_torch_create_tensor_from_blob_v2(
           opaque_metadata,
           opaque_metadata_size));
     } else {
-      aoti_torch_create_tensor_from_blob(
+      return aoti_torch_create_tensor_from_blob(
           data,
           ndim,
           sizes_ptr,
