@@ -65,7 +65,7 @@ build_rocm_ck_wheel() {
   # manywheel list -- must not appear here: it would union in macros such as
   # CK_USE_WMMA for hardware the backend never reaches. Extend this when
   # ck_supported_arch is extended, not before.
-  local ck_gpu_targets="gfx90a;gfx942;gfx950"
+  local ck_gpu_targets="gfx90a;gfx942;gfx950;gfx1250"
 
   # Referenced via ROCM_UTILS_DIR, not a relative path: callers run from the
   # pytorch root and this function has already pushd'd into $ck_dir.
