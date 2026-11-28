@@ -2289,6 +2289,115 @@ def forward(self, x_1):
             prims.utils.compare_tensor_meta(y, dispatched, check_strides=True)
             self.assertIs(maybe_get_fake_mode(dispatched), mode)
 
+    @parametrize("symbolic", [False, True])
+    @parametrize(
+        "layout,label",
+        [
+            ("contiguous", "fast is_contiguous"),
+            ("channels_last", "fast channels_last"),
+            ("transposed", "slow no contiguity match"),
+            ("broadcast", "fast is_contiguous"),
+            ("both_broadcast", "slow both tensors nontrivially broadcast"),
+            ("empty", "fast is_contiguous"),
+            ("scalar", "fast is_contiguous"),
+        ],
+        name_fn=lambda layout, label: layout,
+    )
+    def test_fast_ne_layout(self, symbolic, layout, label):
+        shape_env = ShapeEnv() if symbolic else None
+        mode = FakeTensorMode(shape_env=shape_env)
+        size = shape_env.create_unbacked_symint() if symbolic else 2
+        with mode:
+            x = torch.empty(size, 3, 4, 5)
+            y = torch.empty(size, 3, 4, 5)
+            if layout == "channels_last":
+                x = x.to(memory_format=torch.channels_last)
+                y = y.to(memory_format=torch.channels_last)
+            elif layout == "transposed":
+                x, y = x.transpose(1, 2), y.transpose(1, 2)
+            elif layout == "broadcast":
+                y = torch.empty(1, 3, 1, 5)
+            elif layout == "both_broadcast":
+                x = torch.empty(size, 1, 4, 5)
+                y = torch.empty(1, 3, 1, 5)
+            elif layout == "empty":
+                x = torch.empty(size, 0)
+                y = torch.empty(size, 0)
+            elif layout == "scalar":
+                y = torch.empty(())
+
+        self._check_fast_ne(mode, x, y, label, symbolic=symbolic)
+
+    @parametrize(
+        "dtypes",
+        [
+            subtest((torch.bool, torch.bool), name="bool"),
+            subtest((torch.int64, torch.int64), name="int"),
+            subtest((torch.int64, torch.float32), name="mixed_real"),
+            subtest((torch.complex64, torch.complex64), name="complex"),
+            subtest((torch.complex64, torch.float32), name="mixed_complex"),
+        ],
+    )
+    def test_fast_ne_dtype(self, dtypes):
+        shape_env = ShapeEnv()
+        mode = FakeTensorMode(shape_env=shape_env)
+        size = shape_env.create_unbacked_symint()
+        with mode:
+            x = torch.empty(size, 3, dtype=dtypes[0])
+            y = torch.empty(size, 3, dtype=dtypes[1])
+        self._check_fast_ne(mode, x, y, "fast is_contiguous")
+
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    @parametrize(
+        "hints",
+        [
+            subtest((1, 4), name="broadcast_left"),
+            subtest((4, 1), name="broadcast_right"),
+            subtest((1, 1), name="both_one"),
+            subtest((4, 4), name="matching"),
+        ],
+    )
+    @parametrize("symbolic_other", [False, True])
+    def test_fast_ne_backed_size_oblivious(self, hints, symbolic_other):
+        shape_env = ShapeEnv(specialize_zero_one=False)
+        mode = FakeTensorMode(shape_env=shape_env)
+
+        def backed_size(hint, name):
+            source = LocalSource(name)
+            symbol = shape_env.create_symbol(
+                hint, source, DimDynamic.DYNAMIC, do_not_specialize_zero_one=True
+            )
+            return shape_env.create_symintnode(symbol, hint=hint, source=source)
+
+        size = backed_size(hints[0], "size")
+        other_size = backed_size(hints[1], "other_size") if symbolic_other else hints[1]
+        with mode:
+            x = torch.empty(size, 3)
+            y = torch.empty(other_size, 3)
+        self._check_fast_ne(mode, x, y, "slow backed size oblivious")
+
+    def _check_fast_ne(self, mode, x, y, label, *, symbolic=True):
+        from torch._subclasses import fake_impls
+
+        op = torch.ops.aten.ne.Tensor
+        fast = fake_impls.get_fast_op_impls()[op]
+        with patch.object(fake_impls, "count_label") as count:
+            result = fast(mode, x, y)
+        count.assert_any_call(label)
+        with mode:
+            expected = torch._refs.ne(x, y)
+            with patch.object(fake_impls, "count_label") as count:
+                dispatched = op(x, y)
+        if symbolic:
+            count.assert_any_call(label)
+        for actual in (result, dispatched):
+            self.assertEqual(actual.dtype, torch.bool)
+            prims.utils.compare_tensor_meta(actual, expected, check_strides=True)
+            # compare_tensor_meta may skip symbolic strides and empty tensors.
+            self.assertEqual(actual.stride(), expected.stride())
+            self.assertEqual(actual.storage_offset(), expected.storage_offset())
+            self.assertIs(maybe_get_fake_mode(actual), mode)
+
     def test_nanmean_out(self):
         # Regression test to ensure we don't error out.
         with torch._subclasses.fake_tensor.FakeTensorMode() as mode:
@@ -5939,6 +6048,45 @@ instantiate_device_type_tests(
 @instantiate_parametrized_tests
 class TestFakeTensorPreferDeviceType(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @skipIfCppFakeTensor("Exercises Python FakeTensor symbolic eq device resolution")
+    @parametrize("preference", [None, "cpu", "cuda"])
+    def test_symbolic_eq_device_conflict(self, preference):
+        # Synthetic CUDA tensors exercise device resolution without hardware.
+        with (
+            patch("torch._subclasses.fake_tensor.init_gpu_context", lambda _: None),
+            patch(
+                "torch._subclasses.fake_tensor._avoid_device_init", return_value=True
+            ),
+            torch._functorch.config.patch(fake_tensor_prefer_device_type=preference),
+        ):
+            shape_env = ShapeEnv()
+            mode = FakeTensorMode(shape_env=shape_env)
+            size = shape_env.create_unbacked_symint()
+            x, y = (
+                mode.fake_tensor_converter.from_meta_and_device(
+                    mode, torch.empty(size, 3, device="meta"), torch.device(device)
+                )
+                for device in ("cpu", "cuda:0")
+            )
+            with mode:
+                if preference is None:
+                    with self.assertRaisesRegex(
+                        FakeTensorDeviceMismatchError,
+                        "found at least two devices, cpu and cuda:0",
+                    ) as exc:
+                        torch.ops.aten.eq.Tensor(x, y)
+                    self.assertIs(exc.exception.func, torch.ops.aten.eq.Tensor)
+                    self.assertEqual(exc.exception.common_device, x.device)
+                    self.assertEqual(exc.exception.device, y.device)
+                else:
+                    result = torch.ops.aten.eq.Tensor(x, y)
+                    self.assertEqual(
+                        result.device, x.device if preference == "cpu" else y.device
+                    )
+                    self.assertEqual(result.dtype, torch.bool)
+                    self.assertEqual(result.shape, x.shape)
+                    self.assertIs(maybe_get_fake_mode(result), mode)
 
     def test_fake_tensor_prefer_device_type_cpu_only(self):
         """

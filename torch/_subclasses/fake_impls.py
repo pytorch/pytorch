@@ -2539,6 +2539,14 @@ def make_fast_binary_impl(
 
         count_label("attempt fast")
 
+        if (
+            type_promotion_kind == ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+            and torch.fx.experimental._config.backed_size_oblivious
+        ):
+            # Workaround for https://github.com/pytorch/pytorch/issues/206411;
+            # remove once infer_size handles backed size-1 broadcasts.
+            return slow("backed size oblivious")
+
         # Fast path (based off of TensorIterator fast path).
         # Unfortunately, there is no way to easily deduplicate
         # this with either the TensorIterator C++ implementation
@@ -2711,6 +2719,12 @@ def get_fast_op_impls() -> dict[OpOverload, Callable[..., Any]]:
         make_fast_binary_impl(
             torch._refs.div,
             type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        )
+    )
+    register_fast_op_impl(torch.ops.aten.ne.Tensor)(
+        make_fast_binary_impl(
+            torch._refs.ne,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
         )
     )
     register_fast_op_impl(torch.ops.aten.detach.default)(fast_detach)
