@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -20,7 +21,10 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/CallOnce.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+
+#include <array>
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 13000
 #include <cuda_fp8.h>
@@ -44,6 +48,18 @@ at::cuda::CUDAEventPool::Event getEventFromPool(const at::DeviceIndex device_idx
 
 void neg_kernel_cuda(TensorIteratorBase &iter);
 void conj_kernel_cuda(TensorIteratorBase &iter);
+
+#ifdef USE_ROCM
+static bool is_gfx1250_device(c10::DeviceIndex device_index) {
+  TORCH_INTERNAL_ASSERT(device_index >= 0 && device_index < C10_COMPILE_TIME_MAX_GPUS);
+  static std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> once_flags;
+  static std::array<bool, C10_COMPILE_TIME_MAX_GPUS> results{};
+  c10::call_once(once_flags[device_index], [device_index] {
+    results[device_index] = at::detail::getCUDAHooks().isGPUArch({"gfx1250"}, device_index);
+  });
+  return results[device_index];
+}
+#endif
 
 template <typename SrcT, typename DstT>
 void converting_copy_kernel_cuda(TensorIteratorBase &iter) {
@@ -185,10 +201,147 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
   }
 }
 
+#ifdef USE_ROCM
+namespace {
+
+// Bytes per destination store of strided_gather_copy_kernel, the widest global
+// store (memory::aligned_vector).
+constexpr int kStridedGatherCopyVectorBytes = 16;
+
+// Each thread gathers one destination vector of vec elements, read src_stride
+// bytes apart in the source, and writes it with one 16-byte store. offsets
+// gives the destination vector's offset and the source offset of its first
+// element. In a 1-D copy the last vector may be partial.
+template <typename T, int vec>
+C10_LAUNCH_BOUNDS_1(num_threads())
+__global__ void strided_gather_copy_kernel(char* dst, const char* src, OffsetCalculator<2> offsets, uint32_t num_vectors, uint32_t numel, uint32_t src_stride) {
+  const uint32_t vec_idx = blockIdx.x * num_threads() + threadIdx.x;
+  if (vec_idx >= num_vectors) {
+    return;
+  }
+  const auto offset = offsets.get(vec_idx);
+  const char* src_first = src + offset[1];
+  T* dst_first = reinterpret_cast<T*>(dst + offset[0]);
+  const uint32_t remaining = numel - vec_idx * vec;
+  if (remaining >= vec) {
+    memory::aligned_vector<T, vec> v;
+#pragma unroll
+    for (int j = 0; j < vec; j++) {
+      v.val[j] = *reinterpret_cast<const T*>(src_first + j * src_stride);
+    }
+    *reinterpret_cast<memory::aligned_vector<T, vec>*>(dst_first) = v;
+  } else {
+    for (uint32_t j = 0; j < remaining; j++) {
+      dst_first[j] = *reinterpret_cast<const T*>(src_first + j * src_stride);
+    }
+  }
+}
+
+// True for a same-dtype (not bool) copy on one device, without shared storage
+// and 32-bit indexable, of 1-, 2-, 4- or 8-byte elements, whose destination is
+// contiguous along the inner dim with every destination vector 16-byte aligned
+// while the source is strided along it (a column of a matrix, a strided slice,
+// an inner-dim broadcast) with a non-negative inner stride for which
+// src_stride * (16 / element size) fits in uint32. Bool is excluded because raw
+// element moves skip bool normalization (NOTE [Loading boolean values]); copies
+// with a contiguous source row are left to maybe_strided_chunk_copy and the
+// generic kernels.
+bool can_use_strided_gather_copy(TensorIteratorBase& iter) {
+  const int ndim = iter.ndim();
+  const int64_t element_size = iter.element_size(0);
+  if (ndim == 0 || ndim > MAX_DIMS || iter.numel() == 0 || iter.dtype(0) != iter.dtype(1) || iter.dtype(0) == kBool ||
+      element_size >= kStridedGatherCopyVectorBytes || iter.device(0) != iter.device(1) ||
+      iter.tensor_base(0).is_alias_of(iter.tensor_base(1)) || !iter.can_use_32bit_indexing()) {
+    return false;
+  }
+  if (element_size != 1 && element_size != 2 && element_size != 4 && element_size != 8) {
+    return false;
+  }
+  const int64_t src_stride = iter.strides(1)[0];
+  if (iter.strides(0)[0] != element_size || src_stride == element_size || src_stride < 0 ||
+      src_stride * (kStridedGatherCopyVectorBytes / element_size) > std::numeric_limits<uint32_t>::max()) {
+    return false;
+  }
+  // The base pointer always; for N-D copies also the row length and every
+  // outer destination stride.
+  uint64_t alignment = reinterpret_cast<uintptr_t>(iter.data_ptr(0));
+  if (ndim > 1) {
+    alignment |= iter.shape()[0] * element_size;
+    for (int d = 1; d < ndim; ++d) {
+      if (iter.shape()[d] > 1) {
+        alignment |= iter.strides(0)[d];
+      }
+    }
+  }
+  return alignment % kStridedGatherCopyVectorBytes == 0;
+}
+
+// Requires can_use_strided_gather_copy(iter).
+void launch_strided_gather_copy_kernel(TensorIteratorBase& iter) {
+  const auto launch = [&](auto element) {
+    using T = decltype(element);
+    constexpr int vec = kStridedGatherCopyVectorBytes / sizeof(T);
+    const int64_t src_stride = iter.strides(1)[0];
+    const int64_t numel = iter.numel();
+    // 1-D: one row of numel elements, the last vector possibly partial.
+    const int64_t vecs_per_row = iter.ndim() == 1 ? at::ceil_div<int64_t>(numel, vec) : iter.shape()[0] / vec;
+    const int64_t num_vectors = vecs_per_row * (numel / iter.shape()[0]);
+    // The iterator's byte offsets, except dim 0 counts vectors instead of elements.
+    auto offsets = make_offset_calculator<2>(iter);
+    offsets.sizes_[0] = at::cuda::detail::IntDivider<uint32_t>(vecs_per_row);
+    offsets.strides_[0][0] = kStridedGatherCopyVectorBytes;
+    offsets.strides_[0][1] = vec * src_stride;
+    const int64_t grid = at::ceil_div<int64_t>(num_vectors, num_threads());
+    strided_gather_copy_kernel<T, vec><<<grid, num_threads(), 0, at::cuda::getCurrentCUDAStream()>>>(
+        static_cast<char*>(iter.data_ptr(0)), static_cast<const char*>(iter.data_ptr(1)), offsets,
+        static_cast<uint32_t>(num_vectors), static_cast<uint32_t>(numel), static_cast<uint32_t>(src_stride));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  };
+  switch (iter.element_size(0)) {
+    case 1: launch(uint8_t{}); break;
+    case 2: launch(uint16_t{}); break;
+    case 4: launch(uint32_t{}); break;
+    default: launch(uint64_t{}); break;
+  }
+}
+
+} // namespace
+#endif
+
 // TODO: We probably can use the opaque type trick to avoid creating duplicate
 // kernels for equivalent bit lengths
 void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType dtype = iter.dtype(0);
+#ifdef USE_ROCM
+  // gfx1250 is wave32, where the per-element generic kernels are bound by the
+  // memory instruction rate: strided same-dtype copies take a vectorized-store
+  // gather, and these converting pairs a statically typed (vectorizable) copy
+  // instead of the dynamic-cast path. The kernels run on the source device
+  // (copy_device_to_device launches there), so the gate checks that device.
+  const bool gfx1250 = is_gfx1250_device(iter.device(1).index());
+  if (gfx1250) {
+    const ScalarType src_dtype = iter.dtype(1);
+    if (can_use_strided_gather_copy(iter)) {
+      return launch_strided_gather_copy_kernel(iter);
+    } else if (src_dtype == kChar && dtype == kBFloat16) {
+      return converting_copy_kernel_cuda<int8_t, BFloat16>(iter);
+    } else if (src_dtype == kChar && dtype == kHalf) {
+      return converting_copy_kernel_cuda<int8_t, Half>(iter);
+    } else if (src_dtype == kBFloat16 && dtype == kHalf) {
+      return converting_copy_kernel_cuda<BFloat16, Half>(iter);
+    } else if (src_dtype == kHalf && dtype == kBFloat16) {
+      return converting_copy_kernel_cuda<Half, BFloat16>(iter);
+    } else if (src_dtype == kLong && dtype == kInt) {
+      return converting_copy_kernel_cuda<int64_t, int32_t>(iter);
+    } else if (src_dtype == kLong && dtype == kFloat) {
+      return converting_copy_kernel_cuda<int64_t, float>(iter);
+    } else if (src_dtype == kFloat && dtype == kLong) {
+      return converting_copy_kernel_cuda<float, int64_t>(iter);
+    } else if (src_dtype == kFloat && dtype == kInt) {
+      return converting_copy_kernel_cuda<float, int32_t>(iter);
+    }
+  }
+#endif
   if (isQIntType(dtype)) {
     AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
@@ -218,6 +371,19 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
   else if (iter.dtype(1) == kBool && dtype == kDouble) {
     converting_copy_kernel_cuda<bool, double>(iter);
   }
+#ifdef USE_ROCM
+  // On gfx1250 the generic bool-source copies below (dynamic cast, one source
+  // byte per lane) are bound by the memory instruction rate. The statically
+  // typed copy takes the vectorized elementwise kernel; bool loads still
+  // normalize to 0/1.
+  else if (iter.dtype(1) == kBool && gfx1250 &&
+           (dtype == kByte || dtype == kChar || dtype == kShort || dtype == kInt || dtype == kHalf ||
+            dtype == kBFloat16 || dtype == kFloat)) {
+    AT_DISPATCH_V2(dtype, "copy_from_bool", AT_WRAP([&] {
+      converting_copy_kernel_cuda<bool, scalar_t>(iter);
+    }), kByte, kChar, kShort, kInt, kHalf, kBFloat16, kFloat);
+  }
+#endif
   else if (isBitsType(dtype)) {
     TORCH_CHECK(dtype == iter.dtype(1), "copy_() does not support casting "
       "bits types to different bits types. Source dtype is ", iter.dtype(1), "target dtype is ", dtype);
