@@ -199,7 +199,8 @@ def register_run_and_save_rng_state_op():
 
     @run_and_save_rng_state.py_impl(ProxyTorchDispatchMode)
     def impl_proxy_dispatch_mode(mode, op, *args, **kwargs):
-        out = impl_backend_select(op, *args, **kwargs)
+        with disable_proxy_modes_tracing():
+            out = run_and_save_rng_state(op, *args, **kwargs)
         proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (op, *args))
         proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
         out_proxy = mode.tracer.create_proxy(

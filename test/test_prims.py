@@ -349,6 +349,34 @@ class TestPrimsBasic(TestCase):
         self.assertEqual(result.device.type, "cpu")
         self.assertEqual(result.shape, (1,))
 
+    def test_rng_wrapper_backend_select(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        hop = torch._prims.rng_prims.run_and_save_rng_state
+        rand = torch.ops.aten.rand.default
+        key = torch._C.DispatchKey.BackendSelect
+        original = hop.py_kernels[key]
+        calls = []
+
+        def replacement(op, *args, **kwargs):
+            calls.append(op)
+            return original(op, *args, **kwargs)
+
+        def f():
+            _, out = hop(rand, [10], device="cpu")
+            return out
+
+        hop.py_kernels[key] = replacement
+        try:
+            hop._dispatch_cache.clear()
+            gm = make_fx(f)()
+
+            self.assertEqual(calls, [rand])
+            self.assertIn(hop, [node.target for node in gm.graph.nodes])
+        finally:
+            hop.py_kernels[key] = original
+            hop._dispatch_cache.clear()
+
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
         self.assertEqual(torch.ops.prims.sin(r), torch.sin(r))
