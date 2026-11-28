@@ -5,6 +5,7 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/quantized/Quantizer.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -400,6 +401,12 @@ static inline bool is_null_or_equal_to(
   return test.value() == value;
 }
 
+static bool are_functorch_transforms_active() {
+  auto include_set = c10::impl::tls_local_dispatch_key_set().included_;
+  return include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
+      include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
+}
+
 // NOTE: static runtime's to_maybe_copy_out relies on details of this
 // check; if you change how it works, please update static runtime as
 // well.
@@ -412,11 +419,22 @@ bool to_will_alias(
     std::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
 
+  // suggest_memory_format() also matches non-dense strides, and
+  // is_contiguous() alone is ambiguous for shapes that are contiguous in
+  // several formats (e.g. C == 1), so require both. Non-strided tensors have
+  // no strides and _to_copy can't copy non-contiguous nested tensors, so these
+  // keep returning self. So do channels-last formats while any functorch
+  // transform is active: under vmap, is_contiguous() throws for them and
+  // _to_copy can't produce them, and TLS can't tell whether vmap is active.
   return is_null_or_equal_to(dtype, self.dtype().toScalarType()) &&
       is_null_or_equal_to(layout, self.layout()) &&
       is_null_or_equal_to(device, self.device()) && !copy &&
       (memory_format == MemoryFormat::Preserve ||
-       self.suggest_memory_format() == memory_format);
+       (self.suggest_memory_format() == memory_format &&
+        (self.layout() != kStrided || self.is_nested() ||
+         (memory_format != MemoryFormat::Contiguous &&
+          are_functorch_transforms_active()) ||
+         self.is_contiguous_or_false(memory_format))));
 }
 
 static inline Tensor to_impl(
