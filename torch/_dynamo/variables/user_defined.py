@@ -4006,6 +4006,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if result is not None:
             return result
 
+        # Step 3b: A class-level setattr pending in this frame shadows the
+        # stale class __dict__ entry found by the MRO walk.
+        pending = self.pending_class_attr(tx, name)
+        if pending is not None:
+            return pending
+
         # Step 4-5: Non-data descriptor or plain class attribute.
         if type_attr is not NO_SUCH_SUBOBJ:
             return self.resolve_type_attr(tx, name, type_attr, source)
@@ -4184,6 +4190,40 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ],
             )
         return VariableTracker.build(tx, resolved, source)
+
+    def pending_class_attr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        """Shadow a stale class __dict__ read with a pending class setattr.
+
+        A store to a class attribute earlier in this frame lives in side
+        effects until the frame exits, so the MRO walk above still sees the
+        pre-store value. Mirror the owner block in
+        UserDefinedClassVariable.tp_getattro_impl, binding functions to
+        this instance like the regular non-data descriptor step does.
+        """
+        cls_var = self._class_vt(tx)
+        if not isinstance(cls_var, UserDefinedClassVariable):
+            return None
+        owner = cls_var.pending_setattr_owner(tx, name)
+        if owner is None:
+            return None
+        value = tx.output.side_effects.load_attr(owner, name)
+        if isinstance(value, variables.UserFunctionVariable):
+            return variables.UserMethodVariable(
+                value,
+                self,
+                source=AttrSource(self.source, name) if self.source else None,
+            )
+        if isinstance(
+            value, (variables.StaticMethodVariable, variables.ClassMethodVariable)
+        ):
+            return value.tp_descr_get_impl(tx, self, cls_var)
+        if isinstance(value, UserDefinedVariable) and (
+            mro_lookup(value.python_type(), "__get__") is not NO_SUCH_SUBOBJ
+        ):
+            return value.call_method(tx, "__get__", [self, cls_var], {})
+        return value
 
     def resolve_type_attr(
         self,

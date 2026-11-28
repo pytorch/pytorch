@@ -872,6 +872,47 @@ class TestClassSetattr(TestCase):
         MyModule.x = 10
 
 
+    def test_setattr_class_attribute_read_via_instance(self):
+        # the class __dict__ is only updated when the frame exits, so an
+        # instance lookup must consult the pending class-level store
+        class Holder:
+            n = 0
+
+        def fn(x):
+            Holder.n = 5
+            return x + Holder().n
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.zeros(1)).item(), 5.0)
+
+    def test_setattr_class_attribute_function_binds_instance(self):
+        class Holder:
+            def f(self):
+                return 1
+
+        def g(self):
+            return 6
+
+        def fn(x):
+            Holder.f = g
+            return x + Holder().f()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.zeros(1)).item(), 6.0)
+
+    def test_instance_dict_still_wins_over_pending_class_store(self):
+        class Holder:
+            n = 0
+
+        def fn(x):
+            inst = Holder()
+            inst.n = 2
+            Holder.n = 100
+            return x + inst.n
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.zeros(1)).item(), 2.0)
+
 class TestObjectNew(TestCase):
     def test_object_new_on_plain_class(self):
         def fn():
