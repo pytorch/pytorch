@@ -1236,14 +1236,8 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
                   aten::_foreach_add_
                     urEnqueueUSMMemcpy
                       Memcpy H2D (Host (Driver Allocated) -> Device)
-                    urEnqueueUSMMemcpy
-                      Memcpy H2D (Host (Driver Allocated) -> Device)
                     urEnqueueKernelLaunchWithArgsExp
                       at::native::xpu::multi_tensor_apply_kernel<...>
-                    aten::empty
-                      [memory]
-                    aten::empty
-                      [memory]
                     [memory]
                     [memory]""",
             )
