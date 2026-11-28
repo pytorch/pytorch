@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -39,6 +40,24 @@ at::cuda::CUDAEventPool::Event getEventFromPool(const at::DeviceIndex device_idx
   static auto* event_pool = new at::cuda::CUDAEventPool(kInitialEventPoolSize);
   return event_pool->get(device_idx);
 }
+
+#ifdef USE_ROCM
+// On gfx1250, hipMemcpyAsync device-to-device is lowered to the ROCclr
+// copyBuffer blit, which is slower than the vectorized elementwise copy kernel
+// for large copies but faster for small ones (kernel launch cost). The
+// crossover was measured on MI455X-A0 (gfx1250-strict) with 16-byte aligned
+// buffers; copies of at least this many bytes use the kernel.
+constexpr int64_t kGfx1250ElementwiseCopyMinBytes = 8 << 20;
+constexpr uintptr_t kGfx1250ElementwiseCopyAlignment = 16;
+
+// Dtypes that were benchmarked and that direct_copy_kernel_cuda dispatches
+// unconditionally. Everything else (quantized, sub-byte shell, bits, float8,
+// float4) stays on memcpyAsync, which does not depend on the dtype.
+inline bool gfx1250ElementwiseCopyDtype(ScalarType t) {
+  return isIntegralType(t, /*includeBool=*/true) || isComplexType(t) ||
+      t == kFloat || t == kDouble || t == kHalf || t == kBFloat16;
+}
+#endif
 
 } // namespace
 
@@ -625,6 +644,25 @@ void copy_device_to_device(TensorIterator& iter,
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
 
+  // On gfx1250 a large same-device contiguous copy is faster as an elementwise
+  // kernel than as hipMemcpyAsync (see kGfx1250ElementwiseCopyMinBytes).
+  // Cross-device copies and self copies (a no-op below) keep the memcpy path,
+  // as do dtypes outside the benchmarked set (direct_copy_kernel_cuda cannot
+  // dispatch every dtype that memcpy can copy) and buffers that are not
+  // 16-byte aligned (not benchmarked, and the kernel then loses its vectorized
+  // loads). The arch check is last so it only runs for large copies; the
+  // gfx1250 substring match covers every gfx1250 variant.
+  bool use_elementwise_copy = false;
+#ifdef USE_ROCM
+  use_elementwise_copy = memcpy_eligible && src_device == dst_device &&
+      numel * iter.element_size(0) >= kGfx1250ElementwiseCopyMinBytes &&
+      gfx1250ElementwiseCopyDtype(iter.dtype(0)) &&
+      iter.data_ptr(0) != iter.data_ptr(1) &&
+      reinterpret_cast<uintptr_t>(iter.data_ptr(0)) % kGfx1250ElementwiseCopyAlignment == 0 &&
+      reinterpret_cast<uintptr_t>(iter.data_ptr(1)) % kGfx1250ElementwiseCopyAlignment == 0 &&
+      at::detail::getCUDAHooks().isGPUArch({"gfx1250"}, src_device.index());
+#endif
+
   CUDAGuard device_guard(src_device);
 
   // We always perform the copy on the source device, using the current stream
@@ -650,7 +688,9 @@ void copy_device_to_device(TensorIterator& iter,
     dst_ready->block(copy_stream);
   }
 
-  if (memcpy_eligible) {
+  if (use_elementwise_copy) {
+    direct_copy_kernel_cuda(iter);
+  } else if (memcpy_eligible) {
     void *dst = iter.data_ptr(0);
     void *src = iter.data_ptr(1);
     size_t size = numel * iter.element_size(0);
