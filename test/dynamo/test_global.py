@@ -735,6 +735,49 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), x + 42)
             self.assertNotIn("delete_value", mod.__dict__)
 
+    @parametrize("lookup", ("attribute", "getattr", "hasattr"))
+    def test_delete_global_crossfile_then_store_getattr(self, lookup):
+        with crossfile_globals(delete_value=1) as mod:
+
+            def fn(x):
+                mod.delete_value_fn()
+                mod.__getattr__ = lambda name: 42
+                if lookup == "getattr":
+                    return x + getattr(mod, "delete_value", -1)
+                if lookup == "hasattr":
+                    return x + (42 if hasattr(mod, "delete_value") else -1)
+                try:
+                    return x + mod.delete_value
+                except AttributeError:
+                    return x - 1
+
+            x = torch.ones(2, 2)
+            opt_fn = torch.compile(fn, backend="eager")
+            self.assertEqual(opt_fn(x), x + 42)
+            self.assertNotIn("delete_value", mod.__dict__)
+
+            del mod.__getattr__
+            mod.delete_value = 1
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                Unsupported, "DELETE_GLOBAL in module with __getattr__"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_delete_global_crossfile_then_store_getattr_without_lookup(self):
+        with crossfile_globals(delete_value=1) as mod:
+
+            def fn(x):
+                mod.delete_value_fn()
+                mod.__getattr__ = lambda name: 42
+                return x + 1
+
+            x = torch.ones(2, 2)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertNotIn("delete_value", mod.__dict__)
+            self.assertEqual(mod.delete_value, 42)
+
     # policy=error flags the zero-net store+delete as an unreplayed side
     # effect; the shape itself matches eager without the policy.
     def test_delete_global_crossfile_created_then_deleted(self):

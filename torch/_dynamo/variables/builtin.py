@@ -3520,11 +3520,14 @@ class GetAttrBuiltinVariable(BuiltinVariable):
                 )
             if not fold_constant:
                 return self._call_getattr(tx, args, kwargs)
-        except Unsupported:
+        except Unsupported as exc:
             # Replicate the constant-fold fallback from BuiltinVariable._make_handler:
             # if all args are python constants, evaluate getattr() directly rather
             # than propagating a graph break from tp_getattro_impl.
-            if not check_unspec_or_constant_args(args, kwargs):
+            if (
+                exc.gb_type == "DELETE_GLOBAL in module with __getattr__"
+                or not check_unspec_or_constant_args(args, kwargs)
+            ):
                 raise
             obj = args[0]
             if isinstance(
