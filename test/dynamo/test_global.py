@@ -965,7 +965,18 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             with self.assertRaisesRegex(NameError, "name '_dg_a' is not defined"):
                 torch.compile(fn, backend="eager", fullgraph=False)(x)
 
-    @parametrize("shape", ("hasattr", "attr", "contains"))
+    @parametrize(
+        "shape",
+        (
+            "hasattr",
+            "attr",
+            "contains",
+            "getattr",
+            "getattr_default",
+            "getattr_dict",
+            "dir",
+        ),
+    )
     def test_delete_global_module_read_after(self, shape):
         me = sys.modules[__name__]
 
@@ -987,10 +998,37 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             del _dg_a
             return x + (1 if "_dg_a" in me.__dict__ else 0)
 
+        def fn_getattr(x):
+            global _dg_a
+            del _dg_a
+            try:
+                return x + getattr(me, "_dg_a")  # noqa: B009
+            except AttributeError:
+                return x - 1
+
+        def fn_getattr_default(x):
+            global _dg_a
+            del _dg_a
+            return x + getattr(me, "_dg_a", 0)
+
+        def fn_dir(x):
+            global _dg_a
+            del _dg_a
+            return x + (1 if "_dg_a" in dir(me) else 0)
+
+        def fn_getattr_dict(x):
+            global _dg_a
+            del _dg_a
+            return x + (1 if "_dg_a" in getattr(me, "__dict__") else 0)  # noqa: B009
+
         fn, expected = {
             "hasattr": (fn_hasattr, lambda x: x),
             "attr": (fn_attr, lambda x: x - 1),
             "contains": (fn_contains, lambda x: x),
+            "getattr": (fn_getattr, lambda x: x - 1),
+            "getattr_default": (fn_getattr_default, lambda x: x),
+            "getattr_dict": (fn_getattr_dict, lambda x: x),
+            "dir": (fn_dir, lambda x: x),
         }[shape]
         with mock.patch.dict(globals(), {"_dg_a": 1}):
             x = torch.ones(2, 2)
@@ -1010,6 +1048,20 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                         opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
                         self.assertEqual(opt_fn(x), expected(x))
                         self.assertNotIn("_dg_a", globals())
+
+    def test_delete_global_module_getattr_other_name(self):
+        me = sys.modules[__name__]
+
+        def fn(x):
+            global _dg_a
+            del _dg_a
+            return x + getattr(me, "_dg_b") + getattr(me, "_dg_missing", 3)  # noqa: B009
+
+        x = torch.ones(2, 2)
+        with mock.patch.dict(globals(), {"_dg_a": 1, "_dg_b": 2}):
+            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(out, x + 5)
+            self.assertNotIn("_dg_a", globals())
 
     @parametrize("shape", ("attr", "setitem", "update", "setdefault"))
     def test_delete_global_module_write_after(self, shape):

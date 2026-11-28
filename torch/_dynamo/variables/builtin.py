@@ -2471,6 +2471,8 @@ class BuiltinVariable(TypeVariable):
             return VariableTracker.build(tx, dir(arg.fn))
         if isinstance(arg, TypeVariable):
             return VariableTracker.build(tx, dir(arg._fn))
+        if isinstance(arg, variables.PythonModuleVariable):
+            tx.output.check_deleted_global_access(arg.value.__dict__, None)
         # Enable specialized VTs for constants to work with dir()
         if arg.is_python_constant():
             return VariableTracker.build(tx, dir(arg.as_python_constant()))
@@ -3509,6 +3511,21 @@ class GetAttrBuiltinVariable(BuiltinVariable):
             ]
         no_keywords(tx, "getattr", kwargs)
         check_positional(tx, "getattr", len(args), 2, 3)
+        obj = args[0]
+        if (
+            tx.output.deleted_globals_by_dict
+            and isinstance(obj, variables.PythonModuleVariable)
+            and args[1].is_python_constant()
+        ):
+            # Mirrors _load_attr: the constant fold below reads the real module.
+            name = args[1].as_python_constant()
+            if isinstance(name, str) and (
+                name == "__dict__"
+                or not tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
+            ):
+                tx.output.check_deleted_global_access(
+                    obj.value.__dict__, None if name == "__dict__" else name
+                )
         try:
             fold_constant = False
             if args[1].is_python_constant():
@@ -3526,7 +3543,6 @@ class GetAttrBuiltinVariable(BuiltinVariable):
             # than propagating a graph break from tp_getattro_impl.
             if not check_unspec_or_constant_args(args, kwargs):
                 raise
-            obj = args[0]
             if isinstance(
                 obj, variables.UserDefinedClassVariable
             ) and obj.getattr_needs_tracing(tx, args[1].as_python_constant()):
