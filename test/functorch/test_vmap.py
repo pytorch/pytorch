@@ -4051,6 +4051,9 @@ class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
                 in_dims=(2, 1, None),
             )
 
+    # Under vmap(grad(...)), MPS runs the Metal kernels, which have no derivative, as
+    # the vmap wrappers do not report requires_grad (#202724, fixed by #202957)
+    @skipMPS
     @onlyAccelerator
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     def test_sdpa_unbatched_inputs(self, device, backend):
