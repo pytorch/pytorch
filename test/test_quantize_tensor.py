@@ -349,8 +349,8 @@ def _assert_bitwise_eq(a: torch.Tensor, b: torch.Tensor) -> None:
     torch.testing.assert_close(a.view(torch.uint8), b.view(torch.uint8), rtol=0, atol=0)
 
 
-class TestMXFP8ReferenceNumerics(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestMXFP8Reference(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_f32_to_e8m0_rceil(self, device):
         # copied from
@@ -374,6 +374,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
         else:
             qdata, scales = quantize_fn(cases.inputs, (-2, -1), False, False)
         assert_mxfp8_semantics(qdata, scales, cases)
+
+
+class TestMXFP8ReferenceNumerics(TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     @parametrize(
         "swizzle_type",
@@ -1523,6 +1527,9 @@ class TestQuantizeTensorMeta(TestCase):
             )
 
 
+instantiate_device_type_tests(
+    TestMXFP8Reference, globals(), except_for="cpu", allow_xpu=True
+)
 instantiate_device_type_tests(TestMXFP8ReferenceNumerics, globals(), only_for="cuda")
 
 if __name__ == "__main__":
