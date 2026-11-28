@@ -739,6 +739,30 @@ class SymPyValueRangeAnalysis:
 
         return ValueRanges(min(products), max(products))
 
+    @staticmethod
+    def truncdiv(a, b):
+        a = ValueRanges.wrap(a)
+        b = ValueRanges.wrap(b)
+
+        # TODO We shall assume division is always valid probably
+        if 0 in b:
+            if (b.lower >= 0 and a.lower >= 0) or (b.upper <= 0 and a.upper <= 0):
+                return ValueRanges(0, int_oo)
+            if (b.upper <= 0 and a.lower >= 0) or (b.lower >= 0 and a.upper <= 0):
+                return ValueRanges(-int_oo, 0)
+            return ValueRanges.unknown_int()
+
+        def trunc_div(x, y):
+            sign = sympy.sign(x) * sympy.sign(y)
+            q = FloorDiv(abs(x), abs(y))
+            return sign * int_oo if q is sympy.nan else sign * q
+
+        products = [
+            trunc_div(x, y)
+            for x, y in itertools.product([a.lower, a.upper], [b.lower, b.upper])
+        ]
+        return ValueRanges(min(products), max(products))
+
     @classmethod
     def mod(cls, x, y):
         x = ValueRanges.wrap(x)
