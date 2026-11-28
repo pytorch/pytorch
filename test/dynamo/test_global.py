@@ -868,6 +868,25 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 )
             self.assertIn("_dg_hop", globals())
 
+    def test_clone_copies_deleted_globals_registry(self):
+        from torch._dynamo.side_effects import SideEffects
+
+        output_graph = mock.Mock()
+        side_effects = SideEffects(output_graph=output_graph)
+        namespace = {"__name__": "test_clone_registry"}
+        side_effects.deleted_globals_by_dict[id(namespace)] = (namespace, {"x"})
+
+        cloned = side_effects.clone()
+        self.assertEqual(
+            cloned.deleted_globals_by_dict, side_effects.deleted_globals_by_dict
+        )
+        self.assertIsNot(
+            cloned.deleted_globals_by_dict[id(namespace)][1],
+            side_effects.deleted_globals_by_dict[id(namespace)][1],
+        )
+        cloned.deleted_globals_by_dict[id(namespace)][1].add("y")
+        self.assertNotIn("y", side_effects.deleted_globals_by_dict[id(namespace)][1])
+
     @parametrize("preexisting", (True, False))
     def test_delete_global_through_module_object(self, preexisting):
         me = sys.modules[__name__]
