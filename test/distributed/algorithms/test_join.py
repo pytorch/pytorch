@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
-import os
 import sys
 from typing import Any
 
@@ -14,11 +13,16 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
-    require_n_gpus_for_nccl_backend,
+    DistributedTestBase,
+    skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -28,10 +32,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-BACKEND = dist.get_default_backend_for_device(device_type)
 WORLD_SIZE = min(4, max(2, torch.accelerator.device_count()))
 
 # Constants used for testing post-hooks
@@ -140,59 +140,23 @@ class AllReducer(Joinable):
         return common_rank
 
 
-class TestJoin(MultiProcessTestCase):
+class TestJoin(DistributedTestBase):
     r"""Test cases for the generic join context."""
 
-    def setUp(self):
-        super().setUp()
-        os.environ["WORLD_SIZE"] = str(self.world_size)
-        os.environ["BACKEND"] = BACKEND
-        self._spawn_processes()
-
-    @property
-    def device(self):
-        return (
-            torch.device(self.rank)
-            if BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL
-            else torch.device("cpu")
-        )
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @property
     def world_size(self):
         return WORLD_SIZE
 
-    @property
-    def process_group(self):
-        return dist.group.WORLD
-
-    def tearDown(self):
-        try:
-            dist.destroy_process_group()
-        except AssertionError:
-            pass
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    def dist_init(self, rank, world_size, backend=BACKEND):
-        store = dist.FileStore(self.file_name, world_size)
-        return dist.init_process_group(
-            backend=backend, store=store, rank=rank, world_size=world_size
-        )
-
-    def construct_uneven_inputs(self, base, offset, device=None):
+    def construct_uneven_inputs(self, base, offset, device):
         r"""
         Returns uneven inputs: rank i gets ``base`` + i * ``offset`` inputs.
         """
-        if device is None:
-            device = self.device
         return [torch.zeros(1, device=device) for _ in range(base + self.rank * offset)]
 
-    def construct_even_inputs(self, base, device=None):
+    def construct_even_inputs(self, base, device):
         r"""Returns even inputs: each rank gets ``base`` inputs."""
-        if device is None:
-            device = self.device
         return [torch.zeros(1, device=device) for _ in range(base)]
 
     @property
@@ -207,6 +171,7 @@ class TestJoin(MultiProcessTestCase):
 
     def _test_join_base(
         self,
+        device: str,
         uneven_inputs: bool,
         num_joinables: int,
         enable: bool,
@@ -219,6 +184,7 @@ class TestJoin(MultiProcessTestCase):
         Skeleton for all :class:`Join` tests.
 
         Arguments:
+            device (str): device type to run on.
             uneven_inputs (bool): ``True`` to use uneven inputs; ``False``
                 otherwise.
             num_joinables (int): number of :class:`AllReducer` s to construct.
@@ -233,18 +199,18 @@ class TestJoin(MultiProcessTestCase):
                 all-reduce total; otherwise, the expected total; default is
                 ``None``.
         """
-        self.dist_init(self.rank, self.world_size)
+        device_type = torch.device(device).type
+        process_group = self.create_pg(device_type)
+        device = torch.device(device_type)
 
-        allreducers = [
-            AllReducer(self.device, self.process_group) for _ in range(num_joinables)
-        ]
+        allreducers = [AllReducer(device, process_group) for _ in range(num_joinables)]
         for allreducer in allreducers:
             self.assertEqual(allreducer.post_hook_tensor.item(), BEFORE_CONSTANT)
 
         inputs = (
-            self.construct_uneven_inputs(self.base_num_inputs, self.offset)
+            self.construct_uneven_inputs(self.base_num_inputs, self.offset, device)
             if uneven_inputs
-            else self.construct_even_inputs(self.base_num_inputs)
+            else self.construct_even_inputs(self.base_num_inputs, device)
         )
         allreduce_total = 0
 
@@ -285,8 +251,8 @@ class TestJoin(MultiProcessTestCase):
             for allreducer in allreducers:
                 self.assertEqual(allreducer.post_hook_tensor.item(), AFTER_CONSTANT)
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
-    def test_single_joinable_main_hooks(self):
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
+    def test_single_joinable_main_hooks(self, device):
         r"""Tests the main hooks of a single :class:`Joinable`."""
         num_joinables = 1
         num_allreduces = 1
@@ -300,6 +266,7 @@ class TestJoin(MultiProcessTestCase):
             expected_total += (self.world_size - num_joined) * self.offset
 
         self._test_join_base(
+            device,
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -309,14 +276,15 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
-    def test_single_joinable_post_hooks(self):
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
+    def test_single_joinable_post_hooks(self, device):
         r"""Tests the post-hooks of a single :class:`Joinable`."""
         num_joinables = 1
         num_allreduces = 0  # set to 0 to skip the main hooks
         run_post_hooks = False
 
         self._test_join_base(
+            device,
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -326,8 +294,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=None,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
-    def test_single_joinable(self):
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
+    def test_single_joinable(self, device):
         r"""
         Tests the main hooks and post-hooks of a single :class:`Joinable`
         together.
@@ -345,6 +313,7 @@ class TestJoin(MultiProcessTestCase):
             expected_total += (self.world_size - num_joined) * self.offset
 
         self._test_join_base(
+            device,
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -354,8 +323,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
-    def test_multiple_joinables(self):
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
+    def test_multiple_joinables(self, device):
         r"""
         Tests the main hooks and post-hooks of multiple :class:`Joinable` s
         together.
@@ -374,6 +343,7 @@ class TestJoin(MultiProcessTestCase):
         expected_total *= num_joinables
 
         self._test_join_base(
+            device,
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -383,8 +353,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
-    def test_single_joinable_disable(self):
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
+    def test_single_joinable_disable(self, device):
         r"""Tests ``enable=False`` for a single :class:`Joinable`."""
         num_joinables = 1
         num_allreduces = 1
@@ -395,6 +365,7 @@ class TestJoin(MultiProcessTestCase):
         expected_total = self.world_size * self.base_num_inputs
 
         self._test_join_base(
+            device,
             uneven_inputs=uneven_inputs,
             num_joinables=num_joinables,
             enable=enable,
@@ -404,8 +375,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
-    def test_multiple_joinable_disable(self):
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
+    def test_multiple_joinable_disable(self, device):
         r"""
         Tests ``enable=False`` for multiple :class:`Joinable` s.
 
@@ -421,6 +392,7 @@ class TestJoin(MultiProcessTestCase):
         expected_total = self.world_size * self.base_num_inputs * num_joinables
 
         self._test_join_base(
+            device,
             uneven_inputs=uneven_inputs,
             num_joinables=num_joinables,
             enable=enable,
@@ -430,8 +402,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
-    def test_single_joinable_throw(self):
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
+    def test_single_joinable_throw(self, device):
         r"""
         Tests ``throw_on_early_termination=True`` for a single
         :class:`Joinable`.
@@ -442,6 +414,7 @@ class TestJoin(MultiProcessTestCase):
         run_post_hooks = False
 
         self._test_join_base(
+            device,
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -451,8 +424,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=None,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
-    def test_multiple_joinables_throw(self):
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
+    def test_multiple_joinables_throw(self, device):
         r"""
         Tests ``throw_on_early_termination=True`` for multiple
         :class:`Joinable` s together.
@@ -466,6 +439,7 @@ class TestJoin(MultiProcessTestCase):
         run_post_hooks = False
 
         self._test_join_base(
+            device,
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -475,8 +449,8 @@ class TestJoin(MultiProcessTestCase):
             expected_total=None,
         )
 
-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
-    def test_join_kwargs(self):
+    @skip_if_lt_x_gpu(WORLD_SIZE, allow_cpu=True)
+    def test_join_kwargs(self, device):
         r"""
         Tests passing keyword arguments to the context manager.
         """
@@ -491,6 +465,7 @@ class TestJoin(MultiProcessTestCase):
         expected_total *= num_allreduces
 
         self._test_join_base(
+            device,
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -499,6 +474,9 @@ class TestJoin(MultiProcessTestCase):
             run_post_hooks=run_post_hooks,
             expected_total=expected_total,
         )
+
+
+instantiate_device_type_tests(TestJoin, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
