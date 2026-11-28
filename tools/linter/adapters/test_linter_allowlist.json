@@ -321,7 +321,6 @@
   "test/inductor/test_benchmarking.py",
   "test/inductor/test_binary_folding.py",
   "test/inductor/test_choices_composition.py",
-  "test/inductor/test_ck_backend.py",
   "test/inductor/test_codecache.py",
   "test/inductor/test_codegen_heuristics_registry_lazy_imports.py",
   "test/inductor/test_codegen_triton.py",
