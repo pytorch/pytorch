@@ -3,10 +3,13 @@ import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 class InductorAnnotationTestCase(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def get_code(self):
         def f(a, b):
             return a + b, a * b
