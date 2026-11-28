@@ -167,6 +167,15 @@ void quantized_matmul(
     std::string_view unary_post_op_algorithm,
     bool m2_trnas);
 
+// Weight-only int8 matmul:
+//   result[M, N] = mat1[M, K] @ (mat2[N, K] * scales[N])^T
+// with fp16/bf16/fp32 activations, s8 weights and per-output-channel scales.
+TORCH_API void woq_matmul_int8(
+    at::Tensor& result, // dst, [M, N]
+    const at::Tensor& mat1, // src, [M, K]
+    const at::Tensor& mat2, // s8 weight, [N, K]
+    const at::Tensor& scales); // [N]
+
 void sdpa(
     int batch_size,
     int seq_len_q,
