@@ -35,7 +35,7 @@ def get_approximate_basis(
     .. note:: To obtain repeatable results, reset the seed for the
               pseudorandom number generator
 
-    Args::
+    Args:
         A (Tensor): the input tensor of size :math:`(*, m, n)`
 
         q (int): the dimension of subspace spanned by :math:`Q`
@@ -49,7 +49,7 @@ def get_approximate_basis(
         M (Tensor, optional): the input tensor's mean of size
                               :math:`(*, m, n)`.
 
-    References::
+    References:
         - Nathan Halko, Per-Gunnar Martinsson, and Joel Tropp, Finding
           structure with randomness: probabilistic algorithms for
           constructing approximate matrix decompositions,
