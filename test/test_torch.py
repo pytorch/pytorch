@@ -9155,6 +9155,11 @@ class TestTorch(TestCase):
         # ensure ones() throws an error when extra positional (non-keyword) arguments are given.
         self.assertRaises(TypeError, lambda: torch.ones((3, 3), torch.float32))
 
+        # the var-args intlist collapse also applies when the leading int would
+        # broadcast via a sized int list (IntArrayRef[1]), see gh-191275
+        t = torch.arange(6).reshape(2, 3)
+        self.assertEqual(t.hash_tensor(0, 1), t.hash_tensor((0, 1)))
+
     def test_invalid_arguments_error_names_mismatched_argument(self):
         # With several overloads, each one whose argument count fits reports the
         # argument that failed, not a guess from the signature string (#87514).
