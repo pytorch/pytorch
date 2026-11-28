@@ -714,6 +714,65 @@ struct ReductionMulOp {
   __forceinline__ scalar_t identity_cpu() const { return 1; }
 };
 
+#if !defined(USE_ROCM) && defined(USE_CUDSS)
+// cuDSS 0.8 added an offsetType argument to cudssMatrixCreateCsr and switched the
+// matrix constructors to cudssDataType_t; cuDSS 1.0 went back to cudaDataType_t
+// (cudssDataType_t is a deprecated alias there).
+#if defined(CUDSS_VERSION) && CUDSS_VERSION >= 800
+#define TORCH_CUDSS_HAS_OFFSET_TYPE
+#endif
+#if defined(CUDSS_VERSION) && CUDSS_VERSION >= 800 && CUDSS_VERSION < 10000
+using cudss_data_type_t = cudssDataType_t;
+constexpr cudss_data_type_t kCudssR32I = CUDSS_R_32I;
+constexpr cudss_data_type_t kCudssR32F = CUDSS_R_32F;
+constexpr cudss_data_type_t kCudssR64F = CUDSS_R_64F;
+#else
+using cudss_data_type_t = cudaDataType_t;
+constexpr cudss_data_type_t kCudssR32I = CUDA_R_32I;
+constexpr cudss_data_type_t kCudssR32F = CUDA_R_32F;
+constexpr cudss_data_type_t kCudssR64F = CUDA_R_64F;
+#endif
+
+template <typename scalar_t>
+constexpr cudss_data_type_t cudss_value_type() {
+  return std::is_same_v<scalar_t, double> ? kCudssR64F : kCudssR32F;
+}
+
+// Dense single-column matrix (column major).
+template <typename scalar_t>
+void cudss_create_dense_vector(cudssMatrix_t* matrix, int64_t n, scalar_t* values) {
+  TORCH_CUDSS_CHECK(cudssMatrixCreateDn(
+      matrix, n, 1, n, values, cudss_value_type<scalar_t>(), CUDSS_LAYOUT_COL_MAJOR));
+}
+
+// General zero-based CSR matrix with int32 row offsets and column indices.
+// rowEnd is nullptr: that is the standard (3-array) CSR format. A non-null rowEnd
+// selects the 4-array variant, which cuDSS >= 0.7 rejects with
+// CUDSS_STATUS_NOT_SUPPORTED (earlier versions ignored the argument).
+template <typename scalar_t>
+void cudss_create_csr(
+    cudssMatrix_t* matrix,
+    int64_t nrows,
+    int64_t ncols,
+    int64_t nnz,
+    int* row_offsets,
+    int* col_indices,
+    scalar_t* values) {
+#ifdef TORCH_CUDSS_HAS_OFFSET_TYPE
+  TORCH_CUDSS_CHECK(cudssMatrixCreateCsr(
+      matrix, nrows, ncols, nnz, row_offsets, /*rowEnd=*/nullptr, col_indices, values,
+      /*offsetType=*/kCudssR32I, /*indexType=*/kCudssR32I, cudss_value_type<scalar_t>(),
+      CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO));
+#else
+  TORCH_CUDSS_CHECK(cudssMatrixCreateCsr(
+      matrix, nrows, ncols, nnz, row_offsets, /*rowEnd=*/nullptr, col_indices, values,
+      /*indexType=*/kCudssR32I, cudss_value_type<scalar_t>(),
+      CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO));
+#endif
+}
+#undef TORCH_CUDSS_HAS_OFFSET_TYPE
+#endif
+
 void _apply_sparse_csr_linear_solve(
   const Tensor& A,
   const Tensor& b,
@@ -763,19 +822,12 @@ void _apply_sparse_csr_linear_solve(
     const scalar_t* values_ptr = values.const_data_ptr<scalar_t>();
     const scalar_t* b_ptr = b.const_data_ptr<scalar_t>();
     scalar_t* x_ptr = x.mutable_data_ptr<scalar_t>();
-    auto CUDA_R_TYP = std::is_same_v<scalar_t, double> ? CUDA_R_64F : CUDA_R_32F;
     // cuDSS descriptors require non-const pointers for the read-only A and b.
-    TORCH_CUDSS_CHECK(cudssMatrixCreateDn(
-        &b_mt, b.size(0), 1, b.size(0), const_cast<scalar_t*>(b_ptr),
-        CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR));
-    TORCH_CUDSS_CHECK(cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR));
-    TORCH_CUDSS_CHECK(cudssMatrixCreateCsr(
-        &A_mt, A.size(0), A.size(1), A._nnz(),
-        const_cast<int*>(rowOffsets),
-        const_cast<int*>(rowOffsets + crow.size(0)),
-        const_cast<int*>(colIndices), const_cast<scalar_t*>(values_ptr),
-        CUDA_R_32I, CUDA_R_TYP, CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL,
-        CUDSS_BASE_ZERO));
+    cudss_create_dense_vector(&b_mt, b.size(0), const_cast<scalar_t*>(b_ptr));
+    cudss_create_dense_vector(&x_mt, x.size(0), x_ptr);
+    cudss_create_csr(
+        &A_mt, A.size(0), A.size(1), A._nnz(), const_cast<int*>(rowOffsets),
+        const_cast<int*>(colIndices), const_cast<scalar_t*>(values_ptr));
   }));
   TORCH_CUDSS_CHECK(cudssExecute(handle, CUDSS_PHASE_ANALYSIS, config, cudss_data, A_mt, x_mt, b_mt));
   TORCH_CUDSS_CHECK(cudssExecute(handle, CUDSS_PHASE_FACTORIZATION, config, cudss_data, A_mt, x_mt, b_mt));
