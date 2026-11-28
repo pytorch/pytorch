@@ -878,6 +878,9 @@ class TensorVariable(VariableTracker):
     def method_attr_grad(
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker | None:
+        if self.source is None:
+            # The grad may come from an input alias or an intermediate with no grad.
+            tx.output.current_tracer.has_sourceless_grad = True
         if tx.output.side_effects.has_pending_mutation_of_attr(self, "grad"):
             return tx.output.side_effects.load_attr(self, "grad")
         alias = self._sourced_alias(tx)
@@ -1276,9 +1279,7 @@ class TensorVariable(VariableTracker):
         method = self.tp_methods.get(name)
         if method is not None:
             flags = _derive_method_flags(self, name)
-            _check_method_arity(
-                tx, f"{self.python_type_name()}.{name}", flags, args, kwargs
-            )
+            _check_method_arity(self, tx, name, flags, args, kwargs)
             # Realize any LazyVariableTracker in kwargs before calling handler.
             realized_kwargs = {k: v.realize() for k, v in kwargs.items()}
             try:
