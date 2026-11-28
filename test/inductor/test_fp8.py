@@ -240,6 +240,45 @@ class TestFP8Types(TestCase):
 
     @skipCUDAIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
+    def test_float8_comparisons(self, float8_dtype: torch.dtype, device: str):
+        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=device)
+
+        vals_x = [0.0, 1.0, -2.0, float("nan")]
+        vals_y = [1.0, 1.0, 0.0, 2.0]
+        if float8_dtype in (torch.float8_e5m2, torch.float8_e5m2fnuz):
+            vals_x.append(float("inf"))
+            vals_y.append(float("-inf"))
+        else:
+            vals_x.append(3.0)
+            vals_y.append(-1.5)
+
+        x = torch.tensor(vals_x, device=device, dtype=torch.float32).to(float8_dtype)
+        y = torch.tensor(vals_y, device=device, dtype=torch.float32).to(float8_dtype)
+
+        fns = [
+            lambda a, b: a == b,
+            lambda a, b: a != b,
+            lambda a, b: a < b,
+            lambda a, b: a <= b,
+            lambda a, b: a > b,
+            lambda a, b: a >= b,
+            lambda a, b: a == 0.0,
+            lambda a, b: a != 1.0,
+            lambda a, b: a > 0.0,
+            lambda a, b: torch.where(a == a, a, b),
+            lambda a, b: torch.isfinite(a),
+            lambda a, b: torch.isnan(a),
+            lambda a, b: torch.isinf(a),
+        ]
+
+        for fn in fns:
+            torch._dynamo.reset()
+            expected = fn(x, y)
+            actual = torch.compile(fn, backend="inductor")(x, y)
+            self.assertEqual(actual, expected)
+
+    @skipCUDAIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     def test_xblock_for_small_numel(self, float8_dtype: torch.dtype, device: str):
         """
         TritonOverrides.to_dtype will set min_elem_per_thread to 2 or 4

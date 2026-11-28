@@ -103,6 +103,7 @@ from ..utils import (
     get_bounds_index_expr,
     get_fused_kernel_name,
     get_kernel_metadata,
+    is_float8_type,
     is_welford_reduction,
     Placeholder,
     prefix_is_pointwise,
@@ -1249,10 +1250,13 @@ def triton_arg_dtype(arg: Any) -> torch.dtype | None:
 
 
 def needs_upcast_to_float32(arg: Any) -> bool:
-    return (
-        not config.triton.codegen_upcast_to_fp32
-        and isinstance(arg, CSEVariable)
-        and arg.dtype in (torch.float16, torch.bfloat16)
+    if not isinstance(arg, CSEVariable):
+        return False
+    if is_float8_type(arg.dtype):
+        return True
+    return not config.triton.codegen_upcast_to_fp32 and arg.dtype in (
+        torch.float16,
+        torch.bfloat16,
     )
 
 
@@ -1375,6 +1379,9 @@ class TritonOverrides(OpOverrides):
         src_dtype: torch.dtype | None = None,
         use_compute_types=True,
     ):
+        if src_dtype is None and isinstance(x, CSEVariable):
+            src_dtype = x.dtype
+
         fp8_dtypes = (
             torch.float8_e4m3fn,
             torch.float8_e5m2,
@@ -1431,6 +1438,10 @@ class TritonOverrides(OpOverrides):
             return f"{x}.to({intermediate}).to({triton_type(dtype)})"
 
         if dtype == torch.bool:
+            if (isinstance(x, CSEVariable) and is_float8_type(x.dtype)) or (
+                src_dtype is not None and is_float8_type(src_dtype)
+            ):
+                return f"({x}.to(tl.float32) != 0)"
             return f"({x} != 0)"
         elif dtype == torch.uint8 and (
             src_dtype is not None and src_dtype.is_floating_point or src_dtype is None
@@ -1451,6 +1462,14 @@ class TritonOverrides(OpOverrides):
             src_dtype is not None
             and dtype in TRITON_FLOAT8_DTYPES
             and (src_dtype == torch.bool or is_integer_dtype(src_dtype))
+        ):
+            return f"{x}.to(tl.float32).to({out_dtype})"
+
+        # Triton cannot cast any fp8 type to integers directly, so go through float32.
+        if (
+            src_dtype is not None
+            and is_float8_type(src_dtype)
+            and is_integer_dtype(dtype)
         ):
             return f"{x}.to(tl.float32).to({out_dtype})"
 
@@ -1517,6 +1536,41 @@ class TritonOverrides(OpOverrides):
             non_finite = f"({TritonOverrides.isnan(x)} | {TritonOverrides.isinf(x)})"
             return f"tl.where({non_finite}, {x} * 0.0, 0.0)"
         return f"{x} - {y}"
+
+    @staticmethod
+    def _cmp(op: str, a: Any, b: Any) -> str:
+        def _upcast_val(v: Any) -> str:
+            if isinstance(v, CSEVariable) and is_float8_type(v.dtype):
+                return f"{v}.to(tl.float32)"
+            return str(v)
+
+        if any(isinstance(v, CSEVariable) and is_float8_type(v.dtype) for v in (a, b)):
+            return f"({_upcast_val(a)} {op} {_upcast_val(b)})"
+        return f"{a} {op} {b}"
+
+    @staticmethod
+    def eq(a, b):
+        return TritonOverrides._cmp("==", a, b)
+
+    @staticmethod
+    def ne(a, b):
+        return TritonOverrides._cmp("!=", a, b)
+
+    @staticmethod
+    def lt(a, b):
+        return TritonOverrides._cmp("<", a, b)
+
+    @staticmethod
+    def le(a, b):
+        return TritonOverrides._cmp("<=", a, b)
+
+    @staticmethod
+    def gt(a, b):
+        return TritonOverrides._cmp(">", a, b)
+
+    @staticmethod
+    def ge(a, b):
+        return TritonOverrides._cmp(">=", a, b)
 
     @classmethod
     def _cast_libdevice_arg(cls, arg, dtype: torch.dtype) -> str:
