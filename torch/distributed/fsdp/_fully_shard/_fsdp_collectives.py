@@ -1153,6 +1153,9 @@ def _get_gradient_divide_factors(
         data_parallel_size *= all_reduce_group.size()
 
     if not overflow_risk and not force_sum_reduction_for_comms:
+        # Unit scaling needs neither averaging nor a custom premultiplied sum.
+        if factor == 1.0:
+            return None, None, ReduceOp.SUM, ReduceOp.SUM
         if factor is None:
             # Warning: NCCL ReduceOp.AVG may produce incorrect results with
             # world size 1.
