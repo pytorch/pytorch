@@ -4,7 +4,6 @@ import json
 import logging
 import re
 import sys
-from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
@@ -15,12 +14,15 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_distributed import DistributedTestBase, TEST_SKIPS
-from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import DistributedTestBase, with_comms
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
+)
 
-
-device_type = get_devtype().type
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -29,71 +31,69 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-WORLD_SIZE = min(4, max(2, torch.get_device_module(device_type).device_count()))
+
+def _nccl_expected_version() -> str:
+    return ".".join(str(v) for v in torch.cuda.nccl.version())
 
 
-def with_comms(func=None):
-    if func is None:
-        return partial(
-            with_comms,
-        )
-
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        if torch.get_device_module(device_type).device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
-        self.create_pg(device_type)
-        func(self)
-        self.destroy_comms()
-
-    return wrapper
-
-
-class C10dErrorLoggerTest(DistributedTestBase):
-    @property
-    def world_size(self):
-        return WORLD_SIZE
-
-    @property
-    def process_group(self):
-        return dist.group.WORLD
-
-    def destroy_comms(self):
-        # Wait for all ranks to reach here before starting shutdown.
-        dist.barrier()
-        dist.destroy_process_group()
+class C10dErrorLoggerTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_get_or_create_logger(self):
         self.assertIsNotNone(_c10d_logger)
         self.assertEqual(1, len(_c10d_logger.handlers))
         self.assertIsInstance(_c10d_logger.handlers[0], logging.NullHandler)
 
+
+class C10dErrorLoggerTestDevice(DistributedTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @property
+    def world_size(self):
+        # Concurrency budget of the current environment, not a per-variant
+        # device source.
+        if torch.accelerator.is_available():
+            return min(4, max(2, torch.accelerator.device_count()))
+        return 2
+
+    @property
+    def process_group(self):
+        return dist.group.WORLD
+
     @_exception_logger
-    def _failed_broadcast_raise_exception(self):
-        tensor = torch.arange(2, dtype=torch.int64)
+    def _failed_broadcast_raise_exception(self, rank_device):
+        tensor = torch.arange(2, dtype=torch.int64, device=rank_device)
         dist.broadcast(tensor, self.world_size + 1)
 
     @_exception_logger
-    def _failed_broadcast_not_raise_exception(self):
+    def _failed_broadcast_not_raise_exception(self, rank_device):
         try:
-            tensor = torch.arange(2, dtype=torch.int64)
+            tensor = torch.arange(2, dtype=torch.int64, device=rank_device)
             dist.broadcast(tensor, self.world_size + 1)
         except Exception:
             pass
 
-    @with_comms
-    def test_exception_logger(self) -> None:
+    @with_comms(barrier_on_success=True)
+    def test_exception_logger(self, device) -> None:
+        device_type = torch.device(device).type
+        rank_device = (
+            torch.device("cpu")
+            if device_type == "cpu"
+            else torch.device(device_type, self.rank)
+        )
+
         with self.assertRaises(Exception):
-            self._failed_broadcast_raise_exception()
+            self._failed_broadcast_raise_exception(rank_device)
 
         with self.assertLogs(_c10d_logger, level="DEBUG") as captured:
-            self._failed_broadcast_not_raise_exception()
+            self._failed_broadcast_not_raise_exception(rank_device)
             error_msg_dict = json.loads(
                 re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
             )
 
             # NCCL adds additional nccl_version data to the error_msg_dict
-            if self.backend(device_type) == dist.Backend.NCCL:
+            expected_backend = self.backend(device_type)
+            if expected_backend == dist.Backend.NCCL:
                 self.assertEqual(len(error_msg_dict), 9)
             else:
                 self.assertEqual(len(error_msg_dict), 8)
@@ -105,13 +105,12 @@ class C10dErrorLoggerTest(DistributedTestBase):
             self.assertEqual("broadcast", error_msg_dict["func_name"])
 
             self.assertIn("backend", error_msg_dict.keys())
-            self.assertEqual(self.backend(device_type), error_msg_dict["backend"])
+            self.assertEqual(expected_backend, error_msg_dict["backend"])
 
-            if self.backend(device_type) == dist.Backend.NCCL:
+            if expected_backend == dist.Backend.NCCL:
                 self.assertIn("nccl_version", error_msg_dict.keys())
-                nccl_ver = torch.cuda.nccl.version()
                 self.assertEqual(
-                    ".".join(str(v) for v in nccl_ver), error_msg_dict["nccl_version"]
+                    _nccl_expected_version(), error_msg_dict["nccl_version"]
                 )
 
             # In this test case, group_size = world_size, since we don't have multiple processes on one node.
@@ -128,6 +127,8 @@ class C10dErrorLoggerTest(DistributedTestBase):
             self.assertIn("local_rank", error_msg_dict.keys())
             self.assertIn(str(dist.get_rank()), error_msg_dict["local_rank"])
 
+
+instantiate_device_type_tests(C10dErrorLoggerTestDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
