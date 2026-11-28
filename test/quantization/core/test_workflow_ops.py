@@ -1345,6 +1345,31 @@ class TestFusedObsFakeQuant(TestCase):
         self.assertEqual(dX, x.grad)
         self.assertTrue(x.grad.dtype == torch.float32)
 
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_fused_obs_fake_quant_per_tensor_channels_last_input(self) -> None:
+        """A channels-last input gives the same results as its contiguous copy
+        without the op copying the input."""
+        x = torch.randn(4, 16, 6, 6, device="cuda").contiguous(memory_format=torch.channels_last)
+        results = {}
+        for name, x_in in (("contiguous", x.contiguous()), ("channels_last", x)):
+            state = [
+                torch.tensor(float("inf"), device="cuda"),
+                torch.tensor(float("-inf"), device="cuda"),
+                torch.tensor([1.0], device="cuda"),
+                torch.tensor([0], dtype=torch.int, device="cuda"),
+            ]
+            on = torch.tensor(1, device="cuda")
+            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU]) as prof:
+                out = torch.fused_moving_avg_obs_fake_quant(x_in, on, on, *state, 0.01, 0, 255, 0, False, False)
+            results[name] = (out, state, [e.name for e in prof.events()])
+
+        out, state, ops = results["channels_last"]
+        self.assertNotIn("aten::contiguous", ops)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(out, results["contiguous"][0], atol=0, rtol=0)
+        for value, expected in zip(state, results["contiguous"][1]):
+            self.assertEqual(value, expected, atol=0, rtol=0)
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"
