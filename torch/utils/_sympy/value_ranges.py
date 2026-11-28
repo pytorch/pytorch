@@ -755,6 +755,11 @@ class SymPyValueRangeAnalysis:
             x = a / b
             return sympy.Integer(x) if x.is_finite and x not in (int_oo, -int_oo) else x
 
+        if not y.is_int:
+            bound = max(abs(y.lower), abs(y.upper))
+            lower = 0.0 if x.lower >= 0 else -bound
+            upper = 0.0 if x.upper <= 0 else bound
+            return ValueRanges(lower, upper)
         if 0 in y:
             return ValueRanges.unknown_int()
         elif y.is_singleton():
@@ -785,12 +790,15 @@ class SymPyValueRangeAnalysis:
         """Python-style modulo: result has same sign as divisor.
 
         Assumes valid input where y is never 0.
-        - When y > 0: result is in [0, y - 1]
-        - When y < 0: result is in [y + 1, 0]
+        - When y > 0: result is in [0, y - 1] for ints, [0, y] for floats
+        - When y < 0: result is in [y + 1, 0] for ints, [y, 0] for floats
+        Float bounds are closed because rounding can return y (-1e-20 % 1.0 == 1.0).
         """
 
         x = ValueRanges.wrap(x)
         y = ValueRanges.wrap(y)
+        if not y.is_int:
+            return ValueRanges(min(0.0, y.lower), max(0.0, y.upper))
         if x.lower >= 0 and y.lower >= 0:
             return SymPyValueRangeAnalysis.mod(x, y)
         lower = y.lower + 1 if y.lower < 0 else 0
