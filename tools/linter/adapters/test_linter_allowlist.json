@@ -262,7 +262,6 @@
   "test/dynamo/test_reconstruct.py",
   "test/dynamo/test_regional_inductor.py",
   "test/dynamo/test_regional_inductor_config.py",
-  "test/dynamo/test_repros.py",
   "test/dynamo/test_resume.py",
   "test/dynamo/test_sdpa.py",
   "test/dynamo/test_sentinel.py",
