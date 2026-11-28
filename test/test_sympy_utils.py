@@ -1251,6 +1251,25 @@ class TestSympyFunctions(TestCase):
         self.assertIsInstance(TorchSymMin(128 * x, 512 * x), TorchSymMin)
         self.assertIsInstance(TorchSymMax(128 * x, 512 * x), TorchSymMax)
 
+    def test_gcd_cancellation_nested_sizes(self):
+        # https://github.com/pytorch/pytorch/issues/206153: cancelling the gcd
+        # with sympy.simplify re-entered FloorDiv.eval for every nested
+        # FloorDiv, so cost grew exponentially with the nesting depth.
+        s = sympy.Symbol("s", integer=True, positive=True)
+        x = sympy.Symbol("x", integer=True, nonnegative=True)
+        size = s
+        for _ in range(10):
+            inner = IntTrueDiv(2 * FloorDiv(size - 1, 2) + 1, 2)
+            size = 4 * CeilToInt(inner + 1.0) - 1
+        self.assertEqual(FloorDiv(4 * x * size, 8 * size), FloorDiv(x, 2))
+        self.assertEqual(
+            ModularIndexing(4 * x * size, 8 * size, 16), ModularIndexing(x, 2, 16)
+        )
+        self.assertEqual(FloorDiv(s * x + x, 2 * s + 2), FloorDiv(x, 2))
+        self.assertEqual(
+            ModularIndexing(s * x + x, 2 * s + 2, 16), ModularIndexing(x, 2, 16)
+        )
+
     def test_modular_indexing_does_not_strip_unproven_nonnegative_term(self):
         q0 = sympy.Symbol("q0", integer=True, nonnegative=True)
         n = sympy.Symbol("n", integer=True, positive=True)
