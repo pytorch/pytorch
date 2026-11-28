@@ -137,6 +137,23 @@ def _check_cuda_bindings(result: Any, *, msg: str = "CUDA error") -> Any:
     return out
 
 
+def _check_cuda_runtime_bindings(
+    result: Any, runtime: Any, *, msg: str = "CUDA error"
+) -> Any:
+    """Check a result from an explicitly selected CUDA-compatible runtime."""
+    err, *out = result
+    if err.value:
+        err_str = runtime.cudaGetErrorString(err)[-1]
+        if isinstance(err_str, bytes):
+            err_str = err_str.decode()
+        raise RuntimeError(f"{msg}: {err} ({err_str})")
+    if not out:
+        return None
+    if len(out) == 1:
+        return out[0]
+    return out
+
+
 def _check_cuda_bindings_driver(result: Any) -> Any:
     """Check a cuda.bindings (cuda-python) driver call result for errors.
 
