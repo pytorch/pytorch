@@ -336,10 +336,9 @@ TEST(NCCLDevCommManagerTest, ReplacementRegistrationEvictsDevComms) {
   EXPECT_EQ(manager.get_comm(group_name), successor_comm);
 }
 
-#ifdef USE_ROCM
 TEST(NCCLDevCommManagerTest, IdentitySafeUnregisterPreservesSuccessor) {
   if (!at::cuda::is_available()) {
-    GTEST_SKIP() << "ROCm not available, skipping test";
+    GTEST_SKIP() << "CUDA/ROCm not available, skipping test";
   }
 
   c10::cuda::CUDAGuard guard(0);
@@ -373,6 +372,8 @@ TEST(NCCLDevCommManagerTest, IdentitySafeUnregisterPreservesSuccessor) {
 
   manager.unregister_comm(group_name, successor_comm);
   EXPECT_THROW(manager.get_comm(group_name), c10::Error);
+  EXPECT_FALSE(manager.comm_registration_is_live(
+      group_name, successor_comm, successor_generation));
 
   EXPECT_EQ(ncclCommDestroy(first_comm), ncclSuccess);
   EXPECT_EQ(ncclCommDestroy(successor_comm), ncclSuccess);
@@ -384,7 +385,7 @@ TEST(NCCLDevCommManagerTest, IdentitySafeUnregisterPreservesSuccessor) {
 // symmetric-memory handles that are still backed by a live communicator.
 TEST(NCCLDevCommManagerTest, SamePointerReregistrationKeepsGeneration) {
   if (!at::cuda::is_available()) {
-    GTEST_SKIP() << "ROCm not available, skipping test";
+    GTEST_SKIP() << "CUDA/ROCm not available, skipping test";
   }
 
   c10::cuda::CUDAGuard guard(0);
@@ -421,7 +422,7 @@ TEST(NCCLDevCommManagerTest, SamePointerReregistrationKeepsGeneration) {
 // even though the pointer is unchanged.
 TEST(NCCLDevCommManagerTest, ReregistrationAfterUnregisterAdvancesGeneration) {
   if (!at::cuda::is_available()) {
-    GTEST_SKIP() << "ROCm not available, skipping test";
+    GTEST_SKIP() << "CUDA/ROCm not available, skipping test";
   }
 
   c10::cuda::CUDAGuard guard(0);
@@ -460,7 +461,6 @@ TEST(NCCLDevCommManagerTest, ReregistrationAfterUnregisterAdvancesGeneration) {
   manager.unregister_comm(group_name, comm);
   EXPECT_EQ(ncclCommDestroy(comm), ncclSuccess);
 }
-#endif
 
 #else // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 

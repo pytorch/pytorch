@@ -187,8 +187,8 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         "been eagerly initialized by filling `device_id` in the "
         "`init_process_group` call.");
 
-#ifdef USE_ROCM
     comm_generation_ = mgr.get_comm_generation(group_name_, comm_);
+#ifdef USE_ROCM
     // Without device API support the handle is host-only: collectives on the
     // buffer still work, but there are no peer pointers, and their accessors
     // raise.
@@ -368,23 +368,26 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     }
     c10::cuda::CUDAGuard guard(device_idx_);
     if (combined_win_ != nullptr) {
-#ifdef USE_ROCM
       // Deregister only while this exact registration, pointer and generation,
       // is live: a retired comm may already be freed, and a successor may sit
       // at the same address.
-      // Relaxed: the destructor may run during HIP capture, and RCCL's
-      // ncclCommWindowDeregister leaves the calling thread in Relaxed mode;
-      // the guard restores the caller's mode on exit.
-      // TODO: drop this guard once RCCL restores the caller's capture thread
-      // mode.
+      // This is a sequential retirement check, not a pin against concurrent
+      // communicator abort/destroy. Callers must serialize teardown.
       auto& manager = NCCLDevCommManager::get(
           c10::Device(c10::DeviceType::CUDA, device_idx_));
       if (manager.comm_registration_is_live(
               group_name_, comm_, comm_generation_)) {
         ncclResult_t res;
         {
+#ifdef USE_ROCM
+          // Relaxed: the destructor may run during HIP capture, and RCCL's
+          // ncclCommWindowDeregister leaves the calling thread in Relaxed mode;
+          // the guard restores the caller's mode on exit.
+          // TODO: drop this guard once RCCL restores the caller's capture thread
+          // mode.
           c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
               cudaStreamCaptureModeRelaxed};
+#endif
           res = ncclCommWindowDeregister(comm_, combined_win_);
         }
         if (res != ncclSuccess) {
@@ -392,13 +395,6 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
                        << ncclGetErrorString(res);
         }
       }
-#else
-      auto res = ncclCommWindowDeregister(comm_, combined_win_);
-      if (res != ncclSuccess) {
-        LOG(WARNING) << "ncclCommWindowDeregister failed: "
-                     << ncclGetErrorString(res);
-      }
-#endif
     }
     if (buffers_dev_ != nullptr) {
       c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
@@ -454,8 +450,8 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   // Multicast address (data buffer base within the multicast mapping)
   void* mc_addr_{nullptr};
   ncclComm_t comm_{nullptr};
-#ifdef USE_ROCM
   uint64_t comm_generation_{0};
+#ifdef USE_ROCM
   bool device_api_support_{false};
 #endif
   friend class NCCLSymmetricMemory;
