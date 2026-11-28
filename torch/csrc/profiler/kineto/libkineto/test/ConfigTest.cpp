@@ -213,6 +213,13 @@ TEST(ParseTest, ProfileStartTime) {
   EXPECT_FALSE(cfg.parse(fmt::format("PROFILE_START_TIME = {}", tbad_ms)));
 }
 
+TEST(ParseTest, ActivitiesWarmupDuration) {
+  Config cfg;
+  EXPECT_EQ(cfg.activitiesWarmupDuration(), milliseconds(500));
+  EXPECT_TRUE(cfg.parse("ACTIVITIES_WARMUP_PERIOD_SECS=2"));
+  EXPECT_EQ(cfg.activitiesWarmupDuration(), seconds(2));
+}
+
 TEST(ParseTest, RequestTraceIds) {
   Config cfg;
   EXPECT_TRUE(cfg.parse("REQUEST_TRACE_ID=XYZ"));

@@ -134,7 +134,7 @@ class Config : public AbstractConfig {
     return activitiesMaxGpuBufferSize_;
   }
 
-  [[nodiscard]] std::chrono::seconds activitiesWarmupDuration() const {
+  [[nodiscard]] std::chrono::milliseconds activitiesWarmupDuration() const {
     return activitiesWarmupDuration_;
   }
 
@@ -363,7 +363,7 @@ class Config : public AbstractConfig {
   bool onDemand_{false};
 
   int64_t activitiesMaxGpuBufferSize_;
-  std::chrono::seconds activitiesWarmupDuration_;
+  std::chrono::milliseconds activitiesWarmupDuration_;
   int activitiesWarmupIterations_;
   bool activitiesCudaSyncWaitEvents_;
 

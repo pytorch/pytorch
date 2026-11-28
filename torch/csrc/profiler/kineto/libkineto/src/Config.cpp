@@ -43,7 +43,7 @@ constexpr std::chrono::milliseconds Config::kControllerIntervalMsecs;
 
 constexpr milliseconds kDefaultActivitiesProfileDurationMSecs(500);
 constexpr int64_t kDefaultActivitiesMaxGpuBufferSize(128LL * 1024 * 1024);
-constexpr seconds kDefaultActivitiesWarmupDurationSecs(5);
+constexpr milliseconds kDefaultActivitiesWarmupDurationMSecs(500);
 constexpr seconds kMaxRequestAge(10);
 constexpr seconds kDefaultOnDemandConfigUpdateIntervalSecs(5);
 // 3200000 is the default value set by CUPTI
@@ -267,7 +267,7 @@ Config::Config()
       activitiesLogFile_(defaultTraceFileName()),
       activitiesLogUrl_(fmt::format("file://{}", activitiesLogFile_)),
       activitiesMaxGpuBufferSize_(kDefaultActivitiesMaxGpuBufferSize),
-      activitiesWarmupDuration_(kDefaultActivitiesWarmupDurationSecs),
+      activitiesWarmupDuration_(kDefaultActivitiesWarmupDurationMSecs),
       activitiesWarmupIterations_(0),
       activitiesCudaSyncWaitEvents_(true),
       activitiesDuration_(kDefaultActivitiesProfileDurationMSecs),
@@ -540,7 +540,7 @@ void Config::printActivityProfilerConfig(std::ostream& s) const {
         s,
         "  Trace start time: {:%Y-%m-%d %H:%M:%S}\n"
         "  Trace duration: {}ms\n"
-        "  Warmup duration: {}s\n",
+        "  Warmup duration: {}ms\n",
         tm,
         activitiesDuration().count(),
         activitiesWarmupDuration().count());

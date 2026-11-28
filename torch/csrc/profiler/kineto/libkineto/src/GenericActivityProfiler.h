@@ -96,7 +96,7 @@ struct ConfigDerivedState final {
   std::chrono::time_point<std::chrono::system_clock> profileStartTime_;
   std::chrono::time_point<std::chrono::system_clock> profileEndTime_;
   std::chrono::milliseconds profileDuration_;
-  std::chrono::seconds profileWarmupDuration_;
+  std::chrono::milliseconds profileWarmupDuration_;
   int64_t profileStartIter_{-1};
   int64_t profileEndIter_{-1};
   bool profilingByIter_{false};
