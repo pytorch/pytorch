@@ -7970,6 +7970,38 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             expected_msg = "missing .* required positional argument: 'b'"
             self.assertRaisesRegex(Exception, expected_msg, caller, x)
 
+    @parametrize(
+        "new_defaults, expected_guard",
+        [
+            ((99, 2), r"len\([^)]*\.__defaults__\) == 1"),
+            (None, r"___check_type_id\([^,]*\.__defaults__,"),
+        ],
+    )
+    def test_pos_default_length_guard_hint(self, new_defaults, expected_guard):
+        reasons = []
+
+        def helper(a, b=2):
+            return a + b
+
+        def caller(x):
+            return x + helper(1)
+
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: reasons.append(failure.reason)
+        )(caller)
+        x = torch.ones(())
+        self.assertEqual(compiled(x), x + 3)
+        with patch.object(helper, "__defaults__", new_defaults):
+            if new_defaults is None:
+                self.assertRaises(TypeError, compiled, x)
+            else:
+                self.assertEqual(compiled(x), x + 3)
+
+        self.assertEqual(len(reasons), 1)
+        self.assertRegex(reasons[0], expected_guard)
+        self.assertIn("Dynamo used a positional default", reasons[0])
+        self.assertIn("count determines which parameter", reasons[0])
+
     def test_func_default_torch_args(self):
         """
         Tests other types of torch types as function default (size, dtype, device)
