@@ -238,4 +238,30 @@ TEST(TorchPyObjectConversion, NullPyObjectIsNotNone) {
   EXPECT_NE(std::strstr(message, "py_obj must not be null"), nullptr);
 }
 
+TEST(TorchPyObjectConversion, SequenceNoopErrorsWithoutLibtorchPython) {
+  int dummy = 0;
+  size_t size_out = 17;
+  expect_noop_error(torch_sequence_size_pyobject(&dummy, &size_out));
+  EXPECT_EQ(size_out, 17);
+
+  void* py_out = nullptr;
+  expect_noop_error(torch_sequence_get_item_pyobject(&dummy, 0, &py_out));
+  EXPECT_EQ(py_out, nullptr);
+  void* items[] = {&dummy};
+  expect_noop_error(torch_new_list_pyobject(items, 1, &py_out));
+  EXPECT_EQ(py_out, nullptr);
+  expect_noop_error(torch_decref_pyobject(&dummy));
+}
+
+TEST(TorchPyObjectConversion, ListItemsValidatedBeforePythonConversion) {
+  void* py_out = nullptr;
+  EXPECT_EQ(torch_new_list_pyobject(nullptr, 1, &py_out), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+  const char* message = torch_exception_get_what_without_backtrace();
+  ASSERT_NE(message, nullptr);
+  EXPECT_NE(
+      std::strstr(message, "items must not be null unless length is 0"),
+      nullptr);
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0

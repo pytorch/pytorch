@@ -458,6 +458,29 @@ torch_is_none_pyobject(void* py_obj, bool* ret);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_new_none_pyobject(void** ret); // returns new reference
 
+// Release one reference to py_obj, such as a new reference returned by another
+// *_pyobject shim.
+AOTI_TORCH_EXPORT AOTITorchError torch_decref_pyobject(void* py_obj);
+
+// Read the length of a Python list or tuple (subclasses included). Other
+// objects error.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_sequence_size_pyobject(void* py_obj, size_t* ret_size);
+
+// Return the item at index of a Python list or tuple. Errors if index is out of
+// range, which can happen if a list shrank after its length was read.
+AOTI_TORCH_EXPORT AOTITorchError torch_sequence_get_item_pyobject(
+    void* py_obj,
+    size_t index,
+    void** ret); // returns new reference
+
+// Build a Python list of items[0, length). The items are borrowed: the list
+// takes its own references, so the caller still owns and releases them.
+AOTI_TORCH_EXPORT AOTITorchError torch_new_list_pyobject(
+    void* const* items,
+    size_t length,
+    void** ret); // returns new reference
+
 // Reads an integer from at::cpu::get_cpu_capabilities().
 // Key is borrowed and NUL-terminated. Outputs are caller-owned.
 // A miss sets *ret_key_exists to false and leaves *ret_value unchanged.

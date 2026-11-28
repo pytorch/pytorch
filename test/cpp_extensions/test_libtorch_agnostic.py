@@ -6,6 +6,7 @@ import math
 import sysconfig
 import unittest
 import warnings
+import weakref
 from pathlib import Path
 
 import torch
@@ -911,6 +912,92 @@ class TestLibtorchAgnostic(TestCase):
         # An engaged value goes through the leaf conversion and its checks.
         with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
             roundtrip(1)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_list_roundtrip(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        interop = libtorch_agnostic._interop
+        # Lists and tuples are read; a list is always returned.
+        for values in ([], [1.5, 2], (1.5, -0.0)):
+            out = interop.double_list_roundtrip(values)
+            self.assertIs(type(out), list)
+            self.assertEqual(out, [float(v) for v in values])
+        self.assertEqual(interop.int64_arrayref_roundtrip((3, -1)), [3, -1])
+        bools = [True, False, True]
+        self.assertEqual(interop.bool_list_roundtrip(bools), bools)
+        nested = [["a"], [], ("b", "c")]
+        self.assertEqual(
+            interop.string_list_list_roundtrip(nested), [["a"], [], ["b", "c"]]
+        )
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_list_rejects(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.double_list_roundtrip
+        # No other iterables, and no broadcasting of a single value.
+        for value in ("ab", iter([1.0]), 1.0, None):
+            with self.assertRaisesRegex(RuntimeError, "expected list or tuple"):
+                roundtrip(value)
+        # Each element is converted with the leaf contract.
+        with self.assertRaisesRegex(RuntimeError, "expected float"):
+            roundtrip([1.0, "2"])
+        # Writing fails in the second inner list, after the first was built.
+        with self.assertRaisesRegex(UnicodeDecodeError, "invalid start byte"):
+            libtorch_agnostic._interop.string_list_list_roundtrip([["ok"], [b"\xff"]])
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_optional_tensor_list(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.optional_tensor_list_roundtrip
+        self.assertIsNone(roundtrip(None))
+        x = torch.randn(2, device=device)
+        out = roundtrip([x, None])
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0].data_ptr(), x.data_ptr())
+        self.assertIsNone(out[1])
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @skipIfTorchDynamo(
+        "Eager-only Tensor lifetime coverage; already exercised outside Dynamo"
+    )
+    def test_pyobject_list_failure_releases_elements(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.optional_tensor_list_roundtrip
+        x = torch.randn(2, device=device)
+        x_ref = weakref.ref(x)
+        values = [x, "not a tensor"]
+        with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
+            roundtrip(values)
+        # The Tensor converted before the failure, and the reference to it
+        # taken from the list, must have been released.
+        del x, values
+        gc.collect()
+        self.assertIsNone(x_ref())
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_list_mutated_during_conversion(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        values = []
+
+        class ClearingInt(int):
+            def __float__(self):
+                values.clear()
+                return 1.0
+
+        values.extend([ClearingInt(1), 2.0])
+        # The item being converted stays alive, and the shrunk list is caught.
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            libtorch_agnostic._interop.double_list_roundtrip(values)
 
     @skipIfTorchVersionLessThan(2, 16)
     @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
