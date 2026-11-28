@@ -213,6 +213,13 @@ def type_disallows_instantiation(obj_type: type) -> bool:
     return bool(obj_type.__flags__ & Py_TPFLAGS_DISALLOW_INSTANTIATION)
 
 
+def type_static_base(obj_type: type) -> type:
+    """Walk tp_base to the first non-heap type; its __new__ is safe to call on obj_type."""
+    while obj_type.__flags__ & Py_TPFLAGS_HEAPTYPE and obj_type.__base__:
+        obj_type = obj_type.__base__
+    return obj_type
+
+
 # PySequenceSlots
 type_implements_sq_item = partial(type_implements_sq_slot, slot=PySequenceSlots.SQ_ITEM)
 type_implements_sq_length = partial(
