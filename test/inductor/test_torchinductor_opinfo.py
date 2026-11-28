@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     isRocmArchAnyOf,
     MI200_ARCH,
     parametrize,
+    periodic,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1426,6 +1427,7 @@ if NEXTAFTER_IN_RANGE:
 
 
 @wrapper_noop_set_seed_decorator
+@periodic
 class TestInductorOpInfo(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
