@@ -7,6 +7,7 @@ import math
 import os
 import sys
 import time as _time
+from itertools import chain
 from typing import Any, cast
 
 import numpy as np
@@ -1231,12 +1232,18 @@ def _merge_annotation_metadata(
     return json.dumps(merged) if merged else None
 
 
+def _csr_offsets(rows: list, /) -> np.ndarray:
+    offsets = np.fromiter(
+        chain((0,), map(len, rows)), dtype=np.int64, count=len(rows) + 1
+    )
+    np.cumsum(offsets, out=offsets)
+    return offsets
+
+
 def _lists_to_csr(lists: list, dtype) -> tuple:
-    """Flatten a list-of-lists into a CSR: an int32 offsets array (length n + 1) and a flat
+    """Flatten a list-of-lists into a CSR: an int64 offsets array (length n + 1) and a flat
     values array of ``dtype``; slice i is values[offsets[i]:offsets[i + 1]]."""
-    lengths = np.fromiter((len(x) for x in lists), dtype=np.int32, count=len(lists))
-    offsets = np.zeros(len(lists) + 1, dtype=np.int32)
-    np.cumsum(lengths, out=offsets[1:])
+    offsets = _csr_offsets(lists)
     flat = np.fromiter(
         (v for x in lists for v in x), dtype=dtype, count=int(offsets[-1])
     )
@@ -1324,7 +1331,7 @@ def _assign_render_event_ids(render_columns: dict, graph_deps: dict) -> tuple | 
             )
         wait_offsets, wait_ids = _lists_to_csr(wait_lists, np.uint64)
     else:
-        wait_offsets = np.zeros(n + 1, dtype=np.int32)
+        wait_offsets = np.zeros(n + 1, dtype=np.int64)
         wait_ids = np.empty(0, dtype=np.uint64)
     return event_id, corr_to_event_ids, wait_offsets, wait_ids
 
@@ -1510,7 +1517,7 @@ def _build_render_stages(
     ]
     launch = (*dims, kernel_iid, launch_args)
     arg_names = [(iid, name) for iid, name, _g in _COMPUTE_ARGS]
-    # CSR of the per-row spread blobs (offsets int32 length n+1 + concatenated bytes;
+    # CSR of the per-row spread blobs (offsets int64 length n+1 + concatenated bytes;
     # empty slice = nothing to spread), mirroring the CPU json_anno column. The native encoder
     # spreads each blob's top-level fields onto the render stage as extra_data.
     meta_l = [b for sub in meta_p for b in sub]
@@ -1518,11 +1525,7 @@ def _build_render_stages(
         b"" if b is None else (b if isinstance(b, bytes) else b.encode())
         for b in meta_l
     ]
-    meta_offsets = np.zeros(len(meta_enc) + 1, dtype=np.int32)
-    np.cumsum(
-        np.fromiter((len(b) for b in meta_enc), dtype=np.int32, count=len(meta_enc)),
-        out=meta_offsets[1:],
-    )
+    meta_offsets = _csr_offsets(meta_enc)
     return (
         specs,
         [
@@ -1936,9 +1939,7 @@ def _window_to_pftrace(
             b"" if b is None else (b if isinstance(b, bytes) else b.encode())
             for b in blobs
         ]
-        lengths = np.fromiter((len(b) for b in enc), dtype=np.int32, count=len(enc))
-        offsets = np.zeros(len(enc) + 1, dtype=np.int32)
-        np.cumsum(lengths, out=offsets[1:])
+        offsets = _csr_offsets(enc)
         return (offsets, b"".join(enc))
 
     def add_group(

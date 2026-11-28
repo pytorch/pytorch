@@ -4690,6 +4690,152 @@ cuspy_core.enable_hes_early()
         self.assertIn("OK", p.stdout)
 
 
+@instantiate_parametrized_tests
+class TestCuspyPftrace(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @staticmethod
+    def _encode_csr(column, offsets, values, n=2):
+        import numpy as np
+
+        ts = np.arange(n, dtype=np.int64) + 1000
+        ids = np.ones(n, dtype=np.uint64)
+        group = [ts, ts + 10, ids, ids, [], [], [], [], None, None, None]
+        stages = [
+            ts,
+            ts + 10,
+            np.arange(1, n + 1, dtype=np.int64),
+            ts,
+            ids,
+            ids,
+            ids,
+            None,
+            None,
+        ]
+        render = [[], [], tuple(stages), [], None, None, None, None]
+        csr = (offsets, values)
+        if column == "json_annos":
+            group[7] = [csr]
+        elif column == "gpu_corr":
+            group[9] = csr
+        elif column == "event_wait":
+            stages[8] = csr
+            render[2] = tuple(stages)
+        else:
+            render[7] = csr
+        return gzip.decompress(
+            torch._C._profiler._cuspy.encode_pftrace(
+                0,
+                [(1, 0, True, 1, 1, "proc")],
+                ["op"],
+                [],
+                [tuple(group)],
+                tuple(render),
+            )
+        )
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_csr_offsets_overflow(self):
+        import numpy as np
+
+        from torch.profiler._cuspy.trace import _csr_offsets
+
+        offsets = _csr_offsets([range(2**31 - 1), range(8), range(0)])
+        self.assertEqual(offsets.dtype, np.dtype(np.int64))
+        self.assertEqual(offsets.tolist(), [0, 2**31 - 1, 2**31 + 7, 2**31 + 7])
+
+    @unittest.skipIf(
+        try_import("torch.profiler._cuspy._cupti_stubs") is None,
+        "requires native .pftrace support",
+    )
+    @parametrize("column", ["json_annos", "gpu_corr", "event_wait", "render metadata"])
+    @parametrize("dtype", ["int32", "int64"])
+    @parametrize("n", [0, 2])
+    @parametrize("layout", ["contiguous", "unaligned", "strided"])
+    def test_pftrace_csr_valid(self, column, dtype, n, layout):
+        import numpy as np
+
+        if column in ("json_annos", "render metadata"):
+            blobs = [b'{"csr_a":1}', b'{"csr_b":2}'][:n]
+            offsets = np.array(
+                [0] + list(np.cumsum([len(b) for b in blobs])), dtype=dtype
+            )
+            values = b"".join(blobs)
+        else:
+            offsets = np.arange(n + 1, dtype=dtype)
+            values = np.array([123, 456][:n], dtype=np.int64)
+        if layout == "unaligned":
+            aligned = offsets
+            offsets = np.ndarray(
+                aligned.shape,
+                dtype=aligned.dtype,
+                buffer=bytearray(aligned.nbytes + 1),
+                offset=1,
+            )
+            offsets[:] = aligned
+        elif layout == "strided":
+            offsets = np.repeat(offsets, 2)[::2]
+        raw = self._encode_csr(column, offsets, values, n)
+        packets = [v for fn, _wt, v in _pb_fields(raw) if fn == 1]
+        if column == "render metadata":
+            expected = {
+                i + 1: {f"csr_{name}": str(i + 1)}
+                for i, name in enumerate(["a", "b"][:n])
+            }
+            self.assertEqual(_pftrace_render_stage_extra(packets), expected)
+        elif column == "json_annos":
+            events = [v for p in packets for fn, _wt, v in _pb_fields(p) if fn == 11]
+            annotations = [
+                [
+                    {fn: v for fn, _wt, v in _pb_fields(a)}
+                    for fn, _wt, a in _pb_fields(e)
+                    if fn == 4
+                ]
+                for e in events
+                if any(fn == 4 for fn, _wt, _v in _pb_fields(e))
+            ]
+            self.assertEqual(
+                annotations, [[{10: b"csr_a", 4: 1}], [{10: b"csr_b", 4: 2}]][:n]
+            )
+        elif column == "event_wait":
+            stages = [v for p in packets for fn, _wt, v in _pb_fields(p) if fn == 53]
+            waits = [[v for fn, _wt, v in _pb_fields(s) if fn == 18] for s in stages]
+            self.assertEqual(waits, [[v] for v in values.tolist()])
+        else:
+            events = [v for p in packets for fn, _wt, v in _pb_fields(p) if fn == 11]
+            corrs = [v for e in events for fn, _wt, v in _pb_fields(e) if fn == 3000]
+            submitted = [[v for fn, _wt, v in _pb_fields(c) if fn == 1] for c in corrs]
+            self.assertEqual(submitted, [[v] for v in values.tolist()])
+
+    @parametrize("column", ["json_annos", "gpu_corr", "event_wait", "render metadata"])
+    @parametrize(
+        "offsets, error",
+        [
+            ([], r"n \+ 1"),
+            ([0, 1], r"n \+ 1"),
+            ([0, 1, 2, 3], r"n \+ 1"),
+            ([[0, 1, 2]], "one-dimensional"),
+            ([1, 1, 2], "start at zero"),
+            ([-2147483638, -2147483631, -2147483624], "start at zero"),
+            ([0, -1, 2], "non-decreasing"),
+            ([0, 3, 2], "non-decreasing"),
+            ([0, 1, 1], "data length"),
+            ([0, 1, 3], "data length"),
+            ([0, 1, 2**32 + 2], "data length"),
+        ],
+    )
+    def test_pftrace_csr_invalid(self, column, offsets, error):
+        import numpy as np
+
+        values = (
+            b"{}"
+            if column in ("json_annos", "render metadata")
+            else np.ones(2, dtype=np.int64)
+        )
+        with self.assertRaisesRegex(ValueError, f"{column}.*{error}"):
+            self._encode_csr(column, np.array(offsets, dtype=np.int64), values)
+
+
 class TestCuspyNative(TestCase):
     """Cuspy's native buffer-pool / v2-record-layout callbacks driven directly
     via ctypes -- pure C++, no CUDA/cupti-python."""

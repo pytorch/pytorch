@@ -1996,7 +1996,9 @@ avoid_32bit_indexing_guards: bool = False
 # made while generating it. Choices made before that keep the example's hints, e.g.
 # Reduction.num_splits at lowering and the memory-coalescing analysis that ranks
 # tilings. If the example inputs already exceed int32, only the 64-bit kernel is built,
-# as without this flag.
+# as without this flag. Unbacked sizes, which have no hint to guard on, already get one
+# 64-bit kernel with no guard; for them, this adds the second compile to get 32-bit
+# speed when the sizes fit.
 # So far covers Triton pointwise, reduction and combo (foreach) kernels, except combo
 # kernels with combo_kernel_per_subkernel_blocks.
 # Takes precedence over avoid_32bit_indexing_guards for the kernels it covers;
@@ -2685,6 +2687,8 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+    # Intel XPU mm templates (mm_xpu_persistent, mm_xpu_non_persistent) for BF16/FP16.
+    enable_xpu_mm_templates = os.environ.get("ENABLE_XPU_MM_TEMPLATES", "1") == "1"
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
