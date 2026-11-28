@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
 from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
@@ -28,10 +28,6 @@ if has_triton():
     # NameError('tl is not defined')
     import triton
     import triton.language as tl
-
-
-def compile_with_ac(f, memory_budget):
-    return torch.compile(f, backend="aot_eager_decomp_partition")
 
 
 def get_act_mem(f):
@@ -74,6 +70,7 @@ def get_mem_and_flops(f, memory_budget=None):
         return round(get_act_mem(f), 1), get_bw_flops(f)
 
 
+@unittest.skipUnless(HAS_TRITON and not TEST_WITH_ROCM, "Requires Triton without ROCm")
 class MemoryBudgetTestDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -426,12 +423,8 @@ class MemoryBudgetTestDevice(TestCase):
         self.assertEqual(flops, eager_flops)
 
 
-instantiate_device_type_tests(
-    MemoryBudgetTestDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
-)
+instantiate_device_type_tests(MemoryBudgetTestDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
-    # I'm using the accelerator memory allocator to verify memory allocations
-    if HAS_GPU_AND_TRITON and not TEST_WITH_ROCM:
-        run_tests()
+    run_tests()
