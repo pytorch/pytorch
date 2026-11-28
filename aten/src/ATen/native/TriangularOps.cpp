@@ -148,11 +148,15 @@ void compute_triu_tril(const Tensor& self, int64_t k, const Tensor &result) {
   Tensor self_c;
   std::tie(inplace_update, self_c) = checkTrilTriuBatchContiguous(self, inplace_op);
 
+  // apply_triu_tril steps between matrices with a single batch stride, so an
+  // out= tensor whose batch dims are not contiguous is computed in a temporary.
   Tensor result_c;
   if (inplace_op && !inplace_update) {
     result_c = at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  } else {
+  } else if (inplace_op) {
     result_c = result;
+  } else {
+    result_c = std::get<1>(checkTrilTriuBatchContiguous(result, /*allow_zero_stride=*/false));
   }
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
@@ -166,7 +170,7 @@ void compute_triu_tril(const Tensor& self, int64_t k, const Tensor &result) {
         apply_triu_tril<scalar_t>(result_c, self_c, inplace_op && inplace_update, k, Triangle::upper);
       });
 
-  if (inplace_op && !inplace_update) {
+  if (!result_c.is_alias_of(result)) {
     result.copy_(result_c);
   }
 }
