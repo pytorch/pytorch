@@ -175,7 +175,11 @@ class _TensorTrackingMode(TorchDispatchMode):
 
     def _track_inputs(self, values: object) -> None:
         for v in tree_iter(values):
-            if not isinstance(v, Tensor) or v.data_ptr() == 0:
+            if (
+                not isinstance(v, Tensor)
+                or v.numel() == 0
+                or not torch._C._has_storage_data(v)
+            ):
                 continue
             if v.is_cuda or v.is_pinned():
                 self._tracker.track_external_input(v)
