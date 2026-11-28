@@ -1896,9 +1896,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self, cls, consumer_type, key, mapping_first
     ):
         token = DictionaryToken(payload=["saved"])
-        unused = cls(
-            key_alias=_Mode.FAST, constructor_alias=token, lock=threading.Lock()
-        )
+        unused = cls(key=_Mode.FAST, token=token, lock=threading.Lock())
         keyed = {key: "saved"}
         scope = {"unused": unused, "keyed": keyed, "consumer": consumer_type(token)}
         if not mapping_first:
@@ -1908,8 +1906,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         token = consumer["token"] if isinstance(consumer, dict) else consumer.token
         self.assertEqual(token.payload, ["saved"])
         self.assertEqual(saved["keyed"], keyed)
-        self.assertIs(saved["unused"]["constructor_alias"], token)
-        self.assertIs(saved["unused"]["key_alias"], _Mode.FAST)
+        self.assertIs(saved["unused"]["token"], token)
+        self.assertIs(saved["unused"]["key"], _Mode.FAST)
         self.assertIsInstance(saved["unused"]["lock"], _Missing)
 
     def test_by_value_function_keeps_constructor_mapping(self):
@@ -1927,32 +1925,28 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertEqual(item.loss(), i)
 
     def test_mapping_proxy_keeps_only_its_copied_state(self):
-        token = DictionaryToken(value=3, payload=["required"])
-        cfg = {"token": token}
-        backing = ClassReducedDict(token)
+        cfg = {"token": DictionaryToken(value=3)}
+        backing = ClassReducedDict(cfg["token"])
         backing["loss"] = _MappingCallable(cfg)
         orphan = DictionaryToken()
-        unused = {"lock": threading.Lock(), "token": orphan}
+        unused = backing.private = {"lock": threading.Lock(), "token": orphan}
         unused["self"] = unused
-        backing.private = unused
         proxy = unused["proxy"] = types.MappingProxyType(backing)
-        scope = dict(cfg=cfg, unused=unused, get=proxy.get, proxy=proxy, alias=unused)
+        scope = dict(fn=_MappingCallable(proxy), cfg=cfg, get=proxy.get)
+        scope["unused"] = scope["alias"] = unused
         scope["orphan"] = types.MappingProxyType({"consumer": TokenConsumer(orphan)})
         # Registered globals outside the saved scopes are not pickle roots.
-        holder = ReducedHolder(2, {})
-        holder.cfg = unused
-        saved = self._roundtrip_pruned(scope, [cfg, unused], {"helper": holder})
-        self.assertIs(saved["get"].__self__, saved["proxy"])
+        saved = self._roundtrip_pruned(scope, [cfg, unused], ReducedHolder(2, unused))
+        self.assertIs(saved["get"].__self__, saved["fn"].cfg)
         self.assertIs(saved["get"]("loss").cfg, saved["cfg"])
-        self.assertIs(saved["unused"], saved["alias"])
-        self.assertIs(saved["unused"]["self"], saved["unused"])
+        self.assertTrue(saved["alias"] is saved["unused"] is saved["unused"]["self"])
         self.assertIsInstance(saved["orphan"]["consumer"].token, DictionaryToken)
         for name in ("lock", "token"):
             self.assertIsInstance(saved["unused"][name], _Missing)
 
     @parametrize("proxy_first", [False, True])
     @parametrize("source", ["list", "instance", "dict"])
-    def test_mapping_proxy_copy_needs_pruned_state(self, proxy_first, source):
+    def test_mapping_proxy_custom_copy(self, proxy_first, source):
         token = DictionaryToken(value=3, payload=["required"])
         slot = 0 if source == "list" else "token"
         items = [token] if source == "list" else {slot: token}
@@ -1961,15 +1955,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         backing.copy = mock.Mock(
             side_effect=lambda: {"nested": [consumer], "rank": backing.copy.call_count}
         )
-        proxy = types.MappingProxyType(backing)
-        scope = {"items": items, "proxy": proxy}
-        if source == "instance":
-            scope["token"] = token
-        if proxy_first:
-            scope = {"proxy": proxy, **scope}
+        inputs = {"items": items} | ({"token": token} if source == "instance" else {})
+        proxy = {"proxy": types.MappingProxyType(backing)}
+        scope = proxy | inputs if proxy_first else inputs | proxy
+        consumer.ignored = types.MappingProxyType(backing)
         scope["second"] = types.MappingProxyType(backing)
-        dictionaries = [] if source == "list" else [items]
-        saved = self._roundtrip_pruned(scope, dictionaries)
+        saved = self._roundtrip_pruned(scope, [] if source == "list" else [items])
         self.assertEqual((saved["proxy"]["rank"], saved["second"]["rank"]), (1, 2))
         self.assertEqual(backing.copy.call_count, 2)
         restored = saved["proxy"]["nested"][0]
@@ -1979,25 +1970,37 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertIs(restored.token, saved["items"][slot])
             self.assertEqual(restored.token.payload, ["required"])
 
+    @parametrize("proxy_first", [False, True])
+    @parametrize("late", [False, True])
+    def test_mapping_proxy_constructor_order(self, proxy_first, late):
+        token = DictionaryToken(payload=["required"])
+        proxy = types.MappingProxyType({"consumer": _PayloadConsumer(token)})
+        pairs = (("proxy", _CopyregToItself() if late else proxy), ("token", token))
+        scope = dict(pairs if proxy_first else reversed(pairs))
+
+        reducers = {_CopyregToItself: lambda _: (dict, (proxy,))}
+        with mock.patch.dict(copyreg.dispatch_table, reducers):
+            if late and not proxy_first:
+                path = r"DictionaryToken at L\['token'\] after its state was pruned"
+                with self.assertRaisesRegex(PackageError, path):
+                    self._roundtrip_pruned(scope, [])
+                return
+            saved = self._roundtrip_pruned(scope, [])
+        self.assertIs(saved["proxy"]["consumer"].token, saved["token"])
+
     def test_setstate_fallback_runs_only_during_load(self):
-        calls = []
-
-        def lookup(obj, name):
-            calls.append(name)
-            raise error(name)
-
         obj, buf = RaisingNameProxy(), io.BytesIO()
-        obj.scale = 3
-        with mock.patch.object(RaisingNameProxy, "__getattr__", lookup):
-            error = AttributeError
-            GuardsStatePickler({id(obj): obj}, {}, {}, {}, buf).dump(obj)
-            self.assertNotIn("__setstate__", calls)
-            load_guards_state(buf.getvalue())
-            self.assertEqual(calls.count("__setstate__"), 1)
-            error = RuntimeError
-            with self.assertRaisesRegex(error, "__setstate__"):
+        obj.lock = threading.Lock()
+        calls = RaisingNameProxy.probed
+        calls.clear()
+        GuardsStatePickler({id(obj): obj}, {}, {}, {}, buf).dump(obj)
+        self.assertNotIn("__setstate__", calls)
+        self.assertIsInstance(load_guards_state(buf.getvalue()).lock, _Missing)
+        self.assertEqual(calls.count("__setstate__"), 1)
+        error = RuntimeError("__setstate__")
+        with mock.patch.object(RaisingNameProxy, "__getattr__", side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, "__setstate__"):
                 load_guards_state(buf.getvalue())
-            self.assertEqual(calls.count("__setstate__"), 2)
 
     def test_state_traversal_bypasses_user_attribute_lookup_and_equality(self):
         class Meta(type):
@@ -3676,29 +3679,34 @@ class TestGuardSerialization(TestGuardSerializationBase):
     @parametrize("holder_type", [RaisingNameProxy, _DelegatingModule])
     def test_saved_constructor_and_annotation_aliases(self, holder_type):
         def fn(x, holder, items=()):
-            return x + holder.weight + (items[1] if items else 0)
+            return x + holder.weight + len(holder.cfg) + (items[1] if items else 0)
 
         first, second, direct = (DictionaryToken() for _ in range(3))
         holder = holder_type()
         holder.weight, holder.stages, holder.lock = 3, [0, 1], threading.Lock()
         holder.cb = TokenConsumer(first).__reduce_ex__
-        inputs = dict(x=torch.ones(1), holder=holder)
+        holder.cfg = {"cb": holder.cb}
+        args = dict(x=torch.ones(1), holder=holder)
+        kinds = ("CONSTANT_MATCH", "FX_ANNOTATION")
         with torch.fx.traceback.annotate({"stages": holder.stages}):
-            kinds = ("CONSTANT_MATCH", "FX_ANNOTATION")
-            check = self._roundtrip_checks(kinds, fn, inputs)
-        check(inputs, False)
+            check = self._roundtrip_checks(kinds, fn, args)
+        check(args, False)
         graph = load_guards_state(self._cached_guards_state).output_graph
         saved = graph.local_scope["holder"]
         self.assertIs(saved.stages, graph.fx_annotation["stages"])
         self.assertEqual(saved.stages, [0, 1])
         self.assertIsInstance(saved.lock, _Missing)
-        inputs["items"] = [first, 5, second, direct]
+        args["items"] = [first, 5, second, direct, ReducedHolder(2, {"h": holder})]
         annotation = {"consumer": TokenConsumer(second), "token": direct}
         with torch.fx.traceback.annotate(annotation):
-            self._test_serialization("CONSTANT_MATCH", fn, **inputs)
+            self._test_serialization(("CONSTANT_MATCH", "DICT_KEYS_MATCH"), fn, **args)
         graph = load_guards_state(self._cached_guards_state).output_graph
         items = graph.local_scope["items"]
-        self.assertIs(graph.local_scope["holder"].cb.__self__.token, items[0])
+        saved = graph.local_scope["holder"]
+        self.assertIs(saved.cb, saved.cfg["cb"])
+        self.assertIs(saved.cb.__self__.token, items[0])
+        self.assertIsInstance(saved.lock, _Missing)
+        self.assertIsInstance(items[-1], _Missing)
         self.assertIs(graph.fx_annotation["consumer"].token, items[2])
         self.assertIs(graph.fx_annotation["token"], items[3])
 
@@ -3795,43 +3803,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         cfg["extra"] = 1
         check(inputs, False)
 
-    def test_local_dictionary_prunes_bystanders_and_keeps_callback_alias(self):
-        def fn(x, cfg, keyed, items, parent):
-            offset = cfg["inner"]["guarded"] + cfg["opts"][0]
-            return x + offset + len(tuple(keyed)) + items[1] + len(tuple(parent.cfg))
-
-        cfg = {
-            "inner": {"guarded": 3, "lock": threading.Lock()},
-            "alias": _Mode.FAST,
-            "opts": [4, threading.Lock()],
-        }
-        # The discarded list element is the only constructor that could read
-        # the shared mapping in full. Its presence must not retain either lock.
-        helper = ReducedHolder(2, {})
-        helper.cfg = cfg
-        parent = _SetStateModule()
-        # The walk pops cb first, while its dictionary alias still looks prunable.
-        parent.cfg = {"cb": global_func}
-        parent.cb = global_func
-        items = [helper, 5, global_func, global_add]
-        inputs = dict(
-            x=torch.ones(1), cfg=cfg, keyed={_Mode.FAST: 0}, items=items, parent=parent
-        )
-        kinds = ("DICT_KEYS_MATCH", "CONSTANT_MATCH")
-        check = self._roundtrip_checks(kinds, fn, inputs)
-        scope = self._saved_scope
-        self.assertIs(scope["parent"].cb, global_func)
-        self.assertIs(scope["parent"].cfg["cb"], global_func)
-        for item in (scope["items"][0], scope["items"][3]):
-            self.assertIsInstance(item, _Missing)
-        saved = scope["cfg"]
-        self.assertIs(saved["alias"], next(iter(scope["keyed"])))
-        check({**inputs, "keyed": {_Mode.SLOW: 0}}, False)
-        self.assertIsInstance(saved["inner"]["lock"], _Missing)
-        self.assertIsInstance(saved["opts"][1], _Missing)
-        cfg["inner"]["guarded"] += 1
-        check(inputs, False)
-
     @parametrize(
         "consumer_type",
         [_PayloadConsumer, _NewConsumer, _RegisteredConsumer, _DynamicConsumer],
@@ -3841,8 +3812,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return x + consumer.scale + token.scale
 
         token = _PayloadToken(scale=3, payload=["required"])
-        consumer = consumer_type(token)
-        inputs = {"x": torch.ones(1), "consumer": consumer, "token": token}
+        inputs = dict(x=torch.ones(1), consumer=consumer_type(token), token=token)
         reducers = {_RegisteredConsumer: lambda obj: (type(obj), (obj.token,))}
         with mock.patch.dict(copyreg.dispatch_table, reducers):
             check = self._roundtrip_checks("CONSTANT_MATCH", fn, inputs)

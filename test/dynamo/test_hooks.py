@@ -359,7 +359,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
 
         opt, cnt = self.compile_counted(lambda x, module: module(x))
         x = torch.ones(1)
-
         if global_hook:
             self.addCleanup(hook_api.register_module_forward_pre_hook(hook).remove)
 
@@ -378,24 +377,25 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             check(not with_kwargs)
         self.assertEqual(cnt.frame_count, 2)
 
-    def test_hook_flag_mutated_before_dispatch(self):
+    def test_hook_flag_mutated_between_dispatches(self):
         def fn(x, module):
+            before = module(x)
             module._forward_hooks_with_kwargs.clear()
-            return module(x)
+            return before, module(x)
 
         compiled, counter = self.compile_counted(fn)
         for _ in range(2):
             module = torch.nn.Identity()
             module.register_forward_hook(hook_arity, with_kwargs=True)
-            self.assertEqual(compiled(torch.ones(1), module), torch.ones(1) * 10 + 1)
+            x = torch.ones(1)
+            self.assertEqual(compiled(x, module), (x * 10 + 2, x * 10 + 1))
             self.assertFalse(module._forward_hooks_with_kwargs)
         self.assertEqual(counter.frame_count, 1)
 
     def test_cross_module_hook_flags_fallback(self):
-        def fn(x, first, second):
-            return x + sum(
-                key in second._forward_hooks_with_kwargs for key in first._forward_hooks
-            )
+        def fn(x, src, dst):
+            flags = dst._forward_hooks_with_kwargs
+            return x + sum(k in flags for k in src._forward_hooks)
 
         first, second = torch.nn.Identity(), torch.nn.Identity()
         first._forward_hooks[1] = identity_forward_hook
@@ -411,9 +411,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     def test_hook_membership_guard_objects(self, suppressed):
         def prime(ctx):
             tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
-            module = ctx.get_local(
-                "module"
-            )._i_will_not_complain_if_bc_breaks_VariableTracker()
+            module = tx.symbolic_locals["module"]
             hooks = generic_getattr(tx, module, "_forward_hooks")
             flags = generic_getattr(tx, module, "_forward_hooks_with_kwargs")
             with torch._guards.TracingContext.get().guards_context.skip_guard_install():
@@ -641,10 +639,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             subtest(lambda d: 1 in ({0: True}.keys() | d), name="view_union"),
             subtest(lambda d: 1 in {1: True}.keys() & d, name="view_intersection"),
             subtest(lambda d: 1 in d | {0: True}.keys(), name="reverse_view_union"),
-            subtest(
-                lambda d: 1 in pytree.tree_map(lambda value: True, d),
-                name="tree_map",
-            ),
+            subtest(lambda d: 1 in pytree.tree_map(lambda _: True, d), name="tree_map"),
             subtest(
                 lambda d: 1 in pytree.tree_map_with_path(lambda path, value: True, d),
                 name="tree_map_with_path",
