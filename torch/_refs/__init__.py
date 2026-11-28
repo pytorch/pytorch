@@ -5828,9 +5828,12 @@ def linspace(
     # We implement torch.lerp without performing rg / (steps - 1) explicitly
     # With this we get out[0] == start, out[-1] == end
     step = (end - start) / (steps - 1)
+    # Match native CUDA implementation which uses integer division for the midpoint
+    # to ensure consistent behavior with eager CUDA and avoid numerical mismatch
+    # at odd step counts (e.g., steps=21: integer 21/2=10, float 21/2=10.5)
     # pyrefly: ignore [no-matching-overload]
     out = torch.where(
-        rg < steps / 2,
+        rg < steps // 2,
         start + step * cast_rg(rg),  # type: ignore[arg-type,operator]
         end - step * cast_rg((steps - 1) - rg),  # type: ignore[arg-type,operator]
     )
