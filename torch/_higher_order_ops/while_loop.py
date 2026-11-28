@@ -6,6 +6,7 @@ from collections.abc import Callable
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._C._functorch import TransformType
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
     do_auto_functionalize_v2,
@@ -14,6 +15,7 @@ from torch._higher_order_ops.utils import (
     _check_alias_and_mutation,
     _fake_mode_handler,
     _find_or_create_fake_mode,
+    _functorch_grad_rule,
     _maybe_run_with_interpreter,
     autograd_not_implemented,
     check_meta_consistency,
@@ -360,6 +362,9 @@ def _create_unbacked_symint(
     )
     with ctx:
         return fake_mode.shape_env.create_unbacked_symint()
+
+
+while_loop_op.py_impl(TransformType.Grad)(_functorch_grad_rule(while_loop_op))
 
 
 @while_loop_op.py_impl(ProxyTorchDispatchMode)

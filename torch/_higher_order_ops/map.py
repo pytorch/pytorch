@@ -14,6 +14,7 @@ from torch._higher_order_ops.auto_functionalize import (
 )
 from torch._higher_order_ops.utils import (
     _from_fun,
+    _functorch_grad_rule,
     _maybe_run_with_interpreter,
     _stack_pytree,
     _unstack_pytree,
@@ -352,6 +353,9 @@ def map_autograd(f, xs, pos_args, mutated_arg_indices=""):
     num_mapped_args = len(xs)
     flat_out = MapAutogradOp.apply(f, num_mapped_args, *xs, *pos_args)
     return flat_out
+
+
+map_impl.py_impl(torch._C._functorch.TransformType.Grad)(_functorch_grad_rule(map_impl))
 
 
 @map_impl.py_impl(ProxyTorchDispatchMode)

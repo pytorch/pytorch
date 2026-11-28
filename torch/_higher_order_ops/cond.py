@@ -18,6 +18,7 @@ from torch._C._functorch import (
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _fake_mode_handler,
+    _functorch_grad_rule,
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
@@ -384,6 +385,9 @@ def cond_autograd(pred, true_fn, false_fn, operands):
         false_fn,
         *operands,
     )
+
+
+cond_op.py_impl(torch._C._functorch.TransformType.Grad)(_functorch_grad_rule(cond_op))
 
 
 @cond_op.py_impl(ProxyTorchDispatchMode)

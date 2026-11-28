@@ -4,7 +4,7 @@ import functools
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, overload, TypeVar
+from typing import Any, Concatenate, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -39,6 +39,10 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+
+if TYPE_CHECKING:
+    from torch._functorch.pyfunctorch import GradInterpreter
 
 
 @dataclass
@@ -259,6 +263,107 @@ def _maybe_compile_and_run_fn(fn, *args):
         return _hop_compile_and_call(fn, args)
     else:
         return fn(*args)
+
+
+def _functorch_grad_rule(
+    op: HigherOrderOperator,
+) -> Callable[Concatenate["GradInterpreter", ...], object]:
+    """
+    TransformType.Grad rule of a HOP, used by torch.func.grad and torch.func.vjp.
+    Like the Grad rule of autograd.Function (see generate_single_level_function in
+    torch/_functorch/autograd_function.py), it records a single node at the grad level.
+    Its forward runs the HOP one level lower, where the HOP's autograd implementation
+    records the graph, and its backward differentiates that graph. Other transforms and
+    autograd outside of the grad level cannot see that graph, so the rule raises when
+    they are involved. Furthermore, only first-order gradients are supported.
+    """
+    from torch._C._functorch import _unwrap_for_grad, is_dead_tensor_wrapper
+    from torch._functorch.eager_transforms import (
+        _autograd_grad,
+        _create_differentiable,
+        _wrap_all_tensors,
+    )
+    from torch._functorch.pyfunctorch import retrieve_all_functorch_interpreters
+    from torch._functorch.utils import enable_single_level_autograd_function
+
+    prefix = f"torch.func.grad/vjp over {op.name()}"
+
+    def grad_rule(interpreter: "GradInterpreter", *args: Any, **kwargs: Any) -> object:
+        level = interpreter.level()
+        flat, spec = pytree.tree_flatten((args, kwargs))
+        tensors = [a for a in flat if isinstance(a, torch.Tensor)]
+        inputs: list[torch.Tensor] = []
+        outputs: list[torch.Tensor] = []
+        out_spec = None
+        # Created at the grad level, so it is dead once the level has exited
+        token = torch.empty(0)
+
+        def forward(*tensors):
+            nonlocal out_spec
+            with interpreter.lower(), torch.enable_grad():
+                unwrapped = [_unwrap_for_grad(t, level).detach() for t in tensors]
+                inputs[:] = [
+                    _create_differentiable(x) if t.requires_grad else x
+                    for x, t in zip(unwrapped, tensors)
+                ]
+                it = iter(inputs)
+                leaves = [next(it) if isinstance(a, torch.Tensor) else a for a in flat]
+                op_args, op_kwargs = pytree.tree_unflatten(leaves, spec)
+                outputs[:], out_spec = pytree.tree_flatten(op(*op_args, **op_kwargs))
+                # Only backward uses the graph recorded at the lower level
+                out = pytree.tree_map_only(torch.Tensor, torch.Tensor.detach, outputs)
+            return _wrap_all_tensors(tuple(out), level)
+
+        def backward(ctx, *grads):
+            # torch.func.vjp runs the backward after the grad level has exited
+            current = torch._C._functorch.peek_interpreter_stack()
+            alive = not is_dead_tensor_wrapper(token)
+            in_transform = current is not None and current.level() == level and alive
+            if current is not None and not in_transform:
+                raise RuntimeError(
+                    f"{prefix} does not support computing gradients inside another torch.func transform"
+                )
+            wrt = [x for x in inputs if x.requires_grad]
+            retain = torch._C._autograd._get_current_graph_task_keep_graph()
+            with interpreter.lower() if in_transform else nullcontext():
+                grads = [_unwrap_for_grad(g, level) for g in grads]
+                res = _autograd_grad(outputs, wrt, grads, retain, create_graph=False)
+            res = _wrap_all_tensors(res, level) if in_transform else res
+            if in_transform and torch.is_grad_enabled():
+                # Differentiating res again at the grad level reaches this error
+                msg = f"{prefix} supports only first-order gradients"
+                err_fn = torch._C._functions.DelayedError(msg, len(res) + len(tensors))
+                res = err_fn(*res, *tensors)[: len(res)]
+            res = iter(res)
+            return tuple(next(res) if x.requires_grad else None for x in inputs)
+
+        if retrieve_all_functorch_interpreters()[:-1]:
+            raise RuntimeError(
+                f"{prefix} is not supported inside another torch.func transform"
+            )
+        unwrapped = (_unwrap_for_grad(t, level) for t in tensors)
+        if interpreter.prev_grad_mode() and any(t.requires_grad for t in unwrapped):
+            raise RuntimeError(
+                f"{prefix} does not support inputs that require grad outside of the transform"
+            )
+
+        HopGrad = type(
+            f"{op.name()}Grad",
+            (torch.autograd.function._SingleLevelFunction,),
+            {
+                "forward": staticmethod(forward),
+                "setup_context": staticmethod(lambda ctx, inputs, output: None),
+                "backward": staticmethod(backward),
+            },
+        )
+        with enable_single_level_autograd_function():
+            # pyrefly: ignore [missing-attribute]
+            flat_out = HopGrad.apply(*tensors)
+        if out_spec is None:
+            raise AssertionError(f"The forward of {op.name()} did not run")
+        return pytree.tree_unflatten(list(flat_out), out_spec)
+
+    return grad_rule
 
 
 def reenter_make_fx(fn, subgraph_decomp_table=None):
@@ -585,12 +690,12 @@ def _collect_fake_inputs(inputs):
             if hasattr(inp, "meta"):
                 val = inp.meta["example_value"]
                 if isinstance(val, torch.Tensor):
-                    if torch._C._functorch.is_batchedtensor(
+                    if torch._C._functorch.is_functorch_wrapped_tensor(
                         val
                     ) or torch._C._functorch.is_functionaltensor(val):
-                        # This case is for batched or functional tensors
+                        # This case is for batched, grad-tracking or functional tensors
                         # Unwrap the tensors
-                        while torch._C._functorch.is_batchedtensor(
+                        while torch._C._functorch.is_functorch_wrapped_tensor(
                             val
                         ) or torch._C._functorch.is_functionaltensor(val):
                             val = torch._C._functorch.get_unwrapped(val)
