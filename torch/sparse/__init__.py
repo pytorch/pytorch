@@ -231,7 +231,7 @@ def sum(input: Tensor, dim: DimOrDims = None, dtype: DType | None = None) -> Ten
     Args:
         input (Tensor): the input sparse tensor
         dim (int or tuple of ints): a dimension or a list of dimensions to reduce. Default: reduce
-            over all dims.
+            over all dims. An empty list or tuple also reduces over all dims.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned Tensor.
             Default: dtype of :attr:`input`.
 
@@ -272,6 +272,8 @@ def sum(input: Tensor, dim: DimOrDims = None, dtype: DType | None = None) -> Ten
         >>> torch.sparse.sum(S, [0, 1, 3])
         tensor([-2.6596, -1.1450])
     """
+    if isinstance(dim, (list, tuple)) and len(dim) == 0:
+        dim = None
     if dtype is None:
         if dim is not None:
             return torch._sparse_sum(input, dim)
