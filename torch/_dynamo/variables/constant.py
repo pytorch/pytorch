@@ -19,7 +19,7 @@ import torch
 from torch._dynamo.source import GetItemSource
 
 from .. import graph_break_hints, variables
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented, unimplemented_identity
 from ..utils import common_constant_types, np, unpack_iterable
 from .base import (
     GetSet,
@@ -713,12 +713,7 @@ class FakeIdVariable(VariableTracker):
 
     def guard_as_python_constant(self) -> int:
         if self.kind is FakeValueKind.HASH:
-            unimplemented(
-                gb_type="Conversion of compile-time-only hash value",
-                context="identity-dependent hash",
-                explanation="An identity-dependent hash cannot be converted to a constant result.",
-                hints=["Compute the hash outside the compiled function."],
-            )
+            unimplemented_identity("Conversion of compile-time-only hash value")
         return self.value
 
     def is_python_constant(self) -> bool:
@@ -731,11 +726,6 @@ class FakeIdVariable(VariableTracker):
         return hash(self.value), True
 
     def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
-        # Only ID values reach this conversion. HASH values refuse it.
-        # Mirrors int.__repr__: the value is an int, so str()/repr() yield its
-        # decimal string. The distinct-but-compile-time-only identity carried by
-        # the fake id is preserved in the resulting string, matching how
-        # FakeIdVariable already resolves same-kind id()/hash() comparisons.
         return ConstantVariable.create(repr(self.guard_as_python_constant()))
 
     def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:

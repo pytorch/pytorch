@@ -74,6 +74,7 @@ from ..utils import (
     unpack_iterable,
 )
 from .base import (
+    _flags_from_ml_flags,
     AsPythonConstantNotImplementedError,
     AttributeMutationExisting,
     GetSet,
@@ -81,6 +82,7 @@ from .base import (
     load_pending_mutation,
     Member,
     Method,
+    MethodFlags,
     NO_SUCH_SUBOBJ,
     readonly_setter,
     VariableTracker,
@@ -122,6 +124,8 @@ class SuperVariable(VariableTracker):
         self,
         typevar: VariableTracker,
         objvar: VariableTracker | None = None,
+        *,
+        direct_method: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -134,6 +138,7 @@ class SuperVariable(VariableTracker):
         # to the current function where super() is called from (self for regular method,
         # cls for a classmethod)
         self.objvar = objvar
+        self.direct_method = direct_method
 
     @staticmethod
     def create(typevar: VariableTracker, objvar: VariableTracker) -> "SuperVariable":
@@ -277,6 +282,21 @@ class SuperVariable(VariableTracker):
         if is_wrapper_or_member_descriptor(inner_fn) and inner_fn.__objclass__ is dict:
             if isinstance(obj := self.objvar, variables.OrderedDictVariable):
                 if isinstance(inner_fn, types.MethodDescriptorType):
+                    if self.direct_method:
+                        flags = _flags_from_ml_flags(dict, name)
+                        if (
+                            (args and flags & MethodFlags.NOARGS)
+                            or (flags & MethodFlags.O and len(args) != 1)
+                            or (kwargs and not flags & MethodFlags.KEYWORDS)
+                        ):
+                            unimplemented(
+                                gb_type="Specialization-dependent super method error",
+                                context=f"dict.{name}",
+                                explanation="CPython specialization can change the receiver named in the argument error.",
+                                hints=["Bind the method before calling it."],
+                                skip_frame=True,
+                                apply_to_code=False,
+                            )
                     result = obj.call_method_descriptor(
                         tx, inner_fn, args, kwargs, bound=True
                     )
@@ -2223,6 +2243,13 @@ class StringFormatVariable(VariableTracker):
             except (ValueError, TypeError, IndexError, KeyError, AttributeError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return variables.ConstantVariable.create(result)
+        if not tx.output.has_deferred_tensor_format:
+
+            def record_tensor(var: VariableTracker) -> None:
+                if isinstance(var, variables.TensorVariable):
+                    tx.output.has_deferred_tensor_format = True
+
+            VariableTracker.visit(record_tensor, (sym_args, sym_kwargs))
         return cls(format_string, list(sym_args), dict(sym_kwargs))
 
     def __init__(
