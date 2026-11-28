@@ -1123,9 +1123,24 @@ static PyObject * THPVariable___eq__(PyObject* self_, PyObject* args, PyObject* 
 // Used to implement binary arithmetic operators
 template <PyObject* (*Func)(PyObject*, PyObject*, PyObject*)>
 static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, PyObject* kwargs) {
-
+  bool preserve_type_error = false;
+  if constexpr (Func == THPVariable_mul) {
+    if (THPVariable_CheckExact(self) && PyTuple_GET_SIZE(args) == 1) {
+      PyObject* other = PyTuple_GET_ITEM(args, 0);
+      auto* sequence = Py_TYPE(other)->tp_as_sequence;
+      auto* number = Py_TYPE(other)->tp_as_number;
+      if (sequence && sequence->sq_repeat && (!number || !number->nb_multiply) &&
+          !check_has_torch_function(self) && !check_has_torch_function(other)) {
+        HANDLE_TH_ERRORS
+        const auto& self_ = THPVariable_Unpack(self);
+        // CPython's sequence repeat fallback would replace the multiplication error with an index error.
+        preserve_type_error = !isIntegralType(self_.scalar_type(), /*includeBool=*/true) || self_.sym_numel() != 1;
+        END_HANDLE_TH_ERRORS
+      }
+    }
+  }
   PyObject* ret = Func(self, args, kwargs);
-  if (!ret && PyErr_ExceptionMatches(PyExc_TypeError)) {
+  if (!ret && PyErr_ExceptionMatches(PyExc_TypeError) && !preserve_type_error) {
     PyErr_Clear();
     Py_INCREF(Py_NotImplemented);
     ret = Py_NotImplemented;
