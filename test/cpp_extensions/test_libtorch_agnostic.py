@@ -820,7 +820,7 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 16)
-    @parametrize("value", [1.5, -0.0, math.inf, -math.inf, math.nan, 3])
+    @parametrize("value", [1.5, -0.0, math.inf, -math.inf, math.nan, 3, 1e300])
     def test_pyobject_double_roundtrip(self, device, value):
         import libtorch_agn_2_16 as libtorch_agnostic
 
@@ -828,6 +828,16 @@ class TestLibtorchAgnostic(TestCase):
         self.assertIs(type(out), float)
         self.assertEqual(out, float(value))
         self.assertEqual(math.copysign(1.0, out), math.copysign(1.0, value))
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_double_error_message(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        self.assertIn(
+            "int too large to convert to float",
+            libtorch_agnostic._interop.double_error_message(10**400),
+        )
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 16)
