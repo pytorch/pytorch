@@ -3797,8 +3797,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(res.sort().values.long(), torch.arange(n, device=device))
 
 
-    @largeTensorTest("10GB", "cpu")
-    @largeTensorTest("40GB", "cuda")
+    @largeTensorTest(lambda self, device: "10GB" if self.device_type == "cpu" else "40GB")
     @slowTest
     def test_randperm_large(self, device):
         # Test even distribution where rand32 might produce skewed "uniform" distribution
