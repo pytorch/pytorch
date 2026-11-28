@@ -25,7 +25,7 @@ from torch._C import FileCheck
 from torch._dynamo import config
 from torch._dynamo.backends.distributed import DDPOptimizer
 from torch._dynamo.comptime import comptime
-from torch._dynamo.device_interface import CudaInterface, DeviceGuard
+from torch._dynamo.device_interface import CudaInterface, DeviceGuard, XpuInterface
 from torch._dynamo.testing import collect_results, CompileCounter
 from torch._dynamo.utils import same
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
@@ -41,7 +41,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    TEST_MULTIGPU,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
@@ -52,9 +51,14 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import skipIfTorchInductor, skipIfXpu
+from torch.testing._internal.common_utils import (
+    skipIfTorchInductor,
+    skipIfXpu,
+    TEST_MULTIACCELERATOR,
+    TEST_XPU,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 try:
@@ -78,6 +82,7 @@ _skipIf_transformers_ge_5_2 = unittest.skipIf(
 
 
 log = logging.getLogger(__name__)
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 def reset_rng_state():
@@ -300,9 +305,6 @@ def get_hf_bert(rank):
     except ImportError as e:
         raise unittest.SkipTest("Unable to import transformers") from e
 
-    device_type = (
-        acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-    )
     batch_size, max_length, config, device = (
         4,
         512,
@@ -378,7 +380,7 @@ def run_hf_bert_ddp(self, model, inputs, backend):
 
 class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
     @_expectedFailureIf_transformers_ge_5_2
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     @unittest.skipIf(
@@ -809,51 +811,55 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 
 # These tests aren't really distributed, but need multiple GPUs to run
 class TestMultiGPU(torch._inductor.test_case.TestCase):
-    @unittest.skipIf(not TEST_MULTIGPU, "Requires multiple gpus")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_cuda__exchange_device(self):
+        device_mod = torch.get_device_module(device_type)
+
         def fn(x):
-            dev = torch.cuda._exchange_device(0)
+            dev = device_mod._exchange_device(0)
             x = torch.sin(x + dev)
-            torch.cuda._maybe_exchange_device(dev)
+            device_mod._maybe_exchange_device(dev)
             return x
 
-        initial_dev = torch.cuda.current_device()
-        x = torch.randn((2, 2), device="cuda")
+        initial_dev = torch.accelerator.current_device_index()
+        x = torch.randn((2, 2), device=f"{device_type}")
         ref = fn(x)
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
         # make sure we recompile if device changes
-        with torch.cuda.device(1):
+        with torch.accelerator.device_index(1):
             ref = fn(x)
             res = opt_fn(x)
         self.assertEqual(ref, res)
-        self.assertEqual(torch.cuda.current_device(), initial_dev)
+        self.assertEqual(torch.accelerator.current_device_index(), initial_dev)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_device_guard(self):
-        current_device = torch.cuda.current_device()
+        current_device = torch.accelerator.current_device_index()
 
-        device_guard = DeviceGuard(CudaInterface, 1)
+        device_guard = (
+            DeviceGuard(XpuInterface, 1) if TEST_XPU else DeviceGuard(CudaInterface, 1)
+        )
 
         with device_guard as _:
-            self.assertEqual(torch.cuda.current_device(), 1)
+            self.assertEqual(torch.accelerator.current_device_index(), 1)
             self.assertEqual(device_guard.prev_idx, 0)
             self.assertEqual(device_guard.idx, 1)
 
-        self.assertEqual(torch.cuda.current_device(), current_device)
+        self.assertEqual(torch.accelerator.current_device_index(), current_device)
         self.assertEqual(device_guard.prev_idx, 0)
         self.assertEqual(device_guard.idx, 1)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_new_event_api(self) -> None:
         from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
         from torch._dynamo.variables.streams import new_event
 
         def event_generation_backend(gm, *args, **kwargs):  # type: ignore[no-untyped-def]
             e0_ind = new_event()
-            with torch.Stream(device="cuda:1"):
+            with torch.Stream(device=f"{device_type}:1"):
                 get_external_object_by_index(e0_ind).record()
             e1_ind = new_event()
             self.assertNotEqual(e0_ind, e1_ind)
@@ -871,41 +877,43 @@ class TestMultiGPU(torch._inductor.test_case.TestCase):
         def fn(x):
             return x + 1
 
-        fn(torch.ones(2, 2, device="cuda:0"))
+        fn(torch.ones(2, 2, device=f"{device_type}:0"))
 
-    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_get_current_stream_return_no_index(self):
         def fn(x, s0, s1):
             with s1:
                 with s0:
-                    s = torch.accelerator.current_stream(torch.device("cuda"))
+                    s = torch.accelerator.current_stream(torch.device(device_type))
             return s
 
-        s0 = torch.Stream(device="cuda:0")
-        s1 = torch.Stream(device="cuda:1")
+        s0 = torch.Stream(device=f"{device_type}:0")
+        s1 = torch.Stream(device=f"{device_type}:1")
         inp = (torch.ones(2, 2) + 1, s0, s1)
         fn_opt = torch.compile(fn, fullgraph=True)
         s_act = fn_opt(*inp)
         s_exp = fn(*inp)
         self.assertEqual(s_act, s_exp)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_get_current_stream_return_different_device(self):
         def fn(x, s0, s1):
             with s1:
                 with s0:
-                    s = torch.accelerator.current_stream(torch.device("cuda:1"))
+                    s = torch.accelerator.current_stream(
+                        torch.device(f"{device_type}:1")
+                    )
             return s
 
-        s0 = torch.Stream(device="cuda:0")
-        s1 = torch.Stream(device="cuda:1")
+        s0 = torch.Stream(device=f"{device_type}:0")
+        s1 = torch.Stream(device=f"{device_type}:1")
         inp = (torch.ones(2, 2) + 1, s0, s1)
         fn_opt = torch.compile(fn, fullgraph=True)
         s_act = fn_opt(*inp)
         s_exp = fn(*inp)
         self.assertEqual(s_act, s_exp)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_gpu_current_device(self):
         def fn(x):
             y = torch.empty(
@@ -927,7 +935,7 @@ class TestMultiGPU(torch._inductor.test_case.TestCase):
                 self.assertEqual(opt_fn(x), fn(x))
                 self.assertEqual(counter.frame_count, 2)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_symint_as_device_kwarg_multi_gpu(self):
         def fn(rank):
             # -2 to make device id smaller for easier testing on CI
@@ -962,36 +970,38 @@ class TestMultiGPU(torch._inductor.test_case.TestCase):
     @torch._inductor.config.patch("fx_graph_cache", True)
     @torch._inductor.config.patch("fx_graph_remote_cache", False)
     @torch._functorch.config.patch({"enable_autograd_cache": True})
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_constant_tensor_device_guards(self):
         """
         Usually, when there are example inputs, the device index of the inputs
         is sufficient to make sure we don't cache hit with the results from different
-        cuda devices.
-        When the input has no arguments, we still need to have the cuda
+        devices.
+        When the input has no arguments, we still need to have the
         device index in the cache key.
         """
 
+        device_mod = torch.get_device_module(device_type)
+
         @torch.compile(backend="inductor")
         def f():
-            y = torch.tensor([5], device="cuda")
+            y = torch.tensor([5], device=device_type)
             return (y,)
 
-        with torch.cuda._DeviceGuard(0):
-            torch.cuda.set_device(0)
+        with device_mod._DeviceGuard(0):
+            device_mod.set_device(0)
             result = f()
-            self.assertEqual(result[0].device, torch.device("cuda:0"))
+            self.assertEqual(result[0].device, torch.device(f"{device_type}:0"))
 
         self._clear_dynamo_and_codecache()
 
-        with torch.cuda._DeviceGuard(1):
-            torch.cuda.set_device(1)
+        with device_mod._DeviceGuard(1):
+            device_mod.set_device(1)
             result = f()
-            self.assertEqual(result[0].device, torch.device("cuda:1"))
+            self.assertEqual(result[0].device, torch.device(f"{device_type}:1"))
 
 
 class TestMultiGPUDevice(torch._inductor.test_case.TestCase):
-    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_gpu_set_device(self, device):
         def fn():
             a = torch.ones(2, device=device)
@@ -1024,10 +1034,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     sparingly for integration tests.
     """
 
-    device_type = (
-        acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-    )
-
     @skip_if_lt_x_gpu(2)
     @config.patch(optimize_ddp=False, enable_compiler_collectives=True)
     def test_ddp_baseline_aot_eager_multiprocess(self):
@@ -1035,7 +1041,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.rank, self.world_size, rdvz_file=self.file_name
         ):
             self.assertFalse(config.optimize_ddp)
-            m, inputs, correct_outputs = get_model(f"{self.device_type}:{self.rank}")
+            m, inputs, correct_outputs = get_model(f"{device_type}:{self.rank}")
             m = DDP(m, device_ids=[self.rank])
             m = torch.compile(m, backend="aot_eager")
             outputs = m(inputs)
@@ -1052,7 +1058,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @_skipIf_transformers_ge_5_2
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp_inductor(self):
@@ -1061,7 +1067,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @_skipIf_transformers_ge_5_2
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp_inductor_static_graph(self):
@@ -1090,7 +1096,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         self._test_hf_bert_aot_eager(static_graph=True)
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @config.patch(optimize_ddp=False, enable_compiler_collectives=True)
     def test_ddp_activation_checkpointing(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -1113,7 +1119,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.rank, self.world_size, rdvz_file=self.file_name
         ):
             self.assertFalse(config.optimize_ddp)
-            model = MyModel().to(device=self.device_type)
+            model = MyModel().to(device=device_type)
 
             # Activation checkpointing for Linear layers.
             non_reentrant_wrapper = functools.partial(
@@ -1128,7 +1134,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             )
 
             model = DDP(model)
-            x = torch.randn(10, 64).to(self.device_type)
+            x = torch.randn(10, 64).to(device_type)
             correct_outputs = model(x)
 
             opt_model = torch.compile(model)
@@ -1142,14 +1148,14 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.rank, self.world_size, rdvz_file=self.file_name
         ):
             # Test with basic FSDP wrapping (outer wrap around whole model)
-            m, inputs, correct_outputs = get_model(f"{self.device_type}:{self.rank}")
+            m, inputs, correct_outputs = get_model(f"{device_type}:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
             fsdp_m = torch.compile(fsdp_m, backend="aot_eager")
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
             # Test with recursive wrapping, nested FSDP around each Linear
-            m, inputs, correct_outputs = get_model(f"{self.device_type}:{self.rank}")
+            m, inputs, correct_outputs = get_model(f"{device_type}:{self.rank}")
             fsdp_m = FSDP(
                 m,
                 auto_wrap_policy=functools.partial(
@@ -1162,8 +1168,10 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(correct_outputs, outputs))
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
+    @skipIfXpu(
+        msg="Inductor cudagraph trees are not supported on XPU, https://github.com/intel/torch-xpu-ops/issues/5338"
+    )
     def test_ddp_optimizer_cudagraph(self):
         class Net(nn.Module):
             def __init__(self):
@@ -1197,7 +1205,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             for _ in range(10):
                 optimizer.zero_grad()
-                data = torch.randn((16, 46, 8, 8), dtype=torch.float32, device="cuda")
+                data = torch.randn(
+                    (16, 46, 8, 8), dtype=torch.float32, device=device_type
+                )
                 opt_net(data).sum().backward()
 
             # 2 fwd and 2 bwd graph such that 4 graphs in total
@@ -1219,7 +1229,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             counters.clear()
             m, inputs, correct_outputs = get_mutating_model(
-                f"{self.device_type}:{self.rank}"
+                f"{device_type}:{self.rank}"
             )
             fsdp_m = FSDP(m, use_orig_params=True)
             fsdp_m = torch.compile(fsdp_m, backend="eager", fullgraph=False)
@@ -1240,7 +1250,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             counters.clear()
             m, inputs, correct_outputs = get_forced_getattr_module(
-                f"{self.device_type}:{self.rank}"
+                f"{device_type}:{self.rank}"
             )
             fsdp_m = FSDP(m, use_orig_params=True)
             fsdp_m = torch.compile(fsdp_m, backend="eager", fullgraph=False)
@@ -1249,20 +1259,20 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     def test_fsdp_inductor(self):
         with _dynamo_dist_per_rank_init(
             self.rank, self.world_size, rdvz_file=self.file_name
         ):
             # Test with basic FSDP wrapping (outer wrap around whole model)
-            m, inputs, correct_outputs = get_model(f"{self.device_type}:{self.rank}")
+            m, inputs, correct_outputs = get_model(f"{device_type}:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
             fsdp_m = torch.compile(fsdp_m, backend="inductor")
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
             # Test with recursive wrapping, nested FSDP around each Linear
-            m, inputs, correct_outputs = get_model(f"{self.device_type}:{self.rank}")
+            m, inputs, correct_outputs = get_model(f"{device_type}:{self.rank}")
             fsdp_m = FSDP(
                 m,
                 auto_wrap_policy=functools.partial(
@@ -1276,13 +1286,13 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     def test_fsdp_activation_checkpointing(self):
         with _dynamo_dist_per_rank_init(
             self.rank, self.world_size, rdvz_file=self.file_name
         ):
             model, inputs = get_toy_model_for_activation_checkpointing(
-                f"{self.device_type}:{self.rank}"
+                f"{device_type}:{self.rank}"
             )
             is_inner = lambda module: isinstance(module, ToyInnerModel)  # noqa: E731
             wrap_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_inner)
@@ -1300,7 +1310,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @_expectedFailureIf_transformers_ge_5_2
     @import_transformers_or_skip()
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
@@ -1348,7 +1358,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @_expectedFailureIf_transformers_ge_5_2
     @import_transformers_or_skip()
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
@@ -1446,7 +1456,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_automatic_dynamic_scalar(self):
         with _dynamo_dist_per_rank_init(
@@ -1455,7 +1465,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             torch._dynamo.utils.clear_compilation_metrics()
 
             # TODO: This should be possible to do inside the function, but
-            device = f"{self.device_type}:{self.rank}"
+            device = f"{device_type}:{self.rank}"
 
             @torch.compile()
             def f(x, y):
@@ -1476,7 +1486,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_automatic_dynamic_speculation_divergence(self):
         with _dynamo_dist_per_rank_init(
@@ -1508,7 +1518,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_graph_break_empty_graph_still_collective(self):
         with _dynamo_dist_per_rank_init(
@@ -1542,7 +1552,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_dim_mismatch(self):
         with _dynamo_dist_per_rank_init(
@@ -1573,7 +1583,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_missing_source(self):
         with _dynamo_dist_per_rank_init(
@@ -1597,7 +1607,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_scalar_missing_source(self):
         with _dynamo_dist_per_rank_init(
@@ -1621,7 +1631,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_type_mismatch(self):
         with _dynamo_dist_per_rank_init(
@@ -1659,7 +1669,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res:
                 self.assertGreaterEqual(r, 1, "each rank should compile at least once")
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @enable_guard_collectives()
     def test_guard_collective(self):
         with _dynamo_dist_per_rank_init(
@@ -1686,7 +1696,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @patch.object(torch._dynamo.config, "enable_compiler_collectives", True)
     @patch.object(torch._inductor.config, "max_autotune_gemm", True)
     @patch.object(torch._inductor.config, "distributed_max_autotune_gemm", True)
@@ -1724,7 +1734,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             print(f"Result from {self.rank} is {f(a, b, c)}")
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     @patch.object(torch._dynamo.config, "enable_compiler_collectives", True)
     @patch.object(torch._inductor.config, "max_autotune_gemm", True)
     @patch.object(torch._inductor.config, "distributed_max_autotune_gemm", True)
@@ -1800,14 +1810,14 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res_after[1:]:
                 self.assertEqual(res_after[0], r)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     def test_get_pg_attr(self):
         with _dynamo_dist_per_rank_init(
             self.rank, self.world_size, rdvz_file=self.file_name
         ):
             pg = dist.distributed_c10d._get_default_group()
 
-            device = f"{self.device_type}:{self.rank}"
+            device = f"{device_type}:{self.rank}"
 
             @torch.compile(fullgraph=True)
             def f(x):
@@ -1834,7 +1844,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         ):
             torch._dynamo.utils.clear_compilation_metrics()
 
-            device = f"{self.device_type}:{self.rank}"
+            device = f"{device_type}:{self.rank}"
 
             pg = dist.distributed_c10d._get_default_group()
 
@@ -1894,7 +1904,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         ):
             torch._dynamo.utils.clear_compilation_metrics()
 
-            device = f"{self.device_type}:{self.rank}"
+            device = f"{device_type}:{self.rank}"
 
             pg = dist.distributed_c10d._get_default_group()
 
@@ -1946,10 +1956,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     Test simple things here since they are simpler to debug.
     Use TestMultiProc for things that really need to run on multiple nodes
     """
-
-    device_type = (
-        acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-    )
 
     def get_model(
         self, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5, ctx_manager=None
@@ -2147,7 +2153,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 self.assertEqual(len(break_reasons), 4)
                 self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
 
-    @skipIfXpu  # XPU device doesn't support flex_attention yet.
     @patch.object(config, "optimize_ddp", True)
     def test_compiled_flex_attention_full_model_ddp(self):
         class Model(torch.nn.Module):
@@ -2195,15 +2200,14 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         D = 64
 
         model = Model(S, H, D)
-        model.to(self.device_type)
+        model.to(device_type)
         model = torch.compile(model)
         model = DDP(model, device_ids=self.device_ids)
 
-        hidden_states = torch.randn(B, S, H * D).to(self.device_type)
+        hidden_states = torch.randn(B, S, H * D).to(device_type)
         model(hidden_states)
         torch.accelerator.synchronize()
 
-    @skipIfXpu  # XPU device doesn't support flex_attention yet.
     @patch.object(config, "optimize_ddp", True)
     def test_compiled_flex_attention_local_ddp(self):
         class Model(torch.nn.Module):
@@ -2251,16 +2255,16 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         D = 64
 
         model = Model(S, H, D)
-        model.to(self.device_type)
+        model.to(device_type)
         model = torch.compile(model)
         model = DDP(model, device_ids=self.device_ids)
 
-        hidden_states = torch.randn(B, S, H * D).to(self.device_type)
+        hidden_states = torch.randn(B, S, H * D).to(device_type)
         model(hidden_states)
         torch.accelerator.synchronize()
 
     @patch.object(config, "optimize_ddp", True)
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     def test_graph_split_inductor(self):
         if not config.optimize_ddp:
             raise AssertionError("Expected config.optimize_ddp to be True")
@@ -2331,18 +2335,18 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             opt_outputs = opt_fn(inputs)
             self.assertTrue(same(correct_outputs, opt_outputs))
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     def test_graph_split_inductor_layout_optimizations_training(self):
         self._test_graph_split_inductor_layout_optimizations_impl(
             contextlib.nullcontext
         )
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     def test_graph_split_inductor_layout_optimizations_inference(self):
         self._test_graph_split_inductor_layout_optimizations_impl(torch.no_grad)
 
     @patch.object(config, "optimize_ddp", True)
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     def test_graph_split_inductor_transpose(self):
         if not config.optimize_ddp:
             raise AssertionError("Expected config.optimize_ddp to be True")
@@ -2434,7 +2438,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_gpu_and_triton
     def test_empty_graph_inductor(self):
         def fn():
             get_world_size = torch.distributed.distributed_c10d.get_world_size()
@@ -2509,9 +2513,9 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 a = torch.cos(a)
                 return a
 
-        mod = MockModule().to(self.device_type)
+        mod = MockModule().to(device_type)
         mod = DDP(mod, bucket_cap_mb=1)
-        x = torch.randn(N, N, device=self.device_type, requires_grad=True)
+        x = torch.randn(N, N, device=device_type, requires_grad=True)
         args = (x,)
 
         backend = "aot_eager"
@@ -2552,9 +2556,9 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                     self.linear2, x, use_reentrant=False, context_fn=context_fn
                 )
 
-        mod = MockModule().to(self.device_type)
+        mod = MockModule().to(device_type)
         mod = DDP(mod, bucket_cap_mb=1)
-        x = torch.randn(N, N, device=self.device_type, requires_grad=True)
+        x = torch.randn(N, N, device=device_type, requires_grad=True)
 
         compiled = torch.compile(mod, backend="aot_eager")
         compiled(x).sum().backward()
@@ -2562,7 +2566,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     def test_fsdp_orig_params_assert(self):
         # Test with basic FSDP wrapping (outer wrap around whole model)
-        m, inputs, _ = get_model(f"{self.device_type}:{self.rank}")
+        m, inputs, _ = get_model(f"{device_type}:{self.rank}")
         fsdp_m = FSDP(m, use_orig_params=False)
         # Test is that this function call does not throw an exception.
         fsdp_m = torch.compile(fsdp_m)
@@ -2608,7 +2612,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
                     return out
 
-            device = f"{self.device_type}:{self.rank}"
+            device = f"{device_type}:{self.rank}"
             m = ToyModel(
                 in_feat=10,
                 hidden_feat=5000,
@@ -2655,7 +2659,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         torch._dynamo.reset()
 
-        device = f"{self.device_type}:{self.rank}"
+        device = f"{device_type}:{self.rank}"
         m = ToyModel(
             in_feat=10,
             hidden_feat=5000,
@@ -2696,11 +2700,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         class DuplicateModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                device_type = (
-                    acc.type
-                    if (acc := torch.accelerator.current_accelerator())
-                    else "cpu"
-                )
+
                 self._param = torch.randn((3,), device=device_type)
                 self._buf = torch.nn.Buffer(
                     torch.randn((3,), requires_grad=False, device=device_type)
@@ -2716,7 +2716,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model = DuplicateModule()
         fsdp_model = FSDP(copy.deepcopy(model), use_orig_params=True)
         fsdp_model = torch.compile(fsdp_model, backend="aot_eager")
-        inp = torch.randn((2, 3), device=self.device_type)
+        inp = torch.randn((2, 3), device=device_type)
         local_out = model(inp)
         fsdp_out = fsdp_model(inp)
         self.assertEqual(local_out, fsdp_out)
@@ -2733,11 +2733,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         class BufModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                device_type = (
-                    acc.type
-                    if (acc := torch.accelerator.current_accelerator())
-                    else "cpu"
-                )
+
                 self._buf = nn.Buffer(
                     torch.randn((3,), requires_grad=False, device=device_type)
                 )
@@ -2748,11 +2744,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         class Model(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                device_type = (
-                    acc.type
-                    if (acc := torch.accelerator.current_accelerator())
-                    else "cpu"
-                )
+
                 self._param = nn.Parameter(torch.randn((1,), device=device_type))
                 self._buf_module = BufModule()
                 # Share the buffer, meaning same tensor but different source
@@ -2770,7 +2762,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         fsdp_model = FSDP(Model(), use_orig_params=True)
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         fsdp_model = torch.compile(fsdp_model, backend=cnt)
-        inp = torch.randn((2, 3), device=self.device_type)
+        inp = torch.randn((2, 3), device=device_type)
         for _ in range(15):
             fsdp_model(inp)
         # Check for no recompiles (if there were incorrect de-dup guards, then
@@ -2789,11 +2781,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 super().__init__()
                 self._use_self = use_self
                 torch.manual_seed(42)  # force `_param` to be deterministic
-                device_type = (
-                    acc.type
-                    if (acc := torch.accelerator.current_accelerator())
-                    else "cpu"
-                )
+
                 self._param = nn.Parameter(torch.randn((3,), device=device_type))
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -2809,7 +2797,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 return x + y
 
         model = ModuleWithStaticMethod(False)
-        x = torch.randn((2, 3), device=self.device_type)
+        x = torch.randn((2, 3), device=device_type)
         ref_out = model(x)
         test_outs: list[torch.Tensor] = []
 
