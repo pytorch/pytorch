@@ -298,6 +298,12 @@ def vmap_impl(
         in_dims, args, func
     )
 
+    if chunk_size is not None and batch_size == 0:
+        # Chunking an empty batch produces no chunks to run, so there is no
+        # output to flatten/concatenate. The unchunked path already returns
+        # the correctly-shaped empty output; fall through to it.
+        chunk_size = None
+
     if chunk_size is not None:
         chunks_flat_args = _get_chunked_inputs(
             flat_args, flat_in_dims, batch_size, chunk_size
