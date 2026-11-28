@@ -511,6 +511,11 @@ class _KinetoProfile:
                     if not isinstance(config, PerformanceMetricsConfig)
                 ]
             profiler_extensions = _get_profiler_extensions(profiler_configs)
+            for key, attr in ((
+                    ("TRACE_OUTPUT_DIR", "trace_output_dir"),
+                    ("TRACE_WORKER_NAME", "trace_worker_name"))):
+                if val := getattr(self, attr, ""):
+                    profiler_extensions[key] = val
             if "PERFORMANCE_METRICS" in profiler_extensions:
                 profiler_extensions["PERFORMANCE_METRICS_DEVICE_ID"] = str(
                     torch.cuda.current_device()
@@ -1148,6 +1153,10 @@ def tensorboard_trace_handler(
             use_python_export=use_python_export,
         )
 
+    # Expose output dir / worker name for custom backends: profile.__init__ picks
+    # them up and prepare_trace forwards them as TRACE_* Kineto config keys.
+    handler_fn.trace_output_dir = dir_name
+    handler_fn.trace_worker_name = worker_name or ""
     return handler_fn
 
 
@@ -1353,6 +1362,10 @@ class profile(_KinetoProfile):
             self.schedule = _default_schedule_fn
             self.record_steps = False
         self.on_trace_ready = on_trace_ready
+        # Output dir / worker name hints from the handler (optional attributes),
+        # forwarded to custom backends via TRACE_* keys in prepare_trace.
+        self.trace_output_dir = getattr(on_trace_ready, "trace_output_dir", "")
+        self.trace_worker_name = getattr(on_trace_ready, "trace_worker_name", "")
         self.step_num = 0
         self.step_rec_fn: prof.record_function | None = None
 
