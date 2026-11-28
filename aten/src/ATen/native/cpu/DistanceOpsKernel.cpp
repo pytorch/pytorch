@@ -319,9 +319,12 @@ struct Dist {
     }
   }
 
-  // Assumes self is nonempty, contiguous, and 2D and dist is also contiguous
+  // Assumes self is contiguous and 2D and dist is also contiguous
   static void apply_backward_pdist(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
     result.fill_(0);
+    if (self.size(0) == 0) {
+      return;
+    }
     if (p == 0.0) {
     } else if (p == 1.0) {
       run_backward_parallel_pdist<odist_calc<Vec>>(result, grad, self, p, dist);
