@@ -6410,6 +6410,17 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                     else:
                         self.assertEqual(B_left, X @ A_adj)
 
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @parametrize("partial", [False, True])
+    def test_linalg_lu_solve_out_aliases_factor(self, device, partial):
+        A = torch.tensor([[2., 1.], [1., 3.]], dtype=torch.double, device=device)
+        LU, pivots = torch.linalg.lu_factor(A)
+        out = LU[:, :1] if partial else LU
+        B = torch.ones_like(out)
+        torch.linalg.lu_solve(LU, pivots, B, out=out)
+        self.assertEqual(A @ out, B)
+
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_lu_unpack_check_input(self, device, dtype):
