@@ -20,20 +20,15 @@ from torch._inductor.select_algorithm import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, get_num_sms, TMA_DESCRIPTOR_SIZE
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
-    skipIfXpu,
     subtest,
     TEST_XPU,
     xfailIf,
 )
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_CPU,
-    HAS_GPU,
-    HAS_GPU_AND_TRITON,
-)
+from torch.testing._internal.inductor_utils import HAS_CPU, requires_triton
 from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
 
@@ -109,7 +104,7 @@ class BaseLookupTableTest(TestCase):
     def create_mock_mm_kernel_inputs(
         self,
         shapes: list[tuple[int, ...]] | None = None,
-        device: torch.device = torch.device(GPU_TYPE),
+        device: torch.device = torch.device("cuda"),
         dtype: torch.dtype = torch.float32,
         scalars: dict[str, float | int] | None = None,
     ) -> MockMMKernelInputs:
@@ -170,14 +165,12 @@ class BaseLookupTableTest(TestCase):
         return config
 
 
-@unittest.skipIf(not HAS_GPU_AND_TRITON, "GPU not available")
-@instantiate_parametrized_tests
-class TestLookupTable(BaseLookupTableTest):
-    """Consolidated tests for lookup table functionality"""
+class TestLookupTableAccelerator(BaseLookupTableTest):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_lookup_mismatch(self):
+    def test_lookup_mismatch(self, device):
         """Test mismatch scenario in lookup table"""
-        kernel_inputs = self.create_mock_mm_kernel_inputs()
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
 
         lookup_table_data = {
             self.create_lookup_key("mm", kernel_inputs): [self.create_config("triton")]
@@ -193,9 +186,9 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertEqual(result, {})
 
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5442
-    def test_successful_lookup_with_template_filtering(self):
+    def test_successful_lookup_with_template_filtering(self, device):
         """Test successful lookup that filters configs by template_id"""
-        kernel_inputs = self.create_mock_mm_kernel_inputs()
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
 
         config_list = [
             self.create_config("triton", BLOCK_M=128, BLOCK_N=128),
@@ -238,9 +231,9 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertNotIn("template_id", result["decompose_k"][0])
             self.assertEqual(result["decompose_k"][0]["k_split"], 4)
 
-    def test_empty_table(self):
+    def test_empty_table(self, device):
         """Test when template lookup table is empty"""
-        kernel_inputs = self.create_mock_mm_kernel_inputs()
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
 
         with patch.object(inductor_config.lookup_table, "table", {}):
             test_choices = LookupTableChoices()
@@ -250,9 +243,9 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertEqual(result, {})
 
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5442
-    def test_validation_error(self):
+    def test_validation_error(self, device):
         """Test validation error for invalid config"""
-        kernel_inputs = self.create_mock_mm_kernel_inputs()
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
         invalid_config = {"BLOCK_M": 128}  # missing template_id
 
         lookup_table_data = {
@@ -265,26 +258,10 @@ class TestLookupTable(BaseLookupTableTest):
                 test_choices.lookup_template_configs(kernel_inputs, "mm", ["triton"])
             self.assertIn("missing required 'template_id' field", str(cm.exception))
 
-    def test_cpu_input_returns_empty(self):
-        """Test that CPU tensor input returns empty dict"""
-        # Create kernel inputs with CPU tensors
-        kernel_inputs = self.create_mock_mm_kernel_inputs(device=torch.device("cpu"))
-
-        lookup_table_data = {
-            self.create_lookup_key("mm", kernel_inputs): [self.create_config("triton")]
-        }
-
-        with patch.object(inductor_config.lookup_table, "table", lookup_table_data):
-            test_choices = LookupTableChoices()
-            result = test_choices.lookup_template_configs(
-                kernel_inputs, "mm", ["triton"]
-            )
-            self.assertEqual(result, {})  # Should return empty dict for CPU
-
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5442
-    def test_multiple_calls_work(self):
+    def test_multiple_calls_work(self, device):
         """Test that calling lookup functions multiple times works correctly"""
-        kernel_inputs = self.create_mock_mm_kernel_inputs()
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
 
         config_list = [
             self.create_config("triton", BLOCK_M=128),
@@ -321,9 +298,9 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertEqual(len(result4["tma"]), 1)
 
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5442
-    def test_batch_lookup_mixed_entries(self):
+    def test_batch_lookup_mixed_entries(self, device):
         """Test batch lookup where some templates have entries and others don't"""
-        kernel_inputs = self.create_mock_mm_kernel_inputs()
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
 
         config_list = [
             self.create_config("triton", BLOCK_M=128),
@@ -369,9 +346,11 @@ class TestLookupTable(BaseLookupTableTest):
             subtest((None, None, True), decorators=[xfailIf(TEST_XPU)]),
         ],
     )
-    def test_template_hash_checking(self, config_hash, template_hash, expected_kept):
+    def test_template_hash_checking(
+        self, device, config_hash, template_hash, expected_kept
+    ):
         """Test template hash validation behavior"""
-        kernel_inputs = self.create_mock_mm_kernel_inputs()
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
 
         config = self.create_config("triton", BLOCK_M=128, BLOCK_N=64)
         if config_hash is not None:
@@ -404,9 +383,9 @@ class TestLookupTable(BaseLookupTableTest):
                 self.assertEqual(result, {})
 
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5442
-    def test_template_hash_checking_disabled(self):
+    def test_template_hash_checking_disabled(self, device):
         """Test that hash checking is skipped when config flag is disabled"""
-        kernel_inputs = self.create_mock_mm_kernel_inputs()
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
 
         # Create config with mismatching hash
         config = self.create_config("triton", BLOCK_M=128, template_hash="hash123")
@@ -438,9 +417,9 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertNotIn("template_hash", result["triton"][0])
 
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5442
-    def test_template_hash_mixed_scenarios(self):
+    def test_template_hash_mixed_scenarios(self, device):
         """Test mixed hash scenarios with multiple configs"""
-        kernel_inputs = self.create_mock_mm_kernel_inputs()
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
 
         config_list = [
             self.create_config(
@@ -493,9 +472,9 @@ class TestLookupTable(BaseLookupTableTest):
             (None, "missing hash field"),
         ],
     )
-    def test_hash_checking_disabled_edge_cases(self, config_hash, description):
+    def test_hash_checking_disabled_edge_cases(self, device, config_hash, description):
         """Test that configs are kept when hash checking is disabled, regardless of hash validity"""
-        kernel_inputs = self.create_mock_mm_kernel_inputs()
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
 
         # Create config with potentially problematic hash
         config = self.create_config("triton", BLOCK_M=128)
@@ -534,7 +513,9 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertNotIn(
                 "template_hash",
                 result["triton"][0],
-                lambda msg: f"{msg}\ntemplate_hash should be removed from result for {description}",
+                lambda msg: (
+                    f"{msg}\ntemplate_hash should be removed from result for {description}"
+                ),
             )
             # Other config fields should be preserved
             self.assertEqual(
@@ -557,11 +538,11 @@ class TestLookupTable(BaseLookupTableTest):
         ],
     )
     def test_device_key_lookup_scenarios(
-        self, table_has_device_key, lookup_device_matches, expected_found
+        self, device, table_has_device_key, lookup_device_matches, expected_found
     ):
         """Test lookup behavior with device-specific vs device-agnostic keys"""
         # Create kernel inputs for "device_1" (our reference device)
-        kernel_inputs_device1 = self.create_mock_mm_kernel_inputs()
+        kernel_inputs_device1 = self.create_mock_mm_kernel_inputs(device=device)
 
         # Create config
         config = self.create_config("triton", BLOCK_M=128)
@@ -627,13 +608,36 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertEqual(
                 result,
                 {},
-                lambda msg: f"{msg}\nShould return empty dict when expected_found={expected_found}",
+                lambda msg: (
+                    f"{msg}\nShould return empty dict when expected_found={expected_found}"
+                ),
             )
 
+    @requires_triton()
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5442
-    def test_device_key_priority(self):
+    def test_make_lookup_key_variants(self, device):
+        """Test the make_lookup_key_variants helper function"""
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
+
+        test_choices = LookupTableChoices()
+        device_key, device_agnostic_key = test_choices.make_lookup_key_variants(
+            kernel_inputs, "mm"
+        )
+
+        # Both should be strings
+        self.assertIsInstance(device_key, str)
+        self.assertIsInstance(device_agnostic_key, str)
+
+        # Device key should be longer (contains device info)
+        self.assertGreater(len(device_key), len(device_agnostic_key))
+
+        # Device-agnostic key should be contained in device key (as a substring after device part)
+        self.assertIn(device_agnostic_key.split("+mm")[0], device_key)
+
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5442
+    def test_device_key_priority(self, device):
         """Test that device-specific keys take priority over device-agnostic keys"""
-        kernel_inputs = self.create_mock_mm_kernel_inputs()
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
 
         # Create two different configs
         device_specific_config = self.create_config(
@@ -675,25 +679,25 @@ class TestLookupTable(BaseLookupTableTest):
                 "Should use device-specific config when both exist",
             )
 
-    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5442
-    def test_make_lookup_key_variants(self):
-        """Test the make_lookup_key_variants helper function"""
-        kernel_inputs = self.create_mock_mm_kernel_inputs()
 
-        test_choices = LookupTableChoices()
-        device_key, device_agnostic_key = test_choices.make_lookup_key_variants(
-            kernel_inputs, "mm"
-        )
+class TestLookupTableCpu(BaseLookupTableTest):
+    hw_classification = HardwareClassification.CPU
 
-        # Both should be strings
-        self.assertIsInstance(device_key, str)
-        self.assertIsInstance(device_agnostic_key, str)
+    def test_cpu_input_returns_empty(self, device):
+        """Test that CPU tensor input returns empty dict"""
+        # Create kernel inputs on the injected device
+        kernel_inputs = self.create_mock_mm_kernel_inputs(device=device)
 
-        # Device key should be longer (contains device info)
-        self.assertGreater(len(device_key), len(device_agnostic_key))
+        lookup_table_data = {
+            self.create_lookup_key("mm", kernel_inputs): [self.create_config("triton")]
+        }
 
-        # Device-agnostic key should be contained in device key (as a substring after device part)
-        self.assertIn(device_agnostic_key.split("+mm")[0], device_key)
+        with patch.object(inductor_config.lookup_table, "table", lookup_table_data):
+            test_choices = LookupTableChoices()
+            result = test_choices.lookup_template_configs(
+                kernel_inputs, "mm", ["triton"]
+            )
+            self.assertEqual(result, {})  # Should return empty dict for CPU
 
 
 class UnifiedModel(nn.Module):
@@ -735,10 +739,8 @@ class BaseE2ELookupTableTest(BaseLookupTableTest):
         super().setUp()
         torch._dynamo.reset()
         clear_preprocessing_fns()
-        self.device = torch.device(GPU_TYPE)
-        self.dev_key = LookupTableChoices._get_device_key(self.device)
+        self.device = torch.device(self.device_type)
         self.original_lookup_table = inductor_config.lookup_table.table
-        # Set the lookup table choices handler
         V.set_choices_handler(LookupTableChoices())
 
     def tearDown(self):
@@ -862,25 +864,14 @@ class BaseE2ELookupTableTest(BaseLookupTableTest):
 
         return SimpleMatmul()
 
-    def _create_test_inputs(self, device=GPU_TYPE):
-        """Create test inputs for matmul"""
-        return [
-            torch.randn(512, 512, device=device, dtype=torch.float32),
-            torch.randn(512, 512, device=device, dtype=torch.float32),
-        ]
 
-
-@unittest.skipIf(not HAS_GPU_AND_TRITON, "GPU not available")
-@skipIfXpu(
-    msg="Lookup table device key not supported on XPU: https://github.com/intel/torch-xpu-ops/issues/5443"
-)
-@instantiate_parametrized_tests
+@requires_triton()
 class TestLookupTableE2E(BaseE2ELookupTableTest):
-    """E2E tests for lookup table functionality"""
+    hw_classification = HardwareClassification.CUDA
 
     @parametrize("max_autotune", [True, False])
     @fresh_cache()
-    def test_no_lookup_table_entry_autotune_modes(self, max_autotune):
+    def test_no_lookup_table_entry_autotune_modes(self, device, max_autotune):
         """Test when there's no lookup table entry with different autotune modes"""
         tensors = self.create_tensors("mm")
 
@@ -888,8 +879,8 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         self.setup_lookup_table(
             "mm",
             [
-                torch.randn(64, 64, device=self.device),
-                torch.randn(64, 64, device=self.device),
+                torch.randn(64, 64, device=device),
+                torch.randn(64, 64, device=device),
             ],
             [],
         )
@@ -925,7 +916,7 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
 
     @parametrize("operation", ["mm", "addmm", "bmm", "mm_plus_mm"])
     @fresh_cache()
-    def test_valid_lookup_table_entry(self, operation):
+    def test_valid_lookup_table_entry(self, device, operation):
         """Test when there's a valid entry for the operation"""
         k = 256 if operation == "mm_plus_mm" else 64
         tensors = self.create_tensors(operation, k=k)
@@ -957,7 +948,7 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
     @unittest.skipIf(not has_triton_tma_device(), "Need TMA support")
     @parametrize("operation", ["mm", "addmm"])
     @fresh_cache()
-    def test_tma_lookup_table_entry(self, operation):
+    def test_tma_lookup_table_entry(self, device, operation):
         """Test TMA template entry"""
         tensors = self.create_tensors(operation)
         config = self.create_basic_config(
@@ -986,7 +977,7 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         )
 
     @fresh_cache()
-    def test_decompose_k_lookup_table_entry(self):
+    def test_decompose_k_lookup_table_entry(self, device):
         """Test decompose_k template entry"""
         tensors = self.create_tensors("mm", m=32, n=32, k=32 * 32)
         config = self.create_basic_config(
@@ -1009,15 +1000,15 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         )
 
     @fresh_cache()
-    def test_bias_addmm_lookup_table_entry(self):
+    def test_bias_addmm_lookup_table_entry(self, device):
         """Test bias_addmm template entry"""
         # Create bias with stride[0] == 0 for bias_addmm eligibility
-        bias_unexpanded = torch.randn(64, device=self.device, dtype=torch.float16)
+        bias_unexpanded = torch.randn(64, device=device, dtype=torch.float16)
         expanded_bias = bias_unexpanded.expand(64, 64)
         tensors = [
             expanded_bias,
-            torch.randn(64, 32, device=self.device, dtype=torch.float16),
-            torch.randn(32, 64, device=self.device, dtype=torch.float16),
+            torch.randn(64, 32, device=device, dtype=torch.float16),
+            torch.randn(32, 64, device=device, dtype=torch.float16),
         ]
 
         config = self.create_basic_config(torch._inductor.kernel.mm.aten_bias_addmm.uid)
@@ -1037,12 +1028,12 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             }
         ):
             model = UnifiedModel("addmm")
-            compiled_model = torch.compile(model.to(self.device), mode="max-autotune")
+            compiled_model = torch.compile(model.to(device), mode="max-autotune")
             compiled_model(expanded_bias, tensors[1], tensors[2])
 
     @unittest.skipIf(not has_triton_tma_device(), "Need TMA support")
     @fresh_cache()
-    def test_multiple_configs_same_template(self):
+    def test_multiple_configs_same_template(self, device):
         """Test multiple configurations for same template"""
         tensors = self.create_tensors("mm")
 
@@ -1068,7 +1059,7 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
 
     @unittest.skipIf(not has_triton_tma_device(), "Need TMA support")
     @fresh_cache()
-    def test_mixed_template_configs(self):
+    def test_mixed_template_configs(self, device):
         """Test mixing different template types"""
         tensors = self.create_tensors("mm")
 
@@ -1089,7 +1080,7 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         self.run_model("mm", tensors, {"triton.enable_persistent_tma_matmul": True})
 
     @fresh_cache()
-    def test_template_hash_filtering_e2e(self):
+    def test_template_hash_filtering_e2e(self, device):
         """Test end-to-end template hash filtering in real MM operation"""
         tensors = self.create_tensors("mm")
 
@@ -1126,8 +1117,16 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             self.run_model("mm", tensors)
 
 
+instantiate_device_type_tests(
+    TestLookupTableAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(TestLookupTableCpu, globals(), only_for="cpu")
+instantiate_device_type_tests(TestLookupTableE2E, globals(), only_for="cuda")
+
+
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
+    from torch.utils._triton import has_triton
 
-    if HAS_GPU and HAS_CPU and is_big_gpu():
+    if HAS_CPU and has_triton() and is_big_gpu():
         run_tests()
