@@ -249,8 +249,7 @@ DeviceIndex get_device_idx_from_pointer(void* ptr) {
   initDevicePoolCallOnce();
   TORCH_CHECK(ptr, "ptr is an invalid pointer.");
   auto type = sycl::get_pointer_type(ptr, get_device_context());
-  TORCH_CHECK(
-      type == sycl::usm::alloc::device, "ptr is not a device type pointer.");
+  TORCH_CHECK(type != sycl::usm::alloc::unknown, "ptr is not a USM pointer.");
 
   sycl::device raw_device = sycl::get_pointer_device(ptr, get_device_context());
   return static_cast<DeviceIndex>(

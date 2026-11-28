@@ -35,6 +35,24 @@ TEST(XpuDeviceTest, getDeviceFromPtr) {
   ASSERT_THROW(at::xpu::getDeviceFromPtr(&dummy), c10::Error);
 }
 
+TEST(XpuDeviceTest, fromBlobAliasesPinnedMemory) {
+  if (!at::xpu::is_available()) {
+    return;
+  }
+
+  constexpr int64_t n = 1024;
+  auto opts = at::TensorOptions().dtype(at::kFloat);
+  at::Tensor host = at::rand({n}, opts).pin_memory();
+  ASSERT_TRUE(host.is_pinned());
+
+  at::Tensor alias = at::from_blob(host.data_ptr(), {n}, opts.device(at::kXPU));
+  EXPECT_EQ(alias.data_ptr(), host.data_ptr());
+  EXPECT_TRUE(alias.is_xpu());
+
+  at::Tensor result = alias + host.to(alias.device());
+  EXPECT_TRUE(at::equal(result.cpu(), host * 2));
+}
+
 // This intentionally tests the deprecated getGlobalIdxFromDevice
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
