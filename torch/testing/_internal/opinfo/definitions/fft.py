@@ -763,6 +763,13 @@ python_ref_db: list[OpInfo] = [
                 dtypes=(torch.float16,),
                 device_type="cuda",
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_executor",
+                dtypes=(torch.float16,),
+                device_type="xpu",
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(
@@ -841,6 +848,13 @@ python_ref_db: list[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestCommon",
                 "test_python_ref",
+                dtypes=(torch.float16,),
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_executor",
                 dtypes=(torch.float16,),
                 device_type="xpu",
             ),
