@@ -1046,7 +1046,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_sharding_columns(self, device):
         device_type = torch.device(device).type
-        self.init_pg(backend=self.backend)
+        self.init_pg(backend=self.backend(device_type))
 
         for dim in [1, -1]:
             spec = ChunkShardingSpec(
@@ -1084,7 +1084,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_invalid_sharding(self, device):
         device_type = torch.device(device).type
-        self.init_pg(backend=self.backend)
+        self.init_pg(backend=self.backend(device_type))
 
         with self.assertRaisesRegex(
             NotImplementedError, "does not support named dimension"
@@ -1150,7 +1150,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_invalid_pg_rpc_ranks(self, device):
         device_type = torch.device(device).type
-        self.init_pg(backend=self.backend)
+        self.init_pg(backend=self.backend(device_type))
 
         # Init RPC with different ranks.
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
@@ -1174,7 +1174,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_insufficient_sharding_dims(self, device):
         device_type = torch.device(device).type
-        self.init_pg(backend=self.backend)
+        self.init_pg(backend=self.backend(device_type))
 
         spec = ChunkShardingSpec(
             dim=0,
@@ -1364,7 +1364,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.init_rpc()
 
         dist.init_process_group(
-            backend=self.backend,
+            backend=self.backend(device_type),
             world_size=self.world_size,
             rank=self.rank,
             init_method=f"file://{self.file_name}",
