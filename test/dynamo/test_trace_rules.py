@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import cmath
+import copy
 import dataclasses
 import importlib
 import inspect
@@ -585,6 +586,97 @@ class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
         )
 
 
+class FakeQuantizeInlineTests(torch._dynamo.test_case.TestCase):
+    # torch.ao is in MOD_SKIPLIST, so the fake-quant and observer modules must be
+    # inlined explicitly for QAT modules to trace under fullgraph=True. The tests of
+    # the compiled FakeQuantize itself are in test_fake_quantize.py.
+    def test_min_max_observer_fullgraph(self):
+        from torch.ao.quantization.observer import MinMaxObserver
+
+        observer = MinMaxObserver()
+        ref = copy.deepcopy(observer)
+
+        def fn(x):
+            y = x * 2
+            observer(y)
+            return y + 1
+
+        torch._dynamo.reset()
+        x = torch.randn(32, 4)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), x * 2 + 1
+        )
+        ref(x * 2)
+        self.assertEqual(observer.state_dict(), ref.state_dict())
+
+    def test_histogram_observer_methods_stay_skipped(self):
+        from torch._dynamo import trace_rules
+        from torch._dynamo.variables.functions import SkipFunctionVariable
+        from torch.ao.quantization.observer import HistogramObserver, RecordingObserver
+
+        for method in (
+            HistogramObserver.forward,
+            HistogramObserver.calculate_qparams,
+            RecordingObserver.forward,
+        ):
+            self.assertIs(trace_rules.lookup(method), SkipFunctionVariable)
+
+    def test_recording_observer_stays_skipped(self):
+        # it appends to a list, whose length is guarded on: inlined, every call would
+        # recompile
+        from torch._dynamo.utils import counters
+        from torch.ao.quantization.observer import RecordingObserver
+
+        observer = RecordingObserver()
+        ref = RecordingObserver()
+
+        def fn(x):
+            y = x * 2
+            observer(y)
+            return y + 1
+
+        torch._dynamo.reset()
+        counters.clear()
+        compiled = torch.compile(fn, backend="eager")
+        for _ in range(4):
+            x = torch.randn(3)
+            self.assertEqual(compiled(x), x * 2 + 1)
+            ref(x * 2)
+        self.assertEqual(len(observer.tensor_val), 4)
+        for value, expected in zip(observer.tensor_val, ref.tensor_val):
+            self.assertEqual(value, expected)
+        self.assertEqual(sum(counters["graph_break"].values()), 1)
+
+    def test_histogram_observer_stays_skipped(self):
+        # torch.ao.quantization.observer is inlined, but the histogram search is
+        # data-dependent: it has to break the graph at the call and not be traced.
+        from torch._dynamo.utils import counters
+        from torch.ao.quantization.observer import HistogramObserver
+
+        # TestCase forces nested_graph_breaks=True, which is not the default
+        for nested_graph_breaks in (False, True):
+            with self.subTest(nested_graph_breaks=nested_graph_breaks):
+                observer = HistogramObserver()
+                ref = copy.deepcopy(observer)
+
+                def fn(x):
+                    y = x * 2
+                    observer(y)
+                    return y + 1
+
+                torch._dynamo.reset()
+                counters.clear()
+                with torch._dynamo.config.patch(
+                    nested_graph_breaks=nested_graph_breaks
+                ):
+                    x = torch.randn(32, 4)
+                    self.assertEqual(torch.compile(fn, backend="eager")(x), x * 2 + 1)
+                ref(x * 2)
+                self.assertEqual(observer.state_dict(), ref.state_dict())
+                self.assertEqual(sum(counters["graph_break"].values()), 1)
+                self.assertIn("marked as skipped", next(iter(counters["graph_break"])))
+
+
 class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
     def test_top_level_torch_exp_compiles_through_dynamo(self):
         x = torch.randn(4)
@@ -612,6 +704,7 @@ class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(TraceRuleTests)
+instantiate_parametrized_tests(FakeQuantizeInlineTests)
 
 
 if __name__ == "__main__":

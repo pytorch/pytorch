@@ -7,14 +7,17 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import torch
+from torch._compile import _assume_constant_result
 from torch.ao.quantization.observer import (
     _with_args,
     default_fixed_qparams_range_0to1_observer,
     default_fixed_qparams_range_neg1to1_observer,
     FixedQParamsObserver,
     HistogramObserver,
+    MinMaxObserver,
     MovingAverageMinMaxObserver,
     MovingAveragePerChannelMinMaxObserver,
+    PerChannelMinMaxObserver,
 )
 from torch.nn import Module
 
@@ -65,6 +68,28 @@ def _is_symmetric_quant(qscheme: "torch.qscheme") -> bool:
 
 def _is_float_qparams(qscheme: "torch.qscheme") -> bool:
     return qscheme == torch.per_channel_affine_float_qparams
+
+
+# Dynamo calls this while tracing, with the device of the input, which it guards on, and
+# does not put the call into the graph.
+@_assume_constant_result
+def _device_has_fake_quantize_kernels(device_type):
+    # Whether the kernels that FakeQuantize._forward_compiled calls have an implementation
+    # for this device. They are looked up in the dispatcher, and not in a list of device
+    # types, so that a backend that registers them is traced. A fallback of the backend
+    # for all ops is not a kernel.
+    try:
+        key = torch._C._dispatch_key_for_device(device_type)
+    except RuntimeError:
+        # not a device type with a dispatch key
+        return False
+    return all(
+        torch._C._dispatch_has_kernel_for_dispatch_key(op, key)
+        for op in (
+            "aten::fake_quantize_per_channel_affine_cachemask",
+            "aten::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams",
+        )
+    )
 
 
 class FakeQuantizeBase(ABC, Module):
@@ -125,6 +150,52 @@ class FakeQuantizeBase(ABC, Module):
         return fake_quant_constructor
 
 
+# Why FakeQuantize._forward_compiled cannot be used. Each reason is also the reason of the
+# disabled eager forward that the call graph-breaks into.
+_COMPILED_FORWARD_BLOCKERS = {
+    "hooks": (
+        "FakeQuantize cannot be traced when its observer has forward hooks (its own or "
+        "global ones, for example from register_module_forward_hook): the traced forward "
+        "also runs the observer while observer_enabled is 0, where eager does not, so the "
+        "hooks would see calls that eager never makes. Remove the hooks, or run the module "
+        "eagerly: torch.compile without fullgraph=True does that for this call, "
+        "torch.export cannot trace it (torch.export.draft_export traces the eager forward "
+        "instead)."
+    ),
+    "unsupported_type": (
+        "FakeQuantize is only traced for FakeQuantize and FixedQParamsFakeQuantize with a "
+        "MinMaxObserver, MovingAverageMinMaxObserver, PerChannelMinMaxObserver, "
+        "MovingAveragePerChannelMinMaxObserver or FixedQParamsObserver (the exact classes, "
+        "not subclasses): the traced forward restores the state that the observer and "
+        "calculate_qparams update when observer_enabled is 0, which needs all of it to be "
+        "known. Use one of these classes, or run the module eagerly: torch.compile without "
+        "fullgraph=True does that for this call, torch.export cannot trace it "
+        "(torch.export.draft_export traces the eager forward instead)."
+    ),
+    "device": (
+        "FakeQuantize cannot be traced for an input on a device that has no kernel for the "
+        "fake-quantize ops (for example mps): the traced forward calls the kernel also while "
+        "fake_quant_enabled is 0, where eager does not. Run the module eagerly: "
+        "torch.compile without fullgraph=True does that for this call, torch.export cannot "
+        "trace it (torch.export.draft_export traces the eager forward instead)."
+    ),
+    "statistics": (
+        "A per-channel FakeQuantize cannot be traced before its statistics exist: run one "
+        "eager forward first, with the observer enabled (for example a calibration step), "
+        "and compile or export after that. torch.compile without fullgraph=True runs this "
+        "call eagerly instead."
+    ),
+    "shape": (
+        "FakeQuantize cannot be traced when its scale and zero_point do not have the shape "
+        "that observing this input gives them (for example after the number of channels "
+        "changed): the eager forward resizes them, which a traced region cannot do. Run one "
+        "eager forward with this input first, with the observer enabled (after "
+        "reset_min_max_vals() on the observer if the number of channels changed). "
+        "torch.compile without fullgraph=True runs this call eagerly instead."
+    ),
+}
+
+
 class FakeQuantize(FakeQuantizeBase):
     r"""Simulate the quantize and dequantize operations in training time.
 
@@ -148,6 +219,46 @@ class FakeQuantize(FakeQuantizeBase):
 
     * :attr:`dtype` specifies the quantized dtype that is being emulated with fake-quantization,
         allowable values are torch.qint8 and torch.quint8.
+
+    .. note::
+        Under :func:`torch.compile` and :func:`torch.export` this module is traced with a
+        forward that differs from the eager one, because ``observer_enabled`` and
+        ``fake_quant_enabled`` are tensors. It runs the observer and ``calculate_qparams``
+        on every step, also when ``observer_enabled`` is 0 (the statistics of the observer
+        and the qparams are restored afterwards), and the fake-quantize kernel also runs
+        when ``fake_quant_enabled`` is 0, and the module returns the input then. A
+        per-channel module gives the kernel a clamped ``zero_point`` then, so that its range
+        check cannot fail; the check still synchronizes with the device for an integer ``zero_point`` (a
+        floating-point ``zero_point``, as with ``torch.per_channel_affine_float_qparams``,
+        is not checked), which CUDA graphs cannot capture. With Inductor's
+        ``graph_partition`` (on by default outside fbcode) only the partition of that op is
+        run without CUDA graphs and the rest of the graph is captured; with
+        ``graph_partition=False``, ``cpp_wrapper`` or the ``cudagraphs`` backend the whole
+        compiled graph is not captured, and that is the whole traced region, which can be
+        most of the model. A negative ``ch_axis``, which the observers accept, is
+        normalized before the kernel gets it, so the traced forward returns a result where
+        the eager forward raises an error once ``fake_quant_enabled`` is 1 (the kernel
+        rejects a negative axis). The
+        ``min_val > max_val`` assertion and the "must run observer" warning of
+        ``calculate_qparams`` are skipped, and an observer that has not observed anything
+        returns a ``zero_point`` with the dtype of the computed one (``torch.int32`` for
+        ``torch.per_tensor_affine``) instead of ``torch.int64``. The module is only traced for
+        ``FakeQuantize`` and ``FixedQParamsFakeQuantize`` themselves (not subclasses) with
+        ``MinMaxObserver``, ``MovingAverageMinMaxObserver``, ``PerChannelMinMaxObserver``,
+        ``MovingAveragePerChannelMinMaxObserver`` or ``FixedQParamsObserver`` (not
+        subclasses), without forward hooks or forward pre-hooks on the observer (its own, or
+        global ones from ``register_module_forward_hook`` and
+        ``register_module_forward_pre_hook``), with a ``scale`` and ``zero_point`` that
+        already have the shape that observing the input gives them, for an input on a device
+        that has kernels for the fake-quantize ops (for example CPU, CUDA and XPU, or another
+        backend that registers kernels for these two ops; a fallback of the backend for all
+        ops does not count, so with ``PYTORCH_ENABLE_MPS_FALLBACK=1`` the module runs
+        eagerly on MPS), and, for a per-channel module, after one eager forward (for example a calibration step, with the observer
+        enabled) has created its statistics. Otherwise :func:`torch.compile` graph-breaks
+        and runs it eagerly, and :func:`torch.export` raises an error that says why.
+        :func:`torch.export.draft_export` traces the eager forward with real tensors
+        instead, as before, so the branches on ``observer_enabled`` and
+        ``fake_quant_enabled`` that it takes are fixed in the exported program.
 
     Args:
 
@@ -225,7 +336,150 @@ class FakeQuantize(FakeQuantizeBase):
     def calculate_qparams(self):  # type: ignore[override]
         return self.activation_post_process.calculate_qparams()
 
+    def _fake_quantize(self, X):
+        if self.is_per_channel:
+            return torch.fake_quantize_per_channel_affine(
+                X,
+                self.scale,
+                self.zero_point,
+                self.ch_axis,
+                self.activation_post_process.quant_min,
+                self.activation_post_process.quant_max,
+            )
+        return torch.fake_quantize_per_tensor_affine(
+            X,
+            self.scale,
+            self.zero_point,
+            self.activation_post_process.quant_min,
+            self.activation_post_process.quant_max,
+        )
+
+    def _compiled_forward_blocker(self, X):
+        # The key of _COMPILED_FORWARD_BLOCKERS that says why _forward_compiled cannot be
+        # used for this module and input, or None when it can. It observes
+        # unconditionally and then restores the observer's state when the observer is
+        # disabled, so it has to know all of that state: it is only used for the classes
+        # below (a subclass may update more) and when nothing else runs with the
+        # observer, and the qparams must already have the shape that observing X gives
+        # them, because a buffer cannot be resized in a traced region and a new shape
+        # cannot be selected against the old state.
+        observer = self.activation_post_process
+        if (
+            observer._forward_hooks
+            or observer._forward_pre_hooks
+            or torch.nn.modules.module._global_forward_hooks
+            or torch.nn.modules.module._global_forward_pre_hooks
+        ):
+            return "hooks"
+        if type(self) not in (FakeQuantize, FixedQParamsFakeQuantize) or type(
+            observer
+        ) not in (
+            FixedQParamsObserver,
+            MinMaxObserver,
+            MovingAverageMinMaxObserver,
+            PerChannelMinMaxObserver,
+            MovingAveragePerChannelMinMaxObserver,
+        ):
+            return "unsupported_type"
+        # the traced forward calls the kernel on every step, eager only when fake-quant is
+        # enabled
+        if not _device_has_fake_quantize_kernels(X.device.type):
+            return "device"
+        if self.is_per_channel and observer.min_val.numel() == 0:
+            return "statistics"
+        shape = (X.size(self.ch_axis),) if self.is_per_channel else (1,)
+        if self.scale.shape != shape or self.zero_point.shape != shape:
+            return "shape"
+        return None
+
+    def _forward_compiled(self, X):
+        # ``observer_enabled`` and ``fake_quant_enabled`` are tensors, so branching
+        # on them is data-dependent control flow that torch.compile cannot trace.
+        # Run both steps unconditionally and select the result with torch.where.
+        observer = self.activation_post_process
+        observer_enabled = self.observer_enabled[0] == 1
+        observer_state = (
+            []
+            if type(observer) is FixedQParamsObserver
+            else [observer.min_val, observer.max_val]
+        )
+        saved = [t.clone() for t in observer_state]
+
+        observer(X.detach())
+        _scale, _zero_point = self.calculate_qparams()
+        self.scale.copy_(
+            torch.where(observer_enabled, _scale.to(self.scale.device), self.scale)
+        )
+        self.zero_point.copy_(
+            torch.where(
+                observer_enabled,
+                _zero_point.to(self.zero_point.device),
+                self.zero_point,
+            )
+        )
+        for t, old in zip(observer_state, saved):
+            t.copy_(torch.where(observer_enabled, t, old))
+
+        if self.is_per_channel:
+            fake_quant_enabled = self.fake_quant_enabled[0] == 1
+            quant_min = self.activation_post_process.quant_min
+            quant_max = self.activation_post_process.quant_max
+            # the observer accepts a negative ch_axis and the kernel does not, which eager
+            # only calls when fake-quant is enabled, and this path calls on every step
+            ch_axis = self.ch_axis + X.dim() if self.ch_axis < 0 else self.ch_axis
+            # The kernel runs on every step. It checks (and synchronizes with the device
+            # to do so) that an integer zero_point lies in [quant_min, quant_max], which
+            # eager only does when fake-quant is enabled, so it gets one that passes while
+            # fake-quant is disabled.
+            zero_point = torch.where(
+                fake_quant_enabled,
+                self.zero_point,
+                self.zero_point.clamp(quant_min, quant_max),
+            )
+            return torch.where(
+                fake_quant_enabled,
+                torch.fake_quantize_per_channel_affine(
+                    X, self.scale, zero_point, ch_axis, quant_min, quant_max
+                ),
+                X,
+            )
+        # this op takes the flag itself (and passes X through when it is 0), so there is
+        # no extra pass over X; it treats any nonzero value as enabled, and eager only 1
+        return torch._fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+            X,
+            self.scale,
+            self.zero_point,
+            (self.fake_quant_enabled == 1).long(),
+            self.activation_post_process.quant_min,
+            self.activation_post_process.quant_max,
+        )[0]
+
     def forward(self, X):
+        if not torch.jit.is_scripting():
+            if torch.compiler.is_compiling():
+                blocker = self._compiled_forward_blocker(X)
+                if blocker is None:
+                    return self._forward_compiled(X)
+                # one graph break, with the reason of the blocker
+                return _EAGER_FORWARDS[blocker](self, X)
+        return self._forward_eager(X)
+
+    def _forward_eager(self, X):
+        if not torch.jit.is_scripting():
+            if (
+                torch.compiler.is_exporting()
+                and not torch._functorch.config.fake_tensor_propagate_real_tensors
+            ):
+                # Non-strict export has no graph break to report the reason with, and
+                # would fail on the branch on observer_enabled below. draft_export
+                # propagates real tensors, which can take that branch.
+                blocker = self._compiled_forward_blocker(X)
+                if blocker is not None:
+                    raise RuntimeError(
+                        f"{type(self).__name__} with "
+                        f"{type(self.activation_post_process).__name__}: "
+                        f"{_COMPILED_FORWARD_BLOCKERS[blocker]}"
+                    )
         if self.observer_enabled[0] == 1:
             self.activation_post_process(X.detach())
             _scale, _zero_point = self.calculate_qparams()
@@ -240,23 +494,7 @@ class FakeQuantize(FakeQuantizeBase):
             self.zero_point.copy_(_zero_point)
 
         if self.fake_quant_enabled[0] == 1:
-            if self.is_per_channel:
-                X = torch.fake_quantize_per_channel_affine(
-                    X,
-                    self.scale,
-                    self.zero_point,
-                    self.ch_axis,
-                    self.activation_post_process.quant_min,
-                    self.activation_post_process.quant_max,
-                )
-            else:
-                X = torch.fake_quantize_per_tensor_affine(
-                    X,
-                    self.scale,
-                    self.zero_point,
-                    self.activation_post_process.quant_min,
-                    self.activation_post_process.quant_max,
-                )
+            X = self._fake_quantize(X)
         return X
 
     @torch.jit.export
@@ -384,6 +622,21 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
     Similar to :class:`~torch.ao.quantization.FakeQuantize`, and accepts the same attributes as the
     base class.
 
+    .. note::
+        Under :func:`torch.compile` and :func:`torch.export` a per-channel module is only
+        traced after one eager forward (for example a calibration step, with the observer
+        enabled) has created its statistics, because the fake kernel of the fused op does
+        not create them. Before that :func:`torch.compile` graph-breaks and runs the op
+        eagerly, strict :func:`torch.export` raises an error that says why, and non-strict
+        :func:`torch.export` runs the op with fake tensors as before.
+
+        The fused op is in the traced graph of a default QAT model, per-tensor as well as
+        per-channel. CUDA graphs cannot capture it (it is in Inductor's
+        ``FORBIDDEN_CUDAGRAPH_OPS``): with ``graph_partition`` (on by default outside fbcode)
+        its partition runs without CUDA graphs, and with ``graph_partition=False``,
+        ``cpp_wrapper`` or the ``cudagraphs`` backend the whole compiled graph is not
+        captured.
+
     """
 
     def __init__(
@@ -420,7 +673,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
             f"qscheme={self.qscheme}, reduce_range={self.activation_post_process.reduce_range}"
         )
 
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
+    def _fused_forward(self, X: torch.Tensor) -> torch.Tensor:
         return torch.fused_moving_avg_obs_fake_quant(
             X,
             self.observer_enabled,
@@ -436,6 +689,70 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
             self.is_per_channel,
             self.is_symmetric_quant,
         )
+
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        if not torch.jit.is_scripting():
+            if (
+                torch.compiler.is_compiling()
+                and self.is_per_channel
+                and self.activation_post_process.min_val.numel() == 0
+            ):
+                # TODO: remove this guard once the fake kernel of the fused op creates the
+                # per-channel statistics (#199920, #199938)
+                return _fused_fake_quantize_forward_before_statistics_exist(self, X)
+        return self._fused_forward(X)
+
+
+@torch._disable_dynamo(library_fallback_reason=_COMPILED_FORWARD_BLOCKERS["hooks"])
+def _fake_quantize_forward_with_observer_hooks(module, X):
+    return FakeQuantize._forward_eager(module, X)
+
+
+@torch._disable_dynamo(
+    library_fallback_reason=_COMPILED_FORWARD_BLOCKERS["unsupported_type"]
+)
+def _fake_quantize_forward_with_unsupported_classes(module, X):
+    return FakeQuantize._forward_eager(module, X)
+
+
+@torch._disable_dynamo(library_fallback_reason=_COMPILED_FORWARD_BLOCKERS["device"])
+def _fake_quantize_forward_on_a_device_without_the_kernel(module, X):
+    return FakeQuantize._forward_eager(module, X)
+
+
+@torch._disable_dynamo(library_fallback_reason=_COMPILED_FORWARD_BLOCKERS["statistics"])
+def _fake_quantize_forward_before_statistics_exist(module, X):
+    return FakeQuantize._forward_eager(module, X)
+
+
+@torch._disable_dynamo(library_fallback_reason=_COMPILED_FORWARD_BLOCKERS["shape"])
+def _fake_quantize_forward_with_changed_qparams_shape(module, X):
+    return FakeQuantize._forward_eager(module, X)
+
+
+# The calls that a traced FakeQuantize graph-breaks into when it cannot be traced (one per
+# key of _COMPILED_FORWARD_BLOCKERS), so that the break is reported once, with a reason, and
+# what follows it does not trace the call again.
+_EAGER_FORWARDS = {
+    "hooks": _fake_quantize_forward_with_observer_hooks,
+    "unsupported_type": _fake_quantize_forward_with_unsupported_classes,
+    "device": _fake_quantize_forward_on_a_device_without_the_kernel,
+    "statistics": _fake_quantize_forward_before_statistics_exist,
+    "shape": _fake_quantize_forward_with_changed_qparams_shape,
+}
+
+
+@torch._disable_dynamo(
+    library_fallback_reason=(
+        "A per-channel FusedMovingAvgObsFakeQuantize cannot be traced before its "
+        "statistics exist, because the fake kernel of the fused op does not create them: "
+        "run one eager forward first, with the observer enabled (for example a calibration "
+        "step), and compile or export after that. torch.compile without fullgraph=True "
+        "runs this call eagerly instead."
+    )
+)
+def _fused_fake_quantize_forward_before_statistics_exist(module, X):
+    return FusedMovingAvgObsFakeQuantize._fused_forward(module, X)
 
 
 default_fake_quant = FakeQuantize.with_args(
