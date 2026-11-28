@@ -607,6 +607,194 @@ bool maybe_strided_chunk_copy(TensorIteratorBase& iter) {
   return true;
 }
 
+#ifndef USE_ROCM
+// TensorIterator order is fastest dimension first. A slice is read along its
+// unit-stride source dimension and written as [column, packed element].
+constexpr int kInterleaveMaxGroup = 32;
+constexpr int kInterleaveMaxOuterDims = 8;
+constexpr int kInterleaveMinSlices = 4096;
+
+struct InterleaveCopyArgs {
+  int group_size;
+  int columns;
+  int jobs;
+  int outer_dims;
+  at::cuda::detail::IntDivider<uint32_t> tiles_per_slice;
+  at::cuda::detail::IntDivider<uint32_t> outer_sizes[kInterleaveMaxOuterDims];
+  int64_t outer_strides[kInterleaveMaxOuterDims];
+  int64_t source_offsets[kInterleaveMaxGroup];
+};
+
+template <bool Swizzle>
+__device__ __forceinline__ int interleave_slot(int index) {
+  if constexpr (Swizzle) {
+    return index ^ ((index >> 5) & 31);
+  }
+  return index;
+}
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700 && defined(__grid_constant__)
+#define INTERLEAVE_GRID_CONSTANT __grid_constant__
+#else
+#define INTERLEAVE_GRID_CONSTANT
+#endif
+template <typename Word, int Capacity, int Columns, int Warps, bool Swizzle>
+__global__ void interleave_copy_kernel(
+    const Word* __restrict__ src,
+    Word* __restrict__ dst,
+    const INTERLEAVE_GRID_CONSTANT InterleaveCopyArgs args) {
+  extern __shared__ __align__(16) unsigned char storage[];
+  const int warp = threadIdx.x / 32;
+  const int lane = threadIdx.x % 32;
+  const int job = blockIdx.x * Warps + warp;
+  if (job >= args.jobs)
+    return; // Uniform across the warp.
+
+  const auto split = args.tiles_per_slice.divmod(job);
+  const int column = split.mod * Columns;
+  const int valid = ::min(Columns, args.columns - column);
+  const int q = args.group_size;
+  auto* tile = reinterpret_cast<Word*>(storage) + warp * Columns * q;
+  int outer = split.div;
+  int64_t source_base = column;
+  for (int dim = 0; dim < args.outer_dims; ++dim) {
+    if (dim + 1 == args.outer_dims) {
+      source_base += outer * args.outer_strides[dim];
+      break;
+    }
+    const auto coord = args.outer_sizes[dim].divmod(outer);
+    source_base += coord.mod * args.outer_strides[dim];
+    outer = coord.div;
+  }
+
+#pragma unroll
+  for (int f = 0; f < Capacity; ++f) {
+    if (f < q) {
+      const Word* row = src + source_base + args.source_offsets[f];
+      if (lane < valid)
+        tile[interleave_slot<Swizzle>(lane * q + f)] = row[lane];
+      if constexpr (Columns == 64) {
+        if (lane + 32 < valid)
+          tile[interleave_slot<Swizzle>((lane + 32) * q + f)] = row[lane + 32];
+      }
+    }
+  }
+  __syncwarp();
+  Word* output =
+      dst + (static_cast<int64_t>(split.div) * args.columns + column) * q;
+  for (int i = lane; i < valid * q; i += 32) {
+    output[i] = tile[interleave_slot<Swizzle>(i)];
+  }
+}
+
+#undef INTERLEAVE_GRID_CONSTANT
+
+template <typename Word, int Columns, int Warps, bool Swizzle>
+void launch_interleave(
+    InterleaveCopyArgs& args,
+    int slices,
+    TensorIterator& iter) {
+  const int tiles = 1 + (args.columns - 1) / Columns;
+  args.tiles_per_slice = at::cuda::detail::IntDivider<uint32_t>(tiles);
+  args.jobs = slices * tiles; // <= iter.numel(), bounded by the caller.
+  const int blocks = 1 + (args.jobs - 1) / Warps;
+  const size_t bytes = Warps * Columns * args.group_size * sizeof(Word);
+  auto launch = [&](auto cap) {
+    interleave_copy_kernel<Word, decltype(cap)::value, Columns, Warps, Swizzle>
+        <<<blocks, Warps * 32, bytes, at::cuda::getCurrentCUDAStream()>>>(
+            static_cast<const Word*>(iter.data_ptr(1)),
+            static_cast<Word*>(iter.data_ptr(0)),
+            args);
+  };
+  if (args.group_size <= 8)
+    launch(std::integral_constant<int, 8>{});
+  else if (args.group_size <= 16)
+    launch(std::integral_constant<int, 16>{});
+  else
+    launch(std::integral_constant<int, 32>{});
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+// Called only for a non-memcpy copy with matching dtype and neg/conj bits.
+bool maybe_interleave_copy(TensorIterator& iter) {
+  if (iter.device(0) != iter.device(1) || iter.ndim() < 2 ||
+      iter.ndim() > 3 + kInterleaveMaxOuterDims || iter.numel() == 0 ||
+      iter.numel() > INT32_MAX)
+    return false;
+
+  switch (iter.dtype(0)) {
+    case kByte:
+    case kChar:
+    case kHalf:
+    case kBFloat16:
+    case kShort:
+    case kUInt16:
+    case kInt:
+    case kUInt32:
+    case kFloat:
+    case kLong:
+    case kUInt64:
+    case kDouble:
+      break;
+    default:
+      return false;
+  }
+  const int width = iter.element_size(0);
+  const auto shape = iter.shape(), src = iter.strides(1), dst = iter.strides(0);
+  int axis = 0;
+  while (axis < iter.ndim() && src[axis] != width)
+    ++axis;
+  if ((axis != 1 && axis != 2) || axis == iter.ndim() || shape[axis] < 64 ||
+      iter.ndim() - axis - 1 > kInterleaveMaxOuterDims)
+    return false;
+  const int64_t a = shape[0], b = axis == 2 ? shape[1] : 1;
+  const int64_t q = a * b;
+  if (a >= 16 || q < 2 || q > kInterleaveMaxGroup)
+    return false;
+  const int slices = iter.numel() / (q * shape[axis]);
+  if (slices < kInterleaveMinSlices)
+    return false;
+  int64_t stride = width;
+  for (int d = 0; d < iter.ndim(); ++d) {
+    if (dst[d] != stride)
+      return false;
+    stride *= shape[d];
+  }
+  if (iter.tensor_base(0).is_alias_of(iter.tensor_base(1)))
+    return false;
+
+  InterleaveCopyArgs args{};
+  args.group_size = q;
+  args.columns = shape[axis];
+  args.outer_dims = iter.ndim() - axis - 1;
+  for (int d = 0; d < args.outer_dims; ++d) {
+    args.outer_sizes[d] =
+        at::cuda::detail::IntDivider<uint32_t>(shape[axis + 1 + d]);
+    args.outer_strides[d] = src[axis + 1 + d] / width;
+  }
+  for (int j = 0; j < b; ++j)
+    for (int i = 0; i < a; ++i)
+      args.source_offsets[j * a + i] =
+          i * (src[0] / width) + j * (src[1] / width);
+  switch (width) {
+    case 1:
+      launch_interleave<uint8_t, 64, 4, false>(args, slices, iter);
+      break;
+    case 2:
+      launch_interleave<uint16_t, 64, 4, false>(args, slices, iter);
+      break;
+    case 4:
+      launch_interleave<uint32_t, 32, 4, true>(args, slices, iter);
+      break;
+    case 8:
+      launch_interleave<uint64_t, 32, 4, true>(args, slices, iter);
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false);
+  }
+  return true;
+}
+#endif // !USE_ROCM
 } // namespace
 
 // device-to-device copy, does type conversion
@@ -667,8 +855,12 @@ void copy_device_to_device(TensorIterator& iter,
     }
   } else {
     if (same_type && same_neg && same_conj &&
-        (maybe_tiled_transpose_copy(iter) || maybe_strided_chunk_copy(iter))) {
-      // handled by the tiled transpose or strided chunk kernel
+        (maybe_tiled_transpose_copy(iter) || maybe_strided_chunk_copy(iter)
+#ifndef USE_ROCM
+         || maybe_interleave_copy(iter)
+#endif
+         )) {
+      // Handled by a specialized copy kernel.
     } else if (same_neg) {
       if (!same_conj) {
         conj_kernel_cuda(iter);
