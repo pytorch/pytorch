@@ -67,7 +67,7 @@ apply_skip_decorators(
 
 
 class TestOpsUnbacked(TestCase):
-    hw_classification = HardwareClassification.CPU
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _has_valid_unbacked_dims(self, t: torch.Tensor) -> bool:
         """Check if tensor has dimensions that can be marked as unbacked."""
@@ -128,7 +128,7 @@ class TestOpsUnbacked(TestCase):
             self.fail("Should have skipped; no valid samples found")
 
 
-instantiate_device_type_tests(TestOpsUnbacked, globals(), only_for=("cpu",))
+instantiate_device_type_tests(TestOpsUnbacked, globals(), except_for=("cuda",))
 
 if __name__ == "__main__":
     run_tests()
