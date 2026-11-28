@@ -58,6 +58,12 @@ else()
 endif()
 
 if(USE_CUDA)
+  if(NOT WIN32)
+    c10d_add_test(StoreExchangeTest.cpp LINK_LIBRARIES torch_cpu gtest_main INSTALL_TEST ${INSTALL_TEST})
+    c10d_add_test(CUDASymmetricMemoryPeerSetupTest.cpp LINK_LIBRARIES torch_cpu torch_cuda gtest_main INSTALL_TEST ${INSTALL_TEST})
+    target_compile_definitions(CUDASymmetricMemoryPeerSetupTest PRIVATE
+      USE_CUDA PYTORCH_C10_DRIVER_API_SUPPORTED=1)
+  endif()
   if(USE_GLOO AND USE_C10D_GLOO)
     c10d_add_test(ProcessGroupGlooTest.cpp LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main INSTALL_TEST ${INSTALL_TEST})
     c10d_add_test(ProcessGroupGlooAsyncTest.cpp LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main INSTALL_TEST ${INSTALL_TEST})

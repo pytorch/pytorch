@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/util/Logging.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
@@ -9,12 +11,17 @@
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <mutex>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#include <c10/cuda/driver_api.h>
+#endif
 
 namespace c10d {
 namespace symmetric_memory {
@@ -28,6 +35,58 @@ bool allow_overlapping_devices();
 
 // Query environment variable to get the backend used for CUDA Symmetric Memory.
 std::string getSymmMemBackendCUDA();
+
+// Keep an imported handle covered until its mapping has an owner.
+template <typename Map, typename MakeOwner, typename Cleanup>
+auto map_and_own_peer(Map&& map, MakeOwner&& make_owner, Cleanup&& cleanup) {
+  auto rollback = c10::make_scope_exit(std::forward<Cleanup>(cleanup));
+  std::forward<Map>(map)();
+  auto owner = std::forward<MakeOwner>(make_owner)();
+  rollback.release();
+  return owner;
+}
+
+template <typename Close>
+void close_peer_fds(const std::vector<int>& fds, int rank, Close&& close_fd) {
+  for (const auto peer : c10::irange(fds.size())) {
+    if (peer != static_cast<size_t>(rank)) {
+      close_fd(fds[peer]);
+    }
+  }
+}
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+inline void release_unowned_peer(
+    void* ptr,
+    HandleType handle,
+    size_t size,
+    c10::cuda::DriverAPI* driver_api) noexcept {
+  CUresult unmap_result = CUDA_SUCCESS;
+  CUresult free_result = CUDA_SUCCESS;
+  if (ptr != nullptr) {
+    const auto address = reinterpret_cast<CUdeviceptr>(ptr);
+    unmap_result = driver_api->cuMemUnmap_(address, size);
+    if (unmap_result == CUDA_SUCCESS) {
+      free_result = driver_api->cuMemAddressFree_(address, size);
+    }
+  }
+  const auto release_result = driver_api->cuMemRelease_(handle);
+  auto log_failure = [&](CUresult result, const char* operation) {
+    if (result != CUDA_SUCCESS) {
+      const char* error = nullptr;
+      if (driver_api->cuGetErrorString_(result, &error) != CUDA_SUCCESS) {
+        error = nullptr;
+      }
+      LOG(WARNING) << "SymmetricMemory: failed to " << operation << ": "
+                   << (error ? error : "unknown CUDA driver error") << " ("
+                   << static_cast<int>(result) << ")";
+    }
+  };
+  log_failure(unmap_result, "undo peer mapping");
+  log_failure(free_result, "undo peer address reservation");
+  log_failure(release_result, "release imported allocation");
+}
+#endif
 
 // All-gather a fixed-size byte payload through the given ProcessGroup.
 // Uses ProcessGroup::all_gather_single (NCCL allgather for a NCCL-backed PG).
@@ -187,6 +246,59 @@ class StoreExchange {
     std::ostringstream oss;
     oss << store_prefix_ << '/' << next_seq_id(store);
     store->barrier(std::move(oss).str(), world_size);
+  }
+
+  bool barrier_with_failure(
+      const c10::intrusive_ptr<c10d::Store>& store,
+      int world_size,
+      bool failed) {
+    std::ostringstream oss;
+    oss << store_prefix_ << '/' << next_seq_id(store);
+    const auto key = std::move(oss).str();
+    const auto failure_key = key + "/failed";
+    if (failed) {
+      store->add(failure_key, 1);
+    }
+    store->barrier(key, world_size);
+    // add(0) also initializes the all-success case without resetting a failure.
+    // All increments precede the barrier, so every rank observes the same
+    // count.
+    return store->add(failure_key, 0) != 0;
+  }
+
+  // Report the local cause before waiting, and preserve it if agreement fails.
+  bool barrier_with_error(
+      const c10::intrusive_ptr<c10d::Store>& store,
+      int world_size,
+      const std::exception_ptr& local_error) {
+    auto log_error = [](const char* context, const std::exception_ptr& error) {
+      try {
+        std::rethrow_exception(error);
+      } catch (const std::exception& exception) {
+        LOG(WARNING) << context << exception.what();
+      } catch (...) {
+        LOG(WARNING) << context << "non-standard exception";
+      }
+    };
+    if (local_error) {
+      log_error("SymmetricMemory peer setup failed: ", local_error);
+    }
+    bool failed;
+    try {
+      failed = barrier_with_failure(store, world_size, local_error != nullptr);
+    } catch (...) {
+      if (!local_error) {
+        throw;
+      }
+      log_error(
+          "SymmetricMemory peer setup agreement also failed: ",
+          std::current_exception());
+      std::rethrow_exception(local_error);
+    }
+    if (local_error) {
+      std::rethrow_exception(local_error);
+    }
+    return failed;
   }
 
  private:
