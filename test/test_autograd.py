@@ -4634,6 +4634,171 @@ class TestAutograd(TestCase):
         self.assertEqual(ReturnInput.seen_grad_dtype, torch.float32)
         self.assertEqual(x.grad.dtype, torch.float64)
 
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_grad_dtype_obeys_layout_contract(self):
+        class NonContiguousGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, w):
+                return w.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return g.t().contiguous().t().to(torch.bfloat16)
+
+        class ContiguousGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, w):
+                return w.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return g.contiguous().to(torch.bfloat16)
+
+        def record_hook(records):
+            def hook(g):
+                records.append(
+                    (g.dtype, tuple(g.stride()), g.is_contiguous(), g.data_ptr())
+                )
+
+            return hook
+
+        # 1. Contiguous 2D leaf with transposed non-contiguous incoming grads
+        # (e.g., einsum / bmm producing TBackward0 outputs) and accumulation.
+        w_einsum = torch.randn(16, 8, dtype=torch.bfloat16, requires_grad=True)
+        w_einsum.grad_dtype = torch.float32
+        seen_einsum = []
+        w_einsum.register_hook(record_hook(seen_einsum))
+        x_einsum = torch.randint(-4, 5, (2, 4, 8)).to(torch.bfloat16)
+        torch.einsum("bsd,vd->bsv", x_einsum, w_einsum).sum().backward()
+        ref_einsum = (
+            x_einsum.float().reshape(-1, 8).sum(dim=0, keepdim=True).expand(16, 8)
+        )
+        self.assertEqual(
+            seen_einsum, [(torch.float32, (8, 1), True, w_einsum.grad.data_ptr())]
+        )
+        self.assertEqual(w_einsum.grad.dtype, torch.float32)
+        self.assertEqual(w_einsum.grad.stride(), w_einsum.stride())
+        self.assertEqual(w_einsum.grad, ref_einsum)
+
+        # Second backward (in-place accumulation) still gets contract layout.
+        torch.einsum("bsd,vd->bsv", x_einsum, w_einsum).sum().backward()
+        self.assertEqual(len(seen_einsum), 2)
+        self.assertEqual(seen_einsum[1][:3], (torch.float32, (8, 1), True))
+        self.assertEqual(w_einsum.grad.stride(), w_einsum.stride())
+        self.assertEqual(w_einsum.grad, ref_einsum * 2)
+
+        w_bmm = torch.randn(4, 16, 8, dtype=torch.bfloat16, requires_grad=True)
+        w_bmm.grad_dtype = torch.float32
+        seen_bmm = []
+        w_bmm.register_hook(record_hook(seen_bmm))
+        x_bmm = torch.randint(-4, 5, (4, 6, 8)).to(torch.bfloat16)
+        torch.bmm(x_bmm, w_bmm.transpose(1, 2)).sum().backward()
+        ref_bmm = x_bmm.float().sum(dim=1, keepdim=True).expand(4, 16, 8).contiguous()
+        self.assertEqual(
+            seen_bmm, [(torch.float32, (128, 8, 1), True, w_bmm.grad.data_ptr())]
+        )
+        self.assertEqual(w_bmm.grad, ref_bmm)
+
+        # 2. channels_last 4D leaf receiving NCHW contiguous incoming grad.
+        w_cl = (
+            torch.randn(2, 3, 4, 5, dtype=torch.bfloat16)
+            .to(memory_format=torch.channels_last)
+            .detach()
+            .requires_grad_(True)
+        )
+        w_cl.grad_dtype = torch.float32
+        seen_cl = []
+        w_cl.register_hook(record_hook(seen_cl))
+        ContiguousGrad.apply(w_cl).sum().backward()
+        self.assertEqual(len(seen_cl), 1)
+        self.assertEqual(seen_cl[0][0], torch.float32)
+        self.assertEqual(seen_cl[0][1], w_cl.stride())
+        self.assertEqual(seen_cl[0][3], w_cl.grad.data_ptr())
+        self.assertTrue(w_cl.grad.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(w_cl.grad, torch.ones_like(w_cl, dtype=torch.float32))
+
+        # 3. channels_last_3d 5D leaf receiving NCDHW contiguous incoming grad.
+        w_cl3d = (
+            torch.randn(2, 3, 2, 3, 4, dtype=torch.bfloat16)
+            .to(memory_format=torch.channels_last_3d)
+            .detach()
+            .requires_grad_(True)
+        )
+        w_cl3d.grad_dtype = torch.float32
+        seen_cl3d = []
+        w_cl3d.register_hook(record_hook(seen_cl3d))
+        ContiguousGrad.apply(w_cl3d).sum().backward()
+        self.assertEqual(len(seen_cl3d), 1)
+        self.assertEqual(seen_cl3d[0][0], torch.float32)
+        self.assertEqual(seen_cl3d[0][1], w_cl3d.stride())
+        self.assertEqual(seen_cl3d[0][3], w_cl3d.grad.data_ptr())
+        self.assertTrue(w_cl3d.grad.is_contiguous(memory_format=torch.channels_last_3d))
+        self.assertEqual(w_cl3d.grad, torch.ones_like(w_cl3d, dtype=torch.float32))
+
+        # 4. Custom non-overlapping-and-dense strided leaf (transposed strides).
+        w_t = torch.randn(8, 16, dtype=torch.bfloat16).t().detach().requires_grad_(True)
+        w_t.grad_dtype = torch.float32
+        seen_t = []
+        w_t.register_hook(record_hook(seen_t))
+        ContiguousGrad.apply(w_t).sum().backward()
+        self.assertEqual(seen_t, [(torch.float32, (1, 8), False, w_t.grad.data_ptr())])
+        self.assertEqual(w_t.grad.stride(), w_t.stride())
+        self.assertEqual(w_t.grad, torch.ones_like(w_t, dtype=torch.float32))
+
+        # 5. Non-dense leaf must receive a contiguous grad per contract.
+        w_nd = (
+            torch.empty_strided((4, 8), (16, 2), dtype=torch.bfloat16)
+            .fill_(1.0)
+            .detach()
+            .requires_grad_(True)
+        )
+        w_nd.grad_dtype = torch.float32
+        seen_nd = []
+        w_nd.register_hook(record_hook(seen_nd))
+        NonContiguousGrad.apply(w_nd).sum().backward()
+        self.assertEqual(seen_nd, [(torch.float32, (8, 1), True, w_nd.grad.data_ptr())])
+        self.assertEqual(w_nd.grad.stride(), (8, 1))
+        self.assertEqual(w_nd.grad, torch.ones_like(w_nd, dtype=torch.float32))
+
+        # 6. Respect enforce_grad_layout_policy(False).
+        w_off = torch.randn(8, 16, dtype=torch.bfloat16, requires_grad=True)
+        w_off.grad_dtype = torch.float32
+        seen_off = []
+        w_off.register_hook(record_hook(seen_off))
+        with torch.autograd.enforce_grad_layout_policy(False):
+            NonContiguousGrad.apply(w_off).sum().backward()
+        self.assertEqual(
+            seen_off, [(torch.float32, (1, 8), False, w_off.grad.data_ptr())]
+        )
+        self.assertEqual(w_off.grad.stride(), (1, 8))
+
+        # 7. create_graph=True preserves differentiability and obeys contract.
+        class DifferentiableNonContigScale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp
+
+            @staticmethod
+            def backward(ctx, g):
+                return g.t().contiguous().t() * 3.0
+
+        x_cg = torch.randn(4, 8, dtype=torch.float32, requires_grad=True)
+        w_cg = torch.randn(8, 4, dtype=torch.float32).t().detach().requires_grad_(True)
+        w_cg.grad_dtype = torch.float64
+        seen_cg = []
+        w_cg.register_hook(record_hook(seen_cg))
+        upstream = (x_cg * 2.0).sum()
+        loss_cg = DifferentiableNonContigScale.apply(w_cg).sum() * upstream
+        loss_cg.backward(create_graph=True)
+        self.assertEqual(seen_cg[0][:3], (torch.float64, w_cg.stride(), False))
+        self.assertEqual(w_cg.grad.dtype, torch.float64)
+        self.assertEqual(w_cg.grad.stride(), w_cg.stride())
+        self.assertTrue(w_cg.grad.requires_grad)
+        x_cg.grad = None
+        w_cg.grad.sum().backward()
+        expected_x_grad = torch.full_like(x_cg, 2.0 * 3.0 * w_cg.numel())
+        self.assertEqual(x_cg.grad, expected_x_grad)
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,

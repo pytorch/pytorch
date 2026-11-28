@@ -4,11 +4,13 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/Context.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/DeviceGuard.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
 
@@ -18,7 +20,9 @@
 #include <ATen/ops/isnan.h>
 #endif
 
+#include <c10/core/AutogradState.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/core/Event.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
@@ -997,6 +1001,84 @@ bool has_input_metadata<Edge>(const Edge& thing) {
   return thing.is_valid();
 }
 
+// Given an Edge or optional<InputMetadata>, return the target leaf variable if
+// the destination node is AccumulateGrad and its variable is defined.
+template <typename T>
+static const Variable* get_accumulate_grad_variable(const T& thing);
+
+template <>
+const Variable* get_accumulate_grad_variable<std::optional<InputMetadata>>(
+    const std::optional<InputMetadata>& /*thing*/) {
+  return nullptr;
+}
+
+template <>
+const Variable* get_accumulate_grad_variable<Edge>(const Edge& thing) {
+  auto* acc = dynamic_cast<AccumulateGrad*>(thing.function.get());
+  if (acc != nullptr && acc->variable.defined()) {
+    return &acc->variable;
+  }
+  return nullptr;
+}
+
+// Casts grad to target_dtype. When targeting an AccumulateGrad leaf whose
+// layout contract grad does not already obey, cast directly into the target
+// memory format / strides so AccumulateGrad can steal the buffer (Case 1.1)
+// instead of performing a second full-tensor copy (Case 1.5), and so in-place
+// accumulation (Case 2.3) avoids layout mismatches.
+static Variable cast_grad_to_dtype(
+    const Variable& grad,
+    c10::ScalarType target_dtype,
+    const Variable* target_variable,
+    const InputMetadata& metadata) {
+  if (target_variable != nullptr &&
+      c10::AutogradState::get_tls_state()
+          .get_grad_layout_enforcement_enabled() &&
+      !metadata.is_tensor_subclass() &&
+      !grad.unsafeGetTensorImpl()->is_python_dispatch() &&
+      !target_variable->unsafeGetTensorImpl()->is_python_dispatch() &&
+      !grad.key_set().has_any(c10::functorch_transforms_ks) &&
+      !target_variable->key_set().has_any(c10::functorch_transforms_ks) &&
+      !at::isBatchedTensor(grad) && !at::isBatchedTensor(*target_variable) &&
+      !grad.is_mkldnn() && !target_variable->is_mkldnn() &&
+      grad.layout() == at::kStrided &&
+      target_variable->layout() == at::kStrided && !grad.is_nested() &&
+      !target_variable->is_nested() &&
+      grad.device() == target_variable->device() &&
+      grad.sym_sizes() == target_variable->sym_sizes() &&
+      !utils::obeys_layout_contract(grad, *target_variable)) {
+    if (target_variable->is_contiguous(at::MemoryFormat::Contiguous) ||
+        !target_variable->is_non_overlapping_and_dense()) {
+      return grad.to(
+          target_dtype,
+          /*non_blocking=*/false,
+          /*copy=*/false,
+          at::MemoryFormat::Contiguous);
+    }
+    if (target_variable->is_contiguous(at::MemoryFormat::ChannelsLast)) {
+      return grad.to(
+          target_dtype,
+          /*non_blocking=*/false,
+          /*copy=*/false,
+          at::MemoryFormat::ChannelsLast);
+    }
+    if (target_variable->is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+      return grad.to(
+          target_dtype,
+          /*non_blocking=*/false,
+          /*copy=*/false,
+          at::MemoryFormat::ChannelsLast3d);
+    }
+    auto result = grad.new_empty_strided_symint(
+        target_variable->sym_sizes(),
+        target_variable->sym_strides(),
+        grad.options().memory_format(std::nullopt).dtype(target_dtype));
+    result.copy_(grad);
+    return result;
+  }
+  return grad.to(target_dtype);
+}
+
 std::vector<std::optional<InputMetadata>> collect_input_metadata(
     const edge_list& edges) {
   std::vector<std::optional<InputMetadata>> input_metadata;
@@ -1050,7 +1132,11 @@ static void validate_outputs_impl(
 
     if (metadata.grad_dtype().has_value()) {
       if (grad.scalar_type() != metadata.grad_dtype().value()) {
-        grad = grad.to(metadata.grad_dtype().value());
+        grad = cast_grad_to_dtype(
+            grad,
+            metadata.grad_dtype().value(),
+            get_accumulate_grad_variable(input_metadata_container[i]),
+            metadata);
       }
       if (grad.scalar_type() != metadata.grad_dtype().value()) {
         std::stringstream ss;
