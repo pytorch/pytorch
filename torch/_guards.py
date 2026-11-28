@@ -499,6 +499,11 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 
 @dataclasses.dataclass(frozen=True)
 class StorageOverlap(GuardEnvExpr):
+    """
+    Only installed when the StorageOverlapPartition guard is turned off (see
+    _use_storage_overlap_partition_guard).
+    """
+
     overlapping_sources: list[Source]
     non_overlapping_sources: list[Source]
 

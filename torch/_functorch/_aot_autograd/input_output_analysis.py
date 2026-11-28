@@ -16,9 +16,19 @@ from typing import Any
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._C._dynamo.guards import compute_overlapping_tensors
+from torch._C._dynamo.guards import (
+    compute_overlapping_tensor_groups,
+    compute_overlapping_tensors,
+)
+from torch._dynamo.source import (
+    ConstantSource,
+    get_global_source_name,
+    get_local_source_name,
+    GlobalSource,
+)
+from torch._environment import is_fbcode
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
-from torch._guards import StorageOverlap
+from torch._guards import ChainedSource, Source, StorageOverlap, StorageOverlapPartition
 from torch._prims_common import compute_required_storage_length
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -52,6 +62,19 @@ zip = strict_zip
 # alias_of_intermediate* types index into graph intermediates or user outputs
 # instead, so input renumbering must skip them. See OutputAliasInfo.base_idx.
 INPUT_ALIAS_TYPES = (OutputType.alias_of_input, OutputType.is_input)
+
+
+def _use_storage_overlap_partition_guard() -> bool:
+    """
+    Killswitch for the StorageOverlapPartition guard. When off, only aliased
+    mutated inputs under dynamic shapes are guarded, with the older
+    StorageOverlap guard, and static-shape graphs get no overlap guard.
+    """
+    from torch._utils_internal import justknobs_check
+
+    return justknobs_check(
+        "pytorch/compiler:aot_autograd_storage_overlap_partition_guard"
+    )
 
 
 def _is_symbolic(tensors: list[Tensor]) -> bool:
@@ -422,7 +445,10 @@ def _hinted_views(tensors: list[Tensor]) -> list[Tensor] | None:
 
 
 def compute_overlapping_inputs(
-    aot_config: AOTConfig, fwd_inputs: list[Any], aliased_input_indices: list[int]
+    aot_config: AOTConfig,
+    fwd_inputs: list[Any],
+    aliased_input_indices: list[int],
+    use_partition_guard: bool,
 ) -> set[int]:
     num_aliases = len(aliased_input_indices)
     aliased_fwd_inputs = [fwd_inputs[i] for i in aliased_input_indices]
@@ -432,7 +458,7 @@ def compute_overlapping_inputs(
     # the hint path below removes for backed symbols with Dynamo sources. It
     # still keys on the original inputs, so those compiles keep falling back as
     # before: this is deliberate, to keep behavior unchanged.
-    if torch._inductor.config.is_fbcode():
+    if is_fbcode():
         if symbolic and num_aliases > 400:
             from torch._subclasses.fake_tensor import (
                 UnsupportedMutationAliasingException,
@@ -460,7 +486,8 @@ def compute_overlapping_inputs(
     # Add the StorageOverlap AOTAutograd guard only if we are actually keeping track of
     # dynamo sources inside AOTAutograd.
     if (
-        tracing_context is not None
+        not use_partition_guard
+        and tracing_context is not None
         # Make sure dynamic shapes is currently being used. This is whether the
         # original inputs are symbolic, not analysis_symbolic.
         and symbolic
@@ -483,6 +510,83 @@ def compute_overlapping_inputs(
         )
 
     return actual_aliased_indices
+
+
+def _storage_overlap_partition(
+    aot_config: AOTConfig, tensors: list[Tensor]
+) -> tuple[tuple[int, ...], ...]:
+    tensors, symbolic, suppress_guards = _prepare_overlap_analysis(
+        aot_config, tensors, _is_symbolic(tensors)
+    )
+    with suppress_guards:
+        return tuple(
+            tuple(group)
+            for group in compute_overlapping_tensor_groups(tensors, symbolic=symbolic)
+        )
+
+
+def _constant_to_global(s: Source) -> Source:
+    return GlobalSource(s.source_name) if isinstance(s, ConstantSource) else s
+
+
+def _guardable_source(s: Source) -> Source:
+    # Dynamo installs assume_constant_result values as frame globals under their
+    # ConstantSource name, so guard on them through G. Clone only those sources:
+    # cloning rebuilds every link of the chain.
+    base = s.get_base() if isinstance(s, ChainedSource) else s
+    return s.clone(_constant_to_global) if isinstance(base, ConstantSource) else s
+
+
+def add_input_mutation_storage_overlap_partition_guard(
+    aot_config: AOTConfig,
+    fwd_inputs: list[Any],
+    input_info: list[InputAliasInfo],
+) -> None:
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context is None:
+        return
+
+    arg_sources = aot_config.aot_autograd_arg_pos_to_source
+    # AOTDedupeWrapper drops duplicated inputs but not their sources, so the
+    # positions no longer line up.
+    if not arg_sources or len(arg_sources) != len(fwd_inputs):
+        return
+
+    sources = [None if s is None else _guardable_source(s) for s in arg_sources]
+    tensor_indices: list[int] = []
+    selected_sources: list[Source] = []
+    seen_sources: set[Source] = set()
+    for i, inpt in enumerate(fwd_inputs):
+        source = sources[i]
+        if (
+            not isinstance(inpt, Tensor)
+            or source is None
+            or source in seen_sources
+            # Guards only see the frame's locals and globals, not values Dynamo
+            # creates, such as nn.Parameter(x) built in the frame or
+            # random.random() results.
+            or not (get_local_source_name(source) or get_global_source_name(source))
+        ):
+            continue
+        tensor_indices.append(i)
+        selected_sources.append(source)
+        seen_sources.add(source)
+    if len(tensor_indices) <= 1:
+        return
+    if not any(input_info[i].mutates_data for i in tensor_indices):
+        return
+
+    selected_inputs = [fwd_inputs[i] for i in tensor_indices]
+    by_storage: dict[StorageWeakRef, list[int]] = {}
+    for i, t in enumerate(selected_inputs):
+        by_storage.setdefault(StorageWeakRef(t.untyped_storage()), []).append(i)
+    tracing_context.guards_context.aotautograd_guards.append(
+        StorageOverlapPartition(
+            selected_sources,
+            _storage_overlap_partition(aot_config, selected_inputs),
+            tuple(tuple(g) for g in by_storage.values() if len(g) > 1),
+        )
+    )
 
 
 def _graph_input_names(gm: torch.fx.GraphModule) -> list[str]:
