@@ -491,6 +491,9 @@ class BlackwellGPUGemmConfig(GemmConfig):
     data_partition_factor: int = dataclasses.field(kw_only=True, default=1)
     separate_epilogue_store: bool = dataclasses.field(kw_only=True, default=False)
     two_ctas: bool = dataclasses.field(kw_only=True, default=False)
+    # Keep one TMEM accumulator instead of double-buffering it across tiles, for
+    # tiles whose double-buffered accumulator exceeds TMEM (e.g. 256x256 fp32).
+    disallow_acc_multi_buffer: bool = dataclasses.field(kw_only=True, default=False)
 
 
 # FlexAttention Configs
@@ -1241,6 +1244,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     conf.data_partition_factor,
                     conf.separate_epilogue_store,
                     conf.two_ctas,
+                    conf.disallow_acc_multi_buffer,
                 )
 
             extra_key, extra_kwargs = self._get_extra_config_key_and_kwargs(conf)
@@ -1268,6 +1272,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["DATA_PARTITION_FACTOR"] = conf.data_partition_factor
                     kwargs["SEPARATE_EPILOGUE_STORE"] = conf.separate_epilogue_store
                     kwargs["TWO_CTAS"] = conf.two_ctas
+                    if conf.disallow_acc_multi_buffer:
+                        kwargs["DISALLOW_ACC_MULTI_BUFFER"] = True
 
                 kwargs.update(extra_kwargs)
 
@@ -3699,6 +3705,13 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         return configs
 
 
+def _is_tensorwise_scale(scale: IRNode) -> bool:
+    size = scale.get_size()
+    return len(size) == 0 or all(
+        V.graph.sizevars.statically_known_equals(dim, 1) for dim in size
+    )
+
+
 # Scaled MM-specific mixin for scaled MM templates
 class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
     """
@@ -3727,16 +3740,10 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             # Need to unsqueeze bias from [N] -> [1, N]
             bias = L[aten.unsqueeze](bias, 0)
 
-        def is_tensorwise_scale(scale: IRNode) -> bool:
-            size = scale.get_size()
-            return len(size) == 0 or all(
-                V.graph.sizevars.statically_known_equals(dim, 1) for dim in size
-            )
-
         def normalize_tensorwise_scale(
             scale: IRNode, *, allow_high_rank: bool
         ) -> IRNode:
-            if not is_tensorwise_scale(scale):
+            if not _is_tensorwise_scale(scale):
                 return scale
             if not allow_high_rank and len(scale.get_size()) > 2:
                 raise RuntimeError(
@@ -4351,6 +4358,59 @@ class CUDAScaledBlackwellTMATemplateConfigHeuristic(
     def __init__(self) -> None:
         super().__init__()
         self.mm_configs = self.blackwell_scaled_persistent_mm_configs
+
+        def ws_config(
+            block_m: int, block_n: int, num_stages: int, **kwargs: Any
+        ) -> BlackwellGPUGemmConfig:
+            return BlackwellGPUGemmConfig(
+                block_m,
+                block_n,
+                128,
+                num_stages,
+                8,
+                group_m=8,
+                epilogue_subtile=2,
+                warp_specialize=True,
+                flatten=True,
+                **kwargs,
+            )
+
+        # These need sm_107's oversized shared memory mode (up to 334,848 B per
+        # block). The shared list stops at 3 stages for the 128x256 tile, and a
+        # 256x256 fp32 accumulator fits TMEM (512 of 576 columns) only when it
+        # is not double-buffered.
+        self.sm107_mm_configs: list[BaseConfig] = [
+            ws_config(128, 256, 6),
+            ws_config(128, 256, 5),
+            ws_config(256, 256, 4, disallow_acc_multi_buffer=True),
+        ]
+        # With rowwise scales the 6-stage config exceeds even the oversized limit.
+        self.sm107_tensorwise_only_configs = self.sm107_mm_configs[:1]
+
+    def get_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
+        configs = self.mm_configs
+        if torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 7):
+            configs = [*configs, *self.sm107_mm_configs]
+        return partial(self.preprocess_mm_configs, configs=configs)
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        rowwise = not all(_is_tensorwise_scale(s) for s in kernel_inputs.nodes()[2:4])
+        skip = [
+            (c.block_m, c.block_n, c.block_k, c.num_stages, c.num_warps)
+            for c in self.sm107_tensorwise_only_configs
+            if rowwise
+        ]
+        fields = ("BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps")
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            if tuple(template_kwargs[f] for f in fields) not in skip:
+                yield template_kwargs
 
 
 @register_template_heuristic(

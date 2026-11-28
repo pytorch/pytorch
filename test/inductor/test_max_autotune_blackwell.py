@@ -20,6 +20,7 @@ from torch._inductor.heuristics.template.triton import (
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
+    ScaledBlackwellTMAConfigMixin,
     TMATemplateConfigMixin,
 )
 from torch._inductor.ir import FixedLayout
@@ -31,6 +32,7 @@ from torch._inductor.kernel.mm import blackwell_ws_persistent_tma_mm_template
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.lowering import lowerings
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
@@ -56,6 +58,21 @@ def has_tlx() -> bool:
         return True
     except ImportError:
         return False
+
+
+def has_sm107() -> bool:
+    return has_datacenter_blackwell_tma_device() and (
+        torch.cuda.get_device_capability() == (10, 7)
+    )
+
+
+def _forbid_pipelining_fallback():
+    """Fail if a kernel that could not be loaded is recompiled with num_stages=1."""
+    return mock.patch.object(
+        CachingAutotuner,
+        "compile_by_disabling_pipelining",
+        side_effect=AssertionError("recompiled with num_stages=1"),
+    )
 
 
 _PRIOR_FP32_MATMUL_PRECISION: str | None = None
@@ -534,6 +551,77 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             fc.check("tl.make_tensor_descriptor(base=")
         fc.check("_desc.load(").check(write_api).run(code[0])
+
+    @unittest.skipIf(not has_sm107(), "Need sm_107")
+    def test_sm107_scaled_mm_single_acc_256x256(self):
+        def scaled_mm(a, b, scale_a, scale_b):
+            return torch._scaled_mm(
+                a, b.t(), scale_a, scale_b, out_dtype=torch.bfloat16
+            )
+
+        M = N = K = 512
+        a = (torch.randn(M, K, device=GPU_TYPE) * 0.1).to(torch.float8_e4m3fn)
+        b = (torch.randn(N, K, device=GPU_TYPE) * 0.1).to(torch.float8_e4m3fn)
+        scale_a = torch.tensor(0.5, device=GPU_TYPE)
+        scale_b = torch.tensor(3.0, device=GPU_TYPE)
+
+        options = {
+            "max_autotune": True,
+            "triton.enable_persistent_tma_matmul": True,
+            "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            "test_configs.autotune_choice_desc_regex": "DISALLOW_ACC_MULTI_BUFFER=True",
+        }
+        with config.patch(options), _forbid_pipelining_fallback():
+            c_actual, code = run_and_get_code(
+                torch.compile(scaled_mm), a, b, scale_a, scale_b
+            )
+        c_expected = scaled_mm(a, b, scale_a, scale_b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+        FileCheck().check("triton_tem_fused__scaled_mm").check(
+            "BLOCK_M : tl.constexpr = 256"
+        ).check("BLOCK_N : tl.constexpr = 256").check(
+            "disallow_acc_multi_buffer=True"
+        ).run(code[0])
+
+    @unittest.skipIf(not has_sm107(), "Need sm_107")
+    @parametrize("rowwise", (False, True))
+    def test_sm107_scaled_mm_128x256_6_stages_tensorwise_only(self, rowwise: bool):
+        def scaled_mm(a, b, scale_a, scale_b):
+            return torch._scaled_mm(
+                a, b.t(), scale_a, scale_b, out_dtype=torch.bfloat16
+            )
+
+        M = N = K = 1024
+        a = (torch.randn(M, K, device=GPU_TYPE) * 0.1).to(torch.float8_e4m3fn)
+        b = (torch.randn(N, K, device=GPU_TYPE) * 0.1).to(torch.float8_e4m3fn)
+        if rowwise:
+            scale_a = torch.rand(M, 1, device=GPU_TYPE) + 0.5
+            scale_b = torch.rand(1, N, device=GPU_TYPE) + 0.5
+        else:
+            scale_a = torch.tensor(0.5, device=GPU_TYPE)
+            scale_b = torch.tensor(3.0, device=GPU_TYPE)
+
+        options = {
+            "max_autotune": True,
+            "triton.enable_persistent_tma_matmul": True,
+            "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            "test_configs.autotune_choice_desc_regex": (
+                "BLOCK_K=128, BLOCK_M=128, BLOCK_N=256,.*num_stages=6, num_warps=8"
+            ),
+        }
+        with config.patch(options), _forbid_pipelining_fallback():
+            compiled = torch.compile(scaled_mm)
+            if rowwise:
+                # This config exceeds shared memory with the rowwise epilogue.
+                with self.assertRaisesRegex(
+                    BackendCompilerFailed, "NoValidChoicesError"
+                ):
+                    compiled(a, b, scale_a, scale_b)
+                return
+            c_actual = compiled(a, b, scale_a, scale_b)
+        c_expected = scaled_mm(a, b, scale_a, scale_b)
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
@@ -1394,6 +1482,65 @@ class TestBlackwellExhaustiveConfigs(TestCase):
         )
 
 
+@unittest.skipIf(torch.version.hip is not None, "CUDA-specific template heuristics")
+@instantiate_parametrized_tests
+class TestSM107ScaledWSConfigs(TestCase):
+    """sm_107 scaled_mm WS configs, checked without a GPU by mocking the device."""
+
+    def setUp(self):
+        super().setUp()
+        instances = mock.patch.dict(BaseHeuristicSingleton._instances, clear=True)
+        instances.start()
+        self.addCleanup(instances.stop)
+        self.heuristic = CUDAScaledBlackwellTMATemplateConfigHeuristic()
+
+    @parametrize("capability", ((10, 0), (10, 3), (10, 7)))
+    def test_sm107_configs(self, capability):
+        with (
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("torch.cuda.get_device_capability", return_value=capability),
+        ):
+            configs = self.heuristic.get_mm_configs().keywords["configs"]
+        shared = self.heuristic.blackwell_scaled_persistent_mm_configs
+        self.assertEqual(configs[: len(shared)], shared)
+        extra = [
+            (c.block_m, c.block_n, c.num_stages, c.disallow_acc_multi_buffer)
+            for c in configs[len(shared) :]
+        ]
+        expected = [(128, 256, 6, False), (128, 256, 5, False), (256, 256, 4, True)]
+        self.assertEqual(extra, expected if capability == (10, 7) else [])
+
+    @parametrize("tensorwise", (False, True))
+    def test_sm107_tensorwise_only_filter(self, tensorwise):
+        candidates = [
+            {
+                "BLOCK_M": c.block_m,
+                "BLOCK_N": c.block_n,
+                "BLOCK_K": c.block_k,
+                "num_stages": c.num_stages,
+                "num_warps": c.num_warps,
+            }
+            for c in self.heuristic.sm107_mm_configs
+        ]
+        kernel_inputs = mock.Mock(nodes=lambda: [None] * 4)
+        with (
+            mock.patch.object(
+                ScaledBlackwellTMAConfigMixin,
+                "_get_template_configs_impl",
+                return_value=iter(candidates),
+            ),
+            mock.patch(
+                "torch._inductor.heuristics.template.triton._is_tensorwise_scale",
+                return_value=tensorwise,
+            ),
+        ):
+            got = list(
+                self.heuristic._get_template_configs_impl(kernel_inputs, "scaled_mm")
+            )
+        # Only the 6-stage 128x256 config is dropped for rowwise scales.
+        self.assertEqual(got, candidates if tensorwise else candidates[1:])
+
+
 class TestBlackwellAutoWSConstraints(TestCase):
     def test_two_ctas_allows_all_pipeline_depths(self):
         kwargs = {
@@ -1562,11 +1709,12 @@ class TestBlackwellAutoWSConfigs(TestCase):
                         )
                         self.assertEqual(configs, expected)
                     else:
-                        self.assertIs(
+                        # scaled_mm adds its sm_107 configs to mm_configs
+                        self.assertEqual(
                             configs,
                             heuristic.exhaustive_configs
                             if search_space == "EXHAUSTIVE"
-                            else heuristic.mm_configs,
+                            else heuristic.get_mm_configs().keywords["configs"],
                         )
                         if op_name == "addmm":
                             self.assertEqual(
