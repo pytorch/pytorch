@@ -21,8 +21,8 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
-#include <ATen/ops/nll_loss2d_forward_native.h>
 #include <ATen/ops/nll_loss2d_backward_native.h>
+#include <ATen/ops/nll_loss2d_forward_native.h>
 #endif
 
 namespace at::native {
@@ -82,8 +82,8 @@ __global__ void nll_loss2d_forward_no_reduce_kernel(
 template <typename scalar_t, typename accscalar_t, typename index_t>
 C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void nll_loss2d_forward_kernel(
-  scalar_t* output,
-  scalar_t* total_weight,
+  accscalar_t* output,
+  accscalar_t* total_weight,
   const scalar_t* input,
   const int64_t* target,
   const scalar_t* weight,
@@ -121,18 +121,27 @@ __global__ void nll_loss2d_forward_kernel(
   auto input_sum_ = cuda_utils::BlockReduceSum(input_sum, input_sum_smem);
 
   if (threadIdx.x == 0) {
-    gpuAtomicAdd(total_weight, static_cast<scalar_t>(acc_weight_));
-    gpuAtomicAdd(output, static_cast<scalar_t>(input_sum_));
+    // Keep the cross-block reduction in accscalar_t. Casting each partial
+    // sum to fp16 before the atomic overflows past 65504 (issue #201120).
+    gpuAtomicAdd(total_weight, acc_weight_);
+    gpuAtomicAdd(output, input_sum_);
   }
 }
 
-template <typename scalar_t>
-C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
-__global__ void nll_loss2d_forward_size_average_kernel(
-  scalar_t* output,
-  const scalar_t* total_weight
-) {
-  *output /= *total_weight;
+// Cast the accumulated sum once. Mean divides in accscalar_t first so the
+// result stays finite when the sum itself does not fit in scalar_t.
+template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(1)
+__global__ void nll_loss2d_forward_finalize_kernel(
+    scalar_t* output,
+    scalar_t* total_weight,
+    const accscalar_t* acc_output,
+    const accscalar_t* acc_total_weight,
+    bool size_average) {
+  const accscalar_t sum = *acc_output;
+  const accscalar_t tw = *acc_total_weight;
+  *output = static_cast<scalar_t>(size_average ? (sum / tw) : sum);
+  *total_weight = static_cast<scalar_t>(tw);
 }
 
 template <typename scalar_t>
@@ -314,14 +323,32 @@ void nll_loss2d_forward_out_cuda_template(
   auto weight_ = optional_contiguous(weight);
   auto target_ = target.contiguous();
 
-  output.zero_();
-  total_weight.zero_();
-
   auto batch_size = target.size(0);
   int64_t map_nelem = target.numel() / batch_size;
   int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
   int total_blocks = blocks_per_sample * batch_size;
+
+  // Accumulate in fp32 for half/bfloat16. Cast total_weight back to the
+  // caller's dtype once. float/double already match and reuse output.
+  const auto acc_dtype = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
+  Tensor acc_output;
+  if (output.scalar_type() == input.scalar_type() &&
+      output.scalar_type() == acc_dtype) {
+    output.zero_();
+    acc_output = output;
+  } else {
+    acc_output = at::empty({}, input.options().dtype(acc_dtype));
+    acc_output.zero_();
+  }
+  Tensor acc_total_weight;
+  if (total_weight.scalar_type() == acc_dtype) {
+    total_weight.zero_();
+    acc_total_weight = total_weight;
+  } else {
+    acc_total_weight = at::empty({}, input.options().dtype(acc_dtype));
+    acc_total_weight.zero_();
+  }
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
@@ -338,8 +365,8 @@ void nll_loss2d_forward_out_cuda_template(
                   CUDA_NUM_THREADS,
                   0,
                   at::cuda::getCurrentCUDAStream()>>>(
-                    output.mutable_data_ptr<scalar_t>(),
-                    total_weight.mutable_data_ptr<scalar_t>(),
+                    acc_output.mutable_data_ptr<accscalar_t>(),
+                    acc_total_weight.mutable_data_ptr<accscalar_t>(),
                     input_.const_data_ptr<scalar_t>(),
                     target_.const_data_ptr<int64_t>(),
                     optional_data<scalar_t>(weight_),
@@ -348,14 +375,14 @@ void nll_loss2d_forward_out_cuda_template(
                     blocks_per_sample,
                     ignore_index);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
-            // Divide by total_weight
-            if (reduction == at::Reduction::Mean) {
-              nll_loss2d_forward_size_average_kernel<scalar_t>
-                  <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-                      output.mutable_data_ptr<scalar_t>(),
-                      total_weight.const_data_ptr<scalar_t>());
-              C10_CUDA_KERNEL_LAUNCH_CHECK();
-            }
+            nll_loss2d_forward_finalize_kernel<scalar_t, accscalar_t>
+                <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+                    output.mutable_data_ptr<scalar_t>(),
+                    total_weight.mutable_data_ptr<scalar_t>(),
+                    acc_output.const_data_ptr<accscalar_t>(),
+                    acc_total_weight.const_data_ptr<accscalar_t>(),
+                    reduction == at::Reduction::Mean);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
       });
 }

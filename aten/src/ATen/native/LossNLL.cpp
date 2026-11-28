@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIndexing.h>
@@ -245,10 +246,12 @@ void nll_loss_out_frame(
 
   int64_t num_ignored = 0;
 
+  // fp32 for half/bfloat16. CPU acc_type would widen float to double.
+  using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  scalar_t weight_partial_sums[cascade_sum_num_levels] = {0};
+  accscalar_t weight_partial_sums[cascade_sum_num_levels] = {0};
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  scalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
+  accscalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
   for (const auto b : c10::irange(batch_size)) {
     const int64_t cur_target = target_data[b];
     if (cur_target == ignore_index) {
@@ -264,11 +267,11 @@ void nll_loss_out_frame(
 
     const auto data = input_data[b * n_classes + cur_target];
     if (weight_data) {
-      const scalar_t weight_val = weight_data[cur_target];
-      loss_partial_sums[0] -= data * weight_val;
+      const accscalar_t weight_val = static_cast<accscalar_t>(weight_data[cur_target]);
+      loss_partial_sums[0] -= static_cast<accscalar_t>(data) * weight_val;
       weight_partial_sums[0] += weight_val;
     } else {
-      loss_partial_sums[0] -= data;
+      loss_partial_sums[0] -= static_cast<accscalar_t>(data);
     }
 
     for (int64_t j = 0; j + 1 < cascade_sum_num_levels; ++j) {
@@ -285,23 +288,23 @@ void nll_loss_out_frame(
     }
   }
 
-  const scalar_t total_weight_val = !weight_data ?
-    static_cast<scalar_t>(batch_size - num_ignored) :
+  const accscalar_t total_weight_val = !weight_data ?
+    static_cast<accscalar_t>(batch_size - num_ignored) :
     std::accumulate(std::begin(weight_partial_sums),
                     std::end(weight_partial_sums),
-                    scalar_t{0});
+                    accscalar_t{0});
 
-  scalar_t output_val = std::accumulate(std::begin(loss_partial_sums),
-                                        std::end(loss_partial_sums),
-                                        scalar_t{0});
+  accscalar_t output_val = std::accumulate(std::begin(loss_partial_sums),
+                                           std::end(loss_partial_sums),
+                                           accscalar_t{0});
 
   if (reduction == Reduction::Mean) {
     output_val /= total_weight_val;
   }
 
-  // write result to output tensors
-  *output.mutable_data_ptr<scalar_t>() = output_val;
-  *total_weight_data = total_weight_val;
+  // Cast once. The mean was divided in the accumulator.
+  *output.mutable_data_ptr<scalar_t>() = static_cast<scalar_t>(output_val);
+  *total_weight_data = static_cast<scalar_t>(total_weight_val);
 }
 
 void nll_loss_forward_out_cpu_template(

@@ -4940,6 +4940,18 @@ def _nll_loss_forward(
     if n_dims < 2:
         channel_dim = 0
 
+    # fp16/bf16 mean sums overflow past 65504. Divide in fp32 and cast once.
+    # total_weight is cast back so its dtype stays the input dtype.
+    orig_dtype = self.dtype
+    promote = reduction == Reduction.MEAN.value and orig_dtype in (
+        torch.float16,
+        torch.bfloat16,
+    )
+    if promote:
+        self = self.to(torch.float32)
+        if weight is not None:
+            weight = weight.to(torch.float32)
+
     if weight is not None:
         if n_dims > 1:
             shape = [
@@ -4975,6 +4987,10 @@ def _nll_loss_forward(
         result = result.sum()
     elif reduction == Reduction.MEAN.value:
         result = result.sum() / total_weight
+
+    if promote:
+        result = result.to(orig_dtype)
+        total_weight = total_weight.to(orig_dtype)
 
     return result, total_weight
 

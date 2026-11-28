@@ -306,14 +306,25 @@ static void nllnd_loss_forward_impl(Tensor& output,
     }
   });
 
-  total_weight.copy_(at::sum(sample_weights));
+  const bool mean_in_fp32 = reduction == Reduction::Mean &&
+      (input_arg.scalar_type() == ScalarType::Half || input_arg.scalar_type() == ScalarType::BFloat16);
+  if (mean_in_fp32) {
+    // fp16/bf16 sums overflow past 65504. Divide in fp32 and cast once.
+    const auto unreduced_acc = unreduced_loss.to(ScalarType::Float);
+    const auto weights_acc = sample_weights.to(ScalarType::Float);
+    const auto total_weight_acc = at::sum(weights_acc);
+    total_weight.copy_(total_weight_acc);
+    output.copy_(at::sum(unreduced_acc).div(total_weight_acc));
+  } else {
+    total_weight.copy_(at::sum(sample_weights));
 
-  if (reduction == Reduction::None) {
-    // output already holds unreduced_loss
-  } else if (reduction == Reduction::Sum) {
-    output.copy_(at::sum(unreduced_loss));
-  } else if (reduction == Reduction::Mean) {
-    output.copy_(at::sum(unreduced_loss).div(total_weight));
+    if (reduction == Reduction::None) {
+      // output already holds unreduced_loss
+    } else if (reduction == Reduction::Sum) {
+      output.copy_(at::sum(unreduced_loss));
+    } else if (reduction == Reduction::Mean) {
+      output.copy_(at::sum(unreduced_loss).div(total_weight));
+    }
   }
 }
 
