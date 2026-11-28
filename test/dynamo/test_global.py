@@ -5,7 +5,6 @@ import importlib.util
 import os
 import sys
 import tempfile
-import unittest
 import weakref
 from unittest import mock
 
@@ -511,9 +510,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             if preexisting:
                 self.assertNotIn("_dg_a", globals())
 
-    # The re-bound name keeps its old __dict__ slot instead of appending
-    # where eager re-inserts it.
-    @unittest.expectedFailure
     def test_delete_global_then_store_matches_eager_dict_order(self):
         with mock.patch.dict(globals(), {"_dg_a": 1, "_dg_pad": 0}):
 
@@ -777,6 +773,32 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(opt_fn(x), expected)
             self.assertEqual(mod.store_read_delete_store_read_value, expected_value)
+
+    # Eager re-inserts a re-bound name at the end of the module __dict__, after
+    # a name first stored between the delete and the re-bind.
+    @parametrize("shape", ("inlined_store", "module_setattr"))
+    def test_delete_global_crossfile_then_store_matches_eager_dict_order(self, shape):
+        with crossfile_globals() as mod:
+
+            def fn_inlined_store(x):
+                mod.delete_store_other_then_rebind_fn()
+                return x + 1
+
+            def fn_module_setattr(x):
+                mod.delete_value_fn()
+                mod.delete_value = 2
+                return x + 1
+
+            fn = {
+                "inlined_store": fn_inlined_store,
+                "module_setattr": fn_module_setattr,
+            }[shape]
+            x = torch.ones(2, 2)
+            with mock.patch.dict(mod.__dict__):
+                fn(x)
+                eager_order = list(mod.__dict__)
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(list(mod.__dict__), eager_order)
 
     @parametrize("preexisting", (True, False))
     def test_delete_global_presence_flip(self, preexisting):
