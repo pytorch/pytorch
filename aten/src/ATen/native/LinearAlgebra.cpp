@@ -2008,6 +2008,147 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
       .has_value();
 }
 
+// tensor1: (*b1, n, m) and tensor2: (*b2, m, p) where b2 broadcasts to b1. Expanding
+// tensor2 to b1 copies it when its expanded batch dims cannot be merged into one. In that
+// case, fold the batch dims where tensor2 has size 1 into the rows of tensor1 instead.
+// For example, q (b, h, g, s, d) @ kT (b, h, 1, d, t) becomes
+// q.view(b * h, g * s, d).bmm(kT.view(b * h, d, t)) without copying either input.
+// Returns nullopt when this does not apply or is not clearly cheaper.
+// Unlike here, the Python decomposition in torch/_decomp/decompositions.py keeps the
+// expand path when both inputs are 4-D, so that Inductor's attention patterns match.
+static std::optional<Tensor> matmul_fold_broadcast_batch(
+    const Tensor& tensor1,
+    const Tensor& tensor2) {
+  // Not isTensorSubclassLike, which is true under any mode, so that the ops do not
+  // depend on whether a mode is active
+  const auto subclass_like = [](const Tensor& t) {
+    return !(t.key_set() & kTensorSubclassLike).empty();
+  };
+  if (subclass_like(tensor1) || subclass_like(tensor2) ||
+      TORCH_GUARD_OR_FALSE(tensor1.sym_numel().sym_eq(0))) {
+    return std::nullopt;
+  }
+  const auto sizes1 = tensor1.sym_sizes();
+  const auto sizes2 = tensor2.sym_sizes();
+  const int64_t nb = tensor1.dim() - 2;
+  const int64_t offset = tensor1.dim() - tensor2.dim();
+  DimVector keep;
+  DimVector fold;
+  bool broadcasts = false;
+  for (const auto i : c10::irange(nb)) {
+    const auto size2 = i < offset ? c10::SymInt(1) : sizes2[i - offset];
+    if (TORCH_GUARD_OR_FALSE(size2.sym_eq(1))) {
+      fold.push_back(i);
+      broadcasts |= TORCH_GUARD_OR_FALSE(sizes1[i].sym_ne(1));
+    } else if (TORCH_GUARD_OR_FALSE(sizes1[i].sym_eq(size2))) {
+      keep.push_back(i);
+    } else {
+      return std::nullopt;
+    }
+  }
+  if (!broadcasts) {
+    return std::nullopt;
+  }
+
+  c10::SymInt keep_numel = 1;
+  for (const auto i : keep) {
+    keep_numel *= sizes1[i];
+  }
+  c10::SymInt fold_numel = 1;
+  for (const auto i : fold) {
+    fold_numel *= sizes1[i];
+  }
+  const auto& n = sizes1[nb];
+  const auto& m = sizes2[tensor2.dim() - 2];
+  const auto& p = sizes2.back();
+  // If expanding tensor2 does not copy it, keep the existing path
+  c10::SymDimVector expanded_sizes2(sizes1.begin(), sizes1.end() - 2);
+  expanded_sizes2.append({m, p});
+  c10::SymDimVector expanded_strides2(nb, c10::SymInt(0));
+  for (const auto i : keep) {
+    expanded_strides2[i] = tensor2.sym_stride(i - offset);
+  }
+  expanded_strides2.append({tensor2.sym_stride(-2), tensor2.sym_stride(-1)});
+  const c10::SymDimVector bmm_shape2{keep_numel * fold_numel, m, p};
+  if (at::detail::computeStride(expanded_sizes2, expanded_strides2, bmm_shape2)
+          .has_value()) {
+    return std::nullopt;
+  }
+
+  DimVector perm(keep);
+  perm.append(fold.begin(), fold.end());
+  perm.push_back(nb);
+  perm.push_back(nb + 1);
+  bool in_order = true;
+  int64_t last = -1;
+  for (const auto i : perm) {
+    if (!TORCH_GUARD_OR_FALSE(sizes1[i].sym_eq(1))) {
+      in_order &= i > last;
+      last = i;
+    }
+  }
+  if (!in_order) {
+    // Putting the result back in order copies it. That only costs less than expanding
+    // tensor2 for vector rows (n == 1) with m, p > 1, if tensor2 is not already expanded
+    if (!TORCH_GUARD_OR_FALSE(n.sym_eq(1)) ||
+        !TORCH_GUARD_OR_FALSE(sizes1.back().sym_gt(1)) ||
+        !TORCH_GUARD_OR_FALSE(sizes2.back().sym_gt(1))) {
+      return std::nullopt;
+    }
+    for (const auto i : keep) {
+      if (!TORCH_GUARD_OR_FALSE(sizes1[i].sym_eq(1)) &&
+          !TORCH_GUARD_OR_FALSE(tensor2.sym_stride(i - offset).sym_ne(0))) {
+        return std::nullopt;
+      }
+    }
+  }
+
+  const auto strides1 = tensor1.sym_strides();
+  c10::SymDimVector perm_sizes;
+  c10::SymDimVector perm_strides;
+  for (const auto i : perm) {
+    perm_sizes.push_back(sizes1[i]);
+    perm_strides.push_back(strides1[i]);
+  }
+  const c10::SymDimVector t1_shape{keep_numel, fold_numel * n, sizes1.back()};
+  const auto t1_strides =
+      at::detail::computeStride(perm_sizes, perm_strides, t1_shape);
+  // Folding must not copy tensor1, or give it a layout that bmm would copy
+  if (!t1_strides.has_value() ||
+      !TORCH_GUARD_OR_FALSE((*t1_strides)[2].sym_eq(1)) ||
+      !TORCH_GUARD_OR_FALSE((*t1_strides)[1].sym_ge(sizes1.back()))) {
+    return std::nullopt;
+  }
+  // BLAS takes the folded rows and the leading dims as int
+  const c10::SymInt int_max = std::numeric_limits<int>::max();
+  for (const auto& v : {t1_shape[1], (*t1_strides)[1], tensor2.sym_stride(-2),
+                        tensor2.sym_stride(-1)}) {
+    if (!TORCH_GUARD_OR_FALSE(v.sym_le(int_max))) {
+      return std::nullopt;
+    }
+  }
+
+  // perm holds each dim once, so it is the identity if it is sorted
+  const auto t1 =
+      std::is_sorted(perm.begin(), perm.end()) ? tensor1 : tensor1.permute(perm);
+  const auto out =
+      t1.view_symint(t1_shape).bmm(tensor2.reshape_symint({keep_numel, m, p}));
+  if (in_order) {
+    c10::SymDimVector output_shape(sizes1.begin(), sizes1.end() - 1);
+    output_shape.push_back(p);
+    return at::_unsafe_view_symint(out, output_shape);
+  }
+  c10::SymDimVector perm_shape;
+  DimVector inv_perm(perm.size());
+  for (const auto j : c10::irange(perm.size())) {
+    perm_shape.push_back(perm[j] == nb + 1 ? p : sizes1[perm[j]]);
+    inv_perm[perm[j]] = static_cast<int64_t>(j);
+  }
+  return at::_unsafe_view_symint(out, perm_shape)
+      .permute(inv_perm)
+      .clone(at::MemoryFormat::Contiguous);
+}
+
 /*
 Matrix product of two Tensors.
 The behavior depends on the dimensionality of the Tensors as follows:
@@ -2018,7 +2159,9 @@ The behavior depends on the dimensionality of the Tensors as follows:
   conditions on the strides apply (see should_fold) we fold the first N-1 dimensions
   of the ND argument to form a matrix, call mm or mv, reshape it back to ND and return it
 - Otherwise, we return bmm, after broadcasting and folding the batched dimensions if
-  there's more than one
+  there's more than one. If the second argument has size 1 in some batch dimensions and
+  expanding it would copy it, those dimensions are folded into the rows of the first
+  argument instead (see matmul_fold_broadcast_batch)
 */
 static Tensor _matmul_impl(
     Tensor& out,
@@ -2151,6 +2294,15 @@ static Tensor _matmul_impl(
       if (TORCH_GUARD_OR_FALSE(batch_tensor2[0].sym_eq(1)) &&
           (tensor2.requires_grad() || isTensorSubclassLike(tensor2))) {
         return _matmul_impl(out, tensor1, tensor2.squeeze(0));
+      }
+    }
+
+    // Expanding tensor2 can only copy it if tensor1 has at least two batch dims and
+    // tensor2 at least one
+    if (!has_out && dim_tensor1 >= 4 && dim_tensor2 >= 3 &&
+        dim_tensor1 >= dim_tensor2) {
+      if (auto folded = matmul_fold_broadcast_batch(tensor1, tensor2)) {
+        return *std::move(folded);
       }
     }
 

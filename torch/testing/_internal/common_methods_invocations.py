@@ -7899,11 +7899,23 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False
                   ((S, S, M, M), (S, S, M, S)),
                   ((S, S, M, M), (M,)),
                   ((M,), (S, S, M, S)),
-                  ((S, S, S), (1, S, S))
+                  ((S, S, S), (1, S, S)),
                   )
-    for lhs_shape, rhs_shape in test_cases:
-        lhs = make_arg(lhs_shape)
-        rhs = make_arg(rhs_shape)
+    # matmul folds these broadcast batch dims into bmm rows, while out= and tensor
+    # subclasses expand them. Small integer values make both give the same result.
+    # The first one is 5-D because the decomposition does not fold 4-D x 4-D.
+    fold_cases = (((S, 2, 2, S, M), (S, 2, 1, M, S)),
+                  ((S, S, 1, M), (S, M, S)))
+
+    def make_int_arg(shape):
+        t = make_tensor(shape, dtype=torch.long, device=device, low=-2, high=3)
+        return t.to(dtype).requires_grad_(requires_grad)
+
+    cases = [(lhs, rhs, make_arg) for lhs, rhs in test_cases]
+    cases += [(lhs, rhs, make_int_arg) for lhs, rhs in fold_cases]
+    for lhs_shape, rhs_shape, make in cases:
+        lhs = make(lhs_shape)
+        rhs = make(rhs_shape)
         if not is_rmatmul:
             yield SampleInput(lhs, rhs)
         else:
