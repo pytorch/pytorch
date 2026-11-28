@@ -157,6 +157,20 @@ class PrivateUse1BackendTest(TestCase):
         c.backward()
         self.assertTrue(np.allclose(a.grad.raw_data, np.ones((2, 2))))
 
+    def test_fake_tensor_construction_does_not_dispatch_detach(self):
+        # https://github.com/pytorch/pytorch/issues/196309
+        # FakeTensor construction detaches the element internally; with a
+        # backend-registered aten::detach kernel that detach must not reach
+        # the Python kernel, or subclass creation raises
+        # "raw Tensor object is already associated to a python object".
+        a_cpu = torch.randn((2, 2))
+        x = wrap(a_cpu, (2, 2), torch.float32)
+        with torch._subclasses.fake_tensor.FakeTensorMode() as mode:
+            fx = mode.from_tensor(x)
+            fv = fx.view(-1)
+        self.assertEqual(tuple(fv.shape), (4,))
+        self.assertEqual(fv.device.type, "npy")
+
     def test_ldexp(self):
         a_cpu = torch.tensor([1.0, 2.0], dtype=torch.float32)
         b_cpu = torch.tensor([1, 2], dtype=torch.int32)
