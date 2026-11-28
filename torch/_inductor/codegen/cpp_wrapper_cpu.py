@@ -3687,9 +3687,23 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             return
 
-        # For cpp_wrapper JIT, fall back to direct boxed dispatcher calls for
-        # schemas the StableIValue bridge cannot represent, such as Tensor[].
-        if self._compatible_with_cpp_boxed_dispatch(op_overload):
+        # Some fbcode XAR binaries do not export the boxed dispatcher symbols
+        # needed by the AOTI tuning wrapper. Use the existing Python callback
+        # for Python Tensor[] -> Tensor ops while tuning.
+        arguments = op_overload._schema.arguments
+        returns = op_overload._schema.returns
+        needs_python_list_bridge = (
+            config.is_fbcode()
+            and V.graph.is_dual_wrapper_mode
+            and len(arguments) == len(returns) == 1
+            and isinstance(list_type := arguments[0].real_type, torch.ListType)
+            and isinstance(list_type.getElementType(), torch.TensorType)
+            and isinstance(returns[0].real_type, torch.TensorType)
+            and torch._library.custom_ops._maybe_get_opdef(op_overload) is not None
+        )
+        if not needs_python_list_bridge and self._compatible_with_cpp_boxed_dispatch(
+            op_overload
+        ):
             self.generate_fallback_kernel_with_runtime_lookup_boxed(
                 op_overload,
                 raw_args,

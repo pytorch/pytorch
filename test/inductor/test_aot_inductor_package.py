@@ -14,12 +14,17 @@ import unittest
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
 from parameterized import parameterized_class
 
 import torch
 import torch._inductor.config
-from torch._inductor.codecache import get_kernel_bin_format, WritableTempFile
+from torch._inductor.codecache import (
+    CppWrapperCodeCache,
+    get_kernel_bin_format,
+    WritableTempFile,
+)
 from torch._inductor.package import load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_cache
@@ -263,6 +268,53 @@ class TestAOTInductorPackage(TestCase):
             torch.randn(10, 10, device=self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    @skipif(
+        lambda device, package_cpp_only: (
+            not IS_FBCODE or device != GPU_TYPE or package_cpp_only
+        ),
+        "requires an fbcode GPU test with the Python package loader",
+    )
+    def test_python_tensor_list_op_in_jit_tuning_wrapper(self):
+        @torch.library.custom_op("aoti_package_test::sum_list", mutates_args=())
+        def sum_list(tensors: list[torch.Tensor]) -> torch.Tensor:
+            return tensors[0] + tensors[1]
+
+        @sum_list.register_fake
+        def _(tensors):
+            return torch.empty_like(tensors[0])
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return sum_list([x, x + 1]) + 5
+
+        x = torch.arange(4096, device=self.device, dtype=torch.int64)
+        with patch.object(
+            CppWrapperCodeCache,
+            "load_pybinding",
+            wraps=CppWrapperCodeCache.load_pybinding,
+        ) as load_jit:
+            self.check_model(
+                Model(),
+                (x,),
+                inductor_configs={
+                    "force_disable_caches": True,
+                    "triton.autotune_at_compile_time": False,
+                },
+            )
+
+        sources = [call.kwargs["main_code"] for call in load_jit.call_args_list]
+        self.assertTrue(
+            any("custom_op_wrapper" in source for source in sources),
+            "Expected the JIT tuning wrapper to call the Python op",
+        )
+        self.assertFalse(
+            any(
+                'findSchemaOrThrow("aoti_package_test::sum_list"' in source
+                for source in sources
+            ),
+            "The JIT tuning wrapper must not use boxed C++ dispatch for sum_list",
+        )
 
     @skipif(lambda device, package_cpp_only: device != GPU_TYPE, f"requires {GPU_TYPE}")
     def test_int64_floor_divide_tensor_constant_divisor(self):
