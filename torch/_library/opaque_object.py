@@ -120,8 +120,9 @@ def _resolve_opaque_type_info(cls: Any) -> _OpaqueTypeInfo | None:
     if not isinstance(cls, type):
         return None
 
-    # Allow subclasses too
-    for parent in cls.__mro__[1:]:
+    # Allow subclasses too. Read tp_mro directly: a metaclass __mro__ property
+    # must not run here, and CPython's MRO walk uses tp_mro.
+    for parent in type.__dict__["__mro__"].__get__(cls)[1:]:
         if parent in _OPAQUE_TYPES:
             return _OPAQUE_TYPES[parent]
     return None
