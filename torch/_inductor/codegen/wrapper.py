@@ -5195,6 +5195,14 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta["kernel_name"] = name
         triton_info_kernel_cls = self._get_triton_info_kernel_cls()
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
+        # The best config of such a kernel depends on tensor values: never cache it.
+        if getattr(kernel, "autotune_per_process", False):
+            inductor_meta["autotune_local_cache"] = False
+            inductor_meta["autotune_remote_cache"] = False
+        if margin := getattr(kernel, "autotune_default_margin", None):
+            inductor_meta["autotune_default_margin"] = margin
+            defaults = getattr(kernel, "autotune_default_configs", 1)
+            inductor_meta["autotune_default_configs"] = defaults
 
         compile_wrapper = IndentedBuffer()
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())

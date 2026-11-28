@@ -1530,6 +1530,20 @@ partitioned_scatter_force: bool = (
 )
 
 
+# Rewrite 2-D row scatter-adds (index_add, index_put accumulate, scatter_add) on
+# CUDA into skew-aware kernels (kernel/skew_scatter.py), autotuned on each call
+# site's first call. Takes precedence over partitioned_scatter_enabled; leaves to
+# sorted_segment_scatter_enabled the index_put nodes that pass rewrites.
+skew_scatter_enabled: bool = os.environ.get("TORCHINDUCTOR_SKEW_SCATTER_ENABLED") == "1"
+
+# Skip scatters with fewer index entries than this.
+skew_scatter_min_index_size: int = 1 << 16
+
+# Also rewrite embedding_dense_backward. Off by default: ATen's eager kernel is a
+# deterministic sorted reduce, and the atomic kernel's summation order differs.
+skew_scatter_embedding_backward: bool = False
+
+
 class _collective:
     auto_select: bool = False
     one_shot_all_reduce_threshold_bytes: int = 128 * 1024

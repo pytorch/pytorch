@@ -2052,6 +2052,13 @@ class CachingAutotuner(KernelInterface):
 
         autotuning_inputs_log.debug("=" * 60)
 
+    def _pick_timing(self, index: int, timing: float) -> float:
+        # The first autotune_default_configs configs are kept unless another one
+        # is faster by at least autotune_default_margin.
+        margin = self.inductor_meta.get("autotune_default_margin")
+        defaults = self.inductor_meta.get("autotune_default_configs", 1)
+        return timing * (1 - margin) if margin and index < defaults else timing
+
     def benchmark_all_configs(self, *args, **kwargs):
         with (
             dynamo_timed(
@@ -2073,9 +2080,10 @@ class CachingAutotuner(KernelInterface):
             timings = {}
             best_launcher = None
             best_timing = float("inf")
-            for launcher in self.launchers:
+            for i, launcher in enumerate(self.launchers):
                 timing = self.bench(launcher, *args, **kwargs)
                 timings[launcher] = timing
+                timing = self._pick_timing(i, timing)
                 # Close losing static launchers eagerly so exhaustive autotuning
                 # keeps only the current winner and candidate modules loaded.
                 if best_launcher is None or timing < best_timing:
@@ -2167,7 +2175,8 @@ class CachingAutotuner(KernelInterface):
                     best_time,
                 )
 
-        best_launcher = builtins.min(timings, key=timings.get)
+        picks = {k: self._pick_timing(i, v) for i, (k, v) in enumerate(timings.items())}
+        best_launcher = builtins.min(picks, key=picks.get)
         self._keep_launcher(best_launcher)
         self.autotune_time_taken_ns = (
             self.precompile_time_taken_ns + benchmark_time_taken_ns
