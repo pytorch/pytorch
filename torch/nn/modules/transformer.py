@@ -386,6 +386,10 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = (
                 f"{enc_layer}.self_attn._qkv_same_embed_dim was not True"
             )
+        elif encoder_layer.self_attn.use_rotary:
+            why_not_sparsity_fast_path = (
+                f"{enc_layer}.self_attn.use_rotary was True"
+            )
         elif encoder_layer.self_attn.in_proj_bias is None:
             why_not_sparsity_fast_path = f"{enc_layer}.self_attn was passed bias=False"
         elif not encoder_layer.activation_relu_or_gelu:
@@ -469,6 +473,10 @@ class TransformerEncoder(Module):
             )
         elif first_layer.training:
             why_not_sparsity_fast_path = f"{str_first_layer} was in training mode"
+        elif first_layer.self_attn.use_rotary:
+            why_not_sparsity_fast_path = (
+                f"{str_first_layer}.self_attn.use_rotary was True"
+            )
         elif src.dim() != 3:
             why_not_sparsity_fast_path = (
                 f"input not batched; expected src.dim() of 3 but got {src.dim()}"
@@ -764,7 +772,8 @@ class TransformerEncoderLayer(Module):
             dropout=dropout,
             bias=bias,
             batch_first=batch_first,
-            **factory_kwargs,
+            device=device,
+            dtype=dtype,
         )
         # Implementation of Feedforward model
         self.linear1 = Linear(d_model, dim_feedforward, bias=bias, **factory_kwargs)
@@ -852,6 +861,8 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "training is enabled"
         elif not self.self_attn.batch_first:
             why_not_sparsity_fast_path = "self_attn.batch_first was not True"
+        elif self.self_attn.use_rotary:
+            why_not_sparsity_fast_path = "self_attn.use_rotary was True"
         elif self.self_attn.in_proj_bias is None:
             why_not_sparsity_fast_path = "self_attn was passed bias=False"
         elif not self.self_attn._qkv_same_embed_dim:
@@ -982,6 +993,50 @@ class TransformerEncoderLayer(Module):
         return self.dropout2(x)
 
 
+class _TransformerEncoderLayerRoPE(TransformerEncoderLayer):
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        activation: str | Callable[[Tensor], Tensor] = F.relu,
+        layer_norm_eps: float = 1e-5,
+        batch_first: bool = False,
+        norm_first: bool = False,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+        add_bias_kv: bool = False,
+        add_zero_attn: bool = False,
+    ) -> None:
+        super().__init__(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation=activation,
+            layer_norm_eps=layer_norm_eps,
+            batch_first=batch_first,
+            norm_first=norm_first,
+            bias=bias,
+            device=device,
+            dtype=dtype,
+        )
+        self.self_attn = MultiheadAttention(
+            d_model,
+            nhead,
+            dropout=dropout,
+            batch_first=batch_first,
+            bias=bias,
+            add_bias_kv=add_bias_kv,
+            add_zero_attn=add_zero_attn,
+            use_rotary=True,
+            device=device,
+            dtype=dtype,
+        )
+
+
 class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
 
@@ -1049,7 +1104,8 @@ class TransformerDecoderLayer(Module):
             dropout=dropout,
             batch_first=batch_first,
             bias=bias,
-            **factory_kwargs,
+            device=device,
+            dtype=dtype,
         )
         self.multihead_attn = MultiheadAttention(
             d_model,
@@ -1057,7 +1113,8 @@ class TransformerDecoderLayer(Module):
             dropout=dropout,
             batch_first=batch_first,
             bias=bias,
-            **factory_kwargs,
+            device=device,
+            dtype=dtype,
         )
         # Implementation of Feedforward model
         self.linear1 = Linear(d_model, dim_feedforward, bias=bias, **factory_kwargs)

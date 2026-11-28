@@ -83,7 +83,9 @@ class MultiheadAttention(nn.MultiheadAttention):
             kdim,
             vdim,
             batch_first,
-            **factory_kwargs,
+            device=factory_kwargs.get("device"),
+            dtype=factory_kwargs.get("dtype"),
+            use_rotary=False,
         )
         self.linear_Q = nn.Linear(
             self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs
