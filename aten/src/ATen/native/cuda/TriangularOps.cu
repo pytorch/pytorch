@@ -5,6 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/TriangularOpsUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -181,6 +182,7 @@ void launch_triu_tril_kernel(const Tensor& result, const Tensor& self, int64_t k
 
 template <bool upper>
 void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k, const char* name) {
+  checkTrilTriuMatrixOverlap(result);
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       at::ScalarType::ComplexHalf,
       at::ScalarType::Half,

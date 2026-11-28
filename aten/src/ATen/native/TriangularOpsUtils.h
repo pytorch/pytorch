@@ -1,7 +1,19 @@
+#pragma once
 #include <ATen/core/Tensor.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 
 namespace at::native {
+
+static inline void checkTrilTriuMatrixOverlap(const Tensor& result) {
+  if (result.numel() == 0 || result.is_contiguous()) {
+    return;
+  }
+  auto matrix = result.as_strided(
+      {result.size(-2), result.size(-1)},
+      {result.stride(-2), result.stride(-1)});
+  at::assert_no_internal_overlap(matrix);
+}
 
 /*
  * Given batches of matrices with arbitrary batch dim,
