@@ -2,8 +2,7 @@
 name: inductor-rocm-mi300
 
 on:
-  schedule:
-    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
+  workflow_call:
   push:
     branches:
       - release/*
@@ -12,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-inductor-rocm-mi300
   cancel-in-progress: true
 
 permissions:
@@ -25,6 +24,8 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/target_determination.yml
+    with:
+      artifact-suffix: -inductor-rocm-mi300
 
   get-label-type:
     name: get-label-type
@@ -61,6 +62,7 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-noble-rocm-py3_11-inductor-build
     with:
+      td-artifact-suffix: -inductor-rocm-mi300
       build-environment: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.docker-image }}
       test-matrix:  ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.test-matrix }}

@@ -2,17 +2,16 @@
 name: rocm-mi300
 
 on:
+  workflow_call:
   push:
     branches:
       - release/*
     tags:
       - ciflow/rocm-mi300/*
   workflow_dispatch:
-  schedule:
-    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-rocm-mi300
   cancel-in-progress: true
 
 permissions:
@@ -25,6 +24,8 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/target_determination.yml
+    with:
+      artifact-suffix: -rocm-mi300
 
   get-label-type:
     name: get-label-type
@@ -67,11 +68,12 @@ jobs:
       - linux-noble-rocm-py3_11-build
       - target-determination
     with:
+      td-artifact-suffix: -rocm-mi300
       build-environment: ${{ needs.linux-noble-rocm-py3_11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_11-build.outputs.test-matrix }}
       # The default config picks these up by discovery; inductor-rocm-mi300.yml already
-      # runs them on the same schedule. A PR tagged only for this workflow will
+      # runs them under scheduled-rocm-mi300.yml. A PR tagged only for this workflow will
       # not cover them, so tag both. Only affects default (see EXCLUDE_CLAUSE in
       # .ci/pytorch/test.sh).
       tests-to-exclude: >-

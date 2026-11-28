@@ -69,6 +69,13 @@ on:
         required: false
         type: number
         default: 1
+      td-artifact-suffix:
+        required: false
+        type: string
+        default: ""
+        description: |
+          The artifact-suffix the calling workflow passes to its own target_determination.yml job.
+          TD download is best-effort, so a mismatch silently runs without TD.
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -154,6 +161,8 @@ jobs:
       - name: Download TD artifacts
         continue-on-error: true
         uses: ./.github/actions/download-td-artifacts
+        with:
+          artifact-suffix: ${{ inputs.td-artifact-suffix }}
 
       - name: Parse ref
         id: parse-ref
