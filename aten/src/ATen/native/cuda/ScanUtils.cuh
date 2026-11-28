@@ -1233,6 +1233,720 @@ void launch(T* tgt, const T* src, int64_t num_rows, int64_t row_size, T init, Bi
 }
 
 } // namespace inner_scan
+
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+#define AT_OUTER_SCAN_TDM 1
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_amdgcn_tensor_load_to_lds_d2) && __has_builtin(__builtin_amdgcn_tensor_store_from_lds_d2)
+#define AT_OUTER_SCAN_TDM_BUILTINS 1
+#endif
+#if __has_builtin(__builtin_amdgcn_s_wait_tensorcnt)
+#define AT_OUTER_SCAN_TDM_WAIT_BUILTIN 1
+#endif
+#endif
+#endif
+
+/* Tiled inclusive scan along an outer dimension.
+ *
+ * The tensor is viewed as [num_orows, row_size, num_irows] and scanned along row_size.
+ * tensor_kernel_scan_outer_dim gives each (orow, irow) column one thread that walks the whole
+ * column serially, which leaves the GPU almost idle when num_orows * num_irows is small. Here a
+ * block scans (tile_h x tile_w) tiles staged in LDS with kBlock / tile_w threads per column, and
+ * long columns are split into chunks: reduce_chunks writes each chunk's column totals,
+ * scan_partials turns them into running totals, and scan_chunks scans every chunk starting from
+ * the running total of the chunks before it.
+ *
+ * On gfx1250 one wave moves tiles between global memory and LDS with the Tensor Data Mover
+ * (TENSOR_LOAD_TO_LDS / TENSOR_STORE_FROM_LDS), pipelined through a kStages-deep LDS ring; on
+ * gfx950 the block copies tiles with ordinary loads and stores. Like inner_scan, it is used only on
+ * those targets (inner_scan::supported_device()) and only for cumsum and cumprod.
+ */
+namespace outer_scan {
+
+constexpr int kBlock = 256;
+constexpr int kWarp = inner_scan::kLogicalWarp;
+constexpr int kWarps = kBlock / kWarp;
+constexpr int kStages = 4;
+// Most chunk totals one lane of scan_partials folds; bounds the chunk count to kWarp times this.
+constexpr int kPartialsPerLane = 32;
+constexpr int64_t kMaxChunks = int64_t{kWarp} * kPartialsPerLane;
+// Below this many rows the one-thread-per-column kernel is as fast (kMinRowsTdm with the Tensor
+// Data Mover, which hides the latency of short columns' few tile copies).
+constexpr int64_t kMinRows = 32;
+constexpr int64_t kMinRowsTdm = 16;
+// Split columns into chunks only if there are fewer (orow, strip) groups than SMs * this...
+constexpr int64_t kChunkBlocksPerSM = 4;
+// ...and each group has at least this many tiles; shorter columns don't repay the extra launches.
+constexpr int64_t kMinTilesToChunk = 16;
+constexpr int64_t kMinTilesPerChunk = 2;
+// Two chunks cost two extra launches and a re-read of half of every column, more than halving the
+// serial chain saves, so such columns stay in one piece.
+constexpr int64_t kMinChunks = 3;
+// Without the Tensor Data Mover tiles are copied synchronously and a block's LDS ring leaves room
+// for only a block or two per CU. Once a row of the tensor holds kLargeRowBytesPerSM bytes per SM
+// (128 f32 columns), the one-thread-per-column kernel keeps the memory system busy and is faster on
+// columns shorter than kLargeRowMinRows; from kHugeRowBytesPerSM, shorter than kHugeRowMinRows.
+constexpr int64_t kLargeRowBytesPerSM = 512;
+constexpr int64_t kLargeRowMinRows = 128;
+constexpr int64_t kHugeRowBytesPerSM = 4096;
+constexpr int64_t kHugeRowMinRows = 256;
+// Also without it, rows that are not a whole number of vectors, or not vector-aligned, are copied
+// an element at a time. That loses on 1-byte columns shorter than kScalarCopyMinRows1, and on
+// columns shorter than kWideScalarCopyMinRows in rows at least a block wide.
+constexpr int64_t kScalarCopyMinRows1 = 64;
+constexpr int64_t kWideScalarCopyMinRows = 192;
+// With the Tensor Data Mover, 1-byte columns shorter than kFewColumnsMinRows1Tdm lose if there are
+// fewer than kFewColumns of them and the rows are not a whole number of vectors.
+constexpr int64_t kFewColumns = 64;
+constexpr int64_t kFewColumnsMinRows1Tdm = 32;
+
+template <typename T>
+struct Traits {
+  static_assert(sizeof(T) <= 8, "the Tensor Data Mover moves elements of 1, 2, 4 or 8 bytes");
+  // Rows of one column that a thread scans per tile. Odd, so that the threads sharing the columns
+  // of a narrow tile (tile_w < kWarp) read from different LDS banks.
+  static constexpr int kRows = 64 / sizeof(T) - 1;
+  static constexpr int kTileElems = kBlock * kRows;
+  static constexpr int kVec = 16 / sizeof(T);
+  // kStages tiles, then one T per thread for combining column segments.
+  static constexpr size_t kSmemBytes = (static_cast<size_t>(kStages) * kTileElems + kBlock) * sizeof(T);
+};
+
+struct Problem {
+  uint32_t num_orows, row_size, num_irows;
+  uint32_t log_tile_w;  // tile_w = 1 << log_tile_w <= kBlock
+  uint32_t tile_h;      // (kBlock >> log_tile_w) * kRows
+  uint32_t strips;      // ceil(num_irows / tile_w) column strips per orow
+  uint32_t num_chunks;  // pieces each (orow, strip) column group is split into along row_size
+  uint32_t chunk_rows;  // rows per piece; a multiple of tile_h
+  bool vec_ok;          // 16-byte accesses are allowed (ordinary-load mover only)
+};
+
+// A tile's first element, and how much of the tensor (within the current chunk) lies below and to
+// the right of it. The rest of the tile reads as zero and is never written back.
+struct Tile {
+  uint64_t offset;
+  uint32_t rows;
+  uint32_t cols;
+};
+
+// A thread copies kVecIters 16-byte vectors of a tile (the last only if the tile has that many), or
+// kRows elements, loading all of them before storing any so that its loads are in flight together.
+template <typename T>
+constexpr int kVecIters = (Traits<T>::kTileElems / Traits<T>::kVec + kBlock - 1) / kBlock;
+
+// The elements a thread copies one at a time lie in one column, kBlock / tile_w rows apart. Walking
+// them with a pointer, instead of computing each address, keeps the 63 loads of a 1-byte tile
+// within the registers of the two waves per SIMD that the LDS ring allows.
+struct Column {
+  uint64_t first, stride;  // offset of the thread's first element, and between its elements
+  uint32_t count;          // how many of them lie in the tensor
+};
+
+__device__ __forceinline__ Column column_of(const Tile& t, const Problem& p) {
+  constexpr uint32_t kLogBlock = __builtin_ctz(kBlock);
+  const uint32_t r = threadIdx.x >> p.log_tile_w, c = threadIdx.x & ((1u << p.log_tile_w) - 1);
+  const uint32_t shift = kLogBlock - p.log_tile_w;
+  const uint32_t count = r < t.rows && c < t.cols ? ((t.rows - r - 1) >> shift) + 1 : 0;
+  return {t.offset + static_cast<uint64_t>(r) * p.num_irows + c,
+          static_cast<uint64_t>(p.num_irows) << shift, count};
+}
+
+template <typename T>
+__device__ __forceinline__ void copy_in(T* tile, const T* __restrict__ src, const Tile& t, const Problem& p) {
+  constexpr int R = Traits<T>::kRows;
+  constexpr int V = Traits<T>::kVec;
+  constexpr int NV = Traits<T>::kTileElems / V;
+  const uint32_t mask = (1u << p.log_tile_w) - 1;
+  if (p.vec_ok && mask + 1 >= static_cast<uint32_t>(V)) {
+    inner_scan::Vec<T, V> x[kVecIters<T>];
+#pragma unroll
+    for (int i = 0; i < kVecIters<T>; ++i) {
+      const uint32_t v = i * kBlock + threadIdx.x;
+      const uint32_t e = v * V, r = e >> p.log_tile_w, c = e & mask;
+      if (v < static_cast<uint32_t>(NV) && r < t.rows && c < t.cols) {
+        const auto g = *reinterpret_cast<const inner_scan::GVec<T, V>*>(
+            src + t.offset + static_cast<uint64_t>(r) * p.num_irows + c);
+#pragma unroll
+        for (int k = 0; k < V; ++k) {
+          x[i].v[k] = g.v[k];
+        }
+      } else {
+#pragma unroll
+        for (int k = 0; k < V; ++k) {
+          x[i].v[k] = T(0);
+        }
+      }
+    }
+#pragma unroll
+    for (int i = 0; i < kVecIters<T>; ++i) {
+      const uint32_t v = i * kBlock + threadIdx.x;
+      if (v < static_cast<uint32_t>(NV)) {
+        *reinterpret_cast<inner_scan::Vec<T, V>*>(tile + v * V) = x[i];
+      }
+    }
+  } else {
+    const Column col = column_of(t, p);
+    const T* g = src + col.first;
+    T x[R];
+#pragma unroll
+    for (int i = 0; i < R; ++i) {
+      x[i] = static_cast<uint32_t>(i) < col.count ? *g : T(0);
+      g += col.stride;
+    }
+#pragma unroll
+    for (int i = 0; i < R; ++i) {
+      tile[i * kBlock + threadIdx.x] = x[i];
+    }
+  }
+}
+
+template <typename T>
+__device__ __forceinline__ void copy_out(T* __restrict__ dst, const T* tile, const Tile& t, const Problem& p) {
+  constexpr int R = Traits<T>::kRows;
+  constexpr int V = Traits<T>::kVec;
+  constexpr int NV = Traits<T>::kTileElems / V;
+  const uint32_t mask = (1u << p.log_tile_w) - 1;
+  if (p.vec_ok && mask + 1 >= static_cast<uint32_t>(V)) {
+    inner_scan::Vec<T, V> x[kVecIters<T>];
+#pragma unroll
+    for (int i = 0; i < kVecIters<T>; ++i) {
+      const uint32_t v = i * kBlock + threadIdx.x;
+      if (v < static_cast<uint32_t>(NV)) {
+        x[i] = *reinterpret_cast<const inner_scan::Vec<T, V>*>(tile + v * V);
+      }
+    }
+#pragma unroll
+    for (int i = 0; i < kVecIters<T>; ++i) {
+      const uint32_t v = i * kBlock + threadIdx.x;
+      const uint32_t e = v * V, r = e >> p.log_tile_w, c = e & mask;
+      if (v < static_cast<uint32_t>(NV) && r < t.rows && c < t.cols) {
+        inner_scan::GVec<T, V> g;
+#pragma unroll
+        for (int k = 0; k < V; ++k) {
+          g.v[k] = x[i].v[k];
+        }
+        *reinterpret_cast<inner_scan::GVec<T, V>*>(dst + t.offset + static_cast<uint64_t>(r) * p.num_irows + c) = g;
+      }
+    }
+  } else {
+    const Column col = column_of(t, p);
+    T* g = dst + col.first;
+    T x[R];
+#pragma unroll
+    for (int i = 0; i < R; ++i) {
+      x[i] = tile[i * kBlock + threadIdx.x];
+    }
+#pragma unroll
+    for (int i = 0; i < R; ++i) {
+      if (static_cast<uint32_t>(i) < col.count) {
+        *g = x[i];
+      }
+      g += col.stride;
+    }
+  }
+}
+
+#if defined(AT_OUTER_SCAN_TDM)
+typedef int tdm_i32x4 __attribute__((ext_vector_type(4)));
+typedef int tdm_i32x8 __attribute__((ext_vector_type(8)));
+
+// Groups 0 and 1 of the Tensor DMA descriptor (D#) for a 2-D tile, per "Tensor DMA Descriptor"
+// in the CDNA5 ISA guide. The hardware reads the descriptor from SGPRs.
+template <typename T>
+__device__ __forceinline__ void tdm_descriptor(tdm_i32x4& g0, tdm_i32x8& g1, const T* gptr, const T* lds,
+                                               const Tile& t, const Problem& p) {
+  constexpr uint32_t log_size = sizeof(T) == 1 ? 0 : sizeof(T) == 2 ? 1 : sizeof(T) == 4 ? 2 : 3;
+  const uint32_t tile_w = 1u << p.log_tile_w;
+  const uint32_t rows = t.rows < p.tile_h ? t.rows : p.tile_h;
+  uint32_t dim0, dim1, tile_dim0, tile_dim1;
+  uint64_t stride;
+  if (p.num_irows == tile_w) {
+    // Rows are back to back both in memory and in LDS: move the tile as one contiguous run.
+    dim0 = rows * tile_w;
+    dim1 = 1;
+    tile_dim0 = p.tile_h * tile_w;
+    tile_dim1 = 1;
+    stride = tile_dim0;
+  } else {
+    dim0 = t.cols;
+    dim1 = rows;
+    tile_dim0 = tile_w;
+    tile_dim1 = p.tile_h;
+    stride = p.num_irows;
+  }
+  const uint64_t gaddr = reinterpret_cast<uint64_t>(gptr + t.offset);
+  // A flat LDS address carries the LDS byte offset in its low 32 bits.
+  const uint32_t laddr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(lds));
+  g0[0] = 1;  // one valid tensor
+  g0[1] = static_cast<int>(laddr);
+  g0[2] = static_cast<int>(static_cast<uint32_t>(gaddr));
+  g0[3] = static_cast<int>((static_cast<uint32_t>(gaddr >> 32) & 0x1ffffffu) | (2u << 30));  // type = 2
+  g1[0] = static_cast<int>(log_size << 16);  // no multicast, atomic barrier, iteration or padding
+  g1[1] = static_cast<int>(dim0 << 16);
+  g1[2] = static_cast<int>((dim0 >> 16) | (dim1 << 16));
+  g1[3] = static_cast<int>((dim1 >> 16) | (tile_dim0 << 16));
+  g1[4] = static_cast<int>(tile_dim1);
+  g1[5] = static_cast<int>(static_cast<uint32_t>(stride));
+  g1[6] = static_cast<int>(static_cast<uint32_t>(stride >> 32) & 0xffffu);
+  g1[7] = 0;
+#pragma unroll
+  for (int k = 0; k < 4; ++k) {
+    g0[k] = __builtin_amdgcn_readfirstlane(g0[k]);
+  }
+#pragma unroll
+  for (int k = 0; k < 8; ++k) {
+    g1[k] = __builtin_amdgcn_readfirstlane(g1[k]);
+  }
+}
+
+__device__ __forceinline__ void tdm_load(tdm_i32x4 g0, tdm_i32x8 g1) {
+#if defined(AT_OUTER_SCAN_TDM_BUILTINS)
+  __builtin_amdgcn_tensor_load_to_lds_d2(g0, g1, 0);
+#else
+  asm volatile("tensor_load_to_lds %0, %1" ::"s"(g0), "s"(g1) : "memory");
+#endif
+}
+
+__device__ __forceinline__ void tdm_store(tdm_i32x4 g0, tdm_i32x8 g1) {
+#if defined(AT_OUTER_SCAN_TDM_BUILTINS)
+  __builtin_amdgcn_tensor_store_from_lds_d2(g0, g1, 0);
+#else
+  asm volatile("tensor_store_from_lds %0, %1" ::"s"(g0), "s"(g1) : "memory");
+#endif
+}
+
+#if defined(AT_OUTER_SCAN_TDM_WAIT_BUILTIN)
+#define AT_OUTER_SCAN_WAIT_TENSORCNT(n) __builtin_amdgcn_s_wait_tensorcnt(n)
+#else
+#define AT_OUTER_SCAN_WAIT_TENSORCNT(n) asm volatile("s_wait_tensorcnt " #n ::: "memory")
+#endif
+#endif // AT_OUTER_SCAN_TDM
+
+template <typename T>
+__device__ __forceinline__ void load_tile(T* lds, const T* __restrict__ src, const Tile& t, const Problem& p) {
+#if defined(AT_OUTER_SCAN_TDM)
+  tdm_i32x4 g0;
+  tdm_i32x8 g1;
+  tdm_descriptor(g0, g1, src, lds, t, p);
+  tdm_load(g0, g1);
+#else
+  copy_in(lds, src, t, p);
+#endif
+}
+
+template <typename T>
+__device__ __forceinline__ void store_tile(T* __restrict__ dst, const T* lds, const Tile& t, const Problem& p) {
+#if defined(AT_OUTER_SCAN_TDM)
+  tdm_i32x4 g0;
+  tdm_i32x8 g1;
+  tdm_descriptor(g0, g1, dst, lds, t, p);
+  tdm_store(g0, g1);
+#else
+  copy_out(dst, lds, t, p);
+#endif
+}
+
+// Waits until at most `pending` tensor ops issued by this wave are outstanding. They complete in
+// issue order, so this also covers every op issued before them. Ordinary copies are synchronous.
+__device__ __forceinline__ void wait_tiles(uint32_t pending) {
+#if defined(AT_OUTER_SCAN_TDM)
+  if (pending == 0) {
+    AT_OUTER_SCAN_WAIT_TENSORCNT(0);
+  } else if (pending == 1) {
+    AT_OUTER_SCAN_WAIT_TENSORCNT(1);
+  } else {
+    AT_OUTER_SCAN_WAIT_TENSORCNT(2);
+  }
+#else
+  (void)pending;
+#endif
+}
+
+// Threads that move tiles: wave 0 with the Tensor Data Mover, everyone otherwise. Tensor
+// instructions ignore EXEC, so the TDM branch must be uniform (a scalar branch).
+__device__ __forceinline__ bool is_issuer() {
+#if defined(AT_OUTER_SCAN_TDM)
+  return __builtin_amdgcn_readfirstlane(static_cast<int>(threadIdx.x)) < kWarp;
+#else
+  return true;
+#endif
+}
+
+// Thread t owns column (t % tile_w) and, within it, the kRows-row segment (t / tile_w).
+struct Layout {
+  uint32_t tile_w, col, seg, segs, lane;
+  uint32_t lane_stride;  // lanes between consecutive segments of a column within a warp
+  uint32_t q, nq;        // index / count of the warp-sized segment groups of a column
+};
+
+__device__ __forceinline__ Layout make_layout(const Problem& p) {
+  Layout l;
+  l.tile_w = 1u << p.log_tile_w;
+  l.col = threadIdx.x & (l.tile_w - 1);
+  l.seg = threadIdx.x >> p.log_tile_w;
+  l.segs = kBlock >> p.log_tile_w;
+  l.lane = threadIdx.x % kWarp;
+  l.lane_stride = l.tile_w < static_cast<uint32_t>(kWarp) ? l.tile_w : kWarp;
+  const uint32_t warps_per_seg = l.tile_w > static_cast<uint32_t>(kWarp) ? l.tile_w / kWarp : 1;
+  l.q = (threadIdx.x / kWarp) / warps_per_seg;
+  l.nq = kWarps / warps_per_seg;
+  return l;
+}
+
+struct Work {
+  uint64_t orow;
+  uint32_t chunk, col0, rows, cols, num_tiles;
+  uint64_t base;
+};
+
+__device__ __forceinline__ Work decode(uint64_t item, uint32_t chunks_per_group, const Problem& p) {
+  Work w;
+  w.chunk = static_cast<uint32_t>(item % chunks_per_group);
+  const uint64_t group = item / chunks_per_group;
+  const uint32_t strip = static_cast<uint32_t>(group % p.strips);
+  w.orow = group / p.strips;
+  w.col0 = strip << p.log_tile_w;
+  const uint32_t row0 = w.chunk * p.chunk_rows;
+  const uint32_t left = p.row_size - row0;
+  w.rows = p.chunk_rows < left ? p.chunk_rows : left;
+  w.cols = p.num_irows - w.col0;
+  w.num_tiles = ceil_div(w.rows, p.tile_h);
+  w.base = w.orow * p.row_size * static_cast<uint64_t>(p.num_irows) + static_cast<uint64_t>(row0) * p.num_irows +
+      w.col0;
+  return w;
+}
+
+__device__ __forceinline__ Tile tile_at(const Work& w, uint32_t t, const Problem& p) {
+  return Tile{w.base + static_cast<uint64_t>(t) * p.tile_h * p.num_irows, w.rows - t * p.tile_h, w.cols};
+}
+
+// Column-wise inclusive scan of one LDS tile, continuing from `carry`: x receives this thread's
+// kRows results and the column total through the end of the tile is returned. Contains a barrier;
+// callers place another barrier between calls so that `tot` is free again.
+template <typename T, class BinaryFunction>
+__device__ __forceinline__ T scan_tile(T (&x)[Traits<T>::kRows], const T* tile, T* tot, const Layout& l, T carry,
+                                       BinaryFunction binary_op) {
+  constexpr int R = Traits<T>::kRows;
+#pragma unroll
+  for (int r = 0; r < R; ++r) {
+    x[r] = tile[(l.seg * R + r) * l.tile_w + l.col];
+  }
+#pragma unroll
+  for (int r = 1; r < R; ++r) {
+    x[r] = binary_op(x[r - 1], x[r]);
+  }
+  // Combine the segments of each column: first across the lanes of a warp...
+  T incl = x[R - 1];
+  for (uint32_t d = l.lane_stride; d < static_cast<uint32_t>(kWarp); d <<= 1) {
+    const T other = inner_scan::shfl_up(incl, d, kWarp);
+    if (l.lane >= d) {
+      incl = binary_op(other, incl);
+    }
+  }
+  const T warp_excl = inner_scan::shfl_up(incl, l.lane_stride, kWarp);
+  // ...then across warps through LDS.
+  if (l.lane + l.lane_stride >= static_cast<uint32_t>(kWarp)) {
+    tot[l.q * l.tile_w + l.col] = incl;
+  }
+  __syncthreads();
+  T running = carry;
+  T prefix = carry;
+#pragma unroll
+  for (uint32_t i = 0; i < static_cast<uint32_t>(kWarps); ++i) {
+    if (i < l.nq) {
+      if (i == l.q) {
+        prefix = running;
+      }
+      running = binary_op(running, tot[i * l.tile_w + l.col]);
+    }
+  }
+  if (l.lane >= l.lane_stride) {
+    prefix = binary_op(prefix, warp_excl);
+  }
+#pragma unroll
+  for (int r = 0; r < R; ++r) {
+    x[r] = binary_op(prefix, x[r]);
+  }
+  return running;
+}
+
+// Column totals of one LDS tile, grouped as in scan_tile: each thread folds its kRows rows, then
+// the segments of a column are combined in order, neighbours first. Contains a barrier; callers
+// place another barrier between calls so that `tot` is free again.
+template <typename T, class BinaryFunction>
+__device__ __forceinline__ T reduce_tile(const T* tile, T* tot, const Layout& l, BinaryFunction binary_op) {
+  constexpr int R = Traits<T>::kRows;
+  T s = tile[l.seg * R * l.tile_w + l.col];
+#pragma unroll
+  for (int r = 1; r < R; ++r) {
+    s = binary_op(s, tile[(l.seg * R + r) * l.tile_w + l.col]);
+  }
+  for (uint32_t d = l.lane_stride; d < static_cast<uint32_t>(kWarp); d <<= 1) {
+    s = binary_op(s, inner_scan::shfl_down(s, d, kWarp));
+  }
+  if (l.lane < l.lane_stride) {
+    tot[l.q * l.tile_w + l.col] = s;
+  }
+  __syncthreads();
+  T total = tot[l.col];
+  for (uint32_t i = 1; i < l.nq; ++i) {
+    total = binary_op(total, tot[i * l.tile_w + l.col]);
+  }
+  return total;
+}
+
+// Column totals of every chunk except the last one of each (orow, strip), stored chunk-fastest:
+// partials[orow][irow][chunk].
+template <typename T, class BinaryFunction>
+C10_LAUNCH_BOUNDS_1(kBlock)
+__global__ void reduce_chunks(T* __restrict__ partials, const T* __restrict__ src, const Problem p, T init,
+                              BinaryFunction binary_op) {
+  constexpr int E = Traits<T>::kTileElems;
+  extern __shared__ __align__(16) char outer_scan_smem[];
+  T* bufs = reinterpret_cast<T*>(outer_scan_smem);
+  T* tot = bufs + kStages * E;
+  const Layout l = make_layout(p);
+  const bool issuer = is_issuer();
+  const uint32_t chunks = p.num_chunks - 1;
+  const uint64_t total_work = static_cast<uint64_t>(p.num_orows) * p.strips * chunks;
+  for (uint64_t it = blockIdx.x; it < total_work; it += gridDim.x) {
+    // Walk the work backwards so that scan_chunks, which walks forwards, first re-reads the chunks
+    // most likely to still be in L2 / MALL.
+    const Work w = decode(total_work - 1 - it, chunks, p);
+    if (issuer) {
+      for (uint32_t t = 0; t < w.num_tiles && t < static_cast<uint32_t>(kStages) - 1; ++t) {
+        load_tile(bufs + t * E, src, tile_at(w, t, p), p);
+      }
+    }
+    T acc = init;
+    for (uint32_t t = 0; t < w.num_tiles; ++t) {
+      if (issuer) {
+        wait_tiles((t + 1 < w.num_tiles) + (t + 2 < w.num_tiles));
+      }
+      __syncthreads();
+      if (issuer && t + 3 < w.num_tiles) {
+        load_tile(bufs + ((t + 3) % kStages) * E, src, tile_at(w, t + 3, p), p);
+      }
+      acc = binary_op(acc, reduce_tile(bufs + (t % kStages) * E, tot, l, binary_op));
+    }
+    if (l.seg == 0 && l.col < w.cols) {
+      partials[(w.orow * p.num_irows + w.col0 + l.col) * chunks + w.chunk] = acc;
+    }
+    __syncthreads();
+  }
+}
+
+// In place, partials[orow][irow][0 .. chunks-1] becomes its inclusive scan, so that chunk c of
+// scan_chunks starts from partials[orow][irow][c - 1]. One warp per (orow, irow).
+template <typename T, class BinaryFunction>
+C10_LAUNCH_BOUNDS_1(kBlock)
+__global__ void scan_partials(T* __restrict__ partials, const uint64_t num_columns, const uint32_t chunks, T init,
+                              BinaryFunction binary_op) {
+  const uint32_t lane = threadIdx.x % kWarp;
+  const uint32_t per_lane = ceil_div<uint32_t>(chunks, kWarp);
+  const uint32_t begin = lane * per_lane;
+  for (uint64_t column = static_cast<uint64_t>(blockIdx.x) * kWarps + threadIdx.x / kWarp; column < num_columns;
+       column += static_cast<uint64_t>(gridDim.x) * kWarps) {
+    T* row = partials + column * chunks;
+    T x[kPartialsPerLane];
+    T sum = init;
+#pragma unroll
+    for (int k = 0; k < kPartialsPerLane; ++k) {
+      if (static_cast<uint32_t>(k) < per_lane && begin + k < chunks) {
+        x[k] = row[begin + k];
+        sum = binary_op(sum, x[k]);
+      }
+    }
+    const T incl = inner_scan::warp_inclusive_scan(sum, lane, kWarp, binary_op);
+    const T excl = inner_scan::shfl_up(incl, 1, kWarp);
+    T running = lane == 0 ? init : excl;
+#pragma unroll
+    for (int k = 0; k < kPartialsPerLane; ++k) {
+      if (static_cast<uint32_t>(k) < per_lane && begin + k < chunks) {
+        running = binary_op(running, x[k]);
+        row[begin + k] = running;
+      }
+    }
+  }
+}
+
+// Inclusive scan of every (orow, strip, chunk). With num_chunks > 1, chunk c starts from
+// partials[orow][irow][c - 1] (see scan_partials).
+//
+// Tiles are scanned in place in a kStages-deep LDS ring. At the top of iteration t tile t has
+// landed; the result of tile t-1 is then stored and tile t+2 loaded into the stage tile t-2 used.
+template <typename T, class BinaryFunction>
+C10_LAUNCH_BOUNDS_1(kBlock)
+__global__ void scan_chunks(T* tgt, const T* src, const T* __restrict__ partials,
+                            const Problem p, T init, BinaryFunction binary_op) {
+  constexpr int R = Traits<T>::kRows;
+  constexpr int E = Traits<T>::kTileElems;
+  extern __shared__ __align__(16) char outer_scan_smem[];
+  T* bufs = reinterpret_cast<T*>(outer_scan_smem);
+  T* tot = bufs + kStages * E;
+  const Layout l = make_layout(p);
+  const bool issuer = is_issuer();
+  const uint64_t total_work = static_cast<uint64_t>(p.num_orows) * p.strips * p.num_chunks;
+  for (uint64_t it = blockIdx.x; it < total_work; it += gridDim.x) {
+    const Work w = decode(it, p.num_chunks, p);
+    if (issuer) {
+      load_tile(bufs, src, tile_at(w, 0, p), p);
+      if (w.num_tiles > 1) {
+        load_tile(bufs + E, src, tile_at(w, 1, p), p);
+      }
+    }
+    T carry = init;
+    if (w.chunk > 0 && l.col < w.cols) {
+      carry = partials[(w.orow * p.num_irows + w.col0 + l.col) * (p.num_chunks - 1) + w.chunk - 1];
+    }
+    for (uint32_t t = 0; t < w.num_tiles; ++t) {
+      // Issued after load t: store t-2 and load t+1, both from iteration t-1.
+      if (issuer) {
+        wait_tiles((t >= 2) + (t + 1 < w.num_tiles));
+      }
+      __syncthreads();
+      if (issuer) {
+        if (t >= 1) {
+          store_tile(tgt, bufs + ((t - 1) % kStages) * E, tile_at(w, t - 1, p), p);
+        }
+        if (t + 2 < w.num_tiles) {
+          // That stage was last read by store t-2; issued after it: load t+1 and store t-1.
+          if (t >= 2) {
+            wait_tiles(2);
+          }
+          load_tile(bufs + ((t + 2) % kStages) * E, src, tile_at(w, t + 2, p), p);
+        }
+      }
+      T* tile = bufs + (t % kStages) * E;
+      T x[R];
+      carry = scan_tile(x, tile, tot, l, carry, binary_op);
+#pragma unroll
+      for (int r = 0; r < R; ++r) {
+        tile[(l.seg * R + r) * l.tile_w + l.col] = x[r];
+      }
+    }
+    __syncthreads();
+    if (issuer) {
+      store_tile(tgt, bufs + ((w.num_tiles - 1) % kStages) * E, tile_at(w, w.num_tiles - 1, p), p);
+      wait_tiles(0);
+    }
+    __syncthreads();
+  }
+}
+
+// gfx1250 moves tiles with the Tensor Data Mover; gfx950 uses ordinary loads and stores
+// (copy_in / copy_out).
+inline bool has_tdm() {
+  static const std::vector<bool> per_device = [] {
+    std::vector<bool> v(c10::cuda::device_count());
+    for (c10::DeviceIndex d = 0; d < static_cast<c10::DeviceIndex>(v.size()); ++d) {
+      v[d] = at::detail::getCUDAHooks().isGPUArch({"gfx1250", "gfx1250-strict"}, d);
+    }
+    return v;
+  }();
+  return per_device[c10::cuda::current_device()];
+}
+
+template <typename T>
+bool aligned(const T* tgt, const T* src) {
+  constexpr uintptr_t kAlign = inner_scan::kGlobalAlign<T>;
+  return reinterpret_cast<uintptr_t>(src) % kAlign == 0 && reinterpret_cast<uintptr_t>(tgt) % kAlign == 0;
+}
+
+template <typename T>
+bool should_use(const T* tgt, const T* src, int64_t num_orows, int64_t row_size, int64_t num_irows) {
+  if (num_orows <= 0 || num_irows <= 0 || row_size < (has_tdm() ? kMinRowsTdm : kMinRows)) {
+    return false;
+  }
+  const bool odd_columns = num_irows % Traits<T>::kVec != 0;
+  if (has_tdm()) {
+    return !(sizeof(T) == 1 && odd_columns && num_orows * num_irows < kFewColumns &&
+             row_size < kFewColumnsMinRows1Tdm);
+  }
+  const bool scalar_copy = odd_columns || !aligned(tgt, src);
+  // A row at least a block wide gives each thread a column of kRows-row tiles to scan alone, as
+  // the one-thread-per-column kernel does. Of 8-byte elements, that is slower until the columns
+  // hold kMinTilesToChunk tiles and get split into chunks.
+  if (num_irows >= kBlock &&
+      (sizeof(T) == 8 ? ceil_div(row_size, int64_t{Traits<T>::kRows}) < kMinTilesToChunk
+                      : scalar_copy && row_size < kWideScalarCopyMinRows)) {
+    return false;
+  }
+  if (sizeof(T) == 1 && scalar_copy && row_size < kScalarCopyMinRows1) {
+    return false;
+  }
+  const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  const int64_t row_bytes = num_orows * num_irows * static_cast<int64_t>(sizeof(T));
+  return row_bytes < num_sms * kLargeRowBytesPerSM ||
+         row_size >= (row_bytes < num_sms * kHugeRowBytesPerSM ? kLargeRowMinRows : kHugeRowMinRows);
+}
+
+template <typename T>
+Problem make_problem(int64_t num_orows, int64_t row_size, int64_t num_irows, int64_t num_sms, bool vec_ok) {
+  Problem p{};
+  p.num_orows = static_cast<uint32_t>(num_orows);
+  p.row_size = static_cast<uint32_t>(row_size);
+  p.num_irows = static_cast<uint32_t>(num_irows);
+  uint32_t log_tile_w = 0;
+  while ((int64_t{1} << log_tile_w) < num_irows && (1 << log_tile_w) < kBlock) {
+    ++log_tile_w;
+  }
+  p.log_tile_w = log_tile_w;
+  p.tile_h = static_cast<uint32_t>((kBlock >> log_tile_w) * Traits<T>::kRows);
+  p.strips = static_cast<uint32_t>(ceil_div(num_irows, int64_t{1} << log_tile_w));
+  const int64_t groups = num_orows * p.strips;
+  const int64_t tiles = ceil_div(row_size, int64_t{p.tile_h});
+  int64_t num_chunks = 1;
+  if (groups < num_sms * kChunkBlocksPerSM && tiles >= kMinTilesToChunk) {
+    num_chunks = std::min(
+        std::min(ceil_div(num_sms * kChunkBlocksPerSM, groups), tiles / kMinTilesPerChunk), kMaxChunks);
+  }
+  if (num_chunks < kMinChunks) {
+    num_chunks = 1;
+  }
+  const int64_t chunk_tiles = ceil_div(tiles, num_chunks);
+  p.num_chunks = static_cast<uint32_t>(ceil_div(tiles, chunk_tiles));
+  p.chunk_rows = static_cast<uint32_t>(chunk_tiles * p.tile_h);
+  p.vec_ok = vec_ok;
+  return p;
+}
+
+template <typename T, class BinaryFunction>
+void launch(T* tgt, const T* src, int64_t num_orows, int64_t row_size, int64_t num_irows, T init,
+            BinaryFunction binary_op) {
+  constexpr size_t smem = Traits<T>::kSmemBytes;
+  const bool vec_ok = num_irows % Traits<T>::kVec == 0 && aligned(tgt, src);
+  const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  const int64_t max_blocks = num_sms * 8;
+  const Problem p = make_problem<T>(num_orows, row_size, num_irows, num_sms, vec_ok);
+  const int64_t groups = num_orows * p.strips;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  c10::DataPtr partials;
+  T* partials_ptr = nullptr;
+  if (p.num_chunks > 1) {
+    const int64_t chunks = p.num_chunks - 1;
+    partials = c10::cuda::CUDACachingAllocator::get()->allocate(num_orows * num_irows * chunks * sizeof(T));
+    partials_ptr = static_cast<T*>(partials.get());
+    reduce_chunks<T><<<static_cast<uint32_t>(std::min(max_blocks, groups * chunks)), kBlock, smem, stream>>>(
+        partials_ptr, src, p, init, binary_op);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    const int64_t columns = num_orows * num_irows;
+    scan_partials<T><<<static_cast<uint32_t>(std::min(max_blocks, ceil_div(columns, int64_t{kWarps}))), kBlock, 0,
+                       stream>>>(partials_ptr, static_cast<uint64_t>(columns), static_cast<uint32_t>(chunks), init,
+                                 binary_op);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
+  scan_chunks<T><<<static_cast<uint32_t>(std::min(max_blocks, groups * p.num_chunks)), kBlock, smem, stream>>>(
+      tgt, src, partials_ptr, p, init, binary_op);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+} // namespace outer_scan
+#undef AT_OUTER_SCAN_WAIT_TENSORCNT
+#undef AT_OUTER_SCAN_TDM_WAIT_BUILTIN
+#undef AT_OUTER_SCAN_TDM_BUILTINS
+#undef AT_OUTER_SCAN_TDM
 #endif // USE_ROCM
 
 template<typename scalar_t, class BinaryFunction>
@@ -1254,6 +1968,18 @@ __host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
   check_fits_in_unsigned(num_irows, "num_irows");
   check_fits_in_unsigned(num_orows, "num_orows");
   check_fits_in_unsigned(row_size, "row_size");
+#if defined(USE_ROCM)
+  if constexpr (sizeof(scalar_t) <= 8 && inner_scan::Traits<scalar_t, BinaryFunction>::kCheapOp) {
+    if (inner_scan::supported_device() &&
+        outer_scan::should_use<scalar_t>(
+            result.const_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(), num_orows, row_size, num_irows)) {
+      outer_scan::launch<scalar_t>(
+          result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
+          num_orows, row_size, num_irows, init, binary_op);
+      return;
+    }
+  }
+#endif
   if (static_cast<size_t>(num_irows) * num_orows * row_size <= UINT_MAX) {
   tensor_kernel_scan_outer_dim<scalar_t, uint32_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),

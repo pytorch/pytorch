@@ -3313,24 +3313,87 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x_off, expected, atol=0, rtol=0)
 
     @onlyCUDA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    def test_cumsum_cumprod_outer_dim(self, device, dtype):
+        # On MI350 and MI450, scans along a non-last dim of at least 32 rows (16 on MI450) run a
+        # tiled kernel that splits long columns into chunks. These shapes cover narrow and wide
+        # tiles, partial tiles, several outer rows and chunked columns, aligned, one element into
+        # their storage and in place. On MI350 that offset makes 1- and 2-byte tiles be copied an
+        # element at a time, as are the odd-width rows of (200, 301) for every dtype; (4, 200, 15),
+        # (600, 64) and (200, 301) stay on the tiled kernel then. (2621440, 4) is 10 MiB or more:
+        # with the cache emptied it most likely gets an allocation of its own, so an access past the
+        # end of the last tile faults. The inputs keep every result exact in `dtype` for any combine
+        # order: integers wrap around (odd factors for cumprod, so products never reach 0), and
+        # floating-point inputs are small integers for cumsum and +-1 (+-1j) for cumprod.
+        cases = [
+            ((16, 5), 0),
+            ((32, 5), 0),
+            ((300, 3), 0),
+            ((1024, 4), 0),
+            ((257, 33), 0),
+            ((20, 1000), 0),
+            ((40, 1024), 0),
+            ((600, 64), 0),
+            ((200, 301), 0),
+            ((4, 300, 33), 1),
+            ((4, 200, 15), 1),
+            ((65536, 4), 0),
+            ((3, 20001, 3), 1),
+            ((2621440, 4), 0),
+        ]
+        # Partial sums of up to this many values in {-1, 0, 1} are exact in `dtype`.
+        max_len = {torch.half: 2048, torch.bfloat16: 256}.get(dtype, 2**24)
+        for (shape, dim), op in product(cases, (torch.cumsum, torch.cumprod)):
+            if op is torch.cumsum and shape[dim] > max_len:
+                continue
+            if dtype.is_floating_point or dtype.is_complex:
+                if op is torch.cumsum:
+                    vals = [-1, 0, 1] + ([1j, -1j, 1 + 1j] if dtype.is_complex else [])
+                else:
+                    vals = [-1, 1] + ([1j, -1j] if dtype.is_complex else [])
+                vals = torch.tensor(vals, dtype=dtype)
+                x = vals[torch.randint(len(vals), shape)]
+            elif op is torch.cumsum:
+                x = make_tensor(shape, dtype=dtype, device="cpu")
+            else:
+                x = torch.randint(0, 5, shape, dtype=dtype) * 2 + 1
+            expected = op(x, dim, dtype=dtype)
+            if shape[0] == 2621440:
+                torch.cuda.empty_cache()
+            x = x.to(device)
+            self.assertEqual(op(x, dim, dtype=dtype), expected, atol=0, rtol=0)
+            # A one-element storage offset misaligns 16-byte vector accesses.
+            x_off = torch.empty(x.numel() + 1, dtype=dtype, device=device)[1:].view(shape)
+            x_off.copy_(x)
+            self.assertEqual(op(x_off, dim, dtype=dtype), expected, atol=0, rtol=0)
+            getattr(x_off, op.__name__ + "_")(dim)
+            self.assertEqual(x_off, expected, atol=0, rtol=0)
+
+    @onlyCUDA
     @dtypes(*floating_types())
     def test_cumsum_cumprod_special_values(self, device, dtype):
-        # -inf, inf and nan on rows within one tile and across the tile and chunk boundaries of the
-        # ROCm row-scan kernels. Finite results stay exact in `dtype` for any combine order.
+        # -inf, inf and nan on lines within one tile and across the tile and chunk boundaries of the
+        # ROCm scan kernels, along the last dim and along an outer dim. Finite results stay exact in
+        # `dtype` for any combine order.
         inf, nan = float("inf"), float("nan")
-        for n, op in product((300, 65536), (torch.cumsum, torch.cumprod)):
+        cases = [((4, 300), 1), ((4, 65536), 1), ((4, 300, 33), 1), ((65536, 4), 0)]
+        for (shape, dim), op in product(cases, (torch.cumsum, torch.cumprod)):
+            n = shape[dim]
             vals = torch.tensor([-1, 0, 1] if op is torch.cumsum else [-1, 1], dtype=dtype)
-            x = vals[torch.randint(len(vals), (4, n))]
-            x[0, :n // 2] = -inf
-            x[1, n // 3] = inf
-            x[2, 2 * n // 3] = nan
-            # inf + -inf and 0 * inf turn the rest of the row into nan.
-            x[3, n // 4] = inf if op is torch.cumsum else 0
-            x[3, n // 2] = -inf if op is torch.cumsum else inf
-            expected = op(x, 1)
+            x = vals[torch.randint(len(vals), shape)]
+            # Scan line k is x.movedim(dim, 0)[:, 0, ..., 0, k].
+            lines = x.movedim(dim, 0)
+            pre = (0,) * (x.dim() - 2)
+            lines[(slice(0, n // 2),) + pre + (0,)] = -inf
+            lines[(n // 3,) + pre + (1,)] = inf
+            lines[(2 * n // 3,) + pre + (2,)] = nan
+            # inf + -inf and 0 * inf turn the rest of the line into nan.
+            lines[(n // 4,) + pre + (3,)] = inf if op is torch.cumsum else 0
+            lines[(n // 2,) + pre + (3,)] = -inf if op is torch.cumsum else inf
+            expected = op(x, dim)
             x = x.to(device)
-            self.assertEqual(op(x, 1), expected, atol=0, rtol=0)
-            getattr(x, op.__name__ + "_")(1)
+            self.assertEqual(op(x, dim), expected, atol=0, rtol=0)
+            getattr(x, op.__name__ + "_")(dim)
             self.assertEqual(x, expected, atol=0, rtol=0)
 
     @onlyCUDA
@@ -3338,18 +3401,21 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double, torch.cfloat)
     def test_cumsum_cumprod_no_spurious_overflow(self, device, dtype):
         # Every run of these inputs has a finite sum and product that is exact in `dtype`, but
-        # folding elements that are not adjacent (e.g. all the 2^e first) overflows. 1-D and
-        # chunked last-dim lines on ROCm.
+        # folding elements that are not adjacent (e.g. all the 2^e first) overflows. 1-D, chunked
+        # last-dim and chunked outer-dim lines on ROCm.
         e = {torch.half: 9, torch.bfloat16: 120, torch.float: 120, torch.double: 1000, torch.cfloat: 120}[dtype]
-        for shape, op in product(((2_000_000,), (3, 200_000)), (torch.cumsum, torch.cumprod)):
+        cases = [((2_000_000,), 0), ((3, 200_000), 1), ((65536, 2), 0)]
+        for (shape, dim), op in product(cases, (torch.cumsum, torch.cumprod)):
             if op is torch.cumsum:
                 pattern = [2.0**e] * 16 + [-2.0**e] * 16
             else:
                 pattern = [2.0**e] + [1.0] * 15 + [2.0**-e] + [1.0] * 15
-            n = shape[-1]
+            n = shape[dim]
             line = torch.tensor(pattern, dtype=torch.double).repeat(n // len(pattern) + 1)[:n]
-            x = line.expand(shape).to(dtype).contiguous()
-            self.assertEqual(op(x.to(device), -1), op(x, -1), atol=0, rtol=0)
+            view = [1] * len(shape)
+            view[dim] = n
+            x = line.view(view).expand(shape).to(dtype).contiguous()
+            self.assertEqual(op(x.to(device), dim), op(x, dim), atol=0, rtol=0)
 
     @onlyCUDA
     @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
@@ -3357,19 +3423,23 @@ class TestTorchDeviceType(TestCase):
     @runOnRocmArch(MI350_ARCH + MI450_ARCH)
     @largeTensorTest('12GB')
     def test_cumsum_more_than_2_32_elements(self, device):
-        # The stock kernel gives each row to a single block, which is too slow for a unit test.
-        n = 2**31 + 16
-        # Random values make every chunk and tile carry visible modulo 256.
-        x = torch.randint(0, 256, (2, n), dtype=torch.uint8, device=device)
-        res = x.cumsum(1, dtype=torch.uint8)
-        # res is the cumsum modulo 256 iff it starts with x[:, 0] and each step adds x[:, i]. Checked
-        # in slices with elementwise ops, so no scan is involved and the temporaries stay small.
-        self.assertTrue(torch.equal(res[:, 0], x[:, 0]))
-        step = 2**27
-        for start in range(1, n, step):
-            end = min(start + step, n)
-            diff = res[:, start:end] - res[:, start - 1:end - 1]
-            self.assertTrue(torch.equal(diff, x[:, start:end]), f"wrong result in [{start}, {end})")
+        # The stock kernels give each of these lines to a single block (last dim) or thread (outer
+        # dim), which is too slow for a unit test.
+        for shape, dim in (((2, 2**31 + 16), 1), ((2, 2**30 + 8, 2), 1)):
+            # Random values make every chunk and tile carry visible modulo 256.
+            x = torch.randint(0, 256, shape, dtype=torch.uint8, device=device)
+            res = x.cumsum(dim, dtype=torch.uint8)
+            # res is the cumsum modulo 256 iff it starts with x[0] and each step adds x[i]. Checked in
+            # slices with elementwise ops, so no scan is involved and the temporaries stay small.
+            n = shape[dim]
+            self.assertTrue(torch.equal(res.narrow(dim, 0, 1), x.narrow(dim, 0, 1)))
+            step = 2**27
+            for start in range(1, n, step):
+                length = min(step, n - start)
+                diff = res.narrow(dim, start, length) - res.narrow(dim, start - 1, length)
+                self.assertTrue(torch.equal(diff, x.narrow(dim, start, length)),
+                                f"{shape} along {dim}: wrong result in [{start}, {start + length})")
+            del x, res
 
     @onlyCUDA
     @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
@@ -3454,17 +3524,19 @@ class TestTorchDeviceType(TestCase):
     @runOnRocmArch(MI350_ARCH + MI450_ARCH)
     @dtypes(torch.half, torch.bfloat16)
     def test_cumsum_alignment_independent(self, device, dtype):
-        # These rows run the chunked last-dim path. A misaligned input switches it from vector to
-        # dword-aligned accesses, which must give the same bits, as must reruns. (CUB and hipCUB scan
-        # 1-D inputs with a look-back that can group partial sums differently from run to run.)
-        for shape in ((100_000,), (2_000_000,), (3, 200_000), (1, 16_777_216)):
+        # These lines run the chunked last-dim and outer-dim paths. A misaligned input switches them
+        # from vector to dword-aligned or element accesses, which must give the same bits, as must
+        # reruns. (CUB and hipCUB scan 1-D inputs with a look-back that can group partial sums
+        # differently from run to run.)
+        cases = [((100_000,), 0), ((2_000_000,), 0), ((3, 200_000), 1), ((1, 16_777_216), 1), ((65536, 8), 0)]
+        for shape, dim in cases:
             x = torch.randn(shape, dtype=dtype, device=device)
-            ref = x.cumsum(-1)
+            ref = x.cumsum(dim)
             x_off = torch.empty(x.numel() + 1, dtype=dtype, device=device)[1:].view(shape)
             x_off.copy_(x)
-            self.assertEqual(x_off.cumsum(-1), ref, atol=0, rtol=0)
+            self.assertEqual(x_off.cumsum(dim), ref, atol=0, rtol=0)
             for _ in range(3):
-                self.assertEqual(x.cumsum(-1), ref, atol=0, rtol=0)
+                self.assertEqual(x.cumsum(dim), ref, atol=0, rtol=0)
 
     def _test_cumminmax_helper(self, x, fn, expected_val, expected_ind):
         val, ind = fn(x, -1)
