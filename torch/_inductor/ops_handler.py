@@ -262,6 +262,9 @@ class OpsHandler(Generic[T]):
         """
         raise NotImplementedError
 
+    def padded_scatter_padding(self, name: str) -> None:
+        raise NotImplementedError
+
     # TODO: Better explain how the "collective" semantics of these ops;
     # remember that the input value is a scalar, you can't reduce on it in the
     # traditional sense!
