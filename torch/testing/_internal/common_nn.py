@@ -2634,7 +2634,7 @@ def get_new_module_tests():
     non_linear_activations_extra_info: dict[str, dict] = {
         'CELU': {'constructor_args': (2.,), 'default_dtype': torch.double},
         'Threshold': {'constructor_args': (2., 1.)},
-        'Hardsigmoid': {'check_gradgrad': False, 'check_jit': False, 'default_dtype': torch.double},
+        'Hardsigmoid': {'check_jit': False, 'default_dtype': torch.double},
         'Hardswish': {'check_gradgrad': False, 'check_jit': False, 'default_dtype': torch.double},
         # For RRelu, test that compare CPU and GPU results fail because RNG
         # is different between CPU and GPU

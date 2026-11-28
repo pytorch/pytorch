@@ -1795,9 +1795,6 @@ class TestOperatorsDevice(TestCase):
                     "grid_sampler_2d", ""
                 ),  # NYI: forward AD for grid_sampler_2d_backward
                 xfail(
-                    "nn.functional.hardsigmoid", ""
-                ),  # NYI: forward AD for hardsigmoid_backward
-                xfail(
                     "nn.functional.huber_loss", ""
                 ),  # NYI: forward AD for huber_loss_backward
                 xfail("NumpyCubeNotComposableAutogradFunction"),  # not composable
@@ -2040,9 +2037,6 @@ class TestOperatorsDevice(TestCase):
                 xfail(
                     "grid_sampler_2d"
                 ),  # NYI: forward AD for grid_sampler_2d_backward
-                xfail(
-                    "nn.functional.hardsigmoid"
-                ),  # Forward AD not implemented and no decomposition
                 xfail(
                     "nn.functional.hinge_embedding_loss"
                 ),  # vmap: inplace into a regular tensor
