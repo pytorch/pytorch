@@ -488,7 +488,11 @@ size_t parseCUDABlasLtWorkspaceSize() {
   // https://rocm.docs.amd.com/projects/hipBLASLt/en/docs-7.14.1/conceptual/hipblaslt-clients.html
   size_t workspace_size = 80*1024; /* Use 80 MiB for hipBLASLt */
 #else
-  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+  // If you want opt out of split-K mechanism for cublas/cublasLt, then use
+  // cublasLtMatmulAlgoConfigSetAttribute and passing
+  // CUBLASLT_ALGO_CONFIG_SPLITK_NUM flag from
+  // https://github.com/NVIDIA/CUDALibrarySamples/blob/main/cuBLASLt/Common/LtMatmulCustomFind.h#L273
+  size_t workspace_size = 32*1024; /* Use 32 MiB for cuBLASLt */
 #endif
 
   if (val.has_value()) {
