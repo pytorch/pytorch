@@ -104,6 +104,20 @@ inline T simd_min(T val) {
   return ::metal::simd_min(val);
 }
 
+// Metal has no bool simd_max/simd_min, but for bools max is any and min is all.
+// These are specializations of the integral templates above rather than plain
+// overloads, which ulong would implicitly convert to. Keep them above the
+// simd_argmax/simd_argmin helpers that use them.
+template <>
+inline bool simd_max(bool val) {
+  return ::metal::simd_any(val);
+}
+
+template <>
+inline bool simd_min(bool val) {
+  return ::metal::simd_all(val);
+}
+
 // Metal does not support SIMD reductions over 64-bit types, but it could be
 // implement using simd_shuffle_down, that yields result in log2(simdgroup_size)
 // iterations Use fill variant, as shuffle down returns garbage if inactive
