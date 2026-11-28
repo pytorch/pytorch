@@ -416,7 +416,10 @@ def install_builtin_method_guard(
         create = functools.partial(GuardBuilder.NATIVE_METHOD_MATCH, expected=expected)
         install_guard(source.make_guard(create))
     elif filtered:
-        exc.unimplemented_identity(f"binding prebound builtin method {source.name}")
+        exc.unimplemented_identity(
+            f"binding prebound builtin method {source.name}: "
+            "pass the receiver and call its method inside the compiled function"
+        )
     else:
         install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 

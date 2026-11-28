@@ -7595,7 +7595,7 @@ class GraphModule(torch.nn.Module):
             methods.append([].count)
         self._check_method_bindings(fn, methods, capture, (1, 1, 2, 2, 3))
         if capture in ("aot", "cache"):
-            self._refuses_capture(fn, [1].count, capture, "binding prebound builtin")
+            self._refuses_capture(fn, [1].count, capture, "pass the receiver")
 
     def test_export_calls_instance_bound_builtin(self):
         class Model(torch.nn.Module):
@@ -7673,10 +7673,7 @@ class GraphModule(torch.nn.Module):
 
         self._check_fallback(fresh, (None,), "unstable receiver")
 
-    @parametrize(
-        "bind",
-        [None, lambda s: s.upper, lambda s: str.__dict__["upper"].__get__(s, str)],
-    )
+    @parametrize("bind", [None, lambda s: s.upper, lambda s: str.upper.__get__(s)])
     def test_bound_method_constant_receiver_hash(self, bind):
         fn = lambda x, s: (x + 1, hash(bind(s) if bind else s))
         a, b = ("".join(("hello", "world")) for _ in range(2))
@@ -8764,13 +8761,11 @@ class GraphModule(torch.nn.Module):
 
         def fn(offset, pair):
             x, obj, day, amount = pair
-            key, field = re.IGNORECASE, Field()
+            key, field, n = re.IGNORECASE, Field(), x.shape[0]
             comptime(lookup_member)
             spec = "{.name[0]:>4} {!r} {!s} {} {!r} {} {!a}"
-            text = spec.format(key, x, x, re.RegexFlag(4), x.shape[0], x.shape, [x])
-            mixed = "{:>{}} {} {o} {o!r} {o!s} {o!a}".format(
-                key, x.shape[0], obj, o=obj
-            )
+            text = spec.format(key, x, x, re.RegexFlag(4), n, x.shape, [x])
+            mixed = "{:>{}} {} {o} {o!r} {o!s} {o!a}".format(key, n, obj, o=obj)
             field.calls = day.calls = calls = []
             rendered = "{0} {2} {1!r:{1}} {1!s:{1}} {1!a:{1}}".format(key, field, day)
             spec = "{0:{1.shape[0]}} {1} {1.shape[0]} {2!s} {2:%Y} {3:.1f} {4}"
@@ -8782,17 +8777,27 @@ class GraphModule(torch.nn.Module):
                     errors.append(template.format(key, obj=field))
                 except (ValueError, IndexError, TypeError) as exc:
                     errors.append((type(exc), exc.args))
+            clocks = str.format("{0} {1:%H:%M} {2:%H:%M %Z} {2}", key, stamp, clock)
             output = (format(torch._C.DispatchKey.CPU), text, mixed, native, errors)
-            return x + offset, output, rendered, tuple(calls)
+            return x + offset, output, rendered, tuple(calls), clocks, format(day, "%Y")
 
         class OpaqueRepr:
             __repr__ = torch.compiler.disable(Field.__repr__)
 
-        day = Day(2020, 1, 1)
-        inputs = [
-            (torch.arange(n), MyCls(), day, decimal.Decimal("1.25")) for n in (2, 4)
-        ]
+        day, stamp = Day(2020, 1, 1), datetime.datetime.min
+        clock = datetime.time(13, 45, tzinfo=datetime.UTC)
+        amount = decimal.Decimal("1.25")
+        inputs = [(torch.arange(n), MyCls(), day, amount) for n in (2, 4)]
         run, _ = self._check_reuse(fn, inputs, frames=1, dynamic=True)
+
+        class Name(str):
+            __slots__ = ()
+            replace = unittest.mock.Mock(side_effect=AssertionError)
+
+        clock = clock.replace(tzinfo=datetime.timezone(clock.utcoffset(), Name("Z")))
+        with self.assertRaisesRegex(Unsupported, "tzinfo callback"):
+            run(torch.ones(1), inputs[-1])
+        clock = clock.replace(tzinfo=None)
         day.strftime = lambda spec: "custom"
         with self.assertRaisesRegex(Unsupported, "instance overrides strftime"):
             run(torch.ones(1), inputs[-1])
@@ -8800,19 +8805,19 @@ class GraphModule(torch.nn.Module):
         def ordered(x, first, second):
             y = x + 1
             text = str.format("{} {} {}", re.IGNORECASE, first, second)
-            return y, text, str.format("{} {}", re.IGNORECASE, y.sin)
+            return y, text, str.format("{} {} {}", re.IGNORECASE, y.sin, y.split)
 
-        field = Field()
+        field, x = Field(), torch.ones(1)
         for item in (Field(), OpaqueRepr()):
-            run = torch.compile(
-                ordered, backend="eager", fullgraph=isinstance(item, Field)
-            )
+            fullgraph = isinstance(item, Field)
+            run = torch.compile(ordered, backend="eager", fullgraph=fullgraph)
             for pair in (([item], field), (field, [item])):
                 field.calls = item.calls = []
-                expected = ordered(torch.ones(1), *pair)[1]
+                expected = ordered(x, *pair)[1]
                 field.calls.clear()
-                y, text, method = run(torch.ones(1), *pair)
-                self.assertEqual((text, method), (expected, f"{re.IGNORECASE} {y.sin}"))
+                y, text, method = run(x, *pair)
+                self.assertEqual(text, expected)
+                self.assertEqual(method, f"{re.IGNORECASE} {y.sin} {y.split}")
                 calls = ["width", "repr"] if pair[0] is field else ["repr", "width"]
                 self.assertEqual(field.calls, calls)
 
@@ -8846,16 +8851,16 @@ class GraphModule(torch.nn.Module):
             Label.__float__ = lambda self: 42.0
             return x + 1, render(member)
 
-        self._check_fallback(
-            fn, (Label(),), r"pending class mutation: __(str|repr|format)__"
-        )
         slot = "__format__" if render is str.format else "__repr__"
+        error = r"pending class mutation: __(str|repr|format)__"
+        self._check_fallback(fn, (Label(),), error)
         delattr(Label, slot)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.ones(1)
-        self.assertEqual(compiled(x, Stable()), fn(x, Stable()))
+        result = compiled(x, Stable())
         observe = repr if slot == "__repr__" else format
         self.assertEqual(observe(Label()), "changed")
+        self.assertEqual(result, fn(x, Stable()))
         self._check_reuse(fn, (re.IGNORECASE,), frames=1)
         if render is str.format:
             for base in (int, float, str):
