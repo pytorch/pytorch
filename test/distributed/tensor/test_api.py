@@ -16,7 +16,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
@@ -44,9 +44,18 @@ class MyModel(nn.Module):
 c10d_ops = torch.ops.c10d
 
 
-class DTensorAPITest(DTensorContinuousTestBase):
+
+class DTensorAPITest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    
     # Four ranks are required for the 2D mesh cases.
     world_size = 4
+    
+    @property
+    def world_size(self) -> int:
+        # hard code world size to 4 as we need to test
+        # at least with 2d mesh
+        return 4
 
     @with_comms
     def test_distribute_tensor_rank(self):
