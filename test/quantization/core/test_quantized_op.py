@@ -2365,6 +2365,32 @@ class TestQuantizedOps(TestCase):
             torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
             torch.testing.assert_close(quantized_out[1], unquantized_out[1])
 
+    def test_qtopk_large_dim(self):
+        # test_qtopk stays at side <= 5, so it never reaches the
+        # k * 64 <= dim_size selection path in TopKImpl.h, which QuantizedCPU
+        # shares with the float kernels. The reference is sort() on the raw
+        # integers rather than topk on the dequantized tensor, which would run
+        # the same selection code; scale 1 and zero_point 0 keep every value
+        # in range instead of saturating to the ends of the type.
+        dim_size = 4096
+        ranges = {torch.qint8: (-128, 128), torch.quint8: (0, 256)}
+        for k, dtype, large, sort in itertools.product(
+            [1, 64, 65], ranges, [False, True], [False, True]
+        ):
+            X = torch.randint(*ranges[dtype], (dim_size,)).float()
+            qX = torch.quantize_per_tensor(X, 1.0, 0, dtype)
+            raw = qX.int_repr()
+            ref = raw.sort(descending=large, stable=True).values[:k]
+
+            values, indices = torch.topk(qX, k, largest=large, sorted=sort)
+            got = values.int_repr()
+            # each index must point at the value reported beside it
+            self.assertEqual(raw[indices], got)
+            if not sort:
+                got = got.sort(descending=large).values
+            self.assertEqual(got, ref)
+            self.assertEqual(indices.unique().numel(), k)
+
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
