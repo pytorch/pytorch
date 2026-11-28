@@ -377,7 +377,6 @@
   "test/inductor/test_flydsl_grouped_scheduler.py",
   "test/inductor/test_flydsl_template.py",
   "test/inductor/test_foreach.py",
-  "test/inductor/test_fp8.py",
   "test/inductor/test_fused_attention.py",
   "test/inductor/test_fusion_regions.py",
   "test/inductor/test_fxir_backend.py",
