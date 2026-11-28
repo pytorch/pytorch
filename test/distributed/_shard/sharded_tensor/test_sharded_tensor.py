@@ -40,6 +40,7 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 from torch.distributed.remote_device import _remote_device
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
@@ -47,10 +48,9 @@ from torch.testing._internal.common_distributed import (
     tp_transports,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
-    skip_but_pass_in_sandcastle_if,
     skipIfRocm,
-    TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -73,27 +73,29 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestShardedTensorMetadata(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_serialize_and_deserialize(self):
         shard_metadatas = [
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement="rank:0/cuda:0",
+                placement="rank:0/cpu",
             ),
             ShardMetadata(
                 shard_offsets=[0, 5],
                 shard_sizes=[5, 5],
-                placement="rank:1/cuda:1",
+                placement="rank:1/cpu",
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
                 shard_sizes=[5, 5],
-                placement="rank:2/cuda:2",
+                placement="rank:2/cpu",
             ),
             ShardMetadata(
                 shard_offsets=[5, 5],
                 shard_sizes=[5, 5],
-                placement="rank:3/cuda:3",
+                placement="rank:3/cpu",
             ),
         ]
 
@@ -190,8 +192,10 @@ class TestShardedTensorMetadata(TestCase):
 
 
 class TestCreateTensorFromParams(TestCase):
-    @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "CUDA GPU is needed")
-    def test_empty(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_empty(self, device):
+        device_type = torch.device(device).type
         expected_dtype = torch.double
         tensor_properties = TensorProperties(
             dtype=expected_dtype,
@@ -200,7 +204,7 @@ class TestCreateTensorFromParams(TestCase):
             pin_memory=False,
             memory_format=torch.contiguous_format,
         )
-        local_device = torch.device("cuda:0")
+        local_device = torch.device(device_type, 0)
         local_tensor = _create_tensor_from_params(
             5, 10, local_device=local_device, tensor_properties=tensor_properties
         )
@@ -211,21 +215,23 @@ class TestCreateTensorFromParams(TestCase):
 
 
 class TestShardParameter(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_shard_parameter(self):
+    def test_shard_parameter(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
 
-        fc = torch.nn.Linear(12, 12).cuda(self.rank)
+        fc = torch.nn.Linear(12, 12).to(device_type)
         weight_og = fc.weight.clone()
         shard_parameter(fc, "weight", spec)
 
@@ -242,19 +248,19 @@ class TestShardParameter(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_shard_parameter_errors(self):
+    def test_shard_parameter_errors(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
 
-        fc = torch.nn.Linear(12, 12).cuda(self.rank)
+        fc = torch.nn.Linear(12, 12).to(device_type)
         with self.assertRaisesRegex(ValueError, "does not match with src_rank"):
             shard_parameter(fc, "weight", spec, src_rank=self.rank)
 
@@ -269,16 +275,16 @@ class TestShardParameter(ShardedTensorTestBase):
             shard_parameter(fc, "bias", spec)
 
         with self.assertRaisesRegex(ValueError, "not a contiguous Tensor"):
-            fc.bias = torch.rand(10, 10).cuda(self.rank).t()
+            fc.bias = torch.rand(10, 10).to(device_type).t()
             shard_parameter(fc, "bias", spec)
 
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:{self.rank}/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:{self.rank}/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
         with self.assertRaisesRegex(ValueError, "does not match with sharding_spec"):
@@ -289,12 +295,12 @@ class TestShardParameter(ShardedTensorTestBase):
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{device_type}:1",
                 ),
             ]
         )
@@ -303,20 +309,22 @@ class TestShardParameter(ShardedTensorTestBase):
 
 
 class TestShardTensor(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_shard_tensor(self):
+    def test_shard_tensor(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
-        tensor = torch.rand(12, 12).cuda(self.rank)
+        tensor = torch.rand(12, 12).to(device_type)
         st = _shard_tensor(tensor, spec)
 
         # Verify.
@@ -328,18 +336,18 @@ class TestShardTensor(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_shard_tensor_with_empty_shard(self):
+    def test_shard_tensor_with_empty_shard(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
-        tensor = torch.rand(9, 12).cuda(self.rank)
+        tensor = torch.rand(9, 12).to(device_type)
         st = _shard_tensor(tensor, spec)
 
         # Verify.
@@ -359,33 +367,33 @@ class TestShardTensor(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_shard_tensor_errors(self):
+    def test_shard_tensor_errors(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
-        tensor = torch.rand(12, 12).cuda(self.rank)
+        tensor = torch.rand(12, 12).to(device_type)
 
         with self.assertRaisesRegex(ValueError, "does not match with src_rank"):
             _shard_tensor(tensor, spec, src_rank=self.rank)
 
         with self.assertRaisesRegex(ValueError, "not a contiguous Tensor"):
-            tensor_t = torch.rand(12, 12).cuda(self.rank).t()
+            tensor_t = torch.rand(12, 12).to(device_type).t()
             _shard_tensor(tensor_t, spec)
 
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:{self.rank}/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:{self.rank}/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
         with self.assertRaisesRegex(ValueError, "does not match with sharding_spec"):
@@ -396,12 +404,12 @@ class TestShardTensor(ShardedTensorTestBase):
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{device_type}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{device_type}:1",
                 ),
             ]
         )
@@ -410,6 +418,8 @@ class TestShardTensor(ShardedTensorTestBase):
 
 
 class TestModuleHookApi(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     class DummyNNModule(torch.nn.Module):
         def __init__(self, spec, tensor_size):
             super().__init__()
@@ -420,8 +430,7 @@ class TestModuleHookApi(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_reshard_output(self):
+    def test_reshard_output(self, device):
         specs = _chunk_sharding_specs_list_for_test([0, 1], seed=5)
         spec, reshard_spec = specs[0], specs[1]
         test_module = self.DummyNNModule(spec, [24, 12])
@@ -445,8 +454,7 @@ class TestModuleHookApi(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_collect_local_shard(self):
+    def test_collect_local_shard(self, device):
         specs = _chunk_sharding_specs_list_for_test([0], seed=5)
         spec = specs[0]
         test_module = self.DummyNNModule(spec, [23, 15])
@@ -459,17 +467,19 @@ class TestModuleHookApi(ShardedTensorTestBase):
 
 
 class TestLocalTensor(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_local_tensor(self):
+    def test_local_tensor(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
             ],
         )
         st = sharded_tensor.rand(spec, 24, 12)
@@ -479,21 +489,21 @@ class TestLocalTensor(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_local_tensor_error(self):
+    def test_local_tensor_error(self, device):
+        device_type = torch.device(device).type
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:1/cuda:1",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:2/cuda:2",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-                "rank:3/cuda:3",
+                f"rank:0/{device_type}:0",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+                f"rank:1/{device_type}:1",
+                f"rank:1/{device_type}:1",
+                f"rank:2/{device_type}:2",
+                f"rank:2/{device_type}:2",
+                f"rank:2/{device_type}:2",
+                f"rank:3/{device_type}:3",
+                f"rank:3/{device_type}:3",
             ],
         )
         st = sharded_tensor.rand(spec, 24, 12)
@@ -3458,6 +3468,8 @@ class TestShardMetadata(ShardedTensorTestBase):
 
 
 class TestShardedTensorSubGroupInit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @spawn_threads_and_init_comms(world_size=4)
     def test_sub_process_group_sharded_tensor_init(self):
         world_pg = dist.GroupMember.WORLD
@@ -3509,6 +3521,8 @@ class TestShardedTensorSubGroupInit(TestCase):
 
 
 class TestCreateTensorNoProcessGroupMode(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_init_from_local_shards_and_global_metadata(self):
         st_metadata: ShardedTensorMetadata = ShardedTensorMetadata(
             shards_metadata=[
@@ -3569,6 +3583,23 @@ class TestCreateTensorNoProcessGroupMode(TestCase):
             local_shards=st_local_shards,
             sharded_tensor_metadata=st_metadata,
         )
+
+
+instantiate_device_type_tests(
+    TestCreateTensorFromParams, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestShardParameter, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestShardTensor, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestModuleHookApi, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestLocalTensor, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
