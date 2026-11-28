@@ -8,7 +8,8 @@ import torch
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
                                                   TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
-                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo, HardwareClassification)
+                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo, HardwareClassification,
+                                                  instantiate_parametrized_tests, parametrize)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests,
                                                         dtypes, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
@@ -73,6 +74,23 @@ class TestTypePromotionDevice(TestCase):
         # uint16_tensor + 5 would result in a long_tensor, which is not what we want.
         int16_tensor = torch.tensor([1, 1, 1], dtype=torch.int16, device=device)
         uint8_tensor *= int16_tensor
+
+    # Shell dtypes such as float4_e2m1fn_x2 have no value conversions, so mixing one
+    # with another dtype must raise on every device instead of reinterpreting its
+    # bits inside a kernel.
+    def test_shell_dtype_promotion_raises(self, device):
+        x = torch.zeros(4, dtype=torch.uint8, device=device).view(torch.float4_e2m1fn_x2)
+        others = (True, 1, 0.5, torch.tensor(5, dtype=torch.uint8, device=device))
+        for other in others:
+            for op in (torch.eq, torch.ne):
+                with self.assertRaisesRegex(NotImplementedError, "is not supported"):
+                    op(x, other)
+        out = torch.empty(4, dtype=torch.float4_e2m1fn_x2, device=device)
+        with self.assertRaisesRegex(NotImplementedError, "is not supported"):
+            torch.add(torch.ones(4, device=device), 1, out=out)
+        # comparing two float4 tensors needs no conversion
+        self.assertTrue((x == x.clone()).all())
+
 
     @float_double_default_dtype
     def test_unsigned(self, device):
@@ -1089,23 +1107,45 @@ class TestTypePromotionDevice(TestCase):
                 self.assertEqual(y, y_promo.to(dtype=dtype))
 
 
-class TestTypePromotionCPU(TestCase):
-    hw_classification = HardwareClassification.CPU
+class TestTypePromotion(TestCase):
+    """Dtype promotion tests that don't require any accelerator."""
+    hw_classification = HardwareClassification.GENERIC
+
+    @float_double_default_dtype
+    def test_can_cast(self):
+        self.assertTrue(torch.can_cast(torch.double, torch.float))
+        self.assertFalse(torch.can_cast(torch.float, torch.int))
+
+    @float_double_default_dtype
+    def test_promote_types(self):
+        self.assertEqual(torch.promote_types(torch.float, torch.int), torch.float)
+        self.assertEqual(torch.promote_types(torch.float, torch.double), torch.double)
+        self.assertEqual(torch.promote_types(torch.int, torch.uint8), torch.int)
+        with self.assertRaisesRegex(RuntimeError, "Promotion for Float8 Types is not supported"):
+            self.assertEqual(torch.promote_types(torch.float8_e5m2, torch.float), torch.float)
+        with self.assertRaisesRegex(RuntimeError, "Promotion for Float8 Types is not supported"):
+            self.assertEqual(torch.promote_types(torch.float, torch.float8_e4m3fn), torch.float)
+
+    @float_double_default_dtype
+    def test_promote_self(self):
+        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf, torch.bool,
+                                               torch.float8_e5m2, torch.float8_e4m3fn):
+            self.assertEqual(torch.promote_types(dtype, dtype), dtype)
+
+    # NB: skip uint16,32,64 as PyTorch doesn't implement promotion for them
+    numpy_dtypes = [d for d in numpy_to_torch_dtype_dict.values() if d not in (torch.uint16, torch.uint32, torch.uint64)]
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
-    # NB: skip uint16,32,64 as PyTorch doesn't implement promotion for them
-    @dtypes(*list(itertools.product(
-        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64},
-        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64})))
-    def test_numpy_array_binary_ufunc_promotion(self, device, dtypes):
+    @parametrize("array_dtype", numpy_dtypes)
+    @parametrize("torch_type", numpy_dtypes)
+    def test_numpy_array_binary_ufunc_promotion(self, array_dtype, torch_type):
         import operator
-        np_type = torch_to_numpy_dtype_dict[dtypes[0]]
-        torch_type = dtypes[1]
+        np_type = torch_to_numpy_dtype_dict[array_dtype]
 
-        t = torch.tensor((1,), device=device, dtype=torch_type)
+        t = torch.tensor((1,), dtype=torch_type)
         a = np.array((1,), dtype=np_type)
-        a_as_t = torch.from_numpy(a).to(device=device)
+        a_as_t = torch.from_numpy(a)
 
         for np_first in (True, False):
             for op in (operator.add, torch.add):
@@ -1161,34 +1201,8 @@ class TestTypePromotionCPU(TestCase):
                     self.fail(msg)
 
 
-class TestTypePromotion(TestCase):
-    """Pure dtype-algebra tests that don't require any accelerator."""
-    hw_classification = HardwareClassification.GENERIC
-
-    @float_double_default_dtype
-    def test_can_cast(self):
-        self.assertTrue(torch.can_cast(torch.double, torch.float))
-        self.assertFalse(torch.can_cast(torch.float, torch.int))
-
-    @float_double_default_dtype
-    def test_promote_types(self):
-        self.assertEqual(torch.promote_types(torch.float, torch.int), torch.float)
-        self.assertEqual(torch.promote_types(torch.float, torch.double), torch.double)
-        self.assertEqual(torch.promote_types(torch.int, torch.uint8), torch.int)
-        with self.assertRaisesRegex(RuntimeError, "Promotion for Float8 Types is not supported"):
-            self.assertEqual(torch.promote_types(torch.float8_e5m2, torch.float), torch.float)
-        with self.assertRaisesRegex(RuntimeError, "Promotion for Float8 Types is not supported"):
-            self.assertEqual(torch.promote_types(torch.float, torch.float8_e4m3fn), torch.float)
-
-    @float_double_default_dtype
-    def test_promote_self(self):
-        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf, torch.bool,
-                                               torch.float8_e5m2, torch.float8_e4m3fn):
-            self.assertEqual(torch.promote_types(dtype, dtype), dtype)
-
-
-instantiate_device_type_tests(TestTypePromotionDevice, globals())
-instantiate_device_type_tests(TestTypePromotionCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestTypePromotionDevice, globals(), allow_xpu=True)
+instantiate_parametrized_tests(TestTypePromotion)
 
 if __name__ == '__main__':
     run_tests()

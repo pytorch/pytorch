@@ -8,6 +8,12 @@
 #pragma once
 #include <ATen/native/mps/kernels/Attention.h>
 
+// Softmax logsumexp of a row from its running max and sum of exp(score - max).
+// A fully masked row gets +inf, so exp(score - lse) is 0 for it in the backward.
+inline float decode_lse(float max_score, float sum_exp_score) {
+  return max_score == -INFINITY ? INFINITY : max_score + metal::log(sum_exp_score);
+}
+
 template <typename T,
           int D,
           int V = D,
@@ -28,6 +34,7 @@ template <typename T,
                             const constant uint4& mask_strides [[buffer(10)]],
                             const constant uint4& qkv_batch_strides_heads [[buffer(11)]],
                             const constant uint2& head_dims [[buffer(12)]],
+                            device float* lse [[buffer(13)]],
                             uint3 tid [[threadgroup_position_in_grid]],
                             uint3 tpg [[threadgroups_per_grid]],
                             uint simd_gid [[simdgroup_index_in_threadgroup]],
@@ -167,6 +174,9 @@ template <typename T,
   U new_max = simd_max(max_score);
   U factor = (new_max == -INFINITY) ? U(1) : metal::fast::exp(max_score - new_max);
   sum_exp_score = simd_sum(sum_exp_scores[simd_lid] * factor);
+  if (lse != nullptr && simd_gid == 0 && simd_lid == 0) {
+    lse[o_offset] = decode_lse(new_max, sum_exp_score);
+  }
 
   // Now we need to aggregate all the outputs
   for (uint i = 0; i < v_per_thread; i++) {
@@ -379,6 +389,7 @@ template <typename T, int D>
                                     const device float* maxs [[buffer(2)]],
                                     device T* out [[buffer(3)]],
                                     const constant uint& v_dim [[buffer(4)]],
+                                    device float* lse [[buffer(5)]],
                                     uint3 tid [[threadgroup_position_in_grid]],
                                     uint3 tpg [[threadgroups_per_grid]],
                                     uint simd_gid [[simdgroup_index_in_threadgroup]],
@@ -407,6 +418,9 @@ template <typename T, int D>
   U new_max = simd_max(max_score);
   U factor = new_max == -INFINITY ? U(1) : fast::exp(max_score - new_max);
   U sum_exp_score = simd_sum(sums[simd_lid] * factor);
+  if (lse != nullptr && simd_gid == 0 && simd_lid == 0) {
+    lse[hq_offset] = decode_lse(new_max, sum_exp_score);
+  }
 
   // Now read the block into registers and then use shared memory to transpose
   // it
@@ -445,6 +459,7 @@ template <typename T, int D>
       const constant uint4& mask_strides [[buffer(10)]],                                                \
       const constant uint4& qkv_batch_strides_heads [[buffer(11)]],                                     \
       const constant uint2& head_dims [[buffer(12)]],                                                   \
+      device float* lse [[buffer(13)]],                                                                 \
       uint3 tid [[threadgroup_position_in_grid]],                                                       \
       uint3 tpg [[threadgroups_per_grid]],                                                              \
       uint simd_gid [[simdgroup_index_in_threadgroup]],                                                 \
@@ -492,6 +507,7 @@ template <typename T, int D>
                                         const device float* maxs [[buffer(2)]],           \
                                         device DTYPE* out [[buffer(3)]],                  \
                                         const constant uint& v_dim [[buffer(4)]],         \
+                                        device float* lse [[buffer(5)]],                  \
                                         uint3 tid [[threadgroup_position_in_grid]],       \
                                         uint3 tpg [[threadgroups_per_grid]],              \
                                         uint simd_gid [[simdgroup_index_in_threadgroup]], \

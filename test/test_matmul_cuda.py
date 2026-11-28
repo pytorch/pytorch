@@ -1431,6 +1431,8 @@ class TestMatmulCuda(InductorTestCase):
             # matches ck_tile::GroupedGemmKernel and the StreamingGroupedGemmKernel built on it
             "ck_tile": ("ROCM_ALLOW_GROUP_GEMM_CK_TILE", "GroupedGemmKernel", "GroupedGemmKernel"),
         }[backend]
+        # ck_tile is on by default and is tried before ck, so the other backend is turned off
+        other_env_var = {"ck": "ROCM_ALLOW_GROUP_GEMM_CK_TILE", "ck_tile": "ROCM_ALLOW_GROUP_GEMM_CK"}[backend]
         if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
             raise unittest.SkipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
         HIPBLASLT_HINT = "Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs"
@@ -1441,12 +1443,12 @@ class TestMatmulCuda(InductorTestCase):
         def uses_hipblaslt(kernels: set[str]) -> bool:
             return any(HIPBLASLT_HINT in k for k in kernels)
 
-        def run_grouped_mm(equal_k: bool):
+        def run_grouped_mm(equal_k: bool, size=(4, 16, 32, 64)):
             device = "cuda"
             dtype = torch.bfloat16
             if equal_k:
                 # 3d-3d grouped GEMM with identical K for all groups
-                G, M, N, K = 4, 16, 32, 64
+                G, M, N, K = size
                 a = torch.randn(G, M, K, device=device, dtype=dtype)
                 b = torch.randn(G, N, K, device=device, dtype=dtype)
                 return F.grouped_mm(a, b.transpose(-2, -1), out_dtype=dtype)
@@ -1459,26 +1461,52 @@ class TestMatmulCuda(InductorTestCase):
             b = torch.randn(N, K_total, device=device, dtype=dtype)
             return F.grouped_mm(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
 
-        def collect_kernel_names(equal_k: bool):
+        def collect_kernel_names(equal_k: bool, size=(4, 16, 32, 64)):
             kernels = set()
             with profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 record_shapes=False,
                 with_stack=False,
             ) as prof:
-                run_grouped_mm(equal_k=equal_k)
+                run_grouped_mm(equal_k=equal_k, size=size)
             for evt in prof.key_averages(group_by_input_shape=False):
                 kernels.add(evt.key)
             return kernels
 
-        with rocm_group_gemm_ck_env(None, var=env_var):
+        with rocm_group_gemm_ck_env("0", var=other_env_var), rocm_group_gemm_ck_env("0", var=env_var):
             self.assertTrue(uses_hipblaslt(collect_kernel_names(equal_k=True)))
-        with rocm_group_gemm_ck_env("1", var=env_var):
+        with rocm_group_gemm_ck_env("0", var=other_env_var), rocm_group_gemm_ck_env("1", var=env_var):
             ck_equal_kernels = collect_kernel_names(equal_k=True)
             self.assertTrue(has_ck_kernel(ck_equal_kernels, CK_EQUAL_K_HINT))
 
             ck_unequal_kernels = collect_kernel_names(equal_k=False)
             self.assertTrue(has_ck_kernel(ck_unequal_kernels, CK_UNEQUAL_K_HINT))
+
+        # Unset, the heuristic picks ck_tile for a small GEMM and hipBLASLt for one above every GPU's threshold
+        if backend == "ck_tile":
+            with rocm_group_gemm_ck_env("0", var=other_env_var), rocm_group_gemm_ck_env(None, var=env_var):
+                self.assertTrue(has_ck_kernel(collect_kernel_names(equal_k=True), CK_EQUAL_K_HINT))
+                large_kernels = collect_kernel_names(equal_k=True, size=(2, 4096, 4096, 4096))
+                self.assertFalse(has_ck_kernel(large_kernels, CK_EQUAL_K_HINT))
+                self.assertTrue(uses_hipblaslt(large_kernels))
+
+    @skipCUDAIfNotRocm
+    @skipXPU
+    def test_grouped_gemm_ck_tile_bf16_rounding(self):
+        if not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
+            raise unittest.SkipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
+        # Truncating float to bf16 stays within the default bf16 tolerance, so check the direction of the rounding
+        # error instead: truncation always rounds toward zero, round-to-nearest only about half the time.
+        G, M, N, K = 4, 64, 128, 256
+        a = torch.randn(G * M, K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(G, N, K, device="cuda", dtype=torch.bfloat16)
+        offs = torch.arange(1, G + 1, device="cuda", dtype=torch.int32) * M
+        with rocm_group_gemm_ck_env("1", var="ROCM_ALLOW_GROUP_GEMM_CK_TILE"):
+            out = F.grouped_mm(a, b.transpose(-2, -1), offs=offs, out_dtype=torch.bfloat16)
+        ref = torch.cat([a[g * M:(g + 1) * M].double() @ b[g].double().t() for g in range(G)])
+        diff = out.double() != ref
+        toward_zero = (out.double().abs() < ref.abs())[diff].float().mean().item()
+        self.assertLess(toward_zero, 0.6)  # round-to-nearest gives about 0.5, truncation about 1.0
 
     @onlyCUDA
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
@@ -1843,7 +1871,7 @@ class TestMixedDtypesLinearCuda(TestCase):
             )
 
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu", allow_xpu=True)
-instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu")
+instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu", allow_xpu=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

@@ -38,7 +38,6 @@ from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
-    requires_nccl_legacy,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -260,11 +259,11 @@ class MultiProcContinuousSkipTest(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "gloo"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cpu"
 
     def test_1_worker_skip(self) -> None:
@@ -578,7 +577,7 @@ class BackendEntryPointTest(TestCase):
             out.split(), ["False", "False", "torch.distributed._backends.fake"]
         )
 
-    @parametrize("backend", ["nccl", "nccl-legacy", "nccl2", "nccl-lazy"])
+    @parametrize("backend", ["nccl", "nccl2", "nccl-lazy"])
     def test_nccl_backend_default_timeout(self, backend):
         timeout = timedelta(seconds=1)
         with unittest.mock.patch.object(c10d, "default_pg_nccl_timeout", timeout):
@@ -633,20 +632,6 @@ class BackendEntryPointTest(TestCase):
         ):
             os.environ.pop("LOCAL_RANK", None)
             self.assertEqual(c10d._nccl2_device(opts), torch.device("cuda:3"))
-
-    @requires_nccl_legacy()
-    def test_nccl_legacy_backend_registration(self):
-        c10d._register_builtin_nccl_legacy_backend()
-
-        self.assertIs(
-            dist.Backend._plugins["NCCL-LEGACY"].creator_fn,
-            c10d._create_nccl_process_group,
-        )
-        self.assertEqual(dist.Backend.backend_capability["nccl-legacy"], ["cuda"])
-        self.assertEqual(
-            dist.Backend.backend_type_map["nccl-legacy"],
-            dist.ProcessGroup.BackendType.CUSTOM,
-        )
 
 
 instantiate_parametrized_tests(BackendEntryPointTest)
