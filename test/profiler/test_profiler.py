@@ -783,9 +783,12 @@ class TestProfiler(TestCase):
         )
         self.assertEqual(len(nodes), sum(tid_counts.values()))
 
-        # Profiler uses uint64_t max as a placeholder until TID can be determined.
+        # Profiler uses uint64_t max minus the Python thread index as a
+        # placeholder until TID can be determined. Every thread here runs work
+        # during the profile, so no start_tid may remain a placeholder. 1024 is
+        # a generous bound on the number of live Python threads.
         no_tid = 2**64 - 1
-        self.assertFalse(no_tid in tid_counts)
+        self.assertLess(max(tid_counts), no_tid - 1024)
 
         worker_threads = prior_threads + (1 if work_in_main_thread else 0)
 
@@ -802,6 +805,57 @@ class TestProfiler(TestCase):
         ]
         self.assertEqual(len(observed_during_run), worker_threads)
         self.assertEqual(len(observed_during_run), len(set(observed_during_run)))
+
+    @serialTest()
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_parked_threads_get_distinct_start_tid(self):
+        # Threads parked for the whole profile never emit an event, so their
+        # start frames have no real TID. Each must get its own placeholder or
+        # build_tree splices one thread's frames under the other's.
+        timeout = 15
+        release = threading.Event()
+        ready = [threading.Event(), threading.Event()]
+
+        def parked_worker(ready_event):
+            ready_event.set()
+            release.wait(timeout=timeout)
+
+        threads = [
+            threading.Thread(target=parked_worker, args=(e,), daemon=True)
+            for e in ready
+        ]
+        try:
+            for t in threads:
+                t.start()
+            for e in ready:
+                self.assertTrue(e.wait(timeout=timeout))
+
+            with torch.profiler.profile(with_stack=True) as prof:
+                torch.ones(1) + 1
+        finally:
+            release.set()
+            for t in threads:
+                t.join(timeout=timeout)
+            for t in threads:
+                self.assertFalse(t.is_alive())
+
+        roots = prof.profiler.kineto_results.experimental_event_tree()
+        parked = [
+            node
+            for node in _utils.traverse_dfs(roots)
+            if isinstance(node.extra_fields, _ExtraFields_PyCall)
+            and node.name.endswith("parked_worker")
+        ]
+        self.assertEqual(len(parked), 2, [n.name for n in parked])
+        self.assertNotEqual(parked[0].start_tid, parked[1].start_tid)
+        for node in parked:
+            self.assertFalse(
+                any(
+                    other is not node
+                    for other in _utils.traverse_dfs(node.children)
+                    if other in parked
+                )
+            )
 
     def payload(self, device="cpu", tensor_size=10):
         x = torch.randn(tensor_size, tensor_size).to(device)
