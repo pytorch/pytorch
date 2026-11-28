@@ -1223,6 +1223,111 @@ def scaled_dot_product_cudnn_attention_backward_single_dim_strategy(
     return [num_heads_dim_sharding, batch_dim_sharding]
 
 
+def _overrideable_attn_bias_placement(
+    attn_bias: object, shard_dim: int
+) -> Placement | _ShardingPlaceholder:
+    # attn_bias is right-aligned against the 4D [B, H, Tq, Tk] attention scores,
+    # so a 2D/3D bias may lack the batch/head dim, and any dim of size 1 is broadcast
+    if not isinstance(attn_bias, TensorMeta):
+        return Replicate()
+    bias_dim = shard_dim - (4 - len(attn_bias.shape))
+    if bias_dim < 0 or attn_bias.shape[bias_dim] == 1:
+        return Replicate()
+    return _ShardingPlaceholder(bias_dim)
+
+
+@register_single_dim_strategy(
+    aten._scaled_dot_product_fused_attention_overrideable.default,
+    schema_info=RuntimeSchemaInfo(4),
+)
+def scaled_dot_product_fused_attention_overrideable_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    query_meta = args_schema[0]
+    if not isinstance(query_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(query_meta)}")
+
+    # trailing default args (attn_bias=None) may be omitted from args_schema
+    attn_bias = args_schema[3] if len(args_schema) > 3 else None
+
+    strategies: list[list[Placement | _ShardingPlaceholder | None]] = []
+    for shard_dim in (1, 0):  # num heads dim (TP), batch dim
+        strategy: list[Placement | _ShardingPlaceholder | None] = [
+            _ShardingPlaceholder(shard_dim),  # output
+            _ShardingPlaceholder(shard_dim),  # logsumexp
+            None,  # cum_seq_q
+            None,  # cum_seq_k
+            None,  # max_q
+            None,  # max_k
+            None,  # philox_seed
+            None,  # philox_offset
+            None,  # debug_attn_mask
+            _ShardingPlaceholder(shard_dim),  # q
+            _ShardingPlaceholder(shard_dim),  # k
+            _ShardingPlaceholder(shard_dim),  # v
+        ]
+        if attn_bias is not None:
+            strategy.append(_overrideable_attn_bias_placement(attn_bias, shard_dim))
+        strategies.append(strategy)
+    return strategies
+
+
+@register_single_dim_strategy(
+    aten._scaled_dot_product_fused_attention_overrideable_backward.default,
+    schema_info=RuntimeSchemaInfo(5),
+)
+def scaled_dot_product_fused_attention_overrideable_backward_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    if len(args_schema) < 16:
+        raise AssertionError(f"Expected at least 16 args, got {len(args_schema)}")
+
+    # grad_out, q, k, v
+    for arg_index in range(4):
+        if not isinstance(args_schema[arg_index], TensorMeta):
+            raise AssertionError(
+                f"Expected TensorMeta, got {type(args_schema[arg_index])}"
+            )
+
+    attn_bias = args_schema[4]
+    # out, logsumexp
+    for arg_index in (6, 7):
+        if not isinstance(args_schema[arg_index], TensorMeta):
+            raise AssertionError(
+                f"Expected TensorMeta, got {type(args_schema[arg_index])}"
+            )
+
+    strategies: list[list[Placement | _ShardingPlaceholder | None]] = []
+    for shard_dim in (1, 0):  # num heads dim (TP), batch dim
+        bias_placement = _overrideable_attn_bias_placement(attn_bias, shard_dim)
+        has_bias = isinstance(attn_bias, TensorMeta)
+        strategy: list[Placement | _ShardingPlaceholder | None] = [
+            _ShardingPlaceholder(shard_dim),  # grad_q
+            _ShardingPlaceholder(shard_dim),  # grad_k
+            _ShardingPlaceholder(shard_dim),  # grad_v
+            bias_placement if has_bias else None,  # grad_attn_bias
+            _ShardingPlaceholder(shard_dim),  # grad_out
+            _ShardingPlaceholder(shard_dim),  # q
+            _ShardingPlaceholder(shard_dim),  # k
+            _ShardingPlaceholder(shard_dim),  # v
+        ]
+        if has_bias:
+            strategy.append(bias_placement)
+        strategy.extend(
+            [
+                _ShardingPlaceholder(shard_dim),  # out
+                _ShardingPlaceholder(shard_dim),  # logsumexp
+            ]
+        )
+        # cum_seq_q / cum_seq_k / philox_seed / philox_offset are undefined or
+        # plain tensors for the overrideable backend
+        for arg_index in (8, 9, 14, 15):
+            if isinstance(args_schema[arg_index], TensorMeta):
+                strategy.append(Replicate())
+        strategies.append(strategy)
+    return strategies
+
+
 def _valid_grouped_mm_strides(
     mesh: DeviceMesh,
     op_schema: OpSchema,
