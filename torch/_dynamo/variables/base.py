@@ -21,6 +21,7 @@ import functools
 import inspect
 import logging
 import operator
+import sys
 import textwrap
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
@@ -347,12 +348,19 @@ def _check_method_arity(
     flags: MethodFlags,
     args: Any,
     kwargs: Any,
+    *,
+    owner: type | None = None,
 ) -> None:
     # Centralized arity check for a tp_methods handler, driven by MethodFlags,
     # raising the same TypeErrors CPython raises for builtin methods. Shared by
     # Method and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
-    qualname = f"{vt.python_type_name()}.{name}"
+    prefix = (
+        vt.python_type_name()
+        if owner is None
+        else type.__dict__["__qualname__"].__get__(owner)
+    )
+    qualname = f"{prefix}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
         raise_type_error(tx, f"{qualname}() takes no keyword arguments")
     if flags & (MethodFlags.NOARGS | MethodFlags.O):
@@ -718,6 +726,13 @@ def _wrap_binaryfunc_r(
     return func(self, tx, other, reverse=True)
 
 
+def _check_pow_args(tx: InstructionTranslatorBase, args: list[VariableTracker]) -> None:
+    if sys.version_info < (3, 14):
+        check_positional(tx, "", len(args), 1, 2)
+    elif len(args) not in (1, 2):
+        raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+
+
 def _wrap_ternaryfunc(
     self: VariableTracker,
     tx: InstructionTranslatorBase,
@@ -726,9 +741,7 @@ def _wrap_ternaryfunc(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # __pow__ is binary or ternary: ``x.__pow__(y)`` or ``x.__pow__(y, z)`` (mod).
-    if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
-    check_positional(tx, "", len(args), 1, 2)
+    _check_pow_args(tx, args)
     z = args[1] if len(args) == 2 else None
     return func(self, tx, args[0], z)
 
@@ -741,11 +754,14 @@ def _wrap_ternaryfunc_r(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # Reflected __rpow__: operands from the right.
-    if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
-    check_positional(tx, "", len(args), 1, 2)
+    _check_pow_args(tx, args)
     z = args[1] if len(args) == 2 else None
     return func(self, tx, args[0], z, reverse=True)
+
+
+def _slot_name(name: str) -> str:
+    # CPython gh-123446 named the PyArg_UnpackTuple calls in slot wrappers in 3.14.
+    return name if sys.version_info >= (3, 14) else ""
 
 
 def _wrap_sq_setitem(
@@ -755,11 +771,9 @@ def _wrap_sq_setitem(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
-    if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import getindex
 
-    check_positional(tx, "", len(args), 2, 2)
+    check_positional(tx, _slot_name("__setitem__"), len(args), 2, 2)
     [arg, value] = args
     i = getindex(tx, self, arg)
     return func(self, tx, i, value)
@@ -790,11 +804,12 @@ def _wrap_indexargfunc(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
-    if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import pynumber_as_ssize_t
 
-    check_positional(tx, "", len(args), 1, 1)
+    if sys.version_info >= (3, 14):
+        check_num_args(tx, args, 1)
+    else:
+        check_positional(tx, "", len(args), 1, 1)
 
     [o] = args
     i = pynumber_as_ssize_t(tx, o, err=OverflowError)
@@ -808,9 +823,7 @@ def _wrap_objobjargproc(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
-    if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
-    check_positional(tx, "", len(args), 2, 2)
+    check_positional(tx, _slot_name("__setitem__"), len(args), 2, 2)
     [key, value] = args
     return func(self, tx, key, value)
 
@@ -943,9 +956,7 @@ def _wrap_setattr(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # tp_setattro via __setattr__: (name, value).
-    if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
-    check_positional(tx, "", len(args), 2, 2)
+    check_positional(tx, _slot_name("__setattr__"), len(args), 2, 2)
     if not issubclass(args[0].python_type(), str):
         raise_type_error(
             tx, f"attribute name must be string, not '{args[0].python_type_name()}'"
@@ -1000,9 +1011,7 @@ def _wrap_descr_get(
     # tp_descr_get via __get__(obj, owner=None): owner defaults to type(obj).
     from .constant import ConstantVariable
 
-    if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
-    check_positional(tx, "", len(args), 1, 2)
+    check_positional(tx, _slot_name("__get__"), len(args), 1, 2)
     # wrap_descr_get maps a None obj to NULL and rejects the call when both
     # arguments are None.
     obj = None if args[0].is_constant_none() else args[0]
@@ -1020,9 +1029,7 @@ def _wrap_descr_set(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # tp_descr_set via __set__(obj, value): 2 args.
-    if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
-    check_positional(tx, "", len(args), 2, 2)
+    check_positional(tx, _slot_name("__set__"), len(args), 2, 2)
     return func(self, tx, args[0], args[1])
 
 
@@ -1217,7 +1224,7 @@ WrapperType: TypeAlias = Callable[
 class SlotDef:
     """One slotdefs entry: dunder name -> (impl method, call wrapper).
 
-    ``impl`` is the VariableTracker method implementing the behavior; ``wrapper``
+    ``impl`` is the VariableTracker method implementing the behavior. ``raw_wrapper``
     adapts a generic ``(self, tx, args)`` call to it (arity + operand order).  A
     reflected op reuses the forward impl with ``_wrap_binaryfunc_r``; an in-place
     op is a plain binary call into its own ``nb_inplace_*`` impl -- so no
@@ -1232,7 +1239,20 @@ class SlotDef:
     impl: str
     group: SlotGroup
     slot: int
-    wrapper: WrapperType
+    raw_wrapper: WrapperType
+
+    def wrapper(
+        self,
+        vt: VariableTracker,
+        tx: InstructionTranslatorBase,
+        impl: Callable[..., VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Only these slot wrappers accept keywords in CPython's slotdefs table.
+        if kwargs and self.raw_wrapper not in (wrap_call, _wrap_init, _wrap_new):
+            raise_type_error(tx, f"wrapper {self.name}() takes no keyword arguments")
+        return self.raw_wrapper(vt, tx, impl, args, kwargs)
 
     def __call__(
         self,
@@ -1244,7 +1264,8 @@ class SlotDef:
         """Call the impl via the wrapper, passing self, tx, and args."""
         vt = vt.realize()
         func = getattr(type(vt), self.impl)
-        return self.wrapper(vt, tx, func, args, kwargs)
+        wrapper = self.wrapper if kwargs else self.raw_wrapper
+        return wrapper(vt, tx, func, args, kwargs)
 
 
 def SQSLOT(name: str, impl: str, slot: int, wrapper: WrapperType) -> SlotDef:

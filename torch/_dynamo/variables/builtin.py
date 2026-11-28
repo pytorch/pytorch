@@ -2872,7 +2872,12 @@ class BuiltinVariable(TypeVariable):
     def call_super(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
-        return variables.SuperVariable.create(a, b)
+        result = variables.SuperVariable.create(a, b)
+        inst = tx.current_instruction
+        result.direct_method = inst.opname == "LOAD_SUPER_ATTR" and bool(
+            (inst.arg or 0) & 1
+        )
+        return result
 
     def call_classmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker
@@ -3624,7 +3629,7 @@ class DictBuiltinVariable(TypeVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
+        return DictBuiltinVariable.construct_dict(tx, *args, **kwargs)
 
     def fromkeys(
         self,
@@ -3680,7 +3685,7 @@ class DictBuiltinVariable(TypeVariable):
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0].realize()
             if isinstance(obj, ConstDictVariable):
-                obj.check_base_dict_mutation(tx, name)
+                obj.check_base_dict_mutation(tx, name, args[1:], kwargs)
             if name in (*_RICH_CMP_DUNDERS, "__repr__", "__iter__"):
                 if not isinstance(obj, ConstDictVariable):
                     unimplemented(
@@ -3703,19 +3708,15 @@ class DictBuiltinVariable(TypeVariable):
         return super().call_method(tx, name, args, kwargs)
 
     @staticmethod
-    def call_custom_dict(
+    def construct_dict(
         tx: "InstructionTranslatorBase",
-        user_cls: type,
         /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
-    ) -> VariableTracker:
-        args_list = list(args)
-        return tx.inline_user_function_return(
-            VariableTracker.build(tx, polyfills.construct_dict),
-            [VariableTracker.build(tx, user_cls), *args_list],
-            kwargs,
-        )
+    ) -> ConstDictVariable:
+        result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        result.tp_init_impl(tx, list(args), kwargs)
+        return result
 
     @staticmethod
     def call_custom_dict_fromkeys(
