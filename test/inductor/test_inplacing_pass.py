@@ -34,13 +34,15 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import is_fake_tensor
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
     subtest,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils._ordered_set import OrderedSet
 
@@ -52,7 +54,6 @@ if dist.is_available():
 
 
 const = torch.tensor(0.0)
-device = GPU_TYPE
 
 
 def num_reinplacing_failures():
@@ -141,7 +142,7 @@ def _(tensors: list[Tensor]) -> None:
     pass
 
 
-if HAS_GPU:
+if HAS_TRITON:
     import triton  # @manual
     import triton.language as tl  # @manual
 
@@ -176,19 +177,7 @@ def boo(x: torch.Tensor) -> None:
 
 
 class TestReinplacingPassCorrectness(InductorTestCase):
-    def setUp(self):
-        ReinplaceCounters.clear()
-        return super().setUp()
-
-    def _test(self, f):
-        nf = torch.compile(f)
-        inp = (
-            torch.randn(4, device=device),
-            torch.ones(2, device=device, dtype=torch.int),
-        )
-        inp2 = (inp[0].clone(), inp[1].clone())
-        self.assertEqual(f(*inp), nf(*inp2))
-        self.assertEqual(inp, inp2)
+    hw_classification = HardwareClassification.GENERIC
 
     def test_input_view_copyback_after_earlier_input_copy(self):
         def f(x, indices, values, initial):
@@ -487,30 +476,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             ],
         )
 
-    def test_dont_modify_live(self):
-        def f(x, y):
-            x = x.cos()
-            x2 = x.index_put((y,), const)
-            return x2, x
-
-        self._test(f)
-
-    def test_dont_modify_view_of_live(self):
-        def f(x, y):
-            x = x.cos()
-            x2 = aten.alias(x)
-            x2 = x2.index_put((y,), const)
-            y = x2 + x.cos()
-            return y
-
-        self._test(f)
-
-    def test_dont_modify_input(self):
-        def f(x, y):
-            return x.index_put((y,), const)
-
-        self._test(f)
-
     @staticmethod
     def _chained_reinplacement_case(use_view):
         class Model(torch.nn.Module):
@@ -611,140 +576,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(targets.count(aten.index_put_.default), 3)
         self.assertNotIn(aten.copy_.default, targets)
 
-    @parametrize("unsafe", [False, True])
-    def test_reinplacement_canonicalizes_chained_results(self, unsafe):
-        op = aten._unsafe_index_put.default if unsafe else aten.index_put.default
-        inplace_op = (
-            inductor_prims._unsafe_index_put_ if unsafe else aten.index_put_.default
-        )
-
-        def f(x, indices, first_values, second_values):
-            first = op(x, [indices], first_values)
-            second = op(first, [indices], second_values)
-            x.copy_(second)
-            return (x,)
-
-        inputs = (
-            torch.arange(8, device=device, dtype=torch.float32),
-            torch.tensor([0, 3], device=device),
-            torch.tensor([10.0, 20.0], device=device),
-            torch.tensor([30.0, 40.0], device=device),
-        )
-        gm = make_fx(f, tracing_mode="fake")(*inputs)
-        mutations = list(gm.graph.find_nodes(op="call_function", target=op))
-        updater = FakeTensorUpdater(gm)
-        reinplace_inplaceable_ops_core(gm.graph, fake_tensor_updater=updater)
-        self.assertEqual(len(mutations), 2)
-        for mutation in mutations:
-            self.assertFalse(mutation._erased)
-            self.assertIs(mutation.target, inplace_op)
-            self.assertIs(mutation.args[0], mutations[0].args[0])
-            self.assertEqual(
-                get_node_storage(mutation), get_node_storage(mutation.args[0])
-            )
-        self.assertFalse(
-            gm.graph.find_nodes(op="call_function", target=aten.copy_.default)
-        )
-        gm.graph.lint()
-        gm.recompile()
-        with V.set_fake_mode(
-            detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
-        ):
-            self.assertEqual(updater.incremental_update(), 0)
-        expected_inputs = tuple(value.clone() for value in inputs)
-        expected = f(*expected_inputs)
-        actual_inputs = tuple(value.clone() for value in inputs)
-        actual = compile_fx_inner(gm, list(actual_inputs))(list(actual_inputs))
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual_inputs, expected_inputs)
-        self.assertTrue(torch._C._is_alias_of(actual[0], actual_inputs[0]))
-
-    def test_reinplacement_canonicalizes_chained_scatter_results(self):
-        def f(x, first_values, second_values):
-            x.diagonal().copy_(first_values)
-            x.diagonal(1).copy_(second_values)
-            return x
-
-        inputs = (
-            torch.randn(3, 4, device=device),
-            torch.randn(3, device=device),
-            torch.randn(3, device=device),
-        )
-        gm = make_fx(torch.func.functionalize(f), tracing_mode="fake")(*inputs)
-        updater = FakeTensorUpdater(gm)
-        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
-        with V.set_fake_mode(fake_mode):
-            reinplace_inplaceable_ops(updater, gm.graph)
-        gm.graph.lint()
-        gm.recompile()
-        self.assertFalse(
-            gm.graph.find_nodes(op="call_function", target=aten.clone.default)
-        )
-        self.assertEqual(
-            len(gm.graph.find_nodes(op="call_function", target=aten.copy_.default)), 2
-        )
-        expected_inputs = tuple(value.clone() for value in inputs)
-        expected = f(*expected_inputs)
-        actual_inputs = tuple(value.clone() for value in inputs)
-        actual = gm(*actual_inputs)
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual_inputs, expected_inputs)
-        self.assertTrue(torch._C._is_alias_of(actual, actual_inputs[0]))
-
-    def test_reinplacement_canonicalizes_philox_result(self):
-        def f(key):
-            return random.uniform(key, (8,))
-
-        key = random.key(42, device=device)
-        gm = make_fx(torch.func.functionalize(f), tracing_mode="fake")(key)
-        generator = next(
-            n for n in gm.graph.nodes if n.target is aten._philox_uniform.default
-        )
-        updater = FakeTensorUpdater(gm)
-        reinplace_inplaceable_ops_core(gm.graph, fake_tensor_updater=updater)
-        self.assertIs(generator.target, aten._philox_uniform_.default)
-        self.assertFalse(generator._erased)
-        self.assertEqual(
-            get_node_storage(generator), get_node_storage(generator.args[0])
-        )
-        self.assertIs(gm.graph.output_node().args[0], generator.args[0])
-        gm.graph.lint()
-        gm.recompile()
-        expected = f(key)
-        self.assertEqual(gm(key), expected)
-        self.assertEqual(torch.compile(f, fullgraph=True)(key), expected)
-
-    @parametrize("ordering_only", [False, True])
-    def test_reinplacement_preserves_control_dependency(self, ordering_only):
-        def f(x, indices, values, other):
-            result = x.clone().index_put((indices,), values)
-            return (other if ordering_only else result).sin()
-
-        inputs = (
-            torch.randn(8, device=device),
-            torch.tensor([0], device=device),
-            torch.tensor([2.0], device=device),
-            torch.randn(8, device=device),
-        )
-        gm = make_fx(f, tracing_mode="fake")(*inputs)
-        mutation = next(n for n in gm.graph.nodes if n.target is aten.index_put.default)
-        buffer = mutation.args[0]
-        reader = next(n for n in gm.graph.nodes if n.target is aten.sin.default)
-        data_input = reader.args[0]
-        preserve_node_ordering(gm.graph, {reader: OrderedSet([mutation])})
-        updater = FakeTensorUpdater(gm)
-        reinplace_inplaceable_ops_core(gm.graph, fake_tensor_updater=updater)
-        ordered = next(
-            n for n in gm.graph.nodes if n.target is torch.ops.higher_order.control_deps
-        )
-        self.assertIs(mutation.target, aten.index_put_.default)
-        self.assertFalse(mutation._erased)
-        self.assertEqual(ordered.args[0], (mutation,))
-        self.assertIs(ordered.args[2], data_input if ordering_only else buffer)
-        gm.graph.lint()
-        gm.recompile()
-        self.assertEqual(gm(*inputs), f(*inputs))
-
     def test_reinplacement_without_owning_module_is_skipped(self):
         def f(x, indices, values):
             return x.cos().index_put((indices,), values)
@@ -769,222 +600,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             reinplace_inplaceable_ops_core(
                 first.graph, fake_tensor_updater=FakeTensorUpdater(second)
             )
-
-    @parametrize("non_dense", [False, True])
-    def test_reinplacement_handles_transitive_unsupported_lowering(self, non_dense):
-        def f(x, weight, indices, values):
-            base = x @ weight
-            if non_dense:
-                base = base[:, :2]
-            return aten.alias.default(base.index_put((indices,), values))
-
-        def unsupported_lowering(x):
-            return x
-
-        unsupported_lowering._inductor_lowering_function = True  # type: ignore[attr-defined]
-        unsupported_lowering._inductor_lowering_output_metadata_ignores_input_storage = True  # type: ignore[attr-defined]
-
-        width = 2 if non_dense else 4
-        inputs = (
-            torch.randn(4, 4, device=device),
-            torch.randn(4, 4, device=device),
-            torch.tensor([0], device=device),
-            torch.full((1, width), 10.0, device=device),
-        )
-        gm = make_fx(f, tracing_mode="fake")(*inputs)
-        result = next(n for n in gm.graph.nodes if n.target is aten.index_put.default)
-        forwarded = next(n for n in result.users if n.target is aten.alias.default)
-        self.assertEqual(
-            result.meta["val"].stride() == result.args[0].meta["val"].stride(),
-            not non_dense,
-        )
-        output = gm.graph.output_node()
-        with gm.graph.inserting_before(output):
-            lowered = gm.graph.call_function(unsupported_lowering, (forwarded,))
-        lowered.meta["val"] = forwarded.meta["val"]
-        output.args = (lowered,)
-
-        reinplace_inplaceable_ops_core(gm.graph)
-
-        self.assertIs(
-            result.target,
-            aten.index_put.default if non_dense else aten.index_put_.default,
-        )
-        gm.graph.lint()
-        gm.recompile()
-        self.assertEqual(gm(*inputs), f(*inputs))
-
-    def test_foreach_reinplacement_rewires_results_before_refresh(self):
-        def f(x, y):
-            torch._foreach_add_([x], [y])
-            return x.sin()
-
-        inputs = (
-            torch.randn(8, device=device),
-            torch.randn(8, device=device),
-        )
-        gm = make_fx(torch.func.functionalize(f), tracing_mode="fake")(*inputs)
-        foreach = next(n for n in gm.graph.nodes if n.target in inplaceable_foreach_ops)
-        inplace_target = inplaceable_foreach_ops[foreach.target].inplace_op
-        getitems = [
-            n
-            for n in foreach.users
-            if n.target is operator.getitem and isinstance(n.args[1], int)
-        ]
-        self.assertTrue(getitems)
-
-        reinplace_inplaceable_ops_core(gm.graph)
-
-        self.assertIs(foreach.target, inplace_target)
-        self.assertTrue(all(node._erased for node in getitems))
-        self.assertFalse(
-            any(
-                node.target is operator.getitem and node.args[0] is foreach
-                for node in gm.graph.nodes
-            )
-        )
-        gm.graph.lint()
-        gm.recompile()
-        expected_x = inputs[0].clone()
-        expected = f(expected_x, inputs[1])
-        actual_x = inputs[0].clone()
-        actual = gm(actual_x, inputs[1])
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual_x, expected_x)
-
-    def test_reinplacement_rewired_lowering_survives_full_refresh(self):
-        def f(x, y):
-            torch._foreach_add_([x], [y])
-            return x
-
-        def unsupported_lowering(x):
-            return x.sin()
-
-        def supported_lowering(x):
-            return x
-
-        unsupported_lowering._inductor_lowering_function = True  # type: ignore[attr-defined]
-        unsupported_lowering._inductor_lowering_output_metadata_ignores_input_storage = True  # type: ignore[attr-defined]
-        supported_lowering._inductor_lowering_function = True  # type: ignore[attr-defined]
-        supported_lowering._inductor_lowering_output_metadata_is_input = 0  # type: ignore[attr-defined]
-        inputs = (torch.randn(8, device=device), torch.randn(8, device=device))
-        gm = make_fx(torch.func.functionalize(f), tracing_mode="fake")(*inputs)
-        foreach = next(n for n in gm.graph.nodes if n.target in inplaceable_foreach_ops)
-        inplace_target = inplaceable_foreach_ops[foreach.target].inplace_op
-        result = next(iter(foreach.users))
-        output = gm.graph.output_node()
-        with gm.graph.inserting_before(output):
-            unsupported = gm.graph.call_function(unsupported_lowering, (result,))
-            supported = gm.graph.call_function(supported_lowering, (result,))
-        with detect_fake_mode([result.meta["val"]]):
-            unsupported.meta["val"] = result.meta["val"].sin()
-        supported.meta["val"] = result.meta["val"]
-        output.args = ((unsupported, supported),)
-
-        updater = FakeTensorUpdater(gm)
-        reinplace_inplaceable_ops_core(gm.graph, fake_tensor_updater=updater)
-
-        self.assertIs(foreach.target, inplace_target)
-        self.assertTrue(result._erased)
-        self.assertIs(unsupported.args[0], foreach.args[0][0])
-        gm.graph.lint()
-        gm.recompile()
-        expected = inputs[0] + inputs[1]
-        self.assertEqual(gm(inputs[0].clone(), inputs[1]), (expected.sin(), expected))
-        with V.set_fake_mode(
-            detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
-        ):
-            self.assertEqual(updater.incremental_update(), 0)
-
-    @unittest.skipIf(not dist.is_available(), "distributed is not available")
-    @inductor_config.patch({"_collective.auto_select": False})
-    @parametrize("non_contiguous", [False, True])
-    @parametrize("wrapped", [False, True])
-    def test_all_reduce_reinplacement_preserves_result_reference(
-        self, non_contiguous, wrapped
-    ):
-        from torch._higher_order_ops.effects import with_effects
-
-        def f(a, b):
-            result = a @ b
-            if non_contiguous:
-                result = result.t()
-            if wrapped:
-                token = aten._make_dep_token.default()
-                result = with_effects(
-                    token,
-                    torch.ops._c10d_functional.all_reduce.default,
-                    result,
-                    "sum",
-                    "0",
-                )[1]
-                return torch.ops._c10d_functional.wait_tensor.default(result) + 1
-            return funcol.all_reduce(result, "sum", "0") + 1
-
-        inputs = (torch.randn(4, 4, device=device), torch.randn(4, 4, device=device))
-        gm = make_fx(f, tracing_mode="fake")(*inputs)
-        target = (
-            with_effects if wrapped else torch.ops._c10d_functional.all_reduce.default
-        )
-        collective = next(n for n in gm.graph.nodes if n.target is target)
-        result = (
-            next(
-                n
-                for n in collective.users
-                if n.target is operator.getitem and n.args[1] == 1
-            )
-            if wrapped
-            else collective
-        )
-        wait = next(
-            n
-            for n in result.users
-            if n.target is torch.ops._c10d_functional.wait_tensor.default
-        )
-        reinplace_inplaceable_ops_core(gm.graph)
-        expected = (
-            torch.ops._c10d_functional.all_reduce.default
-            if non_contiguous
-            else torch.ops._c10d_functional.all_reduce_.default
-        )
-        self.assertIs(collective.args[1] if wrapped else collective.target, expected)
-        self.assertFalse(collective._erased)
-        self.assertIs(wait.args[0], result)
-        self.assertEqual(
-            collective.args[2 if wrapped else 0].meta["val"].is_contiguous(),
-            not non_contiguous,
-        )
-        gm.graph.lint()
-
-    @unittest.skipIf(not dist.is_available(), "distributed is not available")
-    def test_all_reduce_coalesced_reinplacement_preserves_list_aliases(self):
-        def f(x, y):
-            return torch.ops._c10d_functional.all_reduce_coalesced.default(
-                [x.cos(), y.sin()], "sum", "0"
-            )
-
-        inputs = (torch.randn(8, device=device), torch.randn(8, device=device))
-        gm = make_fx(f, tracing_mode="fake")(*inputs)
-        collective = next(
-            n
-            for n in gm.graph.nodes
-            if n.target is torch.ops._c10d_functional.all_reduce_coalesced.default
-        )
-        reinplace_inplaceable_ops_core(gm.graph)
-
-        self.assertIs(
-            collective.target,
-            torch.ops._c10d_functional.all_reduce_coalesced_.default,
-        )
-        for result, arg in zip(collective.meta["val"], collective.args[0], strict=True):
-            self.assertEqual(result.untyped_storage()._cdata, get_node_storage(arg))
-        projections = list(collective.users)
-        self.assertEqual(len(projections), 2)
-        for projection, argument in zip(projections, collective.args[0], strict=True):
-            self.assertIs(projection.target, operator.getitem)
-            self.assertIs(projection.args[0], collective)
-            self.assertEqual(get_node_storage(projection), get_node_storage(argument))
-        gm.graph.lint()
 
     def test_reinplacement_handles_shared_mutation_inputs(self):
         def f(x, indices, updates):
@@ -1027,21 +642,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual_input, expected_input)
 
-    def test_should_modify_inner(self):
-        def f(x, y):
-            x = x.cos()
-            x = x.index_put((y,), const)
-            return x
-
-        self._test(f)
-
-    def test_should_modify_input(self):
-        def f(x, y):
-            x = x.index_put_((y,), const)
-            return x
-
-        self._test(f)
-
     def test_dont_reinplace_scatter_from_overlapping_view(self):
         # https://github.com/pytorch/pytorch/issues/197829
         def f(x):
@@ -1054,19 +654,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         x2 = x.clone()
         self.assertEqual(f(x), torch.compile(f)(x2))
         self.assertEqual(x, x2)
-
-    def test_dont_reinplace_index_put_that_reads_its_input(self):
-        # https://github.com/pytorch/pytorch/issues/198567
-        def f(x):
-            r = x + 1
-            return torch.put(r, r, r, accumulate=True)
-
-        # r[i] = n - 1 - i, so every element is scattered to the other end: an
-        # index_put_ reinplaced onto r would read indices and values it has
-        # already written.
-        n = 256
-        x = torch.arange(n - 2, -2, -1, device=device)
-        self.assertEqual(f(x), torch.compile(f)(x))
 
     @parametrize(
         "op",
@@ -1373,398 +960,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         gm.recompile()
         self.assertEqual(gm(x), x.sin().cos())
 
-    def test_view_index_put_should_reinplace_copy_to_base(self):
-        def f(input_pos, val, cache):
-            cache_view = aten.reshape.default(cache, [4, -1])
-            val_view = aten.reshape.default(val, [-1])
-            updated = aten.index_put.default(cache_view, [input_pos], val_view)
-            updated_base = aten.reshape.default(updated, [4, 3, 4])
-            return aten.copy_.default(cache, updated_base)
-
-        input_pos = torch.tensor([1], device=device)
-        val = torch.randn(3, 4, device=device)
-        cache = torch.randn(4, 3, 4, device=device)
-
-        expected_cache = cache.clone()
-        expected = f(input_pos, val, expected_cache)
-
-        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
-        reinplace_inplaceable_ops_core(gm.graph)
-        gm.graph.lint()
-        gm.recompile()
-
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertIn(aten.index_put_.default, targets)
-        self.assertNotIn(aten.index_put.default, targets)
-        self.assertNotIn(aten.copy_.default, targets)
-
-        actual_cache = cache.clone()
-        actual = gm(input_pos, val, actual_cache)
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual_cache, expected_cache)
-
-    def test_view_index_put_keeps_copy_when_later_view_is_live(self):
-        def f(input_pos, val, cache):
-            cache_view = aten.reshape.default(cache, [4, -1])
-            live_view = aten.select.int(cache, 0, 0)
-            val_view = aten.reshape.default(val, [-1])
-            updated = aten.index_put.default(cache_view, [input_pos], val_view)
-            live_use = aten.sin.default(live_view)
-            updated_base = aten.reshape.default(updated, [4, 3, 4])
-            copied = aten.copy_.default(cache, updated_base)
-            return live_use, copied
-
-        input_pos = torch.tensor([1], device=device)
-        val = torch.randn(3, 4, device=device)
-        cache = torch.randn(4, 3, 4, device=device)
-
-        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
-        reinplace_inplaceable_ops_core(gm.graph)
-        gm.graph.lint()
-
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertIn(aten.index_put.default, targets)
-        self.assertIn(aten.copy_.default, targets)
-        self.assertNotIn(aten.index_put_.default, targets)
-
-    def test_view_index_put_rejects_non_inverse_copy_back_view(self):
-        def f(input_pos, val, cache):
-            cache_view = aten.transpose.int(cache, 0, 1)
-            updated = aten.index_put.default(cache_view, [input_pos], val)
-            copied_view = aten.as_strided.default(updated, [2, 3], [1, 2])
-            return aten.copy_.default(cache, copied_view)
-
-        input_pos = torch.tensor([1], device=device)
-        val = torch.tensor([[10.0, 20.0]], device=device)
-        cache = torch.arange(6, device=device, dtype=torch.float32).reshape(2, 3)
-
-        expected_cache = cache.clone()
-        expected = f(input_pos, val, expected_cache)
-
-        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
-        reinplace_inplaceable_ops_core(gm.graph)
-        gm.graph.lint()
-        gm.recompile()
-
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertIn(aten.index_put.default, targets)
-        self.assertIn(aten.copy_.default, targets)
-        self.assertNotIn(aten.index_put_.default, targets)
-
-        actual_cache = cache.clone()
-        actual = gm(input_pos, val, actual_cache)
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual_cache, expected_cache)
-
-    def test_chained_reinplacement_tracks_moved_writer(self):
-        class Model(torch.nn.Module):
-            def forward(self, x, indices, first_values, second_values, replacement):
-                base = x.cos()
-                first = base.index_put((indices,), first_values)
-                second = first.index_put((indices,), second_values)
-                first.copy_(replacement)
-                return second
-
-        inputs = (
-            torch.arange(8, device=device, dtype=torch.float32).reshape(2, 4),
-            torch.tensor([0], device=device),
-            torch.full((1, 4), 10.0, device=device),
-            torch.full((1, 4), 20.0, device=device),
-            torch.full((2, 4), -1.0, device=device),
-        )
-        model = Model()
-        expected_inputs = tuple(value.clone() for value in inputs)
-        expected = model(*expected_inputs)
-        gm = make_fx(model, tracing_mode="fake")(*inputs)
-        reinplace_inplaceable_ops_core(gm.graph)
-        gm.graph.lint()
-        gm.recompile()
-        targets = [node.target for node in gm.graph.nodes]
-        self.assertIn(aten.index_put_.default, targets)
-        self.assertIn(aten.index_put.default, targets)
-        actual_inputs = tuple(value.clone() for value in inputs)
-        self.assertEqual(gm(*actual_inputs), expected)
-        self.assertEqual(actual_inputs, expected_inputs)
-
-    def test_counters_functionalize_old(self):
-        ReinplaceCounters.clear()
-
-        def f(x):
-            out = torch.empty_like(x)
-            _, new_out = auto_functionalized(sin._opoverload, x=x, result=out)
-            y = out * new_out
-            return new_out, y
-
-        x = torch.randn(3, device=device)
-        gm = make_fx(f, tracing_mode="fake")(x)
-        reinplace_inplaceable_ops_core(gm.graph)
-
-        # We shouldn't have been able to reinplace `out` because it was used after
-        # auto_functionalized. Note that this usually doesn't happen in practice;
-        # we're artificially creating this example to test the counter.
-        # IF THIS NUMBER GOES TO ZERO, PLEASE FIND ANOTHER EXAMPLE
-        self.assertEqual(num_reinplacing_failures(), 1)
-        self.assertEqual(miss_inplaced_bytes(), 12)
-
-    def test_counters_functionalize_v2(self):
-        ReinplaceCounters.clear()
-
-        def f(x):
-            out = torch.empty_like(x)
-            _, new_out = auto_functionalized_v2(
-                sin._opoverload,
-                x=x,
-                _result_base_index=0,
-                _result_size=(3,),
-                _result_stride=(1,),
-                _result_storage_offset=0,
-                _all_bases=[out],
-            )
-            y = out * new_out
-            return new_out, y
-
-        x = torch.randn(3, device=device)
-        gm = make_fx(f, tracing_mode="fake")(x)
-        reinplace_inplaceable_ops_core(gm.graph)
-
-        # We shouldn't have been able to reinplace `out` because it was used after
-        # auto_functionalized. Note that this usually doesn't happen in practice;
-        # we're artificially creating this example to test the counter.
-        # IF THIS NUMBER GOES TO ZERO, PLEASE FIND ANOTHER EXAMPLE
-        self.assertEqual(num_reinplacing_failures(), 1)
-
-    def get_not_inplaced_count(self, graph):
-        counter = 0
-        auto_functionalized_found = False
-        for node in graph.nodes:
-            if (node.target == torch.ops.higher_order.auto_functionalized) or (
-                node.target == torch.ops.higher_order.auto_functionalized_v2
-            ):
-                auto_functionalized_found = True
-                counter += len(node.meta["only_clone_these_tensors"])
-        if not auto_functionalized_found:
-            raise AssertionError
-        return counter
-
-    def test_view_inplaced_functionalize_v2(self):
-        def f(arg0_1):
-            torch.ops.aten.select.int(arg0_1, 0, 0)
-            auto_functionalized = auto_functionalized_v2(
-                torch.ops.test_view.boo.default,
-                _x_base_index=0,
-                _x_size=(3,),
-                _x_stride=(1,),
-                _x_storage_offset=0,
-                _all_bases=[arg0_1],
-            )
-            getitem_1 = auto_functionalized[1]
-            torch.ops.aten.copy_.default(arg0_1, getitem_1)
-            return ()
-
-        x1 = torch.randn(3, device=device)
-        gm = make_fx(f, tracing_mode="fake")(x1)
-        reinplace_inplaceable_ops_core(gm.graph)
-
-        self.assertEqual(self.get_not_inplaced_count(gm.graph), 0)
-
-    # introduce a view another_view that is used `after` the copy
-    def test_view_inplaced2_functionalize_v2(self):
-        def f(arg0_1):
-            _select = torch.ops.aten.select.int(arg0_1, 0, 0)
-            another_view = arg0_1[2]
-            auto_functionalized = auto_functionalized_v2(
-                torch.ops.test_view.boo.default,
-                _x_base_index=0,
-                _x_size=(3,),
-                _x_stride=(1,),
-                _x_storage_offset=0,
-                _all_bases=[arg0_1],
-            )
-            getitem_1 = auto_functionalized[1]
-            _copy = torch.ops.aten.copy_.default(arg0_1, getitem_1)
-            return another_view
-
-        x1 = torch.randn(3, device=device)
-        gm = make_fx(f, tracing_mode="fake")(x1)
-        reinplace_inplaceable_ops_core(gm.graph)
-
-        self.assertEqual(self.get_not_inplaced_count(gm.graph), 0)
-
-    # introduce a view another_view that is used `before` the copy
-    def test_views_not_inplaced_functionalize_v2(self):
-        def f(arg0_1):
-            _select = torch.ops.aten.select.int(arg0_1, 0, 0)
-            another_view = arg0_1[2]
-            auto_functionalized = auto_functionalized_v2(
-                torch.ops.test_view.boo.default,
-                _x_base_index=0,
-                _x_size=(3,),
-                _x_stride=(1,),
-                _x_storage_offset=0,
-                _all_bases=[arg0_1],
-            )
-            getitem_1 = auto_functionalized[1]
-            use_another_view = another_view * 10
-            _copy = torch.ops.aten.copy_.default(arg0_1, getitem_1)
-            return use_another_view
-
-        x1 = torch.randn(3, device=device)
-        gm = make_fx(f, tracing_mode="fake")(x1)
-        reinplace_inplaceable_ops_core(gm.graph)
-
-        self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
-
-    # a view over input without copy node, inplace not allowed
-    def test_views_not_inplaced2_functionalize_v2(self):
-        def f(arg0_1):
-            _select = torch.ops.aten.select.int(arg0_1, 0, 0)
-            _another_view = arg0_1[2]
-            auto_functionalized = auto_functionalized_v2(
-                torch.ops.test_view.boo.default,
-                _x_base_index=0,
-                _x_size=(3,),
-                _x_stride=(1,),
-                _x_storage_offset=0,
-                _all_bases=[arg0_1],
-            )
-            _getitem_1 = auto_functionalized[1]
-            return
-
-        x1 = torch.randn(3, device=device)
-        gm = make_fx(f, tracing_mode="fake")(x1)
-        reinplace_inplaceable_ops_core(gm.graph)
-
-        self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
-
-    # no copy nodes, view over local, with a use for another view
-    def test_views_not_inplaced3_functionalize_v2(self):
-        def f(arg0_1):
-            a = torch.ones(10)
-            another_view = a[2]
-            auto_functionalized = auto_functionalized_v2(
-                torch.ops.test_view.boo.default,
-                _x_base_index=0,
-                _x_size=(),
-                _x_stride=(),
-                _x_storage_offset=0,
-                _all_bases=[a],
-            )
-            _getitem_1 = auto_functionalized[1]
-            return another_view
-
-        x1 = torch.randn(3, device=device)
-        gm = make_fx(f, tracing_mode="fake")(x1)
-        reinplace_inplaceable_ops_core(gm.graph)
-
-        self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
-
-    def test_multi_output_intermediate(self):
-        for requires_grad in [False, True]:
-            for enable_v2 in [False, True]:
-                with inductor_config.patch(
-                    {"enable_auto_functionalized_v2": enable_v2}
-                ):
-                    ReinplaceCounters.clear()
-
-                    def f(x):
-                        out1 = torch.empty_like(x)
-                        out2 = torch.empty_like(x)
-                        sin_cos(x, out1, out2)
-                        return out1, out2, x**2
-
-                    x = torch.randn(3, device=device, requires_grad=requires_grad)
-                    res1, res2, _ = torch.compile(f)(x)
-                    self.assertEqual(res1, x.sin())
-                    self.assertEqual(res2, x.cos())
-                    self.assertEqual(num_reinplacing_failures(), 0)
-
-    def test_multiple_mutations(self):
-        ReinplaceCounters.clear()
-
-        def f(x, out):
-            sin(x, out)
-            sin(out, out)
-            sin(out, out)
-            return out
-
-        x = torch.randn(3, device=device)
-        out = torch.randn(3, device=device)
-        result = torch.compile(f)(x, out)
-        self.assertEqual(result, x.sin().sin().sin())
-        self.assertEqual(result, out)
-        self.assertEqual(num_reinplacing_failures(), 0)
-
-    def test_multiple_intermediate(self):
-        ReinplaceCounters.clear()
-
-        def f(x):
-            out = torch.empty_like(x)
-            sin(x, out)
-            sin(out, out)
-            sin(out, out)
-            return out
-
-        x = torch.randn(3, device=device)
-        result = torch.compile(f)(x)
-        self.assertEqual(result, x.sin().sin().sin())
-        self.assertEqual(num_reinplacing_failures(), 0)
-
-    def test_lists_functionalize_v2(self):
-        with inductor_config.patch({"enable_auto_functionalized_v2": True}):
-
-            @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
-            def mutate_op(y: list[Tensor]) -> None:
-                y[0].add_(2)
-                y[1].add_(3)
-
-            @torch.compile(fullgraph=True, dynamic=False, backend="inductor")
-            def f(b):
-                mutate_op([b[0], b[1]])
-
-            x1 = torch.tensor([0.3, 0.4], device=device)
-            log_stream, ctx = logs_to_string(
-                "torch._inductor.compile_fx", "post_grad_graphs"
-            )
-            with ctx():
-                torch.compile(f, backend="inductor", fullgraph=True)(x1)
-            post_grad_graphs = "\n".join(
-                log_stream.getvalue().strip().split("\n")[3:]
-            ).strip()
-
-            # We can inplace the base y. no clones emitted.
-            self.assertEqual(num_reinplacing_failures(), 0)
-            self.assertEqual(miss_inplaced_bytes(), 0)
-            self.assertEqual(post_grad_graphs.count("aten.clone"), 0)
-
-    def test_lists_old_functionalize(self):
-        with inductor_config.patch({"enable_auto_functionalized_v2": False}):
-
-            @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
-            def mutate_op(y: list[Tensor]) -> None:
-                y[0].add_(2)
-                y[1].add_(3)
-
-            @torch.compile(fullgraph=True, dynamic=False, backend="inductor")
-            def f(b):
-                mutate_op([b[0], b[1]])
-
-            x1 = torch.tensor([0.3, 0.4], device=device)
-            log_stream, ctx = logs_to_string(
-                "torch._inductor.compile_fx", "post_grad_graphs"
-            )
-            with ctx():
-                torch.compile(f, backend="inductor", fullgraph=True)(x1)
-            post_grad_graphs = "\n".join(
-                log_stream.getvalue().strip().split("\n")[3:]
-            ).strip()
-
-            # Can't reinplace on views yet (1 for the "entire list" failing to reinplace)
-            self.assertEqual(num_reinplacing_failures(), 1)
-            self.assertEqual(miss_inplaced_bytes(), 8)
-
-            # Both list inputs failed to reinplace. So we should have emitted clones for them.
-            self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
-
     @parametrize("reinplace_whenever_possible", [False, True])
     def test_scatter_reinplace_whenever_possible(self, reinplace_whenever_possible):
         def f(x, value):
@@ -1939,84 +1134,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
         self.assertEqual(result, expected)
 
-    def _compile_and_count_scatters(self, fn, *args):
-        log_stream, ctx = logs_to_string(
-            "torch._inductor.compile_fx", "post_grad_graphs"
-        )
-        with inductor_config.patch(enable_auto_functionalized_v2=True), ctx():
-            torch._dynamo.reset()
-            actual = torch.compile(fn)(*args)
-        self.assertEqual(actual, fn(*args))
-        graphs = log_stream.getvalue()
-        self.assertIn("AFTER POST GRAD", graphs)
-        return graphs.count("aten.slice_scatter")
-
-    def test_reinplace_mutated_base_scatter(self):
-        # A custom op writes three disjoint views of a fresh buffer, a separate
-        # write fills the fourth, and a GEMM consumes the whole buffer. The head
-        # write must become an in-place copy_ into the op's updated base, not a
-        # functional slice_scatter that copies the whole buffer.
-        x = torch.randn(16, 8, device=device)
-        weight = torch.randn(32, 8, device=device)
-        self.assertEqual(
-            self._compile_and_count_scatters(mutated_base_scatter, x, weight), 0
-        )
-        self.assertEqual(counters["inductor"]["reinplace_mutated_base_scatter"], 1)
-
-    def test_reinplace_mutated_base_scatter_after_copy_back(self):
-        # The same pattern with the op's results copied onto themselves.
-        # remove_noop_ops drops the identity scatters, then the head write is
-        # reinplaced.
-        x = torch.randn(16, 8, device=device)
-        weight = torch.randn(32, 8, device=device)
-        self.assertEqual(
-            self._compile_and_count_scatters(
-                mutated_base_scatter_with_copy_back, x, weight
-            ),
-            0,
-        )
-        self.assertEqual(counters["inductor"]["reinplace_mutated_base_scatter"], 1)
-
-    @parametrize("writes", ["one_op", "two_ops", "index_put_then_op"])
-    def test_no_reinplace_into_mutated_graph_input(self, writes):
-        # The graph input is written in place before the op, by the op itself,
-        # by a chain of two op calls, or by index_put_. Once those writes are
-        # reinplaced, the op's updated base is the input itself, and the later
-        # x.copy_(y) overwrites it, so writing the scatter into that base would
-        # make the returned s alias x and read back y.
-        def f(x, a, src, y):
-            if writes == "index_put_then_op":
-                x.index_put_((torch.tensor([0], device=x.device),), a[:1])
-            sin(a, x)
-            if writes == "two_ops":
-                sin(a, x)
-            s = x.clone()
-            s[:, :8] = src
-            x.copy_(y)
-            return s
-
-        args = [torch.randn(4, 16, device=device) for _ in range(2)]
-        args += [torch.randn(4, 8, device=device), torch.randn(4, 16, device=device)]
-        x_ref, x_compiled = args[0].clone(), args[0].clone()
-        expected = f(x_ref, *args[1:])
-        log_stream, ctx = logs_to_string(
-            "torch._inductor.compile_fx", "post_grad_graphs"
-        )
-        with inductor_config.patch(enable_auto_functionalized_v2=True), ctx():
-            torch._dynamo.reset()
-            actual = torch.compile(f)(x_compiled, *args[1:])
-        self.assertEqual(actual, expected)
-        self.assertEqual(x_compiled, x_ref)
-        # The scatter is kept functional.
-        graphs = log_stream.getvalue()
-        self.assertIn("AFTER POST GRAD", graphs)
-        self.assertEqual(graphs.count("aten.slice_scatter"), 1)
-        self.assertNotEqual(
-            actual.untyped_storage().data_ptr(),
-            x_compiled.untyped_storage().data_ptr(),
-        )
-        self.assertEqual(counters["inductor"]["reinplace_mutated_base_scatter"], 0)
-
     def test_is_auto_functionalized_v2_base(self):
         from torch._inductor.fx_passes.reinplace import _is_auto_functionalized_v2_base
 
@@ -2112,7 +1229,899 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             (mul,) = [n for n in gm.graph.nodes if n.target is aten.mul.Tensor]
             self.assertEqual(_is_auto_functionalized_v2_base(mul.args[0]), expected)
 
-    def test_training_grad_through_mutating_custom_op(self):
+
+class TestReinplacingPassCorrectnessAccelerator(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        ReinplaceCounters.clear()
+        return super().setUp()
+
+    def _test(self, device, f):
+        nf = torch.compile(f)
+        inp = (
+            torch.randn(4, device=device),
+            torch.ones(2, device=device, dtype=torch.int),
+        )
+        inp2 = (inp[0].clone(), inp[1].clone())
+        self.assertEqual(f(*inp), nf(*inp2))
+        self.assertEqual(inp, inp2)
+
+    def test_dont_modify_live(self, device):
+        def f(x, y):
+            x = x.cos()
+            x2 = x.index_put((y,), const)
+            return x2, x
+
+        self._test(device, f)
+
+    def test_dont_modify_view_of_live(self, device):
+        def f(x, y):
+            x = x.cos()
+            x2 = aten.alias(x)
+            x2 = x2.index_put((y,), const)
+            y = x2 + x.cos()
+            return y
+
+        self._test(device, f)
+
+    def test_dont_modify_input(self, device):
+        def f(x, y):
+            return x.index_put((y,), const)
+
+        self._test(device, f)
+
+    @parametrize("unsafe", [False, True])
+    def test_reinplacement_canonicalizes_chained_results(self, device, unsafe):
+        op = aten._unsafe_index_put.default if unsafe else aten.index_put.default
+        inplace_op = (
+            inductor_prims._unsafe_index_put_ if unsafe else aten.index_put_.default
+        )
+
+        def f(x, indices, first_values, second_values):
+            first = op(x, [indices], first_values)
+            second = op(first, [indices], second_values)
+            x.copy_(second)
+            return (x,)
+
+        inputs = (
+            torch.arange(8, device=device, dtype=torch.float32),
+            torch.tensor([0, 3], device=device),
+            torch.tensor([10.0, 20.0], device=device),
+            torch.tensor([30.0, 40.0], device=device),
+        )
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        mutations = list(gm.graph.find_nodes(op="call_function", target=op))
+        updater = FakeTensorUpdater(gm)
+        reinplace_inplaceable_ops_core(gm.graph, fake_tensor_updater=updater)
+        self.assertEqual(len(mutations), 2)
+        for mutation in mutations:
+            self.assertFalse(mutation._erased)
+            self.assertIs(mutation.target, inplace_op)
+            self.assertIs(mutation.args[0], mutations[0].args[0])
+            self.assertEqual(
+                get_node_storage(mutation), get_node_storage(mutation.args[0])
+            )
+        self.assertFalse(
+            gm.graph.find_nodes(op="call_function", target=aten.copy_.default)
+        )
+        gm.graph.lint()
+        gm.recompile()
+        with V.set_fake_mode(
+            detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        ):
+            self.assertEqual(updater.incremental_update(), 0)
+        expected_inputs = tuple(value.clone() for value in inputs)
+        expected = f(*expected_inputs)
+        actual_inputs = tuple(value.clone() for value in inputs)
+        actual = compile_fx_inner(gm, list(actual_inputs))(list(actual_inputs))
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_inputs, expected_inputs)
+        self.assertTrue(torch._C._is_alias_of(actual[0], actual_inputs[0]))
+
+    def test_reinplacement_canonicalizes_chained_scatter_results(self, device):
+        def f(x, first_values, second_values):
+            x.diagonal().copy_(first_values)
+            x.diagonal(1).copy_(second_values)
+            return x
+
+        inputs = (
+            torch.randn(3, 4, device=device),
+            torch.randn(3, device=device),
+            torch.randn(3, device=device),
+        )
+        gm = make_fx(torch.func.functionalize(f), tracing_mode="fake")(*inputs)
+        updater = FakeTensorUpdater(gm)
+        fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            reinplace_inplaceable_ops(updater, gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        self.assertFalse(
+            gm.graph.find_nodes(op="call_function", target=aten.clone.default)
+        )
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.copy_.default)), 2
+        )
+        expected_inputs = tuple(value.clone() for value in inputs)
+        expected = f(*expected_inputs)
+        actual_inputs = tuple(value.clone() for value in inputs)
+        actual = gm(*actual_inputs)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_inputs, expected_inputs)
+        self.assertTrue(torch._C._is_alias_of(actual, actual_inputs[0]))
+
+    def test_reinplacement_canonicalizes_philox_result(self, device):
+        def f(key):
+            return random.uniform(key, (8,))
+
+        key = random.key(42, device=device)
+        gm = make_fx(torch.func.functionalize(f), tracing_mode="fake")(key)
+        generator = next(
+            n for n in gm.graph.nodes if n.target is aten._philox_uniform.default
+        )
+        updater = FakeTensorUpdater(gm)
+        reinplace_inplaceable_ops_core(gm.graph, fake_tensor_updater=updater)
+        self.assertIs(generator.target, aten._philox_uniform_.default)
+        self.assertFalse(generator._erased)
+        self.assertEqual(
+            get_node_storage(generator), get_node_storage(generator.args[0])
+        )
+        self.assertIs(gm.graph.output_node().args[0], generator.args[0])
+        gm.graph.lint()
+        gm.recompile()
+        expected = f(key)
+        self.assertEqual(gm(key), expected)
+        self.assertEqual(torch.compile(f, fullgraph=True)(key), expected)
+
+    @parametrize("ordering_only", [False, True])
+    def test_reinplacement_preserves_control_dependency(self, device, ordering_only):
+        def f(x, indices, values, other):
+            result = x.clone().index_put((indices,), values)
+            return (other if ordering_only else result).sin()
+
+        inputs = (
+            torch.randn(8, device=device),
+            torch.tensor([0], device=device),
+            torch.tensor([2.0], device=device),
+            torch.randn(8, device=device),
+        )
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        mutation = next(n for n in gm.graph.nodes if n.target is aten.index_put.default)
+        buffer = mutation.args[0]
+        reader = next(n for n in gm.graph.nodes if n.target is aten.sin.default)
+        data_input = reader.args[0]
+        preserve_node_ordering(gm.graph, {reader: OrderedSet([mutation])})
+        updater = FakeTensorUpdater(gm)
+        reinplace_inplaceable_ops_core(gm.graph, fake_tensor_updater=updater)
+        ordered = next(
+            n for n in gm.graph.nodes if n.target is torch.ops.higher_order.control_deps
+        )
+        self.assertIs(mutation.target, aten.index_put_.default)
+        self.assertFalse(mutation._erased)
+        self.assertEqual(ordered.args[0], (mutation,))
+        self.assertIs(ordered.args[2], data_input if ordering_only else buffer)
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(gm(*inputs), f(*inputs))
+
+    @parametrize("non_dense", [False, True])
+    def test_reinplacement_handles_transitive_unsupported_lowering(
+        self, device, non_dense
+    ):
+        def f(x, weight, indices, values):
+            base = x @ weight
+            if non_dense:
+                base = base[:, :2]
+            return aten.alias.default(base.index_put((indices,), values))
+
+        def unsupported_lowering(x):
+            return x
+
+        unsupported_lowering._inductor_lowering_function = True  # type: ignore[attr-defined]
+        unsupported_lowering._inductor_lowering_output_metadata_ignores_input_storage = True  # type: ignore[attr-defined]
+
+        width = 2 if non_dense else 4
+        inputs = (
+            torch.randn(4, 4, device=device),
+            torch.randn(4, 4, device=device),
+            torch.tensor([0], device=device),
+            torch.full((1, width), 10.0, device=device),
+        )
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        result = next(n for n in gm.graph.nodes if n.target is aten.index_put.default)
+        forwarded = next(n for n in result.users if n.target is aten.alias.default)
+        self.assertEqual(
+            result.meta["val"].stride() == result.args[0].meta["val"].stride(),
+            not non_dense,
+        )
+        output = gm.graph.output_node()
+        with gm.graph.inserting_before(output):
+            lowered = gm.graph.call_function(unsupported_lowering, (forwarded,))
+        lowered.meta["val"] = forwarded.meta["val"]
+        output.args = (lowered,)
+
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertIs(
+            result.target,
+            aten.index_put.default if non_dense else aten.index_put_.default,
+        )
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(gm(*inputs), f(*inputs))
+
+    def test_foreach_reinplacement_rewires_results_before_refresh(self, device):
+        def f(x, y):
+            torch._foreach_add_([x], [y])
+            return x.sin()
+
+        inputs = (
+            torch.randn(8, device=device),
+            torch.randn(8, device=device),
+        )
+        gm = make_fx(torch.func.functionalize(f), tracing_mode="fake")(*inputs)
+        foreach = next(n for n in gm.graph.nodes if n.target in inplaceable_foreach_ops)
+        inplace_target = inplaceable_foreach_ops[foreach.target].inplace_op
+        getitems = [
+            n
+            for n in foreach.users
+            if n.target is operator.getitem and isinstance(n.args[1], int)
+        ]
+        self.assertTrue(getitems)
+
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertIs(foreach.target, inplace_target)
+        self.assertTrue(all(node._erased for node in getitems))
+        self.assertFalse(
+            any(
+                node.target is operator.getitem and node.args[0] is foreach
+                for node in gm.graph.nodes
+            )
+        )
+        gm.graph.lint()
+        gm.recompile()
+        expected_x = inputs[0].clone()
+        expected = f(expected_x, inputs[1])
+        actual_x = inputs[0].clone()
+        actual = gm(actual_x, inputs[1])
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
+
+    def test_reinplacement_rewired_lowering_survives_full_refresh(self, device):
+        def f(x, y):
+            torch._foreach_add_([x], [y])
+            return x
+
+        def unsupported_lowering(x):
+            return x.sin()
+
+        def supported_lowering(x):
+            return x
+
+        unsupported_lowering._inductor_lowering_function = True  # type: ignore[attr-defined]
+        unsupported_lowering._inductor_lowering_output_metadata_ignores_input_storage = True  # type: ignore[attr-defined]
+        supported_lowering._inductor_lowering_function = True  # type: ignore[attr-defined]
+        supported_lowering._inductor_lowering_output_metadata_is_input = 0  # type: ignore[attr-defined]
+        inputs = (torch.randn(8, device=device), torch.randn(8, device=device))
+        gm = make_fx(torch.func.functionalize(f), tracing_mode="fake")(*inputs)
+        foreach = next(n for n in gm.graph.nodes if n.target in inplaceable_foreach_ops)
+        inplace_target = inplaceable_foreach_ops[foreach.target].inplace_op
+        result = next(iter(foreach.users))
+        output = gm.graph.output_node()
+        with gm.graph.inserting_before(output):
+            unsupported = gm.graph.call_function(unsupported_lowering, (result,))
+            supported = gm.graph.call_function(supported_lowering, (result,))
+        with detect_fake_mode([result.meta["val"]]):
+            unsupported.meta["val"] = result.meta["val"].sin()
+        supported.meta["val"] = result.meta["val"]
+        output.args = ((unsupported, supported),)
+
+        updater = FakeTensorUpdater(gm)
+        reinplace_inplaceable_ops_core(gm.graph, fake_tensor_updater=updater)
+
+        self.assertIs(foreach.target, inplace_target)
+        self.assertTrue(result._erased)
+        self.assertIs(unsupported.args[0], foreach.args[0][0])
+        gm.graph.lint()
+        gm.recompile()
+        expected = inputs[0] + inputs[1]
+        self.assertEqual(gm(inputs[0].clone(), inputs[1]), (expected.sin(), expected))
+        with V.set_fake_mode(
+            detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
+        ):
+            self.assertEqual(updater.incremental_update(), 0)
+
+    @unittest.skipIf(not dist.is_available(), "distributed is not available")
+    @inductor_config.patch({"_collective.auto_select": False})
+    @parametrize("non_contiguous", [False, True])
+    @parametrize("wrapped", [False, True])
+    def test_all_reduce_reinplacement_preserves_result_reference(
+        self, device, non_contiguous, wrapped
+    ):
+        from torch._higher_order_ops.effects import with_effects
+
+        def f(a, b):
+            result = a @ b
+            if non_contiguous:
+                result = result.t()
+            if wrapped:
+                token = aten._make_dep_token.default()
+                result = with_effects(
+                    token,
+                    torch.ops._c10d_functional.all_reduce.default,
+                    result,
+                    "sum",
+                    "0",
+                )[1]
+                return torch.ops._c10d_functional.wait_tensor.default(result) + 1
+            return funcol.all_reduce(result, "sum", "0") + 1
+
+        inputs = (torch.randn(4, 4, device=device), torch.randn(4, 4, device=device))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        target = (
+            with_effects if wrapped else torch.ops._c10d_functional.all_reduce.default
+        )
+        collective = next(n for n in gm.graph.nodes if n.target is target)
+        result = (
+            next(
+                n
+                for n in collective.users
+                if n.target is operator.getitem and n.args[1] == 1
+            )
+            if wrapped
+            else collective
+        )
+        wait = next(
+            n
+            for n in result.users
+            if n.target is torch.ops._c10d_functional.wait_tensor.default
+        )
+        reinplace_inplaceable_ops_core(gm.graph)
+        expected = (
+            torch.ops._c10d_functional.all_reduce.default
+            if non_contiguous
+            else torch.ops._c10d_functional.all_reduce_.default
+        )
+        self.assertIs(collective.args[1] if wrapped else collective.target, expected)
+        self.assertFalse(collective._erased)
+        self.assertIs(wait.args[0], result)
+        self.assertEqual(
+            collective.args[2 if wrapped else 0].meta["val"].is_contiguous(),
+            not non_contiguous,
+        )
+        gm.graph.lint()
+
+    @unittest.skipIf(not dist.is_available(), "distributed is not available")
+    def test_all_reduce_coalesced_reinplacement_preserves_list_aliases(self, device):
+        def f(x, y):
+            return torch.ops._c10d_functional.all_reduce_coalesced.default(
+                [x.cos(), y.sin()], "sum", "0"
+            )
+
+        inputs = (torch.randn(8, device=device), torch.randn(8, device=device))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        collective = next(
+            n
+            for n in gm.graph.nodes
+            if n.target is torch.ops._c10d_functional.all_reduce_coalesced.default
+        )
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertIs(
+            collective.target,
+            torch.ops._c10d_functional.all_reduce_coalesced_.default,
+        )
+        for result, arg in zip(collective.meta["val"], collective.args[0], strict=True):
+            self.assertEqual(result.untyped_storage()._cdata, get_node_storage(arg))
+        projections = list(collective.users)
+        self.assertEqual(len(projections), 2)
+        for projection, argument in zip(projections, collective.args[0], strict=True):
+            self.assertIs(projection.target, operator.getitem)
+            self.assertIs(projection.args[0], collective)
+            self.assertEqual(get_node_storage(projection), get_node_storage(argument))
+        gm.graph.lint()
+
+    def test_should_modify_inner(self, device):
+        def f(x, y):
+            x = x.cos()
+            x = x.index_put((y,), const)
+            return x
+
+        self._test(device, f)
+
+    def test_should_modify_input(self, device):
+        def f(x, y):
+            x = x.index_put_((y,), const)
+            return x
+
+        self._test(device, f)
+
+    def test_dont_reinplace_index_put_that_reads_its_input(self, device):
+        # https://github.com/pytorch/pytorch/issues/198567
+        def f(x):
+            r = x + 1
+            return torch.put(r, r, r, accumulate=True)
+
+        # r[i] = n - 1 - i, so every element is scattered to the other end: an
+        # index_put_ reinplaced onto r would read indices and values it has
+        # already written.
+        n = 256
+        x = torch.arange(n - 2, -2, -1, device=device)
+        self.assertEqual(f(x), torch.compile(f)(x))
+
+    def test_view_index_put_should_reinplace_copy_to_base(self, device):
+        def f(input_pos, val, cache):
+            cache_view = aten.reshape.default(cache, [4, -1])
+            val_view = aten.reshape.default(val, [-1])
+            updated = aten.index_put.default(cache_view, [input_pos], val_view)
+            updated_base = aten.reshape.default(updated, [4, 3, 4])
+            return aten.copy_.default(cache, updated_base)
+
+        input_pos = torch.tensor([1], device=device)
+        val = torch.randn(3, 4, device=device)
+        cache = torch.randn(4, 3, 4, device=device)
+
+        expected_cache = cache.clone()
+        expected = f(input_pos, val, expected_cache)
+
+        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put_.default, targets)
+        self.assertNotIn(aten.index_put.default, targets)
+        self.assertNotIn(aten.copy_.default, targets)
+
+        actual_cache = cache.clone()
+        actual = gm(input_pos, val, actual_cache)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_cache, expected_cache)
+
+    def test_view_index_put_keeps_copy_when_later_view_is_live(self, device):
+        def f(input_pos, val, cache):
+            cache_view = aten.reshape.default(cache, [4, -1])
+            live_view = aten.select.int(cache, 0, 0)
+            val_view = aten.reshape.default(val, [-1])
+            updated = aten.index_put.default(cache_view, [input_pos], val_view)
+            live_use = aten.sin.default(live_view)
+            updated_base = aten.reshape.default(updated, [4, 3, 4])
+            copied = aten.copy_.default(cache, updated_base)
+            return live_use, copied
+
+        input_pos = torch.tensor([1], device=device)
+        val = torch.randn(3, 4, device=device)
+        cache = torch.randn(4, 3, 4, device=device)
+
+        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertIn(aten.copy_.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+
+    def test_view_index_put_rejects_non_inverse_copy_back_view(self, device):
+        def f(input_pos, val, cache):
+            cache_view = aten.transpose.int(cache, 0, 1)
+            updated = aten.index_put.default(cache_view, [input_pos], val)
+            copied_view = aten.as_strided.default(updated, [2, 3], [1, 2])
+            return aten.copy_.default(cache, copied_view)
+
+        input_pos = torch.tensor([1], device=device)
+        val = torch.tensor([[10.0, 20.0]], device=device)
+        cache = torch.arange(6, device=device, dtype=torch.float32).reshape(2, 3)
+
+        expected_cache = cache.clone()
+        expected = f(input_pos, val, expected_cache)
+
+        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertIn(aten.copy_.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+
+        actual_cache = cache.clone()
+        actual = gm(input_pos, val, actual_cache)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_cache, expected_cache)
+
+    def test_chained_reinplacement_tracks_moved_writer(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, x, indices, first_values, second_values, replacement):
+                base = x.cos()
+                first = base.index_put((indices,), first_values)
+                second = first.index_put((indices,), second_values)
+                first.copy_(replacement)
+                return second
+
+        inputs = (
+            torch.arange(8, device=device, dtype=torch.float32).reshape(2, 4),
+            torch.tensor([0], device=device),
+            torch.full((1, 4), 10.0, device=device),
+            torch.full((1, 4), 20.0, device=device),
+            torch.full((2, 4), -1.0, device=device),
+        )
+        model = Model()
+        expected_inputs = tuple(value.clone() for value in inputs)
+        expected = model(*expected_inputs)
+        gm = make_fx(model, tracing_mode="fake")(*inputs)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put_.default, targets)
+        self.assertIn(aten.index_put.default, targets)
+        actual_inputs = tuple(value.clone() for value in inputs)
+        self.assertEqual(gm(*actual_inputs), expected)
+        self.assertEqual(actual_inputs, expected_inputs)
+
+    def test_counters_functionalize_old(self, device):
+        ReinplaceCounters.clear()
+
+        def f(x):
+            out = torch.empty_like(x)
+            _, new_out = auto_functionalized(sin._opoverload, x=x, result=out)
+            y = out * new_out
+            return new_out, y
+
+        x = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        # We shouldn't have been able to reinplace `out` because it was used after
+        # auto_functionalized. Note that this usually doesn't happen in practice;
+        # we're artificially creating this example to test the counter.
+        # IF THIS NUMBER GOES TO ZERO, PLEASE FIND ANOTHER EXAMPLE
+        self.assertEqual(num_reinplacing_failures(), 1)
+        self.assertEqual(miss_inplaced_bytes(), 12)
+
+    def test_counters_functionalize_v2(self, device):
+        ReinplaceCounters.clear()
+
+        def f(x):
+            out = torch.empty_like(x)
+            _, new_out = auto_functionalized_v2(
+                sin._opoverload,
+                x=x,
+                _result_base_index=0,
+                _result_size=(3,),
+                _result_stride=(1,),
+                _result_storage_offset=0,
+                _all_bases=[out],
+            )
+            y = out * new_out
+            return new_out, y
+
+        x = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x)
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        # We shouldn't have been able to reinplace `out` because it was used after
+        # auto_functionalized. Note that this usually doesn't happen in practice;
+        # we're artificially creating this example to test the counter.
+        # IF THIS NUMBER GOES TO ZERO, PLEASE FIND ANOTHER EXAMPLE
+        self.assertEqual(num_reinplacing_failures(), 1)
+
+    def get_not_inplaced_count(self, graph):
+        counter = 0
+        auto_functionalized_found = False
+        for node in graph.nodes:
+            if (node.target == torch.ops.higher_order.auto_functionalized) or (
+                node.target == torch.ops.higher_order.auto_functionalized_v2
+            ):
+                auto_functionalized_found = True
+                counter += len(node.meta["only_clone_these_tensors"])
+        if not auto_functionalized_found:
+            raise AssertionError
+        return counter
+
+    def test_view_inplaced_functionalize_v2(self, device):
+        def f(arg0_1):
+            torch.ops.aten.select.int(arg0_1, 0, 0)
+            auto_functionalized = auto_functionalized_v2(
+                torch.ops.test_view.boo.default,
+                _x_base_index=0,
+                _x_size=(3,),
+                _x_stride=(1,),
+                _x_storage_offset=0,
+                _all_bases=[arg0_1],
+            )
+            getitem_1 = auto_functionalized[1]
+            torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            return ()
+
+        x1 = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x1)
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 0)
+
+    # introduce a view another_view that is used `after` the copy
+    def test_view_inplaced2_functionalize_v2(self, device):
+        def f(arg0_1):
+            _select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            another_view = arg0_1[2]
+            auto_functionalized = auto_functionalized_v2(
+                torch.ops.test_view.boo.default,
+                _x_base_index=0,
+                _x_size=(3,),
+                _x_stride=(1,),
+                _x_storage_offset=0,
+                _all_bases=[arg0_1],
+            )
+            getitem_1 = auto_functionalized[1]
+            _copy = torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            return another_view
+
+        x1 = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x1)
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 0)
+
+    # introduce a view another_view that is used `before` the copy
+    def test_views_not_inplaced_functionalize_v2(self, device):
+        def f(arg0_1):
+            _select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            another_view = arg0_1[2]
+            auto_functionalized = auto_functionalized_v2(
+                torch.ops.test_view.boo.default,
+                _x_base_index=0,
+                _x_size=(3,),
+                _x_stride=(1,),
+                _x_storage_offset=0,
+                _all_bases=[arg0_1],
+            )
+            getitem_1 = auto_functionalized[1]
+            use_another_view = another_view * 10
+            _copy = torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            return use_another_view
+
+        x1 = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x1)
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
+
+    # a view over input without copy node, inplace not allowed
+    def test_views_not_inplaced2_functionalize_v2(self, device):
+        def f(arg0_1):
+            _select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            _another_view = arg0_1[2]
+            auto_functionalized = auto_functionalized_v2(
+                torch.ops.test_view.boo.default,
+                _x_base_index=0,
+                _x_size=(3,),
+                _x_stride=(1,),
+                _x_storage_offset=0,
+                _all_bases=[arg0_1],
+            )
+            _getitem_1 = auto_functionalized[1]
+            return
+
+        x1 = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x1)
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
+
+    # no copy nodes, view over local, with a use for another view
+    def test_views_not_inplaced3_functionalize_v2(self, device):
+        def f(arg0_1):
+            a = torch.ones(10)
+            another_view = a[2]
+            auto_functionalized = auto_functionalized_v2(
+                torch.ops.test_view.boo.default,
+                _x_base_index=0,
+                _x_size=(),
+                _x_stride=(),
+                _x_storage_offset=0,
+                _all_bases=[a],
+            )
+            _getitem_1 = auto_functionalized[1]
+            return another_view
+
+        x1 = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x1)
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        self.assertEqual(self.get_not_inplaced_count(gm.graph), 1)
+
+    def test_multi_output_intermediate(self, device):
+        for requires_grad in [False, True]:
+            for enable_v2 in [False, True]:
+                with inductor_config.patch(
+                    {"enable_auto_functionalized_v2": enable_v2}
+                ):
+                    ReinplaceCounters.clear()
+
+                    def f(x):
+                        out1 = torch.empty_like(x)
+                        out2 = torch.empty_like(x)
+                        sin_cos(x, out1, out2)
+                        return out1, out2, x**2
+
+                    x = torch.randn(3, device=device, requires_grad=requires_grad)
+                    res1, res2, _ = torch.compile(f)(x)
+                    self.assertEqual(res1, x.sin())
+                    self.assertEqual(res2, x.cos())
+                    self.assertEqual(num_reinplacing_failures(), 0)
+
+    def test_multiple_mutations(self, device):
+        ReinplaceCounters.clear()
+
+        def f(x, out):
+            sin(x, out)
+            sin(out, out)
+            sin(out, out)
+            return out
+
+        x = torch.randn(3, device=device)
+        out = torch.randn(3, device=device)
+        result = torch.compile(f)(x, out)
+        self.assertEqual(result, x.sin().sin().sin())
+        self.assertEqual(result, out)
+        self.assertEqual(num_reinplacing_failures(), 0)
+
+    def test_multiple_intermediate(self, device):
+        ReinplaceCounters.clear()
+
+        def f(x):
+            out = torch.empty_like(x)
+            sin(x, out)
+            sin(out, out)
+            sin(out, out)
+            return out
+
+        x = torch.randn(3, device=device)
+        result = torch.compile(f)(x)
+        self.assertEqual(result, x.sin().sin().sin())
+        self.assertEqual(num_reinplacing_failures(), 0)
+
+    def test_lists_functionalize_v2(self, device):
+        with inductor_config.patch({"enable_auto_functionalized_v2": True}):
+
+            @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
+            def mutate_op(y: list[Tensor]) -> None:
+                y[0].add_(2)
+                y[1].add_(3)
+
+            @torch.compile(fullgraph=True, dynamic=False, backend="inductor")
+            def f(b):
+                mutate_op([b[0], b[1]])
+
+            x1 = torch.tensor([0.3, 0.4], device=device)
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.compile_fx", "post_grad_graphs"
+            )
+            with ctx():
+                torch.compile(f, backend="inductor", fullgraph=True)(x1)
+            post_grad_graphs = "\n".join(
+                log_stream.getvalue().strip().split("\n")[3:]
+            ).strip()
+
+            # We can inplace the base y. no clones emitted.
+            self.assertEqual(num_reinplacing_failures(), 0)
+            self.assertEqual(miss_inplaced_bytes(), 0)
+            self.assertEqual(post_grad_graphs.count("aten.clone"), 0)
+
+    def test_lists_old_functionalize(self, device):
+        with inductor_config.patch({"enable_auto_functionalized_v2": False}):
+
+            @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
+            def mutate_op(y: list[Tensor]) -> None:
+                y[0].add_(2)
+                y[1].add_(3)
+
+            @torch.compile(fullgraph=True, dynamic=False, backend="inductor")
+            def f(b):
+                mutate_op([b[0], b[1]])
+
+            x1 = torch.tensor([0.3, 0.4], device=device)
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.compile_fx", "post_grad_graphs"
+            )
+            with ctx():
+                torch.compile(f, backend="inductor", fullgraph=True)(x1)
+            post_grad_graphs = "\n".join(
+                log_stream.getvalue().strip().split("\n")[3:]
+            ).strip()
+
+            # Can't reinplace on views yet (1 for the "entire list" failing to reinplace)
+            self.assertEqual(num_reinplacing_failures(), 1)
+            self.assertEqual(miss_inplaced_bytes(), 8)
+
+            # Both list inputs failed to reinplace. So we should have emitted clones for them.
+            self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
+
+    def _compile_and_count_scatters(self, fn, *args):
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with inductor_config.patch(enable_auto_functionalized_v2=True), ctx():
+            torch._dynamo.reset()
+            actual = torch.compile(fn)(*args)
+        self.assertEqual(actual, fn(*args))
+        graphs = log_stream.getvalue()
+        self.assertIn("AFTER POST GRAD", graphs)
+        return graphs.count("aten.slice_scatter")
+
+    def test_reinplace_mutated_base_scatter(self, device):
+        # A custom op writes three disjoint views of a fresh buffer, a separate
+        # write fills the fourth, and a GEMM consumes the whole buffer. The head
+        # write must become an in-place copy_ into the op's updated base, not a
+        # functional slice_scatter that copies the whole buffer.
+        x = torch.randn(16, 8, device=device)
+        weight = torch.randn(32, 8, device=device)
+        self.assertEqual(
+            self._compile_and_count_scatters(mutated_base_scatter, x, weight), 0
+        )
+        self.assertEqual(counters["inductor"]["reinplace_mutated_base_scatter"], 1)
+
+    def test_reinplace_mutated_base_scatter_after_copy_back(self, device):
+        # The same pattern with the op's results copied onto themselves.
+        # remove_noop_ops drops the identity scatters, then the head write is
+        # reinplaced.
+        x = torch.randn(16, 8, device=device)
+        weight = torch.randn(32, 8, device=device)
+        self.assertEqual(
+            self._compile_and_count_scatters(
+                mutated_base_scatter_with_copy_back, x, weight
+            ),
+            0,
+        )
+        self.assertEqual(counters["inductor"]["reinplace_mutated_base_scatter"], 1)
+
+    @parametrize("writes", ["one_op", "two_ops", "index_put_then_op"])
+    def test_no_reinplace_into_mutated_graph_input(self, device, writes):
+        # The graph input is written in place before the op, by the op itself,
+        # by a chain of two op calls, or by index_put_. Once those writes are
+        # reinplaced, the op's updated base is the input itself, and the later
+        # x.copy_(y) overwrites it, so writing the scatter into that base would
+        # make the returned s alias x and read back y.
+        def f(x, a, src, y):
+            if writes == "index_put_then_op":
+                x.index_put_((torch.tensor([0], device=x.device),), a[:1])
+            sin(a, x)
+            if writes == "two_ops":
+                sin(a, x)
+            s = x.clone()
+            s[:, :8] = src
+            x.copy_(y)
+            return s
+
+        args = [torch.randn(4, 16, device=device) for _ in range(2)]
+        args += [torch.randn(4, 8, device=device), torch.randn(4, 16, device=device)]
+        x_ref, x_compiled = args[0].clone(), args[0].clone()
+        expected = f(x_ref, *args[1:])
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with inductor_config.patch(enable_auto_functionalized_v2=True), ctx():
+            torch._dynamo.reset()
+            actual = torch.compile(f)(x_compiled, *args[1:])
+        self.assertEqual(actual, expected)
+        self.assertEqual(x_compiled, x_ref)
+        # The scatter is kept functional.
+        graphs = log_stream.getvalue()
+        self.assertIn("AFTER POST GRAD", graphs)
+        self.assertEqual(graphs.count("aten.slice_scatter"), 1)
+        self.assertNotEqual(
+            actual.untyped_storage().data_ptr(),
+            x_compiled.untyped_storage().data_ptr(),
+        )
+        self.assertEqual(counters["inductor"]["reinplace_mutated_base_scatter"], 0)
+
+    def test_training_grad_through_mutating_custom_op(self, device):
         # The same pattern in a custom backward: the reinplace fires and the
         # gradients are bit-identical to eager.
         w = 8
@@ -2164,7 +2173,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             subtest(sin_triton, name="sin_triton"),
         ],
     )
-    def test_partitioner_recomputes_factory(self, factory_op, sin_op):
+    def test_partitioner_recomputes_factory(self, device, factory_op, sin_op):
         class MySin(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
@@ -2188,7 +2197,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         f(x)
         self.assertEqual(num_reinplacing_failures(), 0)
 
-    def test_with_effects_metadata_refresh_unbacked_symbols(self):
+    def test_with_effects_metadata_refresh_unbacked_symbols(self, device):
         from torch._higher_order_ops.effects import with_effects
 
         def f(x, y):
@@ -2216,7 +2225,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         gm.graph.lint()
 
     @parametrize("refresh", ["full", "reinplace"])
-    def test_with_effects_index_put_alias_metadata(self, refresh):
+    def test_with_effects_index_put_alias_metadata(self, device, refresh):
         from torch._higher_order_ops.effects import with_effects
 
         def f(x, indices, values):
@@ -2262,7 +2271,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             self.assertEqual(updater.incremental_update(), 0)
         gm.graph.lint()
 
-    def test_with_effects_index_put_compilation(self):
+    def test_with_effects_index_put_compilation(self, device):
         from torch._higher_order_ops.effects import with_effects
 
         def f(x, indices, values):
@@ -2288,7 +2297,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(inputs, original_inputs)
 
     @parametrize("num_tensors", [1, 2])
-    def test_with_effects_reinplacement_preserves_unextracted_list(self, num_tensors):
+    def test_with_effects_reinplacement_preserves_unextracted_list(
+        self, device, num_tensors
+    ):
         from torch._higher_order_ops.effects import with_effects
         from torch._inductor.fx_passes.reinplace import inplaceable_ops, InplaceableOp
 
@@ -2320,7 +2331,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertIsInstance(actual, list)
         self.assertEqual(actual, [tensor.sin() for tensor in inputs])
 
-    def test_with_effects_reinplace(self):
+    def test_with_effects_reinplace(self, device):
         """Test that the reinplace pass correctly handles with_effects wrapped ops.
 
         When an effectful op is wrapped with with_effects, the reinplace pass should:
@@ -2442,7 +2453,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             if my_add_functional._opoverload in inplaceable_ops:
                 del inplaceable_ops[my_add_functional._opoverload]
 
-    def test_with_effects_reinplace_multiple_mutated_args(self):
+    def test_with_effects_reinplace_multiple_mutated_args(self, device):
         """Test reinplace pass with multiple mutated args in with_effects wrapped ops.
 
         This tests the case where an effectful op mutates multiple tensors,
@@ -2552,7 +2563,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             if my_swap_functional._opoverload in inplaceable_ops:
                 del inplaceable_ops[my_swap_functional._opoverload]
 
-    def test_with_effects_reinplace_list_arg(self):
+    def test_with_effects_reinplace_list_arg(self, device):
         """Test reinplace pass with list arguments in with_effects wrapped ops.
 
         This tests the case where the mutated argument is a list of tensors,
@@ -2694,6 +2705,8 @@ def recorded_lengths(graph):
 
 
 class TestScatterChainReinplacing(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_single_scatter_has_length_one(self):
         graph, chain = make_scatter_chain(1)
         graph.output(chain[-1])
@@ -2792,9 +2805,16 @@ class TestScatterChainReinplacing(InductorTestCase):
         self.assertEqual(result, expected)
 
 
+instantiate_device_type_tests(
+    TestReinplacingPassCorrectnessAccelerator,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
+
 instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 instantiate_parametrized_tests(TestScatterChainReinplacing)
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if IS_LINUX and HAS_TRITON:
         run_tests(needs="filelock")
