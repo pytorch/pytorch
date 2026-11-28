@@ -7480,7 +7480,10 @@ class CodeGuardAccessor : public GuardAccessor {
       PyErr_Clear();
       return GuardDebugInfo(
           false,
-          std::string(repr() + ": Not a function on ") + get_source(),
+          std::string(repr() + ": Not a function on ") + get_source() +
+              " (HINT: Dynamo compiled using the original Python function's "
+              "code object. Restore that function to reuse this compiled "
+              "version.)",
           0);
     }
 
