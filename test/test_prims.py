@@ -447,6 +447,28 @@ class TestRefs(TestCase):
         expect = torch.linspace(2, 10 + 5j, steps=5, device=device)
         self.assertEqual(actual, expect)
 
+    # From https://github.com/pytorch/pytorch/issues/203184
+    @parametrize("steps", [1, 5])
+    @parametrize("dtype", [None, torch.complex128])
+    def test_linspace_with_complex_tensor_input(self, device, steps, dtype):
+        start = torch.tensor(1.0 + 2.0j, dtype=torch.complex128, device=device)
+        actual = refs.linspace(start, 0.0, steps=steps, device=device, dtype=dtype)
+        expect = torch.linspace(start, 0.0, steps=steps, device=device, dtype=dtype)
+        self.assertEqual(actual, expect)
+
+    def test_linspace_with_mixed_complex_tensor_endpoints(self, device):
+        start = torch.tensor(3.0 - 1.0j, dtype=torch.complex64, device=device)
+        end = torch.tensor(1.0 + 2.0j, dtype=torch.complex128, device=device)
+        actual = refs.linspace(start, end, steps=4, device=device)
+        expect = torch.linspace(start, end, steps=4, device=device)
+        self.assertEqual(actual, expect)
+
+    def test_linspace_with_complex_tensor_input_real_dtype(self, device):
+        start = torch.tensor(1.0 + 2.0j, device=device)
+        for fn in (torch.linspace, refs.linspace):
+            with self.assertRaisesRegex(RuntimeError, "can't be safely cast"):
+                fn(start, 0.0, steps=5, device=device, dtype=torch.float32)
+
     # From https://github.com/pytorch/pytorch/issues/109558
     def test_infinite_loop_from_py_dispatcher(self, device):
         # enables prim decomps
