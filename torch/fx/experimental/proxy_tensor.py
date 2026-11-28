@@ -2147,6 +2147,9 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         # enter_autocast node. So we have to save the enter autocast node here, and assign it
         # to the exit_autocast call_function node.
         self.enter_autocast_nodes: list[torch.fx.Node] = []
+        # Autocasts that torch.amp.autocast_mode._enter_autocast entered during
+        # pre-dispatch tracing. Each _exit_autocast must exit the latest one.
+        self.entered_autocasts: list[torch.amp.autocast_mode.autocast] = []
 
     def __torch_function__(
         self,
@@ -3384,6 +3387,13 @@ class _MakefxTracer:
             stack.enter_context(self.proxy_function_mode)
             stack.enter_context(self.torch_fn_metadata_mode)
             stack.enter_context(proxy_mode)
+            if isinstance(self.proxy_function_mode, PreDispatchTorchFunctionMode):
+                # The traced code may leave a replayed autocast without exiting
+                # it, for example a Dynamo graph that raises, since it has no
+                # finally block. Restore the saved state instead of exiting the
+                # open autocasts: the state each of them saved is stale once a
+                # torch.autocast block around it has exited.
+                stack.enter_context(torch.amp.autocast_mode._preserve_autocast_state())
             stack.enter_context(disable_autocast_cache())
             stack.enter_context(_set_make_fx_tracer(self))
 
