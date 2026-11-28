@@ -13,6 +13,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/xpu/MetricsQuery.h>
 #include <torch/csrc/xpu/Module.h>
 #include <torch/csrc/xpu/XPUPluggableAllocator.h>
 #include <torch/csrc/xpu/memory_snapshot.h>
@@ -610,6 +611,12 @@ static void initXpuMethodBindings(PyObject* module) {
     py::gil_scoped_release no_gil;
     return at::getDeviceAllocator(at::kXPU)->getMemoryInfo(device_index);
   });
+#ifdef HAS_XPUPTI
+  m.def(
+      "_xpu_availableScopeProfilerMetrics", [](c10::DeviceIndex device_index) {
+        return torch::xpu::availableScopeProfilerMetrics(device_index);
+      });
+#endif
   m.def(
       "_xpu_getStreamFromExternal",
       [](uintptr_t data_ptr, c10::DeviceIndex device_index) {
