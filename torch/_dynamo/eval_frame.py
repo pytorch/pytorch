@@ -471,6 +471,14 @@ def _create_delayed_compile_callback(
 ) -> Callable[..., Any]:
     def callback_fn(*args: Any, **kwargs: Any) -> convert_frame.ConvertFrameReturn:
         frame = args[0]
+        # Check if Dynamo is disabled or if the frame is in Dynamo's skipfiles list.
+        # This prevents Dynamo from inspecting locals, converting to meta, and
+        # triggering proxy tracing on skipfile frames (such as make_fx internals).
+        if config.disable or trace_rules.check(frame.f_code, frame=frame):
+            if callable(callback):
+                return callback(*args, **kwargs)
+            return ConvertFrameReturn()
+
         example_inputs = _get_or_add_example_inputs(frame)
 
         if len(example_inputs) == 1:

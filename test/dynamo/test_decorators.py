@@ -2109,6 +2109,31 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertEqual(cnts.frame_count, 2)
 
+    @parametrize("stance", ["eager_then_compile", "aot_eager_then_compile"])
+    def test_set_stance_delayed_compile_with_make_fx(self, stance):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def inner(a):
+            return a + 1
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            traced = make_fx(inner)(x)
+            return traced(x)
+
+        with torch.compiler.set_stance(stance):
+            x1 = torch.randn(2, 2)
+            self.assertEqual(fn(x1), x1 + 1)
+            x2 = torch.randn(2, 2)
+            self.assertEqual(fn(x2), x2 + 1)
+            x3 = torch.randn(2, 2)
+            self.assertEqual(fn(x3), x3 + 1)
+
+        expected_count = 1 if stance == "eager_then_compile" else 3
+        self.assertEqual(cnts.frame_count, expected_count)
+
     def test_set_stance_force_eager(self):
         @torch.compile(backend="eager")
         def a(x):
