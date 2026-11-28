@@ -1471,6 +1471,11 @@ class TestTestingOverrides(TestCase):
             torch.Tensor.size: "(self, dim=None)",
             torch.Tensor.permute: "(self, *dims)",
             torch.permute: "(input, dims)",
+            torch.Tensor.expand: "(self, *size)",
+            torch.Tensor.reshape: "(self, *shape)",
+            torch.Tensor.resize_: "(self, *sizes, memory_format=torch.contiguous_format)",
+            torch.Tensor.sum_to_size: "(self, *size)",
+            torch.Tensor.view: "(self, *shape)",
         }
         for func, signature in expected.items():
             self.assertEqual(str(inspect.signature(overrides[func])), signature)
