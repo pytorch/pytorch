@@ -346,6 +346,20 @@ methods_consuming_unbacked_scalars: frozenset[str] = frozenset(
 )
 
 
+# ctc_loss drops log_alpha, whose size is unbacked, and returns only the loss.
+ctc_loss_fns: frozenset[Callable[..., Any]] = frozenset(
+    {
+        torch.ctc_loss,
+        torch.nn.functional.ctc_loss,
+        torch.ops.aten.ctc_loss,
+        torch.ops.aten.ctc_loss.Tensor,
+    }
+)
+
+# Ops whose fresh unbacked symbols never reach their outputs
+ops_with_dropped_unbacked_symbols = ops_consuming_unbacked_scalars | ctc_loss_fns
+
+
 @functools.cache
 def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
     # Defined as a function to avoid circular import like torch.onnx
@@ -4252,7 +4266,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 saved_out_args.append((out_kwarg_vt, saved_out_shapes))
 
         ctx = nullcontext
-        if fn_ in ops_consuming_unbacked_scalars:
+        if fn_ in ops_with_dropped_unbacked_symbols:
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
