@@ -98,6 +98,7 @@ C10_DEVICE inline void adam_math(
     const bool& maximize,
     const float* grad_scale_ptr,
     const float* found_inf_ptr,
+    const double* grad_clip_coef_ptr,
     const opmath_t& bias_correction1,
     const opmath_t& bias_correction2_sqrt) {
   static_assert(depth == 4 || depth == 5);
@@ -118,6 +119,10 @@ C10_DEVICE inline void adam_math(
       grad /= (static_cast<opmath_t>(*grad_scale_ptr));
     }
     const opmath_t grad_to_store = grad;
+    if (grad_clip_coef_ptr) {
+      grad = static_cast<opmath_t>(static_cast<scalar_type>(
+          grad * static_cast<opmath_t>(*grad_clip_coef_ptr)));
+    }
 
     if (maximize) {
       grad = -grad;
@@ -187,7 +192,8 @@ struct FusedAdamMathFunctor {
       const double& eps,
       const bool& maximize,
       const float* grad_scale_ptr,
-      const float* found_inf_ptr) {
+      const float* found_inf_ptr,
+      const double* grad_clip_coef_ptr) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
 
@@ -241,6 +247,7 @@ struct FusedAdamMathFunctor {
             maximize,
             grad_scale_ptr,
             found_inf_ptr,
+            grad_clip_coef_ptr,
             bias_correction1,
             bias_correction2_sqrt);
 #pragma unroll
@@ -264,6 +271,7 @@ struct FusedAdamMathFunctor {
             maximize,
             grad_scale_ptr,
             found_inf_ptr,
+            grad_clip_coef_ptr,
             bias_correction1,
             bias_correction2_sqrt);
 #pragma unroll
@@ -303,7 +311,8 @@ struct FusedAdamMathFunctorMP {
       const double& eps,
       const bool& maximize,
       const float* grad_scale_ptr,
-      const float* found_inf_ptr) {
+      const float* found_inf_ptr,
+      const double* grad_clip_coef_ptr) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
     const double lr_double = lr_ptr ? *lr_ptr : lr;
@@ -428,6 +437,7 @@ struct FusedAdamMathFunctorMP {
             maximize,
             grad_scale_ptr,
             found_inf_ptr,
+            grad_clip_coef_ptr,
             bias_correction1,
             bias_correction2_sqrt);
         if constexpr (!std::is_same_v<scalar_type, param_type>) {
@@ -530,6 +540,7 @@ struct FusedAdamMathFunctorMP {
             maximize,
             grad_scale_ptr,
             found_inf_ptr,
+            grad_clip_coef_ptr,
             bias_correction1,
             bias_correction2_sqrt);
         store_args(param_args, r_args[kParamIdx], i_start, chunk_size, n);
@@ -571,7 +582,20 @@ void _fused_adam_cuda_impl_common(
     const double eps,
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
-    const std::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& found_inf,
+    const std::optional<at::Tensor>& grad_clip_coef = std::nullopt) {
+  const double* grad_clip_coef_ptr = nullptr;
+  if (grad_clip_coef.has_value()) {
+    TORCH_CHECK(
+        !grad_scale.has_value(),
+        "Unscale gradients before fused Adam clipping");
+    TORCH_CHECK(
+        grad_clip_coef->device() == params[0].device() &&
+            grad_clip_coef->scalar_type() == kDouble &&
+            grad_clip_coef->numel() == 1,
+        "grad_clip_coef must be a one-element float64 tensor on the params device");
+    grad_clip_coef_ptr = grad_clip_coef->const_data_ptr<double>();
+  }
   constexpr int depth = amsgrad ? 5 : 4;
   constexpr bool is_adamw = (mode == ADAM_MODE::ADAMW);
   constexpr const char* validate_msg =
@@ -634,7 +658,8 @@ void _fused_adam_cuda_impl_common(
               eps,
               maximize,
               grad_scale_ptr,
-              found_inf_ptr);
+              found_inf_ptr,
+              grad_clip_coef_ptr);
         }),
         kBFloat16);
   } else {
@@ -652,7 +677,8 @@ void _fused_adam_cuda_impl_common(
               eps,
               maximize,
               grad_scale_ptr,
-              found_inf_ptr);
+              found_inf_ptr,
+              grad_clip_coef_ptr);
         });
   }
 }

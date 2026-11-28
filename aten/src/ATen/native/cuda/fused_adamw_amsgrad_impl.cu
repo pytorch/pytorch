@@ -18,7 +18,8 @@ void _fused_adamw_amsgrad_cuda_impl_(
     const double eps,
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
-    const std::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& found_inf,
+    const std::optional<at::Tensor>& grad_clip_coef) {
   _fused_adam_cuda_impl_common<ADAM_MODE::ADAMW, /*amsgrad=*/true>(
       params,
       grads,
@@ -34,7 +35,8 @@ void _fused_adamw_amsgrad_cuda_impl_(
       eps,
       maximize,
       grad_scale,
-      found_inf);
+      found_inf,
+      grad_clip_coef);
 }
 
 // The following overload simply has a Tensor lr
@@ -52,7 +54,8 @@ void _fused_adamw_amsgrad_cuda_impl_(
     const double eps,
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
-    const std::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& found_inf,
+    const std::optional<at::Tensor>& grad_clip_coef) {
   _fused_adam_cuda_impl_common<ADAM_MODE::ADAMW, /*amsgrad=*/true>(
       params,
       grads,
@@ -68,7 +71,8 @@ void _fused_adamw_amsgrad_cuda_impl_(
       eps,
       maximize,
       grad_scale,
-      found_inf);
+      found_inf,
+      grad_clip_coef);
 }
 
 } // namespace at::native
