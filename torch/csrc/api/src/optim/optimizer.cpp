@@ -306,12 +306,6 @@ void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
   param_groups_.emplace_back(std::move(param_group_));
 }
 
-void Optimizer::add_parameters(const std::vector<Tensor>& parameters) {
-  TORCH_WARN("Optimizer::add_parameters() will be removed in PyTorch 1.6");
-  auto& parameters_ = param_groups_[0].params();
-  parameters_.insert(parameters_.end(), parameters.begin(), parameters.end());
-}
-
 void Optimizer::zero_grad(bool set_to_none) {
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
@@ -324,25 +318,6 @@ void Optimizer::zero_grad(bool set_to_none) {
       }
     }
   }
-}
-
-const std::vector<Tensor>& Optimizer::parameters() const noexcept {
-  TORCH_WARN("Optimizer::parameters() will be removed in PyTorch 1.6");
-  return param_groups_.at(0).params();
-}
-
-std::vector<Tensor>& Optimizer::parameters() noexcept {
-  TORCH_WARN("Optimizer::parameters() will be removed in PyTorch 1.6");
-  return param_groups_.at(0).params();
-}
-
-size_t Optimizer::size() const noexcept {
-  TORCH_WARN("Optimizer::size() will be removed in PyTorch 1.6");
-  size_t count = 0;
-  for (const auto& group : param_groups_) {
-    count += group.params().size();
-  }
-  return count;
 }
 
 OptimizerOptions& Optimizer::defaults() noexcept {

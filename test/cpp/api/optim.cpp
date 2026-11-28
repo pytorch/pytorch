@@ -188,70 +188,21 @@ TEST(OptimTest, OptimizerAccessors) {
   optimizer_.state();
 }
 
-#define OLD_INTERFACE_WARNING_CHECK(func)       \
-  {                                             \
-    torch::test::WarningCapture warnings;       \
-    func;                                       \
-    ASSERT_EQ(                                  \
-        torch::test::count_substr_occurrences(  \
-            warnings.str(), "will be removed"), \
-        1);                                     \
-  }
+TEST(OptimTest, AddParamGroup) {
+  auto first = torch::ones({1});
+  auto second = torch::ones({1});
+  first.mutable_grad() = torch::ones_like(first);
+  second.mutable_grad() = torch::ones_like(second);
 
-struct MyOptimizerOptions
-    : public OptimizerCloneableOptions<MyOptimizerOptions> {
-  MyOptimizerOptions(double lr = 1.0) : lr_(lr) {}
-  TORCH_ARG(double, lr) = 1.0;
-};
+  SGD optimizer({first}, 1.0);
+  optimizer.add_param_group(OptimizerParamGroup({second}));
+  ASSERT_EQ(optimizer.param_groups().size(), 2);
+  ASSERT_TRUE(optimizer.param_groups()[0].params()[0].is_same(first));
+  ASSERT_TRUE(optimizer.param_groups()[1].params()[0].is_same(second));
 
-TEST(OptimTest, OldInterface) {
-  struct MyOptimizer : Optimizer {
-    using Optimizer::Optimizer;
-    torch::Tensor step(LossClosure closure = nullptr) override {
-      return {};
-    }
-    explicit MyOptimizer(
-        std::vector<at::Tensor> params,
-        const MyOptimizerOptions& defaults = {})
-        : Optimizer(
-              std::move(params),
-              std::make_unique<MyOptimizerOptions>(defaults)) {}
-  };
-  std::vector<torch::Tensor> parameters = {
-      torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
-  {
-    MyOptimizer optimizer(parameters);
-    size_t size = 0;
-    OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
-    ASSERT_EQ(size, parameters.size());
-  }
-  {
-    std::vector<at::Tensor> params;
-    MyOptimizer optimizer(params);
-
-    size_t size = 0;
-    OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
-    ASSERT_EQ(size, 0);
-
-    OLD_INTERFACE_WARNING_CHECK(optimizer.add_parameters(parameters));
-
-    OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
-    ASSERT_EQ(size, parameters.size());
-
-    std::vector<torch::Tensor> params_;
-    OLD_INTERFACE_WARNING_CHECK(params_ = optimizer.parameters());
-    for (const auto p : c10::irange(size)) {
-      ASSERT_TRUE(params_[p].allclose(parameters[p]));
-    }
-  }
-  {
-    Linear linear(3, 4);
-    MyOptimizer optimizer(linear->parameters());
-
-    size_t size = 0;
-    OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
-    ASSERT_EQ(size, linear->parameters().size());
-  }
+  optimizer.step();
+  ASSERT_EQ(first.item<float>(), 0.0);
+  ASSERT_EQ(second.item<float>(), 0.0);
 }
 
 TEST(OptimTest, XORConvergence_SGD) {
@@ -449,25 +400,6 @@ TEST(OptimTest, ExternalVectorOfParameters) {
   ASSERT_TRUE(parameters[0].allclose(original_parameters[0] - 1.0));
   ASSERT_TRUE(parameters[1].allclose(original_parameters[1] - 1.0));
   ASSERT_TRUE(parameters[2].allclose(original_parameters[2] - 1.0));
-}
-
-TEST(OptimTest, AddParameter_LBFGS) {
-  torch::manual_seed(0);
-
-  std::vector<torch::Tensor> parameters = {torch::randn({5, 5})};
-  std::vector<torch::Tensor> original_parameters = {parameters[0].clone()};
-
-  // Set all gradients to one
-  for (auto& parameter : parameters) {
-    parameter.mutable_grad() = torch::ones_like(parameter);
-  }
-
-  LBFGS optimizer(std::vector<torch::Tensor>{}, 1.0);
-  OLD_INTERFACE_WARNING_CHECK(optimizer.add_parameters(parameters));
-
-  optimizer.step([]() { return torch::tensor(1); });
-
-  // REQUIRE this doesn't throw
 }
 
 // Check whether the learning rate of the parameter groups in the optimizer are
