@@ -72,6 +72,24 @@ namespace {
 
 using namespace c10d::symmetric_memory;
 
+// The slot kernels synchronize block b through channel b of the group's pad.
+uint32_t** group_signal_pads(
+    const c10::intrusive_ptr<SymmetricMemory>& symm_mem,
+    int num_blocks) {
+  const size_t num_channels = symm_mem->get_group_signal_pad_size() /
+      (sizeof(uint32_t) * symm_mem->get_world_size());
+  TORCH_CHECK(
+      static_cast<size_t>(num_blocks) <= num_channels,
+      "symm_mem: this launch needs ",
+      num_blocks,
+      " channels of the group's signal pad, which has ",
+      num_channels,
+      ". Call set_signal_pad_size() with a larger size before the group's "
+      "first rendezvous, or before rendezvousing a new group.");
+  auto pads = symm_mem->get_group_signal_pad_ptrs_dev();
+  return reinterpret_cast<uint32_t**>(pads);
+}
+
 size_t get_and_verify_alignment(const at::Tensor& input, const char* op_name) {
   const size_t min_alignment = std::max(4l, input.element_size());
   // Only check the offset since the multicast address is always at least
@@ -221,8 +239,7 @@ at::Tensor multimem_all_reduce_(
                   reinterpret_cast<scalar_t*>(symm_mem->get_multicast_ptr()) +
                       input.storage_offset(),
                   input.numel(),
-                  reinterpret_cast<uint32_t**>(
-                      symm_mem->get_signal_pad_ptrs_dev()),
+                  group_signal_pads(symm_mem, num_blocks),
                   symm_mem->get_rank(),
                   symm_mem->get_world_size());
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -337,8 +354,7 @@ at::Tensor multimem_one_shot_reduce_out(
                       input.storage_offset(),
                   out.data_ptr<scalar_t>(),
                   input.numel(),
-                  reinterpret_cast<uint32_t**>(
-                      symm_mem->get_signal_pad_ptrs_dev()),
+                  group_signal_pads(symm_mem, num_blocks),
                   rank,
                   world_size,
                   root);
@@ -466,7 +482,7 @@ at::Tensor multimem_all_gather_out(
             reinterpret_cast<char*>(symm_mem->get_multicast_ptr()) +
                 out.storage_offset() * out.element_size(),
             input.numel() * input.element_size(),
-            reinterpret_cast<uint32_t**>(symm_mem->get_signal_pad_ptrs_dev()),
+            group_signal_pads(symm_mem, num_blocks),
             symm_mem->get_rank(),
             symm_mem->get_world_size());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -668,8 +684,7 @@ at::Tensor one_shot_all_reduce_out_impl(
                                             : nullptr,
                     input.storage_offset(),
                     input.numel(),
-                    reinterpret_cast<uint32_t**>(
-                        symm_mem->get_signal_pad_ptrs_dev()),
+                    group_signal_pads(symm_mem, num_blocks),
                     symm_mem->get_rank(),
                     symm_mem->get_world_size());
             C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -941,8 +956,7 @@ at::Tensor two_shot_all_reduce_impl(
                           symm_mem->get_buffer_ptrs_dev()),
                       input.storage_offset(),
                       input.numel(),
-                      reinterpret_cast<uint32_t**>(
-                          symm_mem->get_signal_pad_ptrs_dev()),
+                      group_signal_pads(symm_mem, num_blocks),
                       symm_mem->get_rank(),
                       symm_mem->get_world_size());
               C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -965,8 +979,7 @@ at::Tensor two_shot_all_reduce_impl(
                       output->data_ptr<scalar_t>(),
                       input.storage_offset(),
                       input.numel(),
-                      reinterpret_cast<uint32_t**>(
-                          symm_mem->get_signal_pad_ptrs_dev()),
+                      group_signal_pads(symm_mem, num_blocks),
                       symm_mem->get_rank(),
                       symm_mem->get_world_size());
               C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -1106,8 +1119,7 @@ at::Tensor reduce_scatter_out(
                       output.data_ptr<scalar_t>(),
                       input.storage_offset(),
                       input.numel(),
-                      reinterpret_cast<uint32_t**>(
-                          symm_mem->get_signal_pad_ptrs_dev()),
+                      group_signal_pads(symm_mem, num_blocks),
                       symm_mem->get_rank(),
                       symm_mem->get_world_size(),
                       input.size(-1));
@@ -1135,8 +1147,7 @@ at::Tensor reduce_scatter_out(
                       output.data_ptr<scalar_t>(),
                       input.storage_offset(),
                       input.numel(),
-                      reinterpret_cast<uint32_t**>(
-                          symm_mem->get_signal_pad_ptrs_dev()),
+                      group_signal_pads(symm_mem, num_blocks),
                       symm_mem->get_rank(),
                       symm_mem->get_world_size(),
                       input.size(-1));
