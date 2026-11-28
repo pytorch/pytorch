@@ -325,9 +325,11 @@ class Guard:
         # two sources while guard.name only considers one source.
 
         cls = torch._dynamo.guards.GuardBuilder
-        is_duplicate_input = isinstance(
-            self.create_fn, functools.partial
-        ) and self.create_fn.func in (cls.DUPLICATE_INPUT, cls.NOT_DUPLICATE_INPUT)
+        alias_checks = (cls.DUPLICATE_INPUT, cls.NOT_DUPLICATE_INPUT)
+        is_duplicate_input = (
+            isinstance(self.create_fn, functools.partial)
+            and self.create_fn.func in alias_checks
+        )
         return (
             is_duplicate_input,
             self.source.value if self.source else -1,
@@ -936,8 +938,6 @@ class InvokeSubgraphReuseEntry:
     # The graph may have additional outputs from side-effect intermediates;
     # stamp_out_subgraph uses this to return only the user-visible slice.
     num_user_outputs: int = 0
-
-    lifted_capture_sources: frozenset[Source] = frozenset()
 
     # Predicates from shape guards, finite ranges, and deferred asserts.
     shape_guards: list[sympy.Basic] = dataclasses.field(default_factory=list)

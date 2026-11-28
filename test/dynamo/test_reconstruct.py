@@ -86,6 +86,47 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
+    def test_equal_code_objects_reconstruct_distinct_literal(self):
+        def fn(x):
+            return x + 1, 4.5
+
+        other = float("4.5")
+        code = fn.__code__
+        consts = tuple(other if type(v) is float else v for v in code.co_consts)
+        twin = types.FunctionType(code.replace(co_consts=consts), fn.__globals__)
+        self.assertEqual(code, twin.__code__)
+        x = torch.ones(1)
+        self.assertIsNot(fn(x)[1], twin(x)[1])
+        for original in (fn, twin):
+            compiled = torch.compile(original, backend="eager", fullgraph=True)
+            self.assertIs(compiled(x)[1], original(x)[1])
+
+    @parametrize("operation", ["read", "write", "alias"])
+    def test_formatted_tensor_before_later_operation(self, operation):
+        def fn(x, other):
+            text = str.format("tensor={}", x)
+            if operation == "read":
+                return other + 1, text
+            other.add_(1)
+            return other, text
+
+        def run(fn):
+            x = torch.zeros(2)
+            other = x.view_as(x) if operation == "alias" else x
+            return fn(x, other), x
+
+        expected = run(fn)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        if operation == "read":
+            self.assertEqual(run(compiled), expected)
+        else:
+            self.assertEqual(run(torch.compile(fn, backend="eager")), expected)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                Unsupported, "Tensor mutation after formatting"
+            ):
+                run(compiled)
+
     @parametrize("dynamic", [False, True])
     def test_nbytes_snapshot_after_data_swap(self, dynamic):
         def fn(x, replacement):

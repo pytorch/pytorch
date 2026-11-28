@@ -2210,6 +2210,13 @@ class StringFormatVariable(VariableTracker):
             except (ValueError, TypeError, IndexError, KeyError, AttributeError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return variables.ConstantVariable.create(result)
+        if not tx.output.has_deferred_tensor_format:
+
+            def record_tensor(var: VariableTracker) -> None:
+                if isinstance(var, variables.TensorVariable):
+                    tx.output.has_deferred_tensor_format = True
+
+            VariableTracker.visit(record_tensor, (sym_args, sym_kwargs))
         return cls(format_string, list(sym_args), dict(sym_kwargs))
 
     def __init__(
