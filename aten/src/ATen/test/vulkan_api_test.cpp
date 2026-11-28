@@ -2177,6 +2177,32 @@ TEST_F(VulkanAPITest, copy) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, cumsum_invalid_inputs) {
+  c10::InferenceMode mode;
+
+  // Act: input dimension too large
+  EXPECT_THROW({
+    at::cumsum(
+        at::rand({3, 5, 7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+            .vulkan(),
+        3);
+  }, ::std::exception);
+
+  // Act: dimension out of range
+  EXPECT_THROW({
+    at::cumsum(
+        at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        3);
+  }, ::std::exception);
+
+  // Act: dimension out of range
+  EXPECT_THROW({
+    at::cumsum(
+        at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        -4);
+  }, ::std::exception);
+}
+
 void test_cumsum(const at::IntArrayRef input_shape, const int64_t dim) {
   const auto in_cpu = at::rand(input_shape, at::TensorOptions(at::kCPU).dtype(at::kFloat));
 
@@ -2506,6 +2532,32 @@ TEST_F(VulkanAPITest, expand_as) {
     showRtol(cpu, vulkan.cpu());
   }
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, flip_invalid_inputs) {
+  c10::InferenceMode mode;
+
+  // Act: input dimension too large
+  EXPECT_THROW({
+    at::flip(
+        at::rand({3, 5, 7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+            .vulkan(),
+        {3});
+  }, ::std::exception);
+
+  // Act: dimension out of range
+  EXPECT_THROW({
+    at::flip(
+        at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        {3});
+  }, ::std::exception);
+
+  // Act: dimension out of range
+  EXPECT_THROW({
+    at::flip(
+        at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        {-4});
+  }, ::std::exception);
 }
 
 void test_flip(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list) {
@@ -4522,6 +4574,32 @@ TEST_F(VulkanAPITest, log_softmax_underflow) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, softmax_invalid_inputs) {
+  c10::InferenceMode mode;
+
+  // Act: input dimension too large
+  EXPECT_THROW({
+    at::softmax(
+        at::rand({3, 5, 7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+            .vulkan(),
+        3);
+  }, ::std::exception);
+
+  // Act: dimension out of range
+  EXPECT_THROW({
+    at::softmax(
+        at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        3);
+  }, ::std::exception);
+
+  // Act: dimension out of range
+  EXPECT_THROW({
+    at::softmax(
+        at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
+        -4);
+  }, ::std::exception);
+}
+
 void test_softmax(const at::IntArrayRef shape, bool log_softmax = false) {
   at::Tensor in_cpu =
       at::rand(shape, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -5641,6 +5719,52 @@ TEST_F(VulkanAPITest, unbind_3d_depth_medium) {
 
 TEST_F(VulkanAPITest, unbind_3d_depth_large) {
   test_unbind({100, 1, 144}, 0);
+}
+
+TEST_F(VulkanAPITest, var_invalid_inputs) {
+  c10::InferenceMode mode;
+
+  // Act: input dimension too large
+  EXPECT_THROW({
+    at::var(at::rand({3, 5, 7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {3}, true, false);
+  }, ::std::exception);
+
+  auto expect_var_dim_out_of_range = [](const at::IntArrayRef dim_list) {
+    try {
+      at::var(
+          at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+              .vulkan(),
+          dim_list,
+          true,
+          false);
+      ADD_FAILURE() << "Expected var to reject an out-of-range dim";
+    } catch (const std::exception& e) {
+      EXPECT_NE(
+          std::string(e.what()).find(
+              "Vulkan var.dim_IntList dimension out of range"),
+          std::string::npos)
+          << e.what();
+    }
+  };
+
+  // Act: dimension out of range
+  expect_var_dim_out_of_range({3});
+
+  // Act: dimension out of range
+  expect_var_dim_out_of_range({-4});
+
+  // Act: repeated dimensions
+  EXPECT_THROW({
+    at::var(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {1, 1}, true, false);
+  }, ::std::exception);
+
+  // Act: repeated dimensions
+  EXPECT_THROW({
+    at::var(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {1, -2}, true, false);
+  }, ::std::exception);
 }
 
 void test_var(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list, bool unbiased=true, bool keepdim=false) {

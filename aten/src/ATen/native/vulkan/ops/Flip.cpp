@@ -36,11 +36,11 @@ Tensor flip(const at::Tensor& self, const IntArrayRef dim_list) {
   std::vector<int32_t> dim_args = {0, 0, 0, 0};
   for (const auto dim : dim_list) {
     TORCH_CHECK(
-        dim >= -self.dim() - 1 && dim <= self.dim(),
+        dim >= -self.dim() && dim < self.dim(),
         "Vulkan flip dimension out of range expected to be in range of [",
-        -self.dim() - 1,
+        -self.dim(),
         ",",
-        self.dim(),
+        self.dim() - 1,
         "], but got ",
         dim);
     // Normalize

@@ -92,13 +92,15 @@ Tensor softmax_internal(
   TORCH_CHECK(
       input_arg.dim() >= 1 && input_arg.dim() <= 4,
       "Vulkan softmax expects 1,2,3 or 4-dimensional input!");
-  int64_t dim = utils::normalize(dim_arg, input_arg.dim());
   TORCH_CHECK(
-      dim >= 0 && dim < input_arg.dim(),
-      "Softmax dim input was ",
-      dim,
-      " out of range for Tensor input with dimensions ",
-      input_arg.dim());
+      dim_arg >= -input_arg.dim() && dim_arg < input_arg.dim(),
+      "Vulkan softmax dimension out of range expected to be in range of [",
+      -input_arg.dim(),
+      ",",
+      input_arg.dim() - 1,
+      "], but got ",
+      dim_arg);
+  int64_t dim = utils::normalize(dim_arg, input_arg.dim());
   api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
