@@ -2,6 +2,7 @@
 #
 # Tests specific to the in-tree torchcomms NCCL backends.
 
+import contextlib
 import ctypes
 import gc
 import glob
@@ -16,6 +17,7 @@ import threading
 import time
 import unittest
 import weakref
+from collections.abc import Iterator
 from datetime import timedelta
 from unittest import mock
 
@@ -918,6 +920,22 @@ def _psk_options(psk: str | None) -> "dist.ProcessGroupNCCL.Options":
     return opts
 
 
+def _skip_if_key_refused(e: RuntimeError) -> None:
+    # NCCLX, which fbcode builds link, refuses keys: it authenticates peers with
+    # job certificates instead.
+    if "refuses a pre-shared key" in str(e):
+        raise unittest.SkipTest("NCCL refuses ncclSetEncryption keys") from e
+
+
+@contextlib.contextmanager
+def _key_accepted() -> Iterator[None]:
+    try:
+        yield
+    except RuntimeError as e:
+        _skip_if_key_refused(e)
+        raise
+
+
 @unittest.skipIf(TEST_WITH_ROCM, "ncclSetEncryption is not supported on ROCm")
 @requires_nccl_version((2, 32, 3), "Need NCCL 2.32.3+ for ncclSetEncryption")
 class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
@@ -964,7 +982,8 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "ncclSetEncryption failed"):
             self._new_pg("x" * 31)
         # Failed keys are not applied, so this is still the first group.
-        self._new_pg(_TEST_PSK)
+        with _key_accepted():
+            self._new_pg(_TEST_PSK)
         self._new_pg(_TEST_PSK)
         self._new_pg(None)
         with self.assertRaisesRegex(RuntimeError, "differs"):
@@ -986,7 +1005,8 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
                 self._new_pg(None)
         self.assertNotIn(bad_psk, str(cm.exception))
         with mock.patch.dict(os.environ, {"TORCH_NCCL_ENCRYPTION_PSK": _TEST_PSK}):
-            self._new_pg(None)
+            with _key_accepted():
+                self._new_pg(None)
             with self.assertRaisesRegex(RuntimeError, "differs"):
                 self._new_pg(_TEST_PSK[::-1])
         self._new_pg(_TEST_PSK)
@@ -1045,6 +1065,7 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
                 pg_options=_psk_options(_TEST_PSK),
             )
         except RuntimeError as e:
+            _skip_if_key_refused(e)
             # Both ranks fail locally before connecting.
             self.assertRegex(
                 str(e),
