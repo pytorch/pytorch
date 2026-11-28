@@ -589,7 +589,9 @@ class StrictNumericsTest(TestCase):
                 return y.reshape(batch, width // group, group).sum(-1)
 
         elif kind == "mix":
-            args = (torch.randn(8, 12000, device=device),)
+            # large enough for the mix-order size checks, so that only the
+            # strict reduction prevents the fusion
+            args = (torch.randn(8192, 1280, device=device),)
             cfg = {
                 "triton.mix_order_reduction": True,
                 "triton.mix_order_reduction_non_strict_mode": True,
