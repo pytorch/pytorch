@@ -544,6 +544,9 @@ void ProcessGroupNCCL::abort() {
     stopWatchdog();
     comm_state_ = CommState::ERROR;
     abortNcclComm();
+    // Publish pending Work results now that the watchdog has stopped and NCCL
+    // has stopped using the tensors retained by the queue.
+    workq_.finalize();
   }
 }
 

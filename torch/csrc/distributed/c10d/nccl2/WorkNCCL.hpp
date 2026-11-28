@@ -226,7 +226,7 @@ class WorkNCCLQueue {
   ~WorkNCCLQueue() = default;
 
   WorkNCCL::WorkStatus garbageCollect();
-  // Finalize function can only be called from the main thread
+  // Drains queued work and publishes its results after releasing the lock.
   WorkNCCL::WorkStatus finalize();
   // Cancels the queued work that has not completed; finalize() dequeues it.
   void cancelPending();

@@ -2083,6 +2083,41 @@ class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_abort_resolves_pending_work_results(self) -> None:
+        with mock.patch.dict(os.environ, {"TORCH_NCCL_ASYNC_ERROR_HANDLING": "0"}):
+            pg = self._new_subgroup()
+        self._check_all_reduce(pg)
+
+        results = []
+        if self.rank == 0:
+            # Other ranks never join these collectives. Keep only the result
+            # futures so no Work method can publish their status for abort().
+            tensor = torch.ones(1024, device=self.device)
+            for _ in range(2):
+                result = dist.all_reduce(
+                    tensor, group=pg, async_op=True
+                ).get_future_result()
+                self.assertFalse(result.done())
+                results.append(result)
+
+        self._wait_for_rank_zero(pg)
+        dist.distributed_c10d._abort_process_group(pg)
+
+        statuses = [
+            WorkResult(result.value()) if result.done() else None for result in results
+        ]
+        success = torch.tensor(
+            all(status == WorkResult.COMM_ERROR for status in statuses),
+            device=self.device,
+        )
+        # Fail on all ranks so none waits in graceful teardown after a failure.
+        dist.all_reduce(success, op=dist.ReduceOp.MIN)
+        self.assertTrue(
+            success.item(), f"Expected COMM_ERROR after abort(), got {statuses}"
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_destroy_process_group_returns(self) -> None:
         pg = self._new_subgroup()
         self._check_all_reduce(pg)
