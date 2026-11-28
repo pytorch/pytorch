@@ -675,7 +675,7 @@ def _get_input_guards_for_graph(
             sources[expr] = src
             # process value ranges as elsewhere in export
             min_val, max_val = _convert_range_to_int(range_constraints[expr])
-            if min_val > 2:
+            if min_val > -math.inf:
                 new_guards_code.append(f"{src} >= {min_val}")
             if max_val < math.inf:
                 new_guards_code.append(f"{src} <= {max_val}")
