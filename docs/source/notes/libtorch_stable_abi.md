@@ -111,7 +111,7 @@ runtime and must be called with the GIL held. If you call them from a context th
 may run without the GIL (for example a boxed `STABLE_TORCH_LIBRARY` kernel),
 acquire it first.
 
-See the [C++ Python object interop reference](https://docs.pytorch.org/cppdocs/api/stable/python-interop.html) for detailed conversion contracts.
+See the [C++ Python object interop reference](https://docs.pytorch.org/cppdocs/api/stable/python-interop.html) for detailed conversion contracts. <!-- @lint-ignore: added in #205955; awaiting the next nightly docs publication -->
 
 ### Performance overhead
 
