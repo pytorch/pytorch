@@ -27,8 +27,10 @@ from torch._inductor.codegen.xpu.device_op_overrides import XPUDeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer, run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     find_library_location,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
@@ -202,156 +204,6 @@ class TestGpuWrapper(InductorTestCase):
             }
         )(test_fn)
         comp()
-
-    def test_cpp_wrapper_gpu_debug_sync_codegen(self):
-        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
-        wrapper.device = "cuda"
-
-        debug_sync = IndentedBuffer()
-        wrapper.generate_debug_sync(debug_sync)
-        code = debug_sync.getvalue()
-        if torch.version.hip is not None:
-            self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
-            self.assertIn("DeviceSynchronize", code)
-        else:
-            self.assertIn("CUDA_DRIVER_CHECK", code)
-            self.assertIn("CtxSynchronize", code)
-        self.assertNotIn("torch.cuda.synchronize()", code)
-
-        wrapper.prefix = IndentedBuffer()
-        wrapper._lazy_kernel_names = []
-        # The prologue hoists a stream declaration per device, so it reads the
-        # devices the graph lowered for.
-        graph = SimpleNamespace(
-            aot_mode=False, is_dual_wrapper_mode=False, device_idxs=()
-        )
-        with (
-            config.patch({"triton.debug_sync_graph": True}),
-            V.set_graph_handler(graph),
-        ):
-            wrapper._codegen_entry_impl_prologue()
-        code = wrapper.prefix.getvalue()
-        if torch.version.hip is not None:
-            self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
-            self.assertIn("DeviceSynchronize", code)
-        else:
-            self.assertIn("CUDA_DRIVER_CHECK", code)
-            self.assertIn("CtxSynchronize", code)
-        self.assertNotIn("torch.cuda.synchronize()", code)
-
-        wrapper.device = "xpu"
-        with self.assertRaisesRegex(
-            NotImplementedError, "triton debug sync is not supported"
-        ):
-            wrapper.generate_debug_sync(IndentedBuffer())
-
-    def test_prologue_stream_declaration_per_backend(self):
-        def prologue(wrapper_cls, device, device_codegen, aot_mode=False):
-            wrapper = wrapper_cls.__new__(wrapper_cls)
-            wrapper.device = device
-            wrapper.device_codegen = device_codegen
-            wrapper.prefix = IndentedBuffer()
-            wrapper._lazy_kernel_names = []
-            graph = SimpleNamespace(
-                aot_mode=aot_mode, is_dual_wrapper_mode=False, device_idxs=(0,)
-            )
-            with V.set_graph_handler(graph):
-                wrapper._codegen_entry_impl_prologue()
-            return wrapper.prefix.getvalue()
-
-        self.assertIn(
-            "stream0;", prologue(CppWrapperGpu, "cuda", CUDADeviceOpOverrides())
-        )
-        # Neither backend has a stream type to query: Metal kernels are
-        # dispatched without a raw stream, and pure AOTI takes the stream as a
-        # parameter, which is how MTIA runs through CppWrapperGpu.
-        self.assertNotIn(
-            "stream0", prologue(CppWrapperMps, "mps", MPSDeviceOpOverrides())
-        )
-        self.assertNotIn(
-            "stream0",
-            prologue(CppWrapperGpu, "mtia", MTIADeviceOpOverrides(), aot_mode=True),
-        )
-        self.assertNotIn(
-            "stream0",
-            prologue(CppWrapperGpu, "xpu", XPUDeviceOpOverrides(), aot_mode=True),
-        )
-
-    def test_tunableop_dynamic_dims_guard_codegen(self):
-        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
-        wrapper.device = "cuda"
-        wrapper.lines = []
-
-        with config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": True}):
-            self.assertTrue(
-                wrapper._begin_tunableop_dynamic_dims_guard(
-                    (False, True, False, False), "cuda"
-                )
-            )
-        self.assertEqual(
-            wrapper.lines,
-            [
-                "{",
-                "AOTICudaTunableOpDynamicDimsGuard tunable_dynamic_dims_guard(2);",
-            ],
-        )
-        with config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": True}):
-            self.assertFalse(wrapper._begin_tunableop_dynamic_dims_guard(None, "cuda"))
-            self.assertFalse(
-                wrapper._begin_tunableop_dynamic_dims_guard(
-                    (False, False, False, False), "cuda"
-                )
-            )
-            self.assertFalse(
-                wrapper._begin_tunableop_dynamic_dims_guard(
-                    (False, True, False, False), "cpu"
-                )
-            )
-        with config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": False}):
-            self.assertFalse(
-                wrapper._begin_tunableop_dynamic_dims_guard(
-                    (False, True, False, False), "cuda"
-                )
-            )
-
-    def test_tunableop_dynamic_dims_guard_preserves_alloc_output_scope(self):
-        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
-        wrapper.device = "cuda"
-        wrapper.lines = []
-        extern_kernel = SimpleNamespace(
-            name="buf0",
-            op_overload=None,
-            outputs=[],
-            python_kernel_name=None,
-            tunable_dyn_dims_mask=(True, False, False, False),
-            get_device=lambda: torch.device("cuda"),
-            get_kernel_name=lambda: "at::test",
-        )
-
-        def emit_call(wrapper, *_args, **_kwargs):
-            wrapper.writeline("CALL;")
-
-        with (
-            config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": True}),
-            patch.object(
-                CppWrapperCpu,
-                "generate_c_shim_extern_kernel_call",
-                emit_call,
-            ),
-        ):
-            wrapper._generate_extern_kernel_alloc_helper(extern_kernel, ["arg0"])
-
-        self.assertEqual(
-            wrapper.lines,
-            [
-                "AtenTensorHandle buf0_handle;",
-                "{",
-                "AOTICudaTunableOpDynamicDimsGuard tunable_dynamic_dims_guard(1);",
-                "CALL;",
-                "}",
-                "RAIIAtenTensorHandle buf0(buf0_handle);",
-            ],
-        )
 
     def test_tunableop_dynamic_dims_guard_in_compiled_wrapper(self):
         if not RUN_GPU or self.device != "cuda":
@@ -553,231 +405,6 @@ class TestGpuWrapper(InductorTestCase):
         # with its undefined weight materialized as an undefined tensor, not None.
         self.assertIn("aoti_custom_ops::forward_maybe_weighted", code)
         self.assertIn("c10::IValue(at::Tensor())", code)
-
-    @unittest.skipIf(torch.version.hip is not None, "requires CUDA TMA helpers")
-    @skipIfXpu(msg="tests CUDA TMA helper codegen")
-    def test_tma_descriptor_separates_global_and_kernel_shapes(self):
-        if torch.version.hip is not None:
-            self.skipTest("requires CUDA TMA helpers")
-
-        helpers = CUDADeviceOpOverrides().tma_descriptor_helpers()
-        self.assertNotIn("int32_t* shape", helpers)
-        self.assertIn("uint64_t* shape", helpers)
-        self.assertIn("int32_t kernel_shape[5];", helpers)
-        self.assertIn("uint64_t global_shape[5];", helpers)
-        self.assertIn("uint64_t dim = shape[i];", helpers)
-
-        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
-        wrapper.arg_var_id = itertools.count()
-        launch_args = wrapper.generate_args_decl(
-            IndentedBuffer(),
-            ["descriptor"],
-            [torch.float32],
-            ["tensordesc<fp32[16, 32]>"],
-        )
-        self.assertEqual(
-            launch_args,
-            "&var_0.m, &var_0.kernel_shape[0], &var_0.kernel_shape[1], "
-            "&var_0.strides[0], &var_0.strides[1]",
-        )
-
-    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
-    def test_cpp_scratch_scales_with_grid_size_for_tma(self):
-        scratch_def, scratch_var = CUDADeviceOpOverrides().cpp_scratch(
-            0,
-            TritonScratchWorkspace(
-                size=256,
-                generate_dtype_str=lambda: "at::ScalarType::Byte",
-                generate_device_type_str=lambda: "cached_torch_device_type_cuda",
-            ),
-            prefix="global_scratch",
-        )
-        self.assertEqual(scratch_var, "global_scratch_scratch_0")
-        self.assertIn(
-            "static_cast<int64_t>(256) * grid_0 * grid_1 * grid_2", scratch_def[0]
-        )
-        self.assertIn("cached_torch_device_type_cuda", scratch_def[3])
-
-    @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
-    def test_triton_wrapper_scales_scratch_with_num_ctas(self):
-        class FakeDeviceCodegen:
-            @staticmethod
-            def cpp_kernel_launch_supports_pdl():
-                return True
-
-        class FakeWrapper:
-            device_codegen = FakeDeviceCodegen()
-
-            def __init__(self):
-                self.scratch_spaces = None
-
-            def generate_args_decl(
-                self,
-                prefix,
-                call_args,
-                arg_types,
-                arg_signatures,
-                is_triton_kernel=True,
-                scratch_spaces=None,
-            ):
-                self.scratch_spaces = scratch_spaces
-
-                return ""
-
-        wrapper = FakeWrapper()
-        prefix = IndentedBuffer()
-        params = {
-            "triton_meta": {"signature": {"x": "*fp32"}, "constants": {}},
-            "def_args": ["x"],
-            "call_args": ["x"],
-            "config": {"num_ctas": 8},
-            "num_warps": 4,
-            "shared_mem": 0,
-            "global_scratch": 256,
-        }
-
-        DeferredTritonCallWrapper(
-            wrapper_name="wrapper",
-            kernel_name="kernel",
-            kernel_name_to_body={},
-            arg_types=[torch.float32],
-        ).generate_launch_kernel(prefix, wrapper, "kernel_var", params)
-
-        self.assertEqual(wrapper.scratch_spaces, {"global_scratch": 256 * 8})
-
-    @parametrize(
-        "triton_meta,expected",
-        [
-            (None, "false"),
-            ({}, "false"),
-            ({"launch_pdl": False}, "false"),
-            ({"launch_pdl": True}, "true"),
-            ({"launch_pdl": 0}, "false"),
-            ({"launch_pdl": 1}, "true"),
-            ({"launch_pdl": None}, "false"),
-            (
-                {"launch_pdl": False, "backend_options": {"launch_pdl": True}},
-                "true",
-            ),
-            (
-                {"launch_pdl": True, "backend_options": {"launch_pdl": False}},
-                "false",
-            ),
-        ],
-    )
-    def test_launch_pdl_cpp_literal(self, triton_meta, expected):
-        self.assertEqual(_launch_pdl_cpp_literal(triton_meta), expected)
-
-    @parametrize("enable_kernel_profile", [False, True])
-    @parametrize("supports_pdl,launch_pdl_arg", [(True, ", true"), (False, "")])
-    def test_triton_wrapper_forwards_launch_pdl(
-        self, enable_kernel_profile, supports_pdl, launch_pdl_arg
-    ):
-        class FakeDeviceCodegen:
-            @staticmethod
-            def cpp_kernel_launch_supports_pdl():
-                return supports_pdl
-
-        class FakeWrapper:
-            device_codegen = FakeDeviceCodegen()
-
-            @staticmethod
-            def generate_args_decl(
-                prefix,
-                call_args,
-                arg_types,
-                arg_signatures,
-                is_triton_kernel=True,
-                scratch_spaces=None,
-            ):
-                return ""
-
-        prefix = IndentedBuffer()
-        params = {
-            "triton_meta": {
-                "signature": {"x": "*fp32"},
-                "constants": {},
-                "launch_pdl": True,
-            },
-            "def_args": ["x"],
-            "call_args": ["x"],
-            "config": {},
-            "num_warps": 4,
-            "shared_mem": 0,
-        }
-        with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
-            DeferredTritonCallWrapper(
-                wrapper_name="wrapper",
-                kernel_name="kernel",
-                kernel_name_to_body={},
-                arg_types=[torch.float32],
-            ).generate_launch_kernel(prefix, FakeWrapper(), "kernel_var", params)
-
-        self.assertIn(
-            "launchKernel(kernel_var, grid_0, grid_1, grid_2, 4, 0, "
-            f"kernel_args_, stream_{launch_pdl_arg});",
-            prefix.getvalue(),
-        )
-
-    @parametrize("supports_pdl,launch_pdl_arg", [(True, ", true"), (False, "")])
-    def test_lazy_triton_wrapper_forwards_launch_pdl(
-        self, supports_pdl, launch_pdl_arg
-    ):
-        class FakeDeviceCodegen:
-            @staticmethod
-            def cpp_device_ptr():
-                return "CUdeviceptr"
-
-            @staticmethod
-            def cpp_kernel_launch_supports_pdl():
-                return supports_pdl
-
-        class FakeWrapper:
-            device = "cuda"  # production wrappers always carry .device (see _generate_lazy_scratch)
-            device_codegen = FakeDeviceCodegen()
-
-            @staticmethod
-            def generate_args_decl(
-                prefix,
-                call_args,
-                arg_types,
-                arg_signatures,
-                is_triton_kernel=True,
-                scratch_spaces=None,
-            ):
-                return ""
-
-            @staticmethod
-            def codegen_dtype(dtype):
-                return "at::ScalarType::Byte"
-
-            @staticmethod
-            def codegen_device(device):
-                return "c10::DeviceType::CUDA, 0"
-
-        prefix = DualIndentedBuffer()
-        deferred = DeferredTritonCallWrapper(
-            wrapper_name="wrapper",
-            kernel_name="kernel",
-            kernel_name_to_body={},
-            arg_types=[torch.float32],
-            triton_meta={
-                "signature": {"x": "*fp32"},
-                "constants": {},
-                "launch_pdl": True,
-            },
-        )
-        deferred._generate_lazy_launch(prefix, FakeWrapper(), ["x"], ["x"])
-
-        expected_args = (
-            "grid_0, grid_1, grid_2, kernel_result.num_warps, "
-            f"kernel_result.shared_mem, kernel_args_, stream_{launch_pdl_arg}"
-        )
-        self.assertIn(f"launchKernel(kernel, {expected_args});", prefix.getvalue())
-        self.assertIn(
-            f"launchKernel(kernels_.kernel, {expected_args});",
-            prefix.aot.getvalue(),
-        )
 
     @parametrize("per_subkernel_blocks", [False, True])
     def test_lazy_compile_combo_kernel_default_config(self, per_subkernel_blocks):
@@ -1008,18 +635,403 @@ class TestGpuWrapper(InductorTestCase):
             test_fn(torch.randn(4, device=self.device), "string")
 
 
+class TestGpuWrapperGeneric(InductorTestCase):
+    """Codegen-only checks that do not need an accelerator to run."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_prologue_stream_declaration_per_backend(self):
+        def prologue(wrapper_cls, device, device_codegen, aot_mode=False):
+            wrapper = wrapper_cls.__new__(wrapper_cls)
+            wrapper.device = device
+            wrapper.device_codegen = device_codegen
+            wrapper.prefix = IndentedBuffer()
+            wrapper._lazy_kernel_names = []
+            graph = SimpleNamespace(
+                aot_mode=aot_mode, is_dual_wrapper_mode=False, device_idxs=(0,)
+            )
+            with V.set_graph_handler(graph):
+                wrapper._codegen_entry_impl_prologue()
+            return wrapper.prefix.getvalue()
+
+        self.assertIn(
+            "stream0;", prologue(CppWrapperGpu, "cuda", CUDADeviceOpOverrides())
+        )
+        # Neither backend has a stream type to query: Metal kernels are
+        # dispatched without a raw stream, and pure AOTI takes the stream as a
+        # parameter, which is how MTIA runs through CppWrapperGpu.
+        self.assertNotIn(
+            "stream0", prologue(CppWrapperMps, "mps", MPSDeviceOpOverrides())
+        )
+        self.assertNotIn(
+            "stream0",
+            prologue(CppWrapperGpu, "mtia", MTIADeviceOpOverrides(), aot_mode=True),
+        )
+        self.assertNotIn(
+            "stream0",
+            prologue(CppWrapperGpu, "xpu", XPUDeviceOpOverrides(), aot_mode=True),
+        )
+
+    @parametrize(
+        "triton_meta,expected",
+        [
+            (None, "false"),
+            ({}, "false"),
+            ({"launch_pdl": False}, "false"),
+            ({"launch_pdl": True}, "true"),
+            ({"launch_pdl": 0}, "false"),
+            ({"launch_pdl": 1}, "true"),
+            ({"launch_pdl": None}, "false"),
+            (
+                {"launch_pdl": False, "backend_options": {"launch_pdl": True}},
+                "true",
+            ),
+            (
+                {"launch_pdl": True, "backend_options": {"launch_pdl": False}},
+                "false",
+            ),
+        ],
+    )
+    def test_launch_pdl_cpp_literal(self, triton_meta, expected):
+        self.assertEqual(_launch_pdl_cpp_literal(triton_meta), expected)
+
+    @parametrize("enable_kernel_profile", [False, True])
+    @parametrize("supports_pdl,launch_pdl_arg", [(True, ", true"), (False, "")])
+    def test_triton_wrapper_forwards_launch_pdl(
+        self, enable_kernel_profile, supports_pdl, launch_pdl_arg
+    ):
+        class FakeDeviceCodegen:
+            @staticmethod
+            def cpp_kernel_launch_supports_pdl():
+                return supports_pdl
+
+        class FakeWrapper:
+            device_codegen = FakeDeviceCodegen()
+
+            @staticmethod
+            def generate_args_decl(
+                prefix,
+                call_args,
+                arg_types,
+                arg_signatures,
+                is_triton_kernel=True,
+                scratch_spaces=None,
+            ):
+                return ""
+
+        prefix = IndentedBuffer()
+        params = {
+            "triton_meta": {
+                "signature": {"x": "*fp32"},
+                "constants": {},
+                "launch_pdl": True,
+            },
+            "def_args": ["x"],
+            "call_args": ["x"],
+            "config": {},
+            "num_warps": 4,
+            "shared_mem": 0,
+        }
+        with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
+            DeferredTritonCallWrapper(
+                wrapper_name="wrapper",
+                kernel_name="kernel",
+                kernel_name_to_body={},
+                arg_types=[torch.float32],
+            ).generate_launch_kernel(prefix, FakeWrapper(), "kernel_var", params)
+
+        self.assertIn(
+            "launchKernel(kernel_var, grid_0, grid_1, grid_2, 4, 0, "
+            f"kernel_args_, stream_{launch_pdl_arg});",
+            prefix.getvalue(),
+        )
+
+    @parametrize("supports_pdl,launch_pdl_arg", [(True, ", true"), (False, "")])
+    def test_lazy_triton_wrapper_forwards_launch_pdl(
+        self, supports_pdl, launch_pdl_arg
+    ):
+        class FakeDeviceCodegen:
+            @staticmethod
+            def cpp_device_ptr():
+                return "CUdeviceptr"
+
+            @staticmethod
+            def cpp_kernel_launch_supports_pdl():
+                return supports_pdl
+
+        class FakeWrapper:
+            device = "cuda"  # production wrappers always carry .device (see _generate_lazy_scratch)
+            device_codegen = FakeDeviceCodegen()
+
+            @staticmethod
+            def generate_args_decl(
+                prefix,
+                call_args,
+                arg_types,
+                arg_signatures,
+                is_triton_kernel=True,
+                scratch_spaces=None,
+            ):
+                return ""
+
+            @staticmethod
+            def codegen_dtype(dtype):
+                return "at::ScalarType::Byte"
+
+            @staticmethod
+            def codegen_device(device):
+                return "c10::DeviceType::CUDA, 0"
+
+        prefix = DualIndentedBuffer()
+        deferred = DeferredTritonCallWrapper(
+            wrapper_name="wrapper",
+            kernel_name="kernel",
+            kernel_name_to_body={},
+            arg_types=[torch.float32],
+            triton_meta={
+                "signature": {"x": "*fp32"},
+                "constants": {},
+                "launch_pdl": True,
+            },
+        )
+        deferred._generate_lazy_launch(prefix, FakeWrapper(), ["x"], ["x"])
+
+        expected_args = (
+            "grid_0, grid_1, grid_2, kernel_result.num_warps, "
+            f"kernel_result.shared_mem, kernel_args_, stream_{launch_pdl_arg}"
+        )
+        self.assertIn(f"launchKernel(kernel, {expected_args});", prefix.getvalue())
+        self.assertIn(
+            f"launchKernel(kernels_.kernel, {expected_args});",
+            prefix.aot.getvalue(),
+        )
+
+
+class TestGpuWrapperCudaCodegen(InductorTestCase):
+    """Codegen checks that assert CUDA/ROCm specific generated code."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    def test_cpp_wrapper_gpu_debug_sync_codegen(self):
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.device = "cuda"
+
+        debug_sync = IndentedBuffer()
+        wrapper.generate_debug_sync(debug_sync)
+        code = debug_sync.getvalue()
+        if torch.version.hip is not None:
+            self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+            self.assertIn("DeviceSynchronize", code)
+        else:
+            self.assertIn("CUDA_DRIVER_CHECK", code)
+            self.assertIn("CtxSynchronize", code)
+        self.assertNotIn("torch.cuda.synchronize()", code)
+
+        wrapper.prefix = IndentedBuffer()
+        wrapper._lazy_kernel_names = []
+        # The prologue hoists a stream declaration per device, so it reads the
+        # devices the graph lowered for.
+        graph = SimpleNamespace(
+            aot_mode=False, is_dual_wrapper_mode=False, device_idxs=()
+        )
+        with (
+            config.patch({"triton.debug_sync_graph": True}),
+            V.set_graph_handler(graph),
+        ):
+            wrapper._codegen_entry_impl_prologue()
+        code = wrapper.prefix.getvalue()
+        if torch.version.hip is not None:
+            self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+            self.assertIn("DeviceSynchronize", code)
+        else:
+            self.assertIn("CUDA_DRIVER_CHECK", code)
+            self.assertIn("CtxSynchronize", code)
+        self.assertNotIn("torch.cuda.synchronize()", code)
+
+        wrapper.device = "xpu"
+        with self.assertRaisesRegex(
+            NotImplementedError, "triton debug sync is not supported"
+        ):
+            wrapper.generate_debug_sync(IndentedBuffer())
+
+    def test_tunableop_dynamic_dims_guard_codegen(self):
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.device = "cuda"
+        wrapper.lines = []
+
+        with config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": True}):
+            self.assertTrue(
+                wrapper._begin_tunableop_dynamic_dims_guard(
+                    (False, True, False, False), "cuda"
+                )
+            )
+        self.assertEqual(
+            wrapper.lines,
+            [
+                "{",
+                "AOTICudaTunableOpDynamicDimsGuard tunable_dynamic_dims_guard(2);",
+            ],
+        )
+        with config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": True}):
+            self.assertFalse(wrapper._begin_tunableop_dynamic_dims_guard(None, "cuda"))
+            self.assertFalse(
+                wrapper._begin_tunableop_dynamic_dims_guard(
+                    (False, False, False, False), "cuda"
+                )
+            )
+            self.assertFalse(
+                wrapper._begin_tunableop_dynamic_dims_guard(
+                    (False, True, False, False), "cpu"
+                )
+            )
+        with config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": False}):
+            self.assertFalse(
+                wrapper._begin_tunableop_dynamic_dims_guard(
+                    (False, True, False, False), "cuda"
+                )
+            )
+
+    def test_tunableop_dynamic_dims_guard_preserves_alloc_output_scope(self):
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.device = "cuda"
+        wrapper.lines = []
+        extern_kernel = SimpleNamespace(
+            name="buf0",
+            op_overload=None,
+            outputs=[],
+            python_kernel_name=None,
+            tunable_dyn_dims_mask=(True, False, False, False),
+            get_device=lambda: torch.device("cuda"),
+            get_kernel_name=lambda: "at::test",
+        )
+
+        def emit_call(wrapper, *_args, **_kwargs):
+            wrapper.writeline("CALL;")
+
+        with (
+            config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": True}),
+            patch.object(
+                CppWrapperCpu,
+                "generate_c_shim_extern_kernel_call",
+                emit_call,
+            ),
+        ):
+            wrapper._generate_extern_kernel_alloc_helper(extern_kernel, ["arg0"])
+
+        self.assertEqual(
+            wrapper.lines,
+            [
+                "AtenTensorHandle buf0_handle;",
+                "{",
+                "AOTICudaTunableOpDynamicDimsGuard tunable_dynamic_dims_guard(1);",
+                "CALL;",
+                "}",
+                "RAIIAtenTensorHandle buf0(buf0_handle);",
+            ],
+        )
+
+    def test_tma_descriptor_separates_global_and_kernel_shapes(self):
+        if torch.version.hip is not None:
+            self.skipTest("requires CUDA TMA helpers")
+
+        helpers = CUDADeviceOpOverrides().tma_descriptor_helpers()
+        self.assertNotIn("int32_t* shape", helpers)
+        self.assertIn("uint64_t* shape", helpers)
+        self.assertIn("int32_t kernel_shape[5];", helpers)
+        self.assertIn("uint64_t global_shape[5];", helpers)
+        self.assertIn("uint64_t dim = shape[i];", helpers)
+
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.arg_var_id = itertools.count()
+        launch_args = wrapper.generate_args_decl(
+            IndentedBuffer(),
+            ["descriptor"],
+            [torch.float32],
+            ["tensordesc<fp32[16, 32]>"],
+        )
+        self.assertEqual(
+            launch_args,
+            "&var_0.m, &var_0.kernel_shape[0], &var_0.kernel_shape[1], "
+            "&var_0.strides[0], &var_0.strides[1]",
+        )
+
+    def test_cpp_scratch_scales_with_grid_size_for_tma(self):
+        scratch_def, scratch_var = CUDADeviceOpOverrides().cpp_scratch(
+            0,
+            TritonScratchWorkspace(
+                size=256,
+                generate_dtype_str=lambda: "at::ScalarType::Byte",
+                generate_device_type_str=lambda: "cached_torch_device_type_cuda",
+            ),
+            prefix="global_scratch",
+        )
+        self.assertEqual(scratch_var, "global_scratch_scratch_0")
+        self.assertIn(
+            "static_cast<int64_t>(256) * grid_0 * grid_1 * grid_2", scratch_def[0]
+        )
+        self.assertIn("cached_torch_device_type_cuda", scratch_def[3])
+
+    def test_triton_wrapper_scales_scratch_with_num_ctas(self):
+        class FakeDeviceCodegen:
+            @staticmethod
+            def cpp_kernel_launch_supports_pdl():
+                return True
+
+        class FakeWrapper:
+            device_codegen = FakeDeviceCodegen()
+
+            def __init__(self):
+                self.scratch_spaces = None
+
+            def generate_args_decl(
+                self,
+                prefix,
+                call_args,
+                arg_types,
+                arg_signatures,
+                is_triton_kernel=True,
+                scratch_spaces=None,
+            ):
+                self.scratch_spaces = scratch_spaces
+
+                return ""
+
+        wrapper = FakeWrapper()
+        prefix = IndentedBuffer()
+        params = {
+            "triton_meta": {"signature": {"x": "*fp32"}, "constants": {}},
+            "def_args": ["x"],
+            "call_args": ["x"],
+            "config": {"num_ctas": 8},
+            "num_warps": 4,
+            "shared_mem": 0,
+            "global_scratch": 256,
+        }
+
+        DeferredTritonCallWrapper(
+            wrapper_name="wrapper",
+            kernel_name="kernel",
+            kernel_name_to_body={},
+            arg_types=[torch.float32],
+        ).generate_launch_kernel(prefix, wrapper, "kernel_var", params)
+
+        self.assertEqual(wrapper.scratch_spaces, {"global_scratch": 256 * 8})
+
+
 instantiate_parametrized_tests(TestGpuWrapper)
 
 # Helper script for test_lazy_compile_kernel_name_collision_across_modules.
 # Run as a subprocess so dlopen truly re-runs .so static initializers.
 _LAZY_COMPILE_COLLISION_SCRIPT = """\
+import os
 import torch
-from torch.testing._internal.inductor_utils import GPU_TYPE
 
 from torch._inductor import config
 
 config.cpp_wrapper = True
 config.triton.autotune_at_compile_time = False
+
+device = os.environ["TEST_DEVICE"]
 
 def fn(x, y, z, w):
     a = x.sin()
@@ -1031,7 +1043,7 @@ def fn(x, y, z, w):
     d = (c * w).cos()
     return d.sum()
 
-args = [torch.randn(32, device=GPU_TYPE, requires_grad=True) for _ in range(4)]
+args = [torch.randn(32, device=device, requires_grad=True) for _ in range(4)]
 ref_args = [a.detach().clone().requires_grad_(True) for a in args]
 ref = fn(*ref_args)
 ref.backward()
@@ -1047,9 +1059,9 @@ for i, (a, r) in enumerate(zip(args, ref_args)):
 
 
 class TestLazyCompileKernelCollision(InductorTestCase):
-    device = GPU_TYPE
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_lazy_compile_kernel_name_collision_across_modules(self):
+    def test_lazy_compile_kernel_name_collision_across_modules(self, device):
         """The collision manifests when a fresh process loads .so modules from
         warm on-disk caches: AOTAutograd cache hits cause both forward and
         backward .so to be loaded (static initializers register kernels in
@@ -1059,9 +1071,6 @@ class TestLazyCompileKernelCollision(InductorTestCase):
         This requires two process invocations because dlopen within a single
         process reuses loaded libraries without re-running static initializers.
         """
-        if not RUN_GPU:
-            self.skipTest("GPU not available")
-
         with tempfile.TemporaryDirectory() as tmp_dir:
             # Keep the cache off the subprocess's sys.path: `python -c` puts its
             # cwd first, and a cache subdir such as "z3/" would shadow that module.
@@ -1069,6 +1078,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             env = {
                 **os.environ,
                 "TORCHINDUCTOR_CACHE_DIR": cache_dir,
+                "TEST_DEVICE": device,
                 "INDUCTOR_TEST_DISABLE_FRESH_CACHE": "1",
             }
             # First run: cold compile, populates on-disk caches.
@@ -1101,8 +1111,8 @@ class TestLazyCompileKernelCollision(InductorTestCase):
 
 # Helper script for test_static_init_dlopen_does_not_deadlock
 _STATIC_INIT_DEADLOCK_SCRIPT = """\
+import os
 import torch
-from torch.testing._internal.inductor_utils import GPU_TYPE
 
 from torch._inductor import config
 
@@ -1110,37 +1120,37 @@ config.compile_threads = 1
 config.cpp_wrapper = True
 config.triton.autotune_at_compile_time = False
 
+device = os.environ["TEST_DEVICE"]
+
 
 def fn(x):
     return (x * 2 + 1).sum()
 
 
 compiled = torch.compile(fn)
-x = torch.randn(128, device=GPU_TYPE)
+x = torch.randn(128, device=device)
 compiled(x)
 """
 
 
 class TestCppWrapperStaticInitDeadlock(InductorTestCase):
-    device = GPU_TYPE
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184496")
-    def test_static_init_dlopen_does_not_deadlock(self):
+    def test_static_init_dlopen_does_not_deadlock(self, device):
         """The cpp_wrapper-generated .so must not trigger Triton kernel
         compilation from a static initializer (dlopen-time): doing so
         runs Triton -> mlir::verify -> llvm::StdThreadPool, whose workers
         contend for the dynamic linker's global init lock and deadlock
         the main thread inside dlopen.
         """
-        if not RUN_GPU:
-            self.skipTest("GPU not available")
-
         with tempfile.TemporaryDirectory() as tmp_dir:
             # Keep the cache off sys.path; see the collision test above.
             cache_dir = os.path.join(tmp_dir, "inductor_cache")
             env = {
                 **os.environ,
                 "TORCHINDUCTOR_CACHE_DIR": cache_dir,
+                "TEST_DEVICE": device,
             }
             try:
                 r = subprocess.run(
@@ -1165,7 +1175,7 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
 
 # Helper script for test_lazy_tma_global_scratch_scales_with_launch_grid
 # Run this repro in a subprocess because the regression can poison the CUDA context.
-_LAZY_TMA_GLOBAL_SCRATCH_SCRIPT = f"""\
+_LAZY_TMA_GLOBAL_SCRATCH_SCRIPT = """\
 import torch
 import triton
 import triton.language as tl
@@ -1180,7 +1190,7 @@ BLOCK_N = 16
 
 
 def _alloc_scratch(size, alignment, stream):
-    return torch.empty(size, device="{GPU_TYPE}", dtype=torch.uint8)
+    return torch.empty(size, device="{device}", dtype=torch.uint8)
 
 
 triton.set_allocator(_alloc_scratch)
@@ -1214,7 +1224,7 @@ def _tma_copy_kernel(
     tl.store(out_ptr + offs_m[:, None] * N + offs_n[None, :], tile)
 
 
-@torch.library.triton_op("test_inductor::lazy_tma_scratch_copy", mutates_args={{}})
+@torch.library.triton_op("test_inductor::lazy_tma_scratch_copy", mutates_args={})
 def _tma_copy(x: torch.Tensor) -> torch.Tensor:
     y = torch.empty_like(x)
     grid = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
@@ -1232,7 +1242,7 @@ def _tma_copy(x: torch.Tensor) -> torch.Tensor:
 
 
 def run():
-    x = (torch.arange(M * N, device="{GPU_TYPE}", dtype=torch.float32) % 100).to(
+    x = (torch.arange(M * N, device="{device}", dtype=torch.float32) % 100).to(
         torch.float16
     )
     x = x.reshape(M, N)
@@ -1241,23 +1251,23 @@ def run():
         return _tma_copy(x)
 
     eager = fn(x)
-    torch.{GPU_TYPE}.synchronize()
+    torch.{device}.synchronize()
     torch.testing.assert_close(eager, x)
 
     compiled = torch.compile(
         fn,
         fullgraph=True,
-        options={{
+        options={
             "cpp_wrapper": True,
             "triton.autotune_at_compile_time": False,
-        }},
+        },
     )
     warmup = compiled(x)
-    torch.{GPU_TYPE}.synchronize()
+    torch.{device}.synchronize()
     torch.testing.assert_close(warmup, x)
     # The warmup lazy-compiles through Python; the second call uses the cached C++ launch.
     out = compiled(x)
-    torch.{GPU_TYPE}.synchronize()
+    torch.{device}.synchronize()
     torch.testing.assert_close(out, x)
 
 
@@ -1266,17 +1276,18 @@ run()
 
 
 class TestLazyTmaGlobalScratch(InductorTestCase):
-    device = GPU_TYPE
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(
-        GPU_TYPE not in ("cuda", "xpu") or torch.version.hip, "requires CUDA or XPU"
-    )
-    def test_lazy_tma_global_scratch_scales_with_launch_grid(self):
-        if not RUN_GPU:
-            self.skipTest("GPU not available")
-        if GPU_TYPE not in ("cuda", "xpu") or torch.version.hip:
+    def test_lazy_tma_global_scratch_scales_with_launch_grid(self, device):
+        if torch.version.hip:
+            self.skipTest("TMA descriptors are not available on ROCm")
+        device_type = torch.device(device).type
+        if device_type not in ("cuda", "xpu"):
             self.skipTest("requires CUDA or XPU")
-        if GPU_TYPE == "cuda" and torch.cuda.get_device_capability()[0] < 9:
+        if (
+            device_type == "cuda"
+            and torch.get_device_module(device).get_device_capability()[0] < 9
+        ):
             self.skipTest("requires Hopper or newer for TMA")
         if not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires Triton TensorDescriptor TMA support")
@@ -1286,7 +1297,8 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
             # subdir; see TestLazyCompileKernelCollision.
             cache_dir = os.path.join(tmp_dir, "inductor_cache")
             script_path = Path(tmp_dir) / "lazy_tma_global_scratch_repro.py"
-            script_path.write_text(_LAZY_TMA_GLOBAL_SCRATCH_SCRIPT, encoding="utf-8")
+            script = _LAZY_TMA_GLOBAL_SCRATCH_SCRIPT.replace("{device}", device)
+            script_path.write_text(script, encoding="utf-8")
             env = {
                 **os.environ,
                 "CUDA_LAUNCH_BLOCKING": "1",
@@ -1312,21 +1324,19 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
 
 
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
-    device = GPU_TYPE
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_annotation_training(self):
+    def test_annotation_training(self, device):
         batch_size = 32
         seq_length = 50
         hidden_size = 768
 
         def create_test_fn():
             def test_fn():
-                inp = torch.randn(
-                    batch_size, seq_length, hidden_size, device=self.device
-                )
-                weight = torch.randn(hidden_size, hidden_size, device=self.device)
+                inp = torch.randn(batch_size, seq_length, hidden_size, device=device)
+                weight = torch.randn(hidden_size, hidden_size, device=device)
                 matmul_output = inp @ weight
-                torch.nn.LayerNorm(hidden_size, device=self.device)(matmul_output)
+                torch.nn.LayerNorm(hidden_size, device=device)(matmul_output)
                 return True
 
             return test_fn
@@ -1545,6 +1555,22 @@ if RUN_GPU:
         test_failures_gpu_wrapper,
         xfail_prop="_expected_failure_dynamic_wrapper",
     )
+
+instantiate_parametrized_tests(TestGpuWrapperGeneric)
+instantiate_device_type_tests(TestGpuWrapperCudaCodegen, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestLazyCompileKernelCollision, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestCppWrapperStaticInitDeadlock, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestLazyTmaGlobalScratch, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    DynamicShapesGpuWrapperGpuTests, globals(), except_for="cpu", allow_xpu=True
+)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
