@@ -16,6 +16,7 @@ from torch import Tensor
 from torch._C import _functionalization
 from torch._custom_class_base import CustomClassBase
 from torch._logging import getArtifactLogger
+from torch._prims_common import is_non_overlapping_and_dense_or_false
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
@@ -28,6 +29,45 @@ from torch.utils._python_dispatch import (
 
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
+
+
+def has_lazy_neg_bit(t: object) -> bool:
+    # See Note [Resolving lazy negative inputs at the backend boundary]
+    return isinstance(t, Tensor) and not is_traceable_wrapper_subclass(t) and t.is_neg()
+
+
+def resolve_neg_preserving_strides(t: Tensor) -> Tensor:
+    # See Note [Resolving lazy negative inputs at the backend boundary]
+    # Only the negation is resolved: a conj bit stays, since the traced graph
+    # applies the conjugation itself.
+    if t.is_conj():
+        return resolve_neg_preserving_strides(t._conj())._conj()
+    # The copy keeps t's strides and starts at storage offset 0. resolve_neg()
+    # already does that for a non-overlapping and dense t.
+    if t.is_contiguous() or is_non_overlapping_and_dense_or_false(t):
+        return t.resolve_neg()
+    # clone() resolves the bit. Imported here: torch._inductor.utils imports
+    # this module.
+    from torch._inductor.utils import clone_preserve_strides
+
+    return clone_preserve_strides(t)
+
+
+def storage_offset_on(base: Tensor, target: Tensor) -> int:
+    """Return target's storage offset, translated onto base's storage.
+
+    If the target lives on a different storage than base (e.g. because
+    inductor's copy_misaligned_inputs or the runtime wrapper's resolution of a
+    lazy negative input cloned the input), ``target.storage_offset()`` is
+    expressed in the cloned storage, which starts at base's first element, and
+    would pick the wrong slice when applied via ``as_strided()`` on base. Compare
+    storages via ``_cdata`` (raw c10::Storage handle) rather than
+    ``.data_ptr()`` so this is safe on fake/meta storages that would raise from
+    ``.data_ptr()`` during AOT tracing.
+    """
+    if base.untyped_storage()._cdata != target.untyped_storage()._cdata:
+        return base.storage_offset() + target.storage_offset()
+    return target.storage_offset()
 
 
 def to_fun(t: object) -> Any:
@@ -381,35 +421,18 @@ def gen_alias_from_base(
         if out is not None and out.shape == target_meta_tensor.shape:
             return patch_requires_grad(out)
 
-    size = target_meta_tensor.size()
-    stride = target_meta_tensor.stride()
-    storage_offset = target_meta_tensor.storage_offset()
-    # If the target lives on a different storage than the aliased base
-    # (e.g. because inductor's copy_misaligned_inputs cloned the input to
-    # obtain an aligned buffer), ``target.storage_offset()`` is expressed in
-    # the cloned storage and would pick the wrong slice when applied via
-    # ``as_strided()`` on the original aliased base tensor. Translate the
-    # offset: the traced FakeTensor's storage_offset equals the trace-time
-    # RELATIVE offset from the input, so add back the runtime input's
-    # ``storage_offset`` to keep the alias anchored to the correct slice.
-    # Compare storages via ``_cdata`` (raw c10::Storage handle) rather than
-    # ``.data_ptr()`` so this is safe on fake/meta storages that would raise
-    # from ``.data_ptr()`` during AOT tracing.
-    if (
-        aliased_base_tensor.untyped_storage()._cdata
-        != target_meta_tensor.untyped_storage()._cdata
-    ):
-        storage_offset = aliased_base_tensor.storage_offset() + storage_offset
     if aliased_base_tensor.is_complex() and not target_meta_tensor.is_complex():
-        aliased_out = torch.view_as_real(aliased_base_tensor).as_strided(
-            size, stride, storage_offset
-        )
+        base = torch.view_as_real(aliased_base_tensor)
     elif not aliased_base_tensor.is_complex() and target_meta_tensor.is_complex():
-        aliased_out = torch.view_as_complex(aliased_base_tensor).as_strided(
-            size, stride, storage_offset
-        )
+        base = torch.view_as_complex(aliased_base_tensor)
     else:
-        aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
+        base = aliased_base_tensor
+    # The offset is translated in the units of the view it's applied to.
+    aliased_out = base.as_strided(
+        target_meta_tensor.size(),
+        target_meta_tensor.stride(),
+        storage_offset_on(base, target_meta_tensor),
+    )
     # For outputs aliasing inputs, we need to check if the requires-gradness has changed.
     aliased_out = patch_requires_grad(aliased_out)
     # For outputs aliasing inputs, we need to check if the dtype has changed.
