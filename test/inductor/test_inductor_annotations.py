@@ -3,9 +3,8 @@ import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import requires_triton
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 class InductorAnnotationTestCase(TestCase):
@@ -22,7 +21,7 @@ class InductorAnnotationTestCase(TestCase):
         _, code = run_and_get_code(f_comp, a, b)
         return code[0]
 
-    @requires_triton()
+    @requires_cuda_and_triton
     def test_no_annotations(self):
         code = self.get_code()
 
@@ -30,7 +29,7 @@ class InductorAnnotationTestCase(TestCase):
         self.assertTrue("training_annotation" not in code)
 
     @inductor_config.patch(annotate_training=True)
-    @requires_triton()
+    @requires_cuda_and_triton
     def test_training_annotation(self):
         code = self.get_code()
 
@@ -40,9 +39,6 @@ class InductorAnnotationTestCase(TestCase):
             >= 1
         )
         self.assertTrue(code.count("nvtx._device_range_end(training_annotation)") >= 1)
-
-
-instantiate_device_type_tests(InductorAnnotationTestCase, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
