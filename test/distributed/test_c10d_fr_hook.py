@@ -632,6 +632,9 @@ class AbstractFlightRecorderHookTest:
 
         child = dist.split_group(split_ranks=[list(range(self.world_size))])
         self.assertEqual(self._hook_entries()[len(entries) :], [])
+        # Gloo's connecting side returns from split_group before its peer has
+        # finished the handshake; closing the child then fails the peer's connect.
+        dist.barrier()
         dist.destroy_process_group(child)
         hook.remove()
 
