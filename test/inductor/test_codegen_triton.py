@@ -31,6 +31,7 @@ from torch._inductor.codegen.triton import (
     TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
+    TritonOverrides,
     TritonScheduling,
     TritonSymbols,
 )
@@ -42,10 +43,12 @@ from torch._inductor.codegen.wrapper import (
 )
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
+from torch._inductor.ops_handler import MockHandler
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     get_importable_constexpr_types,
+    is_strict_cuda_triton,
     is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
@@ -170,6 +173,41 @@ class TestCodegenTriton(InductorTestCase):
     def tearDown(self):
         self._stack.close()
         super().tearDown()
+
+    @parametrize("backend", ("triton", "halide", "pallas"))
+    @inductor_config.patch(numerics="strict_pointwise")
+    @patch.object(torch.version, "hip", None)
+    def test_strict_cuda_pointwise_ignores_default_backend(self, backend):
+        cuda = torch.device("cuda")
+        with (
+            inductor_config.patch(cuda_backend=backend),
+            patch.object(self._graph, "get_current_device_or_throw", return_value=cuda),
+            V.set_ops_handler(MockHandler()),
+        ):
+            self.assertIn("ops.where(", TritonOverrides.relu("x"))
+            self.assertIn("libdevice.rcp_rn(", TritonOverrides.sigmoid("x"))
+            self.assertEqual(
+                TritonOverrides.to_dtype("x", torch.uint8),
+                "x.to(tl.int64).to(tl.uint8)",
+            )
+            self.assertEqual(is_strict_cuda_triton(cuda), backend == "triton")
+
+    @inductor_config.patch(numerics="default")
+    def test_non_strict_cuda_pointwise_does_not_query_device(self):
+        with (
+            patch.object(
+                self._graph,
+                "get_current_device_or_throw",
+                side_effect=AssertionError("unexpected device lookup"),
+            ),
+            V.set_ops_handler(MockHandler()),
+        ):
+            self.assertIn("ops.maximum(", TritonOverrides.relu("x"))
+            self.assertEqual(TritonOverrides.sigmoid("x"), "tl.sigmoid(x)")
+            self.assertEqual(
+                TritonOverrides.to_dtype("x", torch.uint8),
+                "x.to(tl.int16).to(tl.uint8)",
+            )
 
     def test_tma_store_can_use_descriptor_local_int32_indexing(self):
         layout = SimpleNamespace(offset=0, stride=[512, 1])

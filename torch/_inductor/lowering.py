@@ -100,6 +100,8 @@ from .utils import (
     is_gpu,
     is_nvidia_sm100_or_later,
     is_pointwise_use,
+    is_strict_cuda_triton,
+    is_strict_float_dtype,
     is_triton_fp8_dtype_supported,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
@@ -8324,8 +8326,45 @@ def _floor_div_floating(a, b):
     return make_pointwise(fn)(a, b, nan, neg_one, zero)
 
 
-@register_lowering(aten.div, broadcast=True)
+def _div_trunc_cuda_scalar(
+    a: TensorBox | IRNode, b: TensorBox | IRNode | int | float | sympy.Basic
+) -> TensorBox:
+    # Match eager CUDA: use the accumulation dtype, then round after truncation.
+    compute_dtype = get_computation_dtype(a.get_dtype())
+    if isinstance(b, (int, float)):
+        b = ir.Constant(value=b, dtype=compute_dtype, device=a.get_device_or_error())
+    elif isinstance(b, sympy.Basic):
+        b = ir.IndexingConstant(
+            index=b, dtype=compute_dtype, device=a.get_device_or_error()
+        )
+    elif isinstance(b, TensorBox):
+        b = maybe_copy_cpu_scalar(b, a.get_device_or_error())
+    b = expand(b, a.get_size())
+
+    def fn(value, divisor):
+        value = ops.to_dtype(value, compute_dtype)
+        reciprocal = ops.div_rn(
+            ops.constant(1.0, compute_dtype), ops.to_dtype(divisor, compute_dtype)
+        )
+        return ops.trunc(ops.mul(value, reciprocal))
+
+    return make_pointwise(fn, force_output_cast=True)(a, b)
+
+
+@register_lowering(aten.div, type_promotion_kind=None)
 def div_mode(a, b, rounding_mode=None):
+    is_cpu_scalar = (
+        isinstance(b, (TensorBox, IRNode))
+        and b.get_device() == torch.device("cpu")
+        and not b.get_size()
+    )
+    # Preserve CPU scalar shape and dtype before broadcasting and promotion.
+    scalar_divisor = (
+        b if isinstance(b, (int, float, sympy.Basic)) or is_cpu_scalar else None
+    )
+    (a, b), _ = transform_args(
+        [a, b], {}, True, ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT, False
+    )
     both_integer = is_integer_type(a) and is_integer_type(b)
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
 
@@ -8346,7 +8385,17 @@ def div_mode(a, b, rounding_mode=None):
             raise AssertionError(
                 "truncdiv operands can not be boolean at the same time"
             )
-        return truncdiv(a, b) if both_integer else trunc(div(a, b))
+        if both_integer:
+            return truncdiv(a, b)
+        if (
+            isinstance(a, (TensorBox, IRNode))
+            and (device := a.get_device()) is not None
+            and is_strict_cuda_triton(device)
+            and scalar_divisor is not None
+            and is_strict_float_dtype(a.get_dtype())
+        ):
+            return _div_trunc_cuda_scalar(a, scalar_divisor)
+        return trunc(div(a, b))
     return div(a, b)
 
 
@@ -8473,12 +8522,7 @@ def _strict_reduction_layout_eligible(axis, dtype) -> bool:
     if not isinstance(fx_input, torch.fx.Node):
         return False
     value = fx_input.meta.get("val")
-    if not isinstance(value, torch.Tensor) or value.dtype not in {
-        torch.float16,
-        torch.bfloat16,
-        torch.float32,
-        torch.float64,
-    }:
+    if not isinstance(value, torch.Tensor) or not is_strict_float_dtype(value.dtype):
         return False
     if (
         not value.is_cuda
