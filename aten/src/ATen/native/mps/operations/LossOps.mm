@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/MemoryOverlap.h>
 #include <ATen/OpMathType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/BinaryOps.h>
@@ -23,6 +24,7 @@
 #include <ATen/ops/huber_loss_native.h>
 #include <ATen/ops/mean.h>
 #include <ATen/ops/mse_loss_backward_native.h>
+#include <ATen/ops/mse_loss_native.h>
 #include <ATen/ops/nll_loss2d_backward_native.h>
 #include <ATen/ops/nll_loss2d_forward_native.h>
 #include <ATen/ops/nll_loss_backward_native.h>
@@ -135,6 +137,55 @@ static void bce_loss_forward_impl(const Tensor& input_arg,
   } else if (!write_to_loss) {
     loss.copy_(unreduced);
   }
+}
+
+// Mean or sum of a pointwise loss fused like bce_loss_forward_impl, so the unreduced loss is never
+// written. Returns false, leaving loss untouched, if the inputs need the TensorIterator path instead.
+static bool loss_forward_reduce(const std::string& name,
+                                const Tensor& input,
+                                const Tensor& target,
+                                int64_t reduction,
+                                double alpha,
+                                const Tensor& loss) {
+  if (reduction == Reduction::None || !input.is_mps() || !target.is_mps() || !loss.is_mps() ||
+      input.scalar_type() != target.scalar_type() || input.scalar_type() != loss.scalar_type() ||
+      !supportedFloatingType(input) || input.sizes() != target.sizes() || input.strides() != target.strides() ||
+      !input.is_non_overlapping_and_dense() || input.numel() == 0 || !canUse32BitIndexMath(input) ||
+      get_overlap_status(loss, input) != MemOverlapStatus::No ||
+      get_overlap_status(loss, target) != MemOverlapStatus::No) {
+    return false;
+  }
+  const auto n = static_cast<uint32_t>(input.numel());
+  const auto max_groups = std::min(512u, at::ceil_div(n, MAX_THREADGROUP_SIZE * SUM_NCHAINS));
+  const auto slice_len = at::ceil_div(n, max_groups);
+  const auto num_groups = at::ceil_div(n, slice_len);
+  const LossReduceParams params{.numel = n,
+                                .slice_len = slice_len,
+                                .scale = reduction == Reduction::Mean ? 1.0f / n : 1.0f,
+                                .alpha = static_cast<float>(alpha)};
+  Tensor partials = at::empty({num_groups}, input.options().dtype(kFloat));
+  loss.resize_({});
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      const auto type = scalarToMetalTypeString(input);
+      auto pso = lib.getPipelineStateForFunc(name + "_loss_forward_reduce_" + type);
+      auto finalize_pso = lib.getPipelineStateForFunc("loss_forward_reduce_finalize_" + type);
+      const auto threads = std::min<uint32_t>(MAX_THREADGROUP_SIZE, [pso maxTotalThreadsPerThreadgroup]);
+      const auto finalize_threads =
+          std::min<uint32_t>(MAX_THREADGROUP_SIZE, [finalize_pso maxTotalThreadsPerThreadgroup]);
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, input, target, partials, params);
+      [encoder dispatchThreads:MTLSizeMake(num_groups * threads, 1, 1)
+          threadsPerThreadgroup:MTLSizeMake(threads, 1, 1)];
+      [encoder setComputePipelineState:finalize_pso];
+      mtl_setArgs(encoder, partials, loss, num_groups);
+      [encoder dispatchThreads:MTLSizeMake(finalize_threads, 1, 1)
+          threadsPerThreadgroup:MTLSizeMake(finalize_threads, 1, 1)];
+    }
+  });
+  return true;
 }
 
 // NLLLoss
@@ -330,6 +381,25 @@ static void huber_mps_kernel(TensorIterator& iter, double delta) {
 
 REGISTER_DISPATCH(huber_stub, &huber_mps_kernel)
 
+Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& result) {
+  TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
+  if (!mps::loss_forward_reduce("huber", input, target, reduction, delta, result)) {
+    native::huber_loss_out(input, target, reduction, delta, result);
+  }
+  return result;
+}
+
+Tensor huber_loss_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
+  TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
+  if (reduction != Reduction::None) {
+    Tensor loss = at::empty({}, input.options());
+    if (mps::loss_forward_reduce("huber", input, target, reduction, delta, loss)) {
+      return loss;
+    }
+  }
+  return native::huber_loss(input, target, reduction, delta);
+}
+
 Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
                                     const Tensor& input,
                                     const Tensor& target,
@@ -376,6 +446,28 @@ static void mse_backward_mps_kernel(TensorIterator& iter, const Scalar& value) {
 
 REGISTER_DISPATCH(mse_stub, &mse_mps_kernel)
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_mps_kernel)
+
+TORCH_IMPL_FUNC(mse_loss_out_mps)
+(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& result) {
+  TORCH_CHECK(input.device() == target.device(),
+              "Expected all tensors to be on the same device, but found at least two devices, ",
+              input.device(),
+              " and ",
+              target.device(),
+              "!");
+  if (reduction == Reduction::None) {
+    mse_mps_kernel(*this);
+  } else if (!mps::loss_forward_reduce("mse", input, target, reduction, 0.0, result)) {
+    Tensor loss;
+    auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
+    mse_mps_kernel(iter);
+    if (reduction == Reduction::Mean) {
+      at::mean_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
+    } else {
+      at::sum_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
+    }
+  }
+}
 
 Tensor mse_loss_backward_mps(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
   Tensor grad_input = at::empty_like(input);
@@ -435,6 +527,22 @@ static void smooth_l1_mps_kernel(TensorIteratorBase& iter, double beta) {
 }
 
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_mps_kernel)
+
+TORCH_IMPL_FUNC(smooth_l1_loss_out_mps)
+(const Tensor& input, const Tensor& target, int64_t reduction, double beta, const Tensor& result) {
+  if (reduction == Reduction::None) {
+    smooth_l1_mps_kernel(*this, beta);
+  } else if (!mps::loss_forward_reduce("smooth_l1", input, target, reduction, beta, result)) {
+    Tensor loss;
+    auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
+    smooth_l1_mps_kernel(iter, beta);
+    if (reduction == Reduction::Mean) {
+      at::mean_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
+    } else {
+      at::sum_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
+    }
+  }
+}
 
 Tensor& smooth_l1_loss_backward_out_mps(const Tensor& grad_output,
                                         const Tensor& input,
