@@ -8,6 +8,9 @@
 #include <c10/util/python_stub.h>
 #include <torch/csrc/Export.h>
 
+#include <string>
+#include <string_view>
+
 // Indirection that lets the libtorch-only Python-interop stable shims call into
 // code that only libtorch_python can provide (THPVariable_* &co) without
 // libtorch (or the user extension) linking libtorch_python. Conversions
@@ -102,6 +105,13 @@ struct TORCH_API PyObjectConversionInterface {
 
   // Return a new-reference Python float. The GIL must be held.
   virtual PyObject* double_to_pyobject(double value) const = 0;
+
+  // Copy a Python str (as UTF-8) or bytes (as is) into a std::string. The GIL
+  // must be held.
+  virtual std::string string_from_pyobject(PyObject* obj) const = 0;
+
+  // Decode UTF-8 bytes into a new-reference Python str. The GIL must be held.
+  virtual PyObject* string_to_pyobject(std::string_view str) const = 0;
 };
 
 // Install the conversion implementation. Called once by libtorch_python when it
