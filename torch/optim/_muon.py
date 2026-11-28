@@ -74,6 +74,8 @@ def _zeropower_via_newtonschulz(
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
     """Default learning rate adjustment used by Muon."""
     A, B = param_shape[:2]
+    if B == 0 and adjust_lr_fn in (None, "original", "spectral_unclamped"):
+        return lr
 
     if adjust_lr_fn is None or adjust_lr_fn == "original":
         # pyrefly: ignore [no-matching-overload]
