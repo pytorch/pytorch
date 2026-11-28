@@ -568,7 +568,9 @@ class MethodDescriptorVariable(DescriptorVariable):
         if mro_lookup(obj.python_type(), name) is self.descriptor:
             # Nothing overrides it, so name lookup reaches the same C method.
             return obj.call_method(tx, name, rest, kwargs)
-        if isinstance(obj, UserDefinedObjectVariable) and objclass is dict:
+        if isinstance(obj, UserDefinedObjectVariable) and (
+            objclass is dict or objclass is variables.FrozenDictVariable._cpython_type
+        ):
             return obj.call_base_method(tx, name, rest, kwargs)
         unimplemented(
             gb_type="Unbound method descriptor call with unmodeled owner",
