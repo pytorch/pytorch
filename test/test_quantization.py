@@ -32,8 +32,8 @@ except ImportError as e:
     log.warning(e)
 # 2. Quantized Functional/Workflow Ops
 from quantization.core.test_quantized_functional import TestQuantizedFunctionalOps  # noqa: F401
+from quantization.core import test_workflow_ops
 from quantization.core.test_workflow_ops import TestFakeQuantizeOps  # noqa: F401
-from quantization.core.test_workflow_ops import TestFusedObsFakeQuant  # noqa: F401
 # 3. Quantized Tensor
 from quantization.core.test_quantized_tensor import TestQuantizedTensor  # noqa: F401
 # 4. Modules
@@ -153,6 +153,14 @@ try:
     from quantization.core.experimental.test_floatx import TestFloat8DtypeCPUOnlyCPU  # noqa: F401
 except ImportError as e:
     log.warning(e)
+
+globals().update(
+    {
+        name: cls
+        for name, cls in vars(test_workflow_ops).items()
+        if name.startswith(("TestFusedObsFakeQuant", "TestFakeQuantizeOpsLearnablePerTensor"))
+    }
+)
 
 if __name__ == '__main__':
     run_tests()
