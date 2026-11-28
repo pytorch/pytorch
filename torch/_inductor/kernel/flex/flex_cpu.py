@@ -2,6 +2,7 @@
 """CPU-specific implementations for flex attention"""
 
 import copy
+import logging
 import os
 import sys
 from typing import Any
@@ -10,12 +11,14 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch._logging import warning_once
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ...codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
 from ...ir import Buffer, ExternKernel, FixedLayout, TensorBox
+from ...lowering import to_dtype
 from ...select_algorithm import autotune_select_algorithm
 from .common import (
     build_subgraph_buffer,
@@ -26,6 +29,9 @@ from .common import (
     infer_dense_strides,
     maybe_realize,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 def check_cpu_supported():
@@ -88,11 +94,20 @@ def lower_cpu(
         mask_graph,
     ) = block_mask
 
-    if query.dtype != key.dtype or query.dtype != value.dtype:
+    if query.dtype not in [torch.float, torch.bfloat16, torch.float16]:
+        raise NotImplementedError(
+            "`torch.float` , `torch.float16` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
+            f"Found input tensors are `{query.dtype}`."
+        )
+    # Key/value may be in a lower precision than query, e.g. an FP8 KV cache.
+    kv_dtypes = [query.dtype, torch.float8_e4m3fn, torch.float8_e5m2]
+    if key.dtype not in kv_dtypes or value.dtype not in kv_dtypes:
         raise ValueError(
-            f"Mixed query, key, and value dtype is not supported on this platform, "
-            f"got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
-            f"and value.dtype: {value.dtype}."
+            f"Unsupported key/value dtype on CPU, got query.dtype: {query.dtype}, "
+            f"key.dtype: {key.dtype} and value.dtype: {value.dtype}. "
+            f"Key and value must each be either the query dtype ({query.dtype}) "
+            f"or an FP8 dtype (torch.float8_e4m3fn, torch.float8_e5m2). "
+            f"Please cast key and value to {query.dtype}, e.g. key.to({query.dtype})."
         )
 
     if kernel_options["OUTPUT_LOGSUMEXP"]:
@@ -231,6 +246,33 @@ def lower_cpu(
         if isinstance(item, TensorBox):
             fake_buffers.append(item.data.data)  # type: ignore[attr-defined]
 
+    # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+    # In flash decoding, the partition size of doing the parallelism on KV length dim
+    PARTITION_SIZE = kernel_options.get("PARTITION_SIZE", 128)
+    use_decoding = CppFlexAttentionTemplate.use_flex_decoding(
+        query, key, PARTITION_SIZE, SPARSE_KV_BLOCK_SIZE
+    )
+    q_dtype = query.get_dtype()
+    lowp_kv = key.get_dtype() != q_dtype or value.get_dtype() != q_dtype
+    if lowp_kv and not use_decoding:
+        warning_once(
+            log,
+            "CPU flex attention is upcasting the %s key and %s value to the %s query "
+            "dtype on every call. Lower-precision key/value are only read directly by "
+            "the flash decoding template, which requires static shapes, a query length "
+            "of 1, a block_mask whose KV block size divides PARTITION_SIZE, and a long "
+            "KV sequence. Otherwise, cast the KV cache to %s once outside the compiled "
+            "function to avoid the repeated conversion.",
+            key.get_dtype(),
+            value.get_dtype(),
+            q_dtype,
+            q_dtype,
+        )
+        key = to_dtype(key, q_dtype)
+        value = to_dtype(value, q_dtype)
+
     # CPU kernel requires last dim to be contiguous
     query, key, value = map(contiguous_last_dim, [query, key, value])
 
@@ -263,11 +305,6 @@ def lower_cpu(
     )
 
     query, key, value = _realize_duplicate_buffer_inputs([query, key, value])
-    if query.get_dtype() not in [torch.float, torch.bfloat16, torch.float16]:
-        raise NotImplementedError(
-            "`torch.float` , `torch.float16` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
-            f"Found input tensors are `{query.get_dtype()}`."
-        )
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
@@ -311,11 +348,6 @@ def lower_cpu(
         ]
 
     skip_mask_score = kernel_options.get("SKIP_MASK_SCORE", False)
-    # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
-    # In flash decoding, the partition size of doing the parallelism on KV length dim
-    PARTITION_SIZE = kernel_options.get("PARTITION_SIZE", 128)
     if not V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
     ):
@@ -338,6 +370,7 @@ def lower_cpu(
         kv_block_size=SPARSE_KV_BLOCK_SIZE,
         q_block_size=SPARSE_Q_BLOCK_SIZE,
         partition_size=PARTITION_SIZE,
+        use_decoding=use_decoding,
         has_other_buffer=has_other_buffer,
         no_full_kv_block=no_full_kv_block,
         fake_buffers=fake_buffers,
