@@ -8,9 +8,10 @@ import torch
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
                                                   TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
-                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo, HardwareClassification)
+                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo, HardwareClassification,
+                                                  instantiate_parametrized_tests, parametrize, dtype_name)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests,
-                                                        dtypes, onlyCPU, expectedFailureMeta, skipMeta)
+                                                        dtypes, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, floating_types, get_all_dtypes,
     float_to_corresponding_complex_type_map,
@@ -937,76 +938,6 @@ class TestTypePromotionDevice(TestCase):
         with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported+'):
             t.addcdiv_(t, t)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @float_double_default_dtype
-    @onlyCPU
-    # NB: skip uint16,32,64 as PyTorch doesn't implement promotion for them
-    @dtypes(*list(itertools.product(
-        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64},
-        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64})))
-    def test_numpy_array_binary_ufunc_promotion(self, device, dtypes):
-        import operator
-        np_type = torch_to_numpy_dtype_dict[dtypes[0]]
-        torch_type = dtypes[1]
-
-        t = torch.tensor((1,), device=device, dtype=torch_type)
-        a = np.array((1,), dtype=np_type)
-        a_as_t = torch.from_numpy(a).to(device=device)
-
-        for np_first in (True, False):
-            for op in (operator.add, torch.add):
-
-                # Acquires results of binary ufunc type promotion.
-                try:
-                    actual = op(a, t) if np_first else op(t, a)
-                except Exception as e:
-                    actual = e
-
-                try:
-                    expected = op(a_as_t, t) if np_first else op(t, a_as_t)
-                except Exception as e:
-                    expected = e
-
-                same_result = (type(expected) is type(actual)) and expected == actual
-
-                # Note: An "undesired failure," as opposed to an "expected failure"
-                # is both expected (we know the test will fail) and
-                # undesirable (if PyTorch was working properly the test would
-                # not fail). This test is affected by three issues (see below)
-                # that will cause undesired failures. It detects when these
-                # issues will occur and updates this bool accordingly.
-                undesired_failure = False
-
-                # A NumPy array as the first argument to the plus operator
-                # or as any argument to torch.add is not working as
-                # intended.
-                # See https://github.com/pytorch/pytorch/issues/36363.
-                if np_first and op is operator.add:
-                    undesired_failure = True
-                if op is torch.add:
-                    undesired_failure = True
-
-                # Expects the same result if undesired_failure is false
-                # and a different result otherwise.
-                # Note: These cases prettyprint the failing inputs to make
-                # debugging test failures easier.
-                if undesired_failure and same_result:
-                    msg = (
-                        f"Failure: {actual} == {expected}. torch type was {torch_type}. "
-                        f"NumPy type was {np_type}. np_first is {np_first} default type is "
-                        f"{torch.get_default_dtype()}."
-                    )
-                    self.fail(msg)
-
-                if not undesired_failure and not same_result:
-                    msg = (
-                        f"Failure: {actual} != {expected}. torch type was {torch_type}. "
-                        f"NumPy type was {np_type}. np_first is {np_first} default type is "
-                        f"{torch.get_default_dtype()}."
-                    )
-                    self.fail(msg)
-
-
     def test_cat_different_dtypes(self, device):
         dtypes = all_types_and_complex_and(torch.half, torch.bool)
         for x_dtype, y_dtype in itertools.product(dtypes, dtypes):
@@ -1201,8 +1132,78 @@ class TestTypePromotion(TestCase):
                                                torch.float8_e5m2, torch.float8_e4m3fn):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @float_double_default_dtype
+    # NB: skip uint16,32,64 as PyTorch doesn't implement promotion for them
+    @parametrize("dtypes", list(itertools.product(
+        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64},
+        set(numpy_to_torch_dtype_dict.values()) - {torch.uint16, torch.uint32, torch.uint64})),
+        name_fn=lambda dtypes: "_".join(map(dtype_name, dtypes)))
+    def test_numpy_array_binary_ufunc_promotion(self, dtypes):
+        import operator
+        np_type = torch_to_numpy_dtype_dict[dtypes[0]]
+        torch_type = dtypes[1]
+
+        t = torch.tensor((1,), dtype=torch_type)
+        a = np.array((1,), dtype=np_type)
+        a_as_t = torch.from_numpy(a)
+
+        for np_first in (True, False):
+            for op in (operator.add, torch.add):
+
+                # Acquires results of binary ufunc type promotion.
+                try:
+                    actual = op(a, t) if np_first else op(t, a)
+                except Exception as e:
+                    actual = e
+
+                try:
+                    expected = op(a_as_t, t) if np_first else op(t, a_as_t)
+                except Exception as e:
+                    expected = e
+
+                same_result = (type(expected) is type(actual)) and expected == actual
+
+                # Note: An "undesired failure," as opposed to an "expected failure"
+                # is both expected (we know the test will fail) and
+                # undesirable (if PyTorch was working properly the test would
+                # not fail). This test is affected by three issues (see below)
+                # that will cause undesired failures. It detects when these
+                # issues will occur and updates this bool accordingly.
+                undesired_failure = False
+
+                # A NumPy array as the first argument to the plus operator
+                # or as any argument to torch.add is not working as
+                # intended.
+                # See https://github.com/pytorch/pytorch/issues/36363.
+                if np_first and op is operator.add:
+                    undesired_failure = True
+                if op is torch.add:
+                    undesired_failure = True
+
+                # Expects the same result if undesired_failure is false
+                # and a different result otherwise.
+                # Note: These cases prettyprint the failing inputs to make
+                # debugging test failures easier.
+                if undesired_failure and same_result:
+                    msg = (
+                        f"Failure: {actual} == {expected}. torch type was {torch_type}. "
+                        f"NumPy type was {np_type}. np_first is {np_first} default type is "
+                        f"{torch.get_default_dtype()}."
+                    )
+                    self.fail(msg)
+
+                if not undesired_failure and not same_result:
+                    msg = (
+                        f"Failure: {actual} != {expected}. torch type was {torch_type}. "
+                        f"NumPy type was {np_type}. np_first is {np_first} default type is "
+                        f"{torch.get_default_dtype()}."
+                    )
+                    self.fail(msg)
+
 
 instantiate_device_type_tests(TestTypePromotionDevice, globals(), allow_xpu=True)
+instantiate_parametrized_tests(TestTypePromotion)
 
 if __name__ == '__main__':
     run_tests()
