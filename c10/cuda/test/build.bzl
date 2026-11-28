@@ -50,6 +50,17 @@ def define_targets(rules, gtest_deps):
     )
 
     rules.cc_test(
+        name = "large_block_placement_test",
+        srcs = [
+            "impl/CUDACachingAllocatorLargeBlockPlacementTest.cpp",
+        ],
+        target_compatible_with = rules.requires_cuda_enabled(),
+        deps = [
+            "//c10/cuda",
+        ] + gtest_deps,
+    )
+
+    rules.cc_test(
         name = "expandable_segment_ipc_reserve_test",
         srcs = [
             "impl/CUDACachingAllocatorIpcReserveTest.cpp",

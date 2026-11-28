@@ -118,6 +118,12 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
     } else if (key == "throw_on_cudamalloc_oom") {
       i = parseThrowOnCudaMallocOom(tokenizer, i);
       used_native_specific_option = true;
+    } else if (key == "large_block_placement") {
+      i = parseLargeBlockPlacement(tokenizer, i);
+      used_native_specific_option = true;
+    } else if (key == "first_fit_max_size_mb") {
+      i = parseFirstFitMaxSize(tokenizer, i);
+      used_native_specific_option = true;
     } else if (key == "expandable_segments_reserve") {
       i = parseExpandableSegmentsReserve(tokenizer, i);
       used_native_specific_option = true;
@@ -223,6 +229,38 @@ size_t CUDAAllocatorConfig::parseThrowOnCudaMallocOom(
   // would likely fail due to insufficient memory.
   tokenizer.checkToken(++i, ":");
   m_throw_on_cudamalloc_oom = tokenizer.toBool(++i);
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parseLargeBlockPlacement(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  const std::string& value = tokenizer[++i];
+  TORCH_CHECK_VALUE(
+      value == "best_fit" || value == "first_fit",
+      "Unknown large_block_placement '",
+      value,
+      "', options are best_fit and first_fit");
+  m_large_block_placement = value == "first_fit"
+      ? LargeBlockPlacement::FIRST_FIT
+      : LargeBlockPlacement::BEST_FIT;
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parseFirstFitMaxSize(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  const size_t size_mb = tokenizer.toSizeT(++i);
+  constexpr size_t kMaxMb = std::numeric_limits<size_t>::max() >> 20;
+  TORCH_CHECK_VALUE(
+      size_mb > 0 && size_mb <= kMaxMb,
+      "first_fit_max_size_mb must be in (0, ",
+      kMaxMb,
+      "], got ",
+      size_mb);
+  m_first_fit_max_size = size_mb << 20;
   return i;
 }
 
