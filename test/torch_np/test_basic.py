@@ -695,6 +695,66 @@ class TestCtorNested(TestCase):
         assert_equal(w.asarray(lst), [[1, 2], [3, 4]])
 
 
+@instantiate_parametrized_tests
+class TestGeomspace(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _check(self, *args, rtol=None, **kwargs):
+        res = w.geomspace(*args, **kwargs)
+        expected = _np.geomspace(*args, **kwargs)
+        assert_equal(res.dtype.name, expected.dtype.name)
+        if rtol is not None:
+            assert_allclose(res, expected, rtol=rtol)
+        else:
+            assert_allclose(res, expected)
+        if len(expected) >= 2:
+            # The endpoints are set exactly, not computed through log10/pow.
+            assert_equal(res[[0, -1]], expected[[0, -1]])
+
+    @parametrize("start, stop", [(1, 7), (2.5, 300), (-1, -1000), (3, 3)])
+    @parametrize("num", [0, 1, 2, 5, 50])
+    @parametrize(
+        "dtype", [None, "int64", "float16", "float32", "float64", "complex128"]
+    )
+    def test_geomspace_real(self, start, stop, num, dtype):
+        self._check(start, stop, num, dtype=dtype)
+
+    @parametrize("start, stop", [(1j, 1000j), (1, 1j), (-1 + 0j, 1j)])
+    @parametrize("num", [0, 1, 5])
+    @parametrize("dtype", [None, "complex64", "complex128"])
+    def test_geomspace_complex(self, start, stop, num, dtype):
+        self._check(start, stop, num, dtype=dtype)
+
+    def test_geomspace_float16_endpoints(self):
+        # float16 endpoints and dtype: the whole computation runs in float16.
+        start, stop = _np.float16(1), _np.float16(7)
+        res = w.geomspace(start, stop, 5, dtype="float16")
+        expected = _np.geomspace(start, stop, 5, dtype="float16")
+        assert_equal(res.dtype.name, "float16")
+        assert_allclose(res, expected, rtol=1e-3)
+        assert_equal(res[[0, -1]], expected[[0, -1]])
+
+    def test_geomspace_float32_endpoints(self):
+        self._check(_np.float32(1), _np.float32(7), 5)
+        self._check(_np.float32(1), _np.float32(7), 5, dtype="float32", rtol=1e-6)
+
+    @parametrize("start, stop", [(1, 7), (1.0, 7.0), (1, 7j)])
+    def test_geomspace_default_float_dtype(self, start, stop):
+        try:
+            w.set_default_dtype(fp_dtype="float32")
+            res = w.geomspace(start, stop, 5)
+            expected = w.complex64 if isinstance(stop, complex) else w.float32
+            assert_equal(res.dtype, expected)
+            assert_allclose(res, _np.geomspace(start, stop, 5), rtol=1e-6)
+        finally:
+            w.set_default_dtype(fp_dtype="numpy")
+
+    @parametrize("start, stop", [(0, 1000), (1, 0), (0j, 1j), (1j, 0j)])
+    def test_geomspace_zero_raises(self, start, stop):
+        with self.assertRaisesRegex(ValueError, "cannot include zero"):
+            w.geomspace(start, stop, num=4)
+
+
 class TestMisc(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -732,6 +792,30 @@ class TestMiscDevice(TestCase):
             w.cov(t.to(device), t.to(device)), w.cov(t, t).tensor.to(device)
         )
         assert_allclose(w.corrcoef(t.to(device)), w.corrcoef(t).tensor.to(device))
+
+    @onlyAccelerator
+    def test_geomspace_on_gpu(self, device):
+        for start, stop in [(1.0, 7.0), (-1.0, -1000.0), (1, 1j)]:
+            res = w.geomspace(
+                w.asarray(torch.tensor(start, device=device)),
+                w.asarray(torch.tensor(stop, device=device)),
+                5,
+            )
+            assert_equal(res.tensor.device.type, torch.device(device).type)
+            assert_allclose(res.tensor.cpu(), w.geomspace(start, stop, 5).tensor)
+
+    @onlyAccelerator
+    def test_geomspace_mixed_devices(self, device):
+        # The result is on the accelerator whichever endpoint is on it
+        on_device = w.asarray(torch.tensor(7.0, device=device))
+        for res in (w.geomspace(1.0, on_device, 5), w.geomspace(on_device, 1.0, 5)):
+            assert_equal(res.tensor.device.type, torch.device(device).type)
+        assert_allclose(
+            w.geomspace(1.0, on_device, 5).tensor.cpu(), w.geomspace(1.0, 7.0, 5).tensor
+        )
+        assert_allclose(
+            w.geomspace(on_device, 1.0, 5).tensor.cpu(), w.geomspace(7.0, 1.0, 5).tensor
+        )
 
 
 instantiate_device_type_tests(
