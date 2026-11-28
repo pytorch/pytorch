@@ -697,6 +697,48 @@ class CommonTemplate:
         if config.triton.use_tensor_descriptor:
             self.assertIn("tl.load(", code)
 
+    @parametrize("transpose_discontiguous_tensor_descriptor", [False, True])
+    def test_output_descriptor_with_zero_strides(
+        self, transpose_discontiguous_tensor_descriptor: bool
+    ):
+        if "block_ptr" in self.block_descriptor_constructor_str:
+            raise unittest.SkipTest("BlockPtr is deprecated.")
+
+        # Based on https://github.com/pytorch/pytorch/issues/174074
+        # The first kernel performs a broadcasted read along dim 0
+        # and writes to a contiguous output of shape [2, 2048].
+        # The second kernel reads from the first kernel's output and writes
+        # back to the user buffer that has shape [1, 2048].
+        # With `prefer_nd_tiling=True`, the compute block shape is [YBLOCK, XBLOCK].
+        # Dropping the broadcast dimension for the output (dim 0) will lead to
+        # inserting a reshape [YBLOCK, XBLOCK] -> [XBLOCK] that raises an error.
+        def fn(x):
+            x[[0, 0]] += x[[0, 0]]
+            return x
+
+        x = torch.randn(1, 2048, dtype=torch.float32, device=self.device)
+        expected = fn(x.clone())
+        with config.patch(
+            {
+                "triton.prefer_nd_tiling": True,
+                "triton.transpose_discontiguous_tensor_descriptor": (
+                    transpose_discontiguous_tensor_descriptor
+                ),
+            }
+        ):
+            result, code = run_and_get_code(
+                torch.compile(fn, backend="inductor"), x.clone()
+            )
+
+        self.assertTrue(torch.allclose(expected, result))
+        self.assertEqual(sum(src.count("@triton.jit") for src in code), 2)
+        self.assertEqual(
+            sum(src.count(self.block_descriptor_constructor_str) for src in code), 4
+        )
+
+        # Store descriptor with stride 0 outermost dimension is not dropped.
+        self.assertIn("out_ptr0, shape=[2, 2048], strides=[0, 1]", code[0])
+
     @parametrize(
         "x_size,y_size",
         [
