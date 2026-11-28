@@ -66,7 +66,8 @@ static Tensor pixel_shuffle_helper(const Tensor& self, int64_t factor, bool upsc
   const int64_t z_dim = channel_major ? hd : channels;
   const std::array<uint32_t, 2> factor_zdim = {c10::safe_conv<uint32_t>(factor, "uint32_t"),
                                                c10::safe_conv<uint32_t>(z_dim, "uint32_t")};
-  const std::string kernel = "pixel_shuffle_" + std::to_string(input.element_size());
+  const auto kernel =
+      fmt::format("pixel_shuffle_{}{}", input.element_size(), mtlIdxSuffix(offsetsFitIn<uint32_t>(input, output)));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
