@@ -1382,12 +1382,12 @@ class TestIdentity(TestCase):
 
     def test_cast_identity_int(self):
         num = 1
-        expr = Identity(num)
+        expr = Identity(num, evaluate=False)
         self.assertEqual(num, int(expr))
 
     def test_cast_identity_float(self):
         num = 1.1
-        expr = Identity(num)
+        expr = Identity(num, evaluate=False)
         self.assertEqual(num, float(expr))
 
     def test_cast_identity_illegal(self):
@@ -1402,7 +1402,7 @@ class TestIdentity(TestCase):
 
 class TestTypedExpr(TestCase):
     def test_typed_expr(self):
-        I = Identity(1)
+        I = Identity(1, evaluate=False)
         typed_I = TypedExpr(I, torch.int32)
         self.assertEqual(typed_I.expr, 1)
 
