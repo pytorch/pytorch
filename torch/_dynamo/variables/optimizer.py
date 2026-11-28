@@ -119,8 +119,15 @@ class OptimizerVariable(UserDefinedObjectVariable):
             return None
         try:
             self.graph_break_if_pending_mutation(tx)
+            if self._has_non_tensor_state():
+                # map_sources_and_install_guards only wraps Tensor state; decline
+                # so UDOV inlines _init_group with guards on non-Tensor values.
+                raise ArgMappingException
             self.move_step_if_cpu()
             py_args, py_kwargs = self.get_python_args(*args, **kwargs)
+            # Shallow snapshot lets us restore live state if _init_group fills a
+            # sourceless list with non-Tensors and we fall back to inlining.
+            orig_state = self._snapshot_state()
             # Eager _init_group is not traced; it reads the live dict to
             # place state["step"]. Temporarily set capturable=True so GPU
             # steps land on device, then restore so the flag does not leak
@@ -136,6 +143,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
             finally:
                 for group, orig in saved_capturables:
                     group["capturable"] = orig
+            if self._has_sourceless_non_tensor_list_arg(
+                args, kwargs, py_args, py_kwargs
+            ):
+                self._restore_state(orig_state)
+                raise ArgMappingException
             self.map_sources_and_install_guards(tx)
             self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
             # stash a weak_ptr to optimizer to invalidate code
@@ -259,14 +271,42 @@ class OptimizerVariable(UserDefinedObjectVariable):
     # if this is the case, move it to the GPU
     # corresponding to the parameter
     # in most cases this is a no-op because the state is empty
+    def _has_non_tensor_state(self) -> bool:
+        return any(
+            not isinstance(val, torch.Tensor)
+            for state in self.value.state.values()
+            for val in state.values()
+        )
+
+    def _snapshot_state(self) -> dict[Any, dict[Any, Any]]:
+        return {p: dict(state) for p, state in self.value.state.items()}
+
+    def _restore_state(self, orig_state: dict[Any, dict[Any, Any]]) -> None:
+        self.value.state.clear()
+        self.value.state.update(orig_state)
+
+    @staticmethod
+    def _has_sourceless_non_tensor_list_arg(
+        args: Iterable[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+        py_args: Iterable[Any],
+        py_kwargs: dict[str, Any],
+    ) -> bool:
+        pairs = list(zip(args, py_args))
+        pairs.extend((kwargs[k], py_kwargs[k]) for k in py_kwargs if k in kwargs)
+        return any(
+            isinstance(arg, ListVariable)
+            and arg.source is None
+            and isinstance(py_arg, list)
+            and any(not isinstance(val, torch.Tensor) for val in py_arg)
+            for arg, py_arg in pairs
+        )
+
     def move_step_if_cpu(self) -> None:
         for p, state in self.value.state.items():
-            if (
-                "step" in state
-                and isinstance(state["step"], torch.Tensor)
-                and state["step"].is_cpu
-            ):
-                state["step"] = state["step"].to(p.device)
+            step = state.get("step")
+            if isinstance(step, torch.Tensor) and step.is_cpu:
+                state["step"] = step.to(p.device)
 
     def map_sources_and_install_guards(self, tx: "InstructionTranslatorBase") -> None:
         from ..decorators import mark_static_address
