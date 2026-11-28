@@ -14,7 +14,9 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/NestedIntSymNodeImpl.h>
 #include <functional>
+#include <limits>
 
 
 #include <algorithm>
@@ -2233,6 +2235,89 @@ TEST(OperatorRegistrationTest, TestSymSymRefCompatibility) {
 
   expectThrows<c10::Error>([&] {
     m_cpu.impl("symint_op", c10::DispatchKey::CPU, TORCH_FN(symint_op3));
+  }, "doesn't match the expected function schema");
+}
+
+template <typename T>
+class SymIntVectorRegistrationTest : public ::testing::Test {};
+
+using SymIntVectorTypes = ::testing::Types<
+    std::vector<c10::SymInt>, const std::vector<c10::SymInt>&>;
+TYPED_TEST_SUITE(SymIntVectorRegistrationTest, SymIntVectorTypes);
+
+TYPED_TEST(SymIntVectorRegistrationTest, PreservesSymbolicValues) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("symint_vector(Tensor self, SymInt[] lengths) -> ()");
+  const c10::SymNode node = c10::make_intrusive<c10::NestedIntSymNodeImpl>(1, 1);
+  int calls = 0;
+  m.impl("symint_vector", c10::DispatchKey::CPU,
+      [&](const Tensor&, TypeParam lengths) {
+        ++calls;
+        ASSERT_EQ(lengths.size(), 2);
+        EXPECT_EQ(lengths[0].expect_int(), 2);
+        ASSERT_TRUE(lengths[1].is_symbolic());
+        EXPECT_EQ(lengths[1].toSymNodeImplUnowned(), node.get());
+      });
+
+  auto op = c10::Dispatcher::singleton().findSchemaOrThrow(
+      "_test::symint_vector", "");
+  const auto self = dummyTensor(c10::DispatchKey::CPU);
+  const std::vector<c10::SymInt> lengths{c10::SymInt(2), c10::SymInt(node)};
+  op.typed<void(const Tensor&, TypeParam)>().call(self, lengths);
+  EXPECT_EQ(calls, 1);
+  callOp(op, self, lengths);
+  EXPECT_EQ(calls, 2);
+}
+
+TYPED_TEST(SymIntVectorRegistrationTest, CallsNonSymIntKernel) {
+  using IntVector = std::conditional_t<
+      std::is_reference_v<TypeParam>,
+      const std::vector<int64_t>&,
+      std::vector<int64_t>>;
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("symint_vector(Tensor self, SymInt[] lengths) -> int[]");
+  int calls = 0;
+  m.impl("symint_vector", c10::DispatchKey::CPU,
+      [&](const Tensor&, IntVector lengths) {
+        ++calls;
+        return lengths;
+      });
+
+  auto op = c10::Dispatcher::singleton().findSchemaOrThrow(
+      "_test::symint_vector", "");
+  const auto self = dummyTensor(c10::DispatchKey::CPU);
+  for (const std::vector<int64_t>& expected : {
+           std::vector<int64_t>{},
+           std::vector<int64_t>{2, 3},
+           std::vector<int64_t>{std::numeric_limits<int64_t>::min(), 0,
+                                std::numeric_limits<int64_t>::max()}}) {
+    const std::vector<c10::SymInt> lengths(expected.begin(), expected.end());
+    EXPECT_EQ(
+        (op.typed<std::vector<int64_t>(const Tensor&, TypeParam)>()
+             .call(self, lengths)),
+        expected);
+    EXPECT_EQ(
+        (op.typed<std::vector<int64_t>(const Tensor&, IntVector)>()
+             .call(self, expected)),
+        expected);
+  }
+  EXPECT_EQ(calls, 6);
+
+  const c10::SymNode node = c10::make_intrusive<c10::NestedIntSymNodeImpl>(1, 1);
+  const std::vector<c10::SymInt> symbolic_lengths{c10::SymInt(node)};
+  EXPECT_THROW(
+      (op.typed<std::vector<int64_t>(const Tensor&, TypeParam)>()
+           .call(self, symbolic_lengths)),
+      c10::Error);
+  EXPECT_EQ(calls, 6);
+}
+
+TYPED_TEST(SymIntVectorRegistrationTest, RejectsIntSchema) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("symint_vector(Tensor self, int[] lengths) -> ()");
+  expectThrows<c10::Error>([&] {
+    m.impl("symint_vector", c10::DispatchKey::CPU,
+        [](const Tensor&, TypeParam) {});
   }, "doesn't match the expected function schema");
 }
 

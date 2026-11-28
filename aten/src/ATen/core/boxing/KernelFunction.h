@@ -9,6 +9,7 @@
 #include <atomic>
 #include <memory>
 #include <type_traits>
+#include <vector>
 
 namespace c10 {
 
@@ -23,11 +24,17 @@ class KernelToken;
 class SafeKernelFunction;
 
 template <typename T>
+using is_symint_vector = std::disjunction<
+    std::is_same<std::vector<c10::SymInt>, T>,
+    std::is_same<const std::vector<c10::SymInt>&, T>>;
+
+template <typename T>
 using has_symint = std::disjunction<
     std::is_same<c10::SymInt, T>,
     std::is_same<c10::SymIntArrayRef, T>,
     std::is_same<at::OptionalSymIntArrayRef, T>,
-    std::is_same<std::optional<c10::SymInt>, T>>;
+    std::is_same<std::optional<c10::SymInt>, T>,
+    is_symint_vector<T>>;
 
 template <typename T>
 struct remove_symint {
@@ -52,6 +59,16 @@ struct remove_symint<c10::SymIntArrayRef> {
 template <>
 struct remove_symint<std::optional<c10::SymInt>> {
   using type = std::optional<int64_t>;
+};
+
+template <>
+struct remove_symint<std::vector<c10::SymInt>> {
+  using type = std::vector<int64_t>;
+};
+
+template <>
+struct remove_symint<const std::vector<c10::SymInt>&> {
+  using type = const std::vector<int64_t>&;
 };
 
 template <bool symint, typename T>
