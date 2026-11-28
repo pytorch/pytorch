@@ -1355,6 +1355,26 @@ class DecompOneOffTests(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyNativeDeviceTypes
+    @parametrize("memory_format", [torch.contiguous_format, torch.channels_last_3d])
+    @parametrize("resize_out", [False, True])
+    @parametrize("align_corners", [False, True])
+    def test_upsample_trilinear3d_out_layout(
+        self, device, memory_format, resize_out, align_corners
+    ):
+        op = aten.upsample_trilinear3d.out
+        ref = decomposition_table[op]
+        x = torch.randn(2, 3, 2, 3, 4, device=device).contiguous(
+            memory_format=memory_format
+        )
+        output_size = [4, 6, 8]
+        shape = (0,) if resize_out else (2, 3, *output_size)
+        expected = x.new_empty(shape)
+        actual = x.new_empty(shape)
+        self.assertIs(op(x, output_size, align_corners, out=expected), expected)
+        self.assertIs(ref(x, output_size, align_corners, out=actual), actual)
+        self.assertEqual(actual, expected, exact_stride=True)
+
+    @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_polar_decomposition_is_functional(self, device):
         # A decomposition is inlined into a graph that must stay functional, so

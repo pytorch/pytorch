@@ -4659,7 +4659,7 @@ def upsample_bilinear2d(
 @register_decomposition(
     [aten.upsample_trilinear3d.default, aten.upsample_trilinear3d.out]
 )
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True)
 def upsample_trilinear3d(
     input: Tensor,
     output_size: list[int],
@@ -4780,7 +4780,6 @@ def _upsample_linear(
     scales: list[float | None],
 ) -> Tensor:
     # get dimensions of original image
-    n_channels = input.shape[1]
     inp_sizes = input.shape[2:]
     n_dims = len(inp_sizes)
 
@@ -4831,10 +4830,6 @@ def _upsample_linear(
 
     # convert output to correct memory format, if necessary
     memory_format = utils.upsample_output_memory_format(input)
-
-    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
-    if input.device.type == "cuda" and n_channels < 16:
-        memory_format = torch.contiguous_format
 
     if not isinstance(result, torch.Tensor):
         raise AssertionError(
