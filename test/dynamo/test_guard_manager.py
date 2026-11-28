@@ -20,7 +20,10 @@ from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.guards import _ordered_dict_order, GuardBuilder
+from torch._dynamo.source import ConstantSource
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -42,6 +45,9 @@ install_object_aliasing_guard = guards.install_object_aliasing_guard
 NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
 install_storage_overlapping_guard = guards.install_storage_overlapping_guard
+compute_overlapping_tensor_groups = guards.compute_overlapping_tensor_groups
+compute_overlapping_tensors = guards.compute_overlapping_tensors
+SWEEP_MIN_BUCKET_SIZE = guards.overlap_sweep_min_bucket_size
 
 
 x = torch.tensor(4)
@@ -1196,6 +1202,221 @@ user_stack=None)
         self.assertFalse(d_a_mgr.is_tag_safe())
         self.assertTrue(guards_manager.check({"x": overlapping, "d": d}))
         self.assertFalse(guards_manager.check({"x": non_overlapping, "d": d}))
+
+    def test_storage_overlapping_guard_separate_storages(self):
+        # Inputs that shared a storage at compile time must still share one,
+        # overlapping or not: AOTAutograd rebuilds all of them from one
+        # synthetic base, or treats them as independent of other storages.
+        storage, other = torch.randn(8), torch.randn(8)
+
+        def make_guard(overlapping, non_overlapping):
+            root = RootGuardManager()
+            values = {**overlapping, **non_overlapping}
+            managers = {
+                name: root.framelocals_manager((name, i), name, v, default_mgr_enum)
+                for i, (name, v) in enumerate(values.items())
+            }
+            install_storage_overlapping_guard(
+                [managers[name] for name in overlapping],
+                [managers[name] for name in non_overlapping],
+                ["storage overlap"],
+                None,
+            )
+            return root
+
+        # a and b overlap, c doesn't.
+        scope = {"a": storage[:2], "b": storage[1:3], "c": storage[4:6]}
+        root = make_guard({"a": scope["a"], "b": scope["b"]}, {"c": scope["c"]})
+        self.assertTrue(root.check(scope))
+        self.assertFalse(root.check({**scope, "b": other[1:3]}))
+        self.assertFalse(root.check({**scope, "c": other[4:6]}))
+
+        # Nothing overlaps.
+        scope = {"a": storage[:2], "c": storage[4:6]}
+        root = make_guard({}, scope)
+        self.assertTrue(root.check(scope))
+        self.assertFalse(root.check({**scope, "c": other[4:6]}))
+
+    def test_compute_overlapping_tensor_groups_buckets_storages(self):
+        # Tensors on different storages never overlap, even when their element
+        # ranges intersect: first[:6], second[:6] and the last tensor all span
+        # elements 0-5.
+        first = torch.arange(12)
+        second = torch.arange(12)
+        tensors = [
+            first[:6],
+            first[3:9],
+            second[:6],
+            second[3:9],
+            torch.arange(6),
+        ]
+
+        groups = compute_overlapping_tensor_groups(tensors, symbolic=False)
+
+        self.assertEqual(groups, [[0, 1], [2, 3]])
+        self.assertEqual(
+            compute_overlapping_tensors(tensors, symbolic=False),
+            {0, 1, 2, 3},
+        )
+
+    def test_compute_overlapping_tensor_groups_repeated_tensor(self):
+        # A repeated tensor overlaps itself without reading its metadata: a
+        # sparse tensor has no strides, and an unbacked numel can't be compared
+        # with 0.
+        sparse = torch.eye(2).to_sparse_csr()
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            unbacked = torch.empty(shape_env.create_unbacked_symint(), 16)
+        for t in (sparse, unbacked):
+            for n in (2, SWEEP_MIN_BUCKET_SIZE):
+                self.assertEqual(
+                    compute_overlapping_tensor_groups([t] * n), [list(range(n))]
+                )
+
+    def _all_pairs_overlap_groups(self, tensors, symbolic=True):
+        # Two-tensor calls always take the direct pairwise path, so they give
+        # an all-pairs reference for the swept path used by larger buckets.
+        parents = list(range(len(tensors)))
+
+        def find(i):
+            while parents[i] != i:
+                i = parents[i]
+            return i
+
+        for i in range(len(tensors)):
+            for j in range(i):
+                pair = [tensors[j], tensors[i]]
+                if compute_overlapping_tensor_groups(pair, symbolic=symbolic):
+                    parents[find(i)] = find(j)
+        components = {}
+        for i in range(len(tensors)):
+            components.setdefault(find(i), []).append(i)
+        return sorted(c for c in components.values() if len(c) > 1)
+
+    def test_compute_overlapping_tensor_groups_matches_all_pairs(self):
+        gen = torch.Generator().manual_seed(0)
+
+        def randint(lo, hi):
+            return int(torch.randint(lo, hi, (), generator=gen))
+
+        def random_view(base):
+            mat = base[:3600].view(60, 60)
+            cube = base.view(16, 16, 16)
+            kind = randint(0, 100)
+            if kind < 25:
+                s = randint(0, 4000)
+                return base[s : s + randint(1, 64)]
+            if kind < 35:
+                s = randint(0, 4000)
+                return base[s : s + randint(1, 64) : randint(2, 9)]
+            if kind < 60:
+                # Tiles in the same row band have intersecting element ranges
+                # but may be disjoint, which the sweep must hand to the
+                # pairwise check.
+                r, c = randint(0, 56), randint(0, 56)
+                return mat[r : r + randint(1, 5), c : c + randint(1, 5)]
+            if kind < 70:
+                r, c = randint(0, 56), randint(0, 56)
+                return mat[r : r + randint(1, 5), c : c + randint(1, 5)].t()
+            if kind < 90:
+                a, b, c = randint(0, 15), randint(0, 15), randint(0, 15)
+                return cube[a : a + 2, b : b + 2, c : c + 2]
+            if kind < 98:
+                return base[randint(0, 4096) :][:0]
+            return base
+
+        for _ in range(300):
+            bases = [torch.zeros(4096) for _ in range(randint(1, 5))]
+            tensors = [
+                random_view(bases[randint(0, len(bases))])
+                for _ in range(randint(8, 60))
+            ]
+            tensors += [tensors[randint(0, len(tensors))] for _ in range(2)]
+            expected = self._all_pairs_overlap_groups(tensors, symbolic=False)
+            actual = compute_overlapping_tensor_groups(tensors, symbolic=False)
+            self.assertEqual(actual, expected)
+
+    def test_compute_overlapping_tensor_groups_symbolic(self):
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_symintnode(
+            shape_env.create_symbol(20, ConstantSource("s0")), hint=20
+        )
+        s1 = shape_env.create_symintnode(
+            shape_env.create_symbol(10, ConstantSource("s1")), hint=10
+        )
+        with FakeTensorMode(shape_env=shape_env):
+            base = torch.empty(s0, s1)
+            flat = base.view(-1)
+
+            # Views sharing offset 0 must not make the sort install a
+            # tie-break guard on their last elements.
+            tied = [
+                base,
+                base[0],
+                base[0, :3],
+                base[0, :1],
+                base[:, 0],
+                base[:2, 0],
+                base[:3],
+                base[:1],
+                base[:, :2],
+                base[:2, :2],
+            ]
+            self.assertGreaterEqual(len(tied), SWEEP_MIN_BUCKET_SIZE)
+            expected = self._all_pairs_overlap_groups(tied)
+            guards = list(shape_env.guards)
+            self.assertEqual(compute_overlapping_tensor_groups(tied), expected)
+            self.assertEqual(shape_env.guards, guards)
+
+            # Symbolic offsets whose order isn't implied by the symbols'
+            # ranges. The sweep may install different guards here, but the
+            # partition must match the all-pairs result.
+            mixed = [
+                base[1],
+                base[2],
+                base[3],
+                base[1:3, 1],
+                base[5:7, 2:4],
+                base[6:8, 3:5],
+                base[6:8, 5:7],
+                flat[s0 : s0 + 2],
+                flat[s0 + 1 : s0 + 3],
+                flat[2 * s0 : 2 * s0 + 1],
+                base[10:12, :2],
+                base[11],
+                base[14],
+                base[15, :3],
+            ]
+            self.assertGreaterEqual(len(mixed), SWEEP_MIN_BUCKET_SIZE)
+            expected = self._all_pairs_overlap_groups(mixed)
+            groups = compute_overlapping_tensor_groups(mixed)
+            self.assertEqual(groups, expected)
+            self.assertGreaterEqual(len(groups), 2)
+
+    def test_compute_overlapping_tensor_groups_symbolic_ties(self):
+        # Two offsets with equal hints. The pairwise check only records how
+        # the later tensor's offset compares to the earlier one's, so the sweep
+        # must not also record the opposite comparison, which would pin the
+        # offsets as equal.
+        shape_env = ShapeEnv(duck_shape=False)
+        a, b = (
+            shape_env.create_symintnode(
+                shape_env.create_symbol(3, ConstantSource(name)), hint=3
+            )
+            for name in ("a", "b")
+        )
+        with FakeTensorMode(shape_env=shape_env):
+            flat = torch.empty(1000)
+            views = [flat[a : a + 2], flat[b : b + 2]]
+            views += [
+                flat[100 + 5 * k : 102 + 5 * k]
+                for k in range(SWEEP_MIN_BUCKET_SIZE - 2)
+            ]
+            self.assertEqual(compute_overlapping_tensor_groups(views), [[0, 1]])
+        # The pairwise check accepts a = 4, b = 3.
+        values = {a.node.expr: 4, b.node.expr: 3}
+        for guard in shape_env.guards:
+            self.assertTrue(guard.expr.subs(values), guard.expr)
 
     def test_globals(self):
         global global_pair, Pair

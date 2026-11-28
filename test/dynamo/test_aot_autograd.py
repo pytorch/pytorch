@@ -1618,6 +1618,31 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             """0/0: check_overlapping(overlapping=[a, b], non_overlapping=[c, d])""",
         )
 
+    def test_inputs_overlapping_with_mutation_member_on_other_storage(self):
+        # The compiled graph rebuilds every view of the storage, overlapping or
+        # not, from one synthetic base, so moving any of them to another storage
+        # must recompile, even to a range that doesn't intersect the others.
+        def f(a, b, c, d):
+            a.mul_(2)
+            return a + b + c + d
+
+        def args(x, y, c_on_y):
+            return x[:5], x[4:9], y[10:15] if c_on_y else x[10:15], x[15:]
+
+        failures = []
+        opt_f = torch._dynamo.optimize(
+            "aot_eager", dynamic=True, guard_fail_fn=lambda f: failures.append(f[0])
+        )(f)
+        for c_on_y in (False, True):
+            x, y = torch.arange(20.0), torch.arange(20.0) + 100
+            expected = f(*args(x.clone(), y.clone(), c_on_y))
+            self.assertEqual(opt_f(*args(x, y, c_on_y)), expected)
+        self.assertEqual(len(failures), 1)
+        self.assertExpectedInline(
+            failures[0],
+            """0/0: check_overlapping(overlapping=[a, b], non_overlapping=[c, d])""",
+        )
+
     def _test_no_storage_overlap_guards(self, f, argsfn):
         # Compile f with aot_eager backend, and run it with the argument set returned by
         # argsfn function. Meanwhile, keep track of the aotautograd_gurads, so as to make
