@@ -482,6 +482,12 @@ class Vectorized<float> {
   DEFINE_MEMBER_OP(operator|, float, vec_or)
   DEFINE_MEMBER_OP(operator^, float, vec_xor)
   DEFINE_MEMBER_TERNARY_OP(madd, float, vec_madd)
+  float reduce_max() const {
+    vfloat32 max0 = vec_max(_vec0, _vec1);
+    vfloat32 max1 = vec_max(max0, vec_sld(max0, max0, 8));
+    vfloat32 max2 = vec_max(max1, vec_sld(max1, max1, 4));
+    return vec_extract(max2, 0);
+  }
 };
 
 template <>
