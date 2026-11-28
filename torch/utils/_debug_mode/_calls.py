@@ -243,14 +243,42 @@ class _TritonKernelCall(_DebugCall):
         kernel_name: str,
         kwargs: dict[str, Any],
         call_depth: int,
+        *,
+        stream: int | None = None,
+        device_index: int | None = None,
     ):
         super().__init__(call_depth)
         self.kernel_name = kernel_name
         self.kwargs = kwargs
         self.kwargs_str: str | None = None
+        self.stream = stream
+        self.device_index = device_index
 
         self.pre_hashes: dict[str, Any] | None = None
         self.post_hashes: dict[str, Any] | None = None
+
+    def _check_hash_stream(self, device_interface: "DeviceInterface | None") -> None:
+        current_device = device_interface.current_device() if device_interface else None
+        if self.device_index is None:
+            self.device_index = current_device
+        if (
+            device_interface is None
+            or current_device is None
+            or self.stream is None
+            or self.device_index != current_device
+            or self.stream != device_interface.get_raw_stream(current_device)
+        ):
+            raise RuntimeError(
+                "defer_scalar requires Triton kernels to launch on the current device stream"
+            )
+        launch_device = device_interface.current_stream().device
+        if any(
+            isinstance(value, torch.Tensor) and value.device != launch_device
+            for value in self.kwargs.values()
+        ):
+            raise RuntimeError(
+                "defer_scalar requires Triton tensor arguments to be on the launch device"
+            )
 
     def stringify_args(
         self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
@@ -262,6 +290,8 @@ class _TritonKernelCall(_DebugCall):
                 for k, v in self.kwargs.items()
                 if isinstance(v, torch.Tensor)
             }
+            if _utils._TRITON_HASH_CALLS is not None:
+                _utils._TRITON_HASH_CALLS.append(self)
 
         if self.kwargs:
             self.kwargs_str = ", ".join(
@@ -296,8 +326,11 @@ class _TritonKernelCall(_DebugCall):
         return f"{base_str}{pre_hashes_str}{post_hashes_str}\n"
 
     def finalize(self, device_interface: "DeviceInterface"):
-        # synchronize -> hash/store kernel results
-        device_interface.synchronize(device_interface.current_device())
+        if _utils._TRITON_HASH_CALLS is None:
+            device_interface.synchronize(device_interface.current_device())
+        else:
+            # The launch and hashes share a stream, including later in-place writes.
+            self._check_hash_stream(device_interface)
         if _utils._RECORD_TRITON_OUTPUTS:
             self.record = {
                 "output": {
@@ -311,6 +344,8 @@ class _TritonKernelCall(_DebugCall):
                 for k, v in self.kwargs.items()
                 if isinstance(v, torch.Tensor)
             }
+            if _utils._TRITON_HASH_CALLS is not None:
+                _utils._TRITON_HASH_CALLS.append(self)
 
         # don't store tensors
         del self.kwargs
