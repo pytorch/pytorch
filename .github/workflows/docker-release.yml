@@ -46,7 +46,19 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.generate-matrix.outputs.matrix }}
+      channel: ${{ steps.release-channel.outputs.channel }}
     steps:
+      - name: Select Docker release channel
+        id: release-channel
+        env:
+          EVENT_REF: ${{ github.event.ref }}
+        run: |
+          case "${GITHUB_EVENT_NAME}:${EVENT_REF}" in
+            pull_request:*|*:refs/heads/nightly|*:refs/tags/ciflow/nightly/*) channel=nightly ;;
+            *:refs/tags/v*-rc*) channel=test ;;
+            *) channel=release ;;
+          esac
+          echo "channel=${channel}" >> "${GITHUB_OUTPUT}"
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
@@ -88,6 +100,8 @@ jobs:
       matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
       fail-fast: false
     env:
+      DOCKER_CHANNEL: ${{ needs.generate-matrix.outputs.channel }}
+      HF_REGISTRY: cr.hf.co
       BUILD_IMAGE_TYPE: ${{ matrix.image_type }}
       BUILD_PLATFORMS: ${{ matrix.platform }}
       CUDA_VERSION: ${{ matrix.cuda_full_version }}
@@ -108,36 +122,35 @@ jobs:
         if: ${{ env.WITH_PUSH == 'true' }}
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
-          registry: ghcr.io
-          username: pytorch
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ env.DOCKER_ORG }}
           password: ${{ secrets.GHCR_PAT }}
       - name: Setup job specific variables
         run: |
           echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py --no-build-suffix)" >> "${GITHUB_ENV}"
           echo "STABLE_CUDA_VERSION=$(python3 .github/scripts/get_ci_variable.py --cuda-stable-version)" >> "${GITHUB_ENV}"
-      - name: Setup test specific variables
-        if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+      - name: Set up Docker image reference
         run: |
-          if [[ ${{ github.event.ref }} =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$ ]]; then
-            {
-              echo "DOCKER_IMAGE=pytorch-test";
-              echo "INSTALL_CHANNEL=whl/test";
-              echo "TRITON_VERSION=$(cut -f 1 .ci/docker/triton_version.txt)";
-            } >> "${GITHUB_ENV}"
+          case "${DOCKER_CHANNEL}" in
+            nightly|test)
+              export DOCKER_IMAGE="pytorch-${DOCKER_CHANNEL}"
+              triton_version="$(cut -f 1 .ci/docker/triton_version.txt)"
+              if [[ "${DOCKER_CHANNEL}" == nightly ]]; then
+                triton_version+="+$(cut -c -10 .ci/docker/ci_commit_pins/triton.txt)"
+              fi
+              {
+                echo "DOCKER_IMAGE=${DOCKER_IMAGE}"
+                echo "INSTALL_CHANNEL=whl/${DOCKER_CHANNEL}"
+                echo "TRITON_VERSION=${triton_version}"
+              } >> "${GITHUB_ENV}"
+              ;;
+          esac
+          image_ref="$(make --no-print-directory -s -f docker.Makefile "print-${BUILD_IMAGE_TYPE}-image-ref")"
+          echo "IMAGE_REF=${image_ref}" >> "${GITHUB_ENV}"
+          if [[ "${DOCKER_CHANNEL}" == nightly ]]; then
+            # Pull requests only read the cache; docker.Makefile writes it only when pushing.
+            echo "CACHE_REF=${image_ref%:*}:buildcache-${BUILD_IMAGE_TYPE}-cuda${CUDA_VERSION_SHORT}-${BUILD_PLATFORMS//\//-}" >> "${GITHUB_ENV}"
           fi
-      - name: Setup nightly specific variables
-        if: ${{ github.event_name == 'pull_request' || github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/ciflow/nightly/') }}
-        run: |
-          {
-            echo "DOCKER_IMAGE=pytorch-nightly";
-            echo "INSTALL_CHANNEL=whl/nightly";
-            echo "TRITON_VERSION=$(cut -f 1 .ci/docker/triton_version.txt)+$(cut -c -10 .ci/docker/ci_commit_pins/triton.txt)";
-            # One cache per image variant. Lets the unchanged layers of last
-            # night's image (the torch dependencies) be reused, with the same
-            # digests, on a builder whose local cache is empty. Pull requests
-            # only read it; docker.Makefile writes it just when pushing.
-            echo "CACHE_REF=${DOCKER_REGISTRY}/${DOCKER_ORG}/pytorch-nightly:buildcache-${BUILD_IMAGE_TYPE}-cuda${CUDA_VERSION_SHORT}-${BUILD_PLATFORMS//\//-}";
-          } >> "${GITHUB_ENV}"
       - name: Run docker build / push
         # docker.Makefile drives the buildx build (USE_BUILDX=1);
         # build_with_remote_buildkit.sh registers the remote builder and adds
@@ -151,8 +164,7 @@ jobs:
         if: ${{ github.event.ref == 'refs/heads/nightly' && matrix.image_type == 'runtime' && matrix.platform == 'linux/amd64' }}
         run: |
           set -eo pipefail
-          PREFIX="${DOCKER_REGISTRY}/${DOCKER_ORG}/${DOCKER_IMAGE}"
-          PYTORCH_DOCKER_TAG="${PYTORCH_VERSION}-cuda${CUDA_VERSION_SHORT}-cudnn${CUDNN_VERSION}-runtime"
+          PREFIX="${IMAGE_REF%:*}"
           CUDA_SUFFIX="-cu${CUDA_VERSION}"
 
           out="$(mktemp -d)"
@@ -164,14 +176,14 @@ jobs:
           COPY --from=src /commit /commit
           DOCKERFILE
           docker buildx build --builder remote-buildkit \
-            --build-arg SRC_IMAGE="${PREFIX}:${PYTORCH_DOCKER_TAG}" \
+            --build-arg SRC_IMAGE="${IMAGE_REF}" \
             --target out --output "type=local,dest=${out}/export" \
             -f "${out}/Dockerfile" "${out}"
           PYTORCH_NIGHTLY_COMMIT="$(cat "${out}/export/commit")"
 
           docker buildx imagetools create \
             -t "${PREFIX}:${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}" \
-            "${PREFIX}:${PYTORCH_DOCKER_TAG}"
+            "${IMAGE_REF}"
 
           # Pin latest to the stable-CUDA build, as before.
           if [[ "${CUDA_VERSION_SHORT}" == "${STABLE_CUDA_VERSION}" ]]; then
@@ -184,9 +196,9 @@ jobs:
         continue-on-error: true
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
-          registry: cr.hf.co
+          registry: ${{ env.HF_REGISTRY }}
           # Ignored by cr.hf.co, the token identifies the user
-          username: pytorch
+          username: ${{ env.DOCKER_ORG }}
           password: ${{ secrets.HF_TOKEN }}
       - name: Mirror nightly image to Hugging Face (experimental)
         # Registry-side copy, no docker daemon needed.
@@ -196,26 +208,19 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           set -eo pipefail
-          if [[ "${CUDA_VERSION_SHORT}" == "cpu" ]]; then
-            TAG="${PYTORCH_VERSION}-runtime"
-          else
-            TAG="${PYTORCH_VERSION}-cuda${CUDA_VERSION_SHORT}-cudnn${CUDNN_VERSION}-${BUILD_IMAGE_TYPE}"
-          fi
+          image_path="${IMAGE_REF#*/}"
           # Pushes don't create the repo. This fails harmlessly if it already exists.
-          curl -sf -X POST "https://huggingface.co/api/containers/${DOCKER_ORG}/${DOCKER_IMAGE}" \
+          curl -sf -X POST "https://huggingface.co/api/containers/${image_path%:*}" \
             -H "Authorization: Bearer ${HF_TOKEN}" -H "Content-Type: application/json" \
             -d '{"private": false}' >/dev/null || true
           docker buildx imagetools create \
-            -t "cr.hf.co/${DOCKER_ORG}/${DOCKER_IMAGE}:${TAG}" \
-            "${DOCKER_REGISTRY}/${DOCKER_ORG}/${DOCKER_IMAGE}:${TAG}"
+            -t "${HF_REGISTRY}/${image_path}" \
+            "${IMAGE_REF}"
 
   validate:
-    needs: build
+    needs: [generate-matrix, build]
     if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
     uses: pytorch/test-infra/.github/workflows/validate-docker-images.yml@main
     with:
-      # Must match what `build` above actually pushed, otherwise validate pulls a
-      # tag that was never built: RC tags publish pytorch-test, final release tags
-      # pytorch, and the nightly branch pytorch-nightly.
-      channel: ${{ contains(github.event.ref, '-rc') && 'test' || (startsWith(github.event.ref, 'refs/tags/v') && 'release' || 'nightly') }}
+      channel: ${{ needs.generate-matrix.outputs.channel }}
       ref: main
