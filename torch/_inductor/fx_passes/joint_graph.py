@@ -1159,6 +1159,8 @@ def _preserve_scaled_softmax_nonfinite_semantics(scaled, stable, dim, keepdim):
     # This pattern also matches the raw scaled - amax(scaled) expression.  Only
     # use the stable form when it preserves that expression's nonfinite behavior.
     original = scaled - torch.amax(scaled, dim=dim, keepdim=keepdim)
+    if isinstance(dim, (list, tuple)) and len(dim) == 0:
+        dim = None
     finite_scaled = torch.all(torch.isfinite(scaled), dim=dim, keepdim=True)
     return torch.where(finite_scaled, stable, original)
 

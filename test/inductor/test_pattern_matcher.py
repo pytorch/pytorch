@@ -2977,15 +2977,18 @@ class TestPatternMatcher(TestCase):
             ),
         )
 
+    @parametrize("dim", [0, None, ()])
     @inductor_config.patch(fx_graph_cache=False)
-    def test_scaled_amax_sub_nonfinite_matches_eager(self):
+    def test_scaled_amax_sub_nonfinite_matches_eager(self, dim):
         def fn(x, scale):
             y = x * scale
-            return y - torch.amax(y, dim=0, keepdim=True)
+            if dim is None:
+                return y - torch.amax(y, keepdim=True)
+            return y - torch.amax(y, dim=dim, keepdim=True)
 
         torch._dynamo.reset()
         counters.clear()
-        x = torch.tensor([[10.0], [0.0]])
+        x = torch.tensor([[3.5], [3.3]])
         scale = torch.tensor([1e38])
         expected = fn(x, scale)
         actual, _ = run_and_get_code(torch.compile(fn), x, scale)
