@@ -34,6 +34,7 @@ from torch._dynamo.aot_compile import AOTCompiledFunction
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, GuardBuilder, strip_local_scope
 from torch._dynamo.package import load_guards_state
+from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.source import (
     AttrSource,
     CellContentsSource,
@@ -47,6 +48,7 @@ from torch._dynamo.source import (
 )
 from torch._dynamo.types import GuardFilterEntry
 from torch._guards import ChainedSource, Guard
+from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -305,6 +307,34 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(loaded(x), fn(x))
             with mock.patch.object(module, "_RAW_DESCRIPTOR_TARGET", replacement):
                 self.assertFalse(loaded.guard_check(x))
+
+    def test_assume_constant_result_tensor_skips_packaging(self):
+        # A tensor returned by an assume_constant_result function becomes a
+        # per-process global that a package cannot carry; the frame must be
+        # left out of the package and load by recompiling correctly instead
+        # of raising on the broken entry.
+        @torch._dynamo.assume_constant_result
+        def get_const():
+            return torch.ones(4)
+
+        def fn(x):
+            return x.sin() + get_const()
+
+        x = torch.ones(4)
+        expected = fn(x)
+        with fresh_cache(), torch._dynamo.config.patch(caching_precompile=True):
+            self.assertEqual(torch.compile(fn)(x), expected)
+            PrecompileContext.save_to_dynamo_cache()
+            torch._dynamo.reset()
+            with torch.compiler.set_stance("fail_on_recompile"):
+                # the frame is not in the package, so the only acceptable
+                # outcomes are a correct load or the stance's own recompile
+                # error; a corrupt entry would surface as NameError or an
+                # input count mismatch instead
+                try:
+                    self.assertEqual(torch.compile(fn)(x), expected)
+                except RuntimeError as e:
+                    self.assertIn("Detected recompile", str(e))
 
     def test_default_guard_filter_drops_the_unserializable_types(self):
         filter_fn = precompile_package.default_guard_filter_fn
