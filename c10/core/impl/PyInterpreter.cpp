@@ -43,16 +43,6 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(reportErrorCallback);
   }
 
-  void python_op_registration_trampoline(
-      const c10::OperatorHandle& /*op*/,
-      c10::DispatchKey /*unused*/,
-      c10::DispatchKeySet /*keyset*/,
-      torch::jit::Stack* /*stack*/,
-      bool /*with_keyset*/,
-      bool /*with_op*/) const override {
-    PANIC(python_op_registration_trampoline);
-  }
-
   void throw_abstract_impl_not_imported_error(
       std::string /*opname*/,
       const char* /*pymodule*/,
