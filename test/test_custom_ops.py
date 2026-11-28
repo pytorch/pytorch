@@ -6610,6 +6610,159 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             },
         )
 
+        result = torch.library.opcheck(
+            torch.ops.aten.sin.default, (x,), test_utils="ALL"
+        )
+        self.assertEqual(
+            result,
+            {
+                "test_schema": "SUCCESS",
+                "test_autograd_registration": "SUCCESS",
+                "test_faketensor": "SUCCESS",
+                "test_aot_dispatch_static": "SUCCESS",
+                "test_aot_dispatch_dynamic": "SUCCESS",
+            },
+        )
+
+    @scoped_load_inline
+    def test_opcheck_symbolic_faketensor_rejects_meta_guards(self, load_inline):
+        load_inline(
+            name="test_opcheck_symbolic_meta_guard",
+            cpp_sources=r"""
+torch::Tensor bad_meta(const torch::Tensor& x) {
+  auto s0 = x.sym_size(0).guard_int(__FILE__, __LINE__);
+  return at::empty_symint({c10::SymInt(s0), x.sym_size(1)}, x.options());
+}
+
+torch::Tensor cpu_impl(const torch::Tensor& x) {
+  return x.clone();
+}
+
+TORCH_LIBRARY(opcheck_symbolic_meta_guard, m) {
+  m.def("foo(Tensor x) -> Tensor");
+  m.def("meta_only(Tensor x) -> Tensor");
+}
+
+TORCH_LIBRARY_IMPL(opcheck_symbolic_meta_guard, CPU, m) {
+  m.impl("foo", cpu_impl);
+}
+
+TORCH_LIBRARY_IMPL(opcheck_symbolic_meta_guard, Meta, m) {
+  m.impl("foo", bad_meta);
+  m.impl("meta_only", [](const torch::Tensor& x) {
+    return at::empty_symint({x.sym_size(0), x.sym_size(1)}, x.options());
+  });
+}
+""",
+            functions=[],
+            is_python_module=False,
+        )
+        op = torch.ops.opcheck_symbolic_meta_guard.foo.default
+        x = torch.randn(3, 4)
+
+        torch.library.opcheck(op, (x,), test_utils="test_faketensor")
+
+        with self.assertRaisesRegex(optests.OpCheckError, "data-dependent"):
+            torch.library.opcheck(op, (x,), test_utils="test_symbolic_faketensor")
+
+        result = torch.library.opcheck(
+            torch.ops.opcheck_symbolic_meta_guard.meta_only.default,
+            (x,),
+            test_utils="test_symbolic_faketensor",
+        )
+        self.assertEqual(result, {"test_symbolic_faketensor": "SUCCESS"})
+
+    def test_opcheck_symbolic_faketensor_allows_check_constraints(self):
+        lib = self.lib()
+        lib.define("check_constraint(Tensor x) -> Tensor")
+        lib.impl("check_constraint", lambda x: x.clone(), "CPU")
+
+        @torch.library.register_fake(f"{self.test_ns}::check_constraint", lib=lib)
+        def check_constraint_fake(x):
+            torch._check(x.shape[1] % 8 == 0)
+            return x.new_empty(x.shape)
+
+        result = torch.library.opcheck(
+            self.ns().check_constraint.default,
+            (torch.randn(3, 8),),
+            test_utils="test_symbolic_faketensor",
+        )
+        self.assertEqual(result, {"test_symbolic_faketensor": "SUCCESS"})
+
+    def test_opcheck_symbolic_faketensor_wrapper_subclass(self):
+        lib = self.lib()
+        lib.define("wrapper_input(Tensor x) -> Tensor")
+        lib.impl("wrapper_input", lambda x: x.clone(), "CPU")
+
+        @torch.library.register_fake(f"{self.test_ns}::wrapper_input", lib=lib)
+        def wrapper_input_fake(x):
+            return x.new_empty(x.shape)
+
+        x = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+        result = torch.library.opcheck(
+            self.ns().wrapper_input.default,
+            (x,),
+            test_utils="test_symbolic_faketensor",
+        )
+        self.assertEqual(result, {"test_symbolic_faketensor": "SUCCESS"})
+
+    @skipIfTorchDynamo("OpCheckMode skips opcheck checks while Dynamo is compiling")
+    def test_generate_opcheck_tests_ignores_experimental_xfails_for_pt2_compliance(
+        self,
+    ):
+        lib = self.lib()
+        lib.define(
+            "symbolic_xfail(Tensor x) -> Tensor",
+            tags=(torch.Tag.pt2_compliant_tag,),
+        )
+        lib.impl("symbolic_xfail", lambda x: x.clone(), "CPU")
+
+        @torch.library.register_fake(f"{self.test_ns}::symbolic_xfail", lib=lib)
+        def symbolic_xfail_fake(x):
+            return x.new_empty((int(x.shape[0]), x.shape[1]))
+
+        op = self.ns().symbolic_xfail.default
+
+        class GeneratedTest(unittest.TestCase):
+            def test_op(self):
+                op(torch.randn(3, 4))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            failures_dict_path = os.path.join(tmpdir, "failures_dict.json")
+            optests.generate_tests.FailuresDict(failures_dict_path, {}).save()
+            optests.generate_opcheck_tests(
+                GeneratedTest,
+                [self.test_ns],
+                failures_dict_path,
+                test_utils=["test_symbolic_faketensor"],
+            )
+
+            with patch.dict(os.environ, {"PYTORCH_OPCHECK_ACCEPT": "1"}):
+                GeneratedTest("test_symbolic_faketensor__test_op").debug()
+
+            failures_dict = optests.generate_tests.FailuresDict.load(failures_dict_path)
+            self.assertEqual(
+                failures_dict.get_status(
+                    f"{self.test_ns}::symbolic_xfail",
+                    "GeneratedTest.test_symbolic_faketensor__test_op",
+                ),
+                "xfail",
+            )
+
+            class GeneratedTagTest(unittest.TestCase):
+                def test_op(self):
+                    op(torch.randn(3, 4))
+
+            optests.generate_opcheck_tests(
+                GeneratedTagTest,
+                [self.test_ns],
+                failures_dict_path,
+                test_utils=["test_symbolic_faketensor"],
+            )
+            GeneratedTagTest(
+                "test_pt2_compliant_tag__test_custom_op_symbolic_xfail"
+            ).debug()
+
     @unittest.skipIf(not TEST_CUDA, "pinned CPU memory requires CUDA")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
