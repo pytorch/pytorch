@@ -212,6 +212,12 @@ void init_num_threads() {
 #endif
 }
 
+namespace internal {
+void set_thread_local_num_threads(int nthreads) {
+  TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
+}
+} // namespace internal
+
 void set_num_threads(int nthreads) {
 #ifndef C10_MOBILE
   TORCH_CHECK(nthreads > 0, "Expected positive number of threads");

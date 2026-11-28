@@ -45,6 +45,10 @@ inline void lazy_init_num_threads() {
 
 TORCH_API void set_thread_num(int /*id*/);
 
+// Like set_num_threads, but for the calling thread only. No-op on the native
+// backend.
+TORCH_API void set_thread_local_num_threads(int /*nthreads*/);
+
 class TORCH_API ThreadIdGuard {
  public:
   ThreadIdGuard(int new_id) : old_id_(at::get_thread_num()) {

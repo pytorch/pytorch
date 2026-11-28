@@ -1,6 +1,7 @@
 # Owner(s): ["module: unknown"]
 
 import collections
+import threading
 import unittest
 
 import torch
@@ -67,6 +68,53 @@ class TestOpenMP_ParallelFor(TestCase):
         ncores = min(5, psutil.cpu_count(logical=False))
         torch.set_num_threads(ncores)
         self.func_rss(300)
+
+
+def _num_threads_in_new_thread(setup=None):
+    result = []
+
+    def run():
+        try:
+            if setup is not None:
+                setup()
+            result.append(torch.get_num_threads())
+        except Exception as e:
+            result.append(e)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    thread.join()
+    if isinstance(result[0], Exception):
+        raise result[0]
+    return result[0]
+
+
+OPENMP_BACKEND = "ATen parallel backend: OpenMP" in torch.__config__.parallel_info()
+
+
+@unittest.skipIf(not OPENMP_BACKEND, "Requires the OpenMP parallel backend")
+class TestOpenMP_ThreadLocalNumThreads(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.orig_num_threads = torch.get_num_threads()
+        torch.set_num_threads(2)
+
+    def tearDown(self):
+        torch.set_num_threads(self.orig_num_threads)
+        super().tearDown()
+
+    def test_set_thread_local_num_threads(self):
+        def set_one():
+            torch._C._set_thread_local_num_threads(1)
+
+        self.assertEqual(_num_threads_in_new_thread(set_one), 1)
+        self.assertEqual(torch.get_num_threads(), 2)
+        self.assertEqual(_num_threads_in_new_thread(), 2)
+
+    def test_set_thread_local_num_threads_invalid(self):
+        for invalid in (0, -1):
+            with self.assertRaisesRegex(RuntimeError, "expects a positive integer"):
+                torch._C._set_thread_local_num_threads(invalid)
 
 
 if __name__ == "__main__":

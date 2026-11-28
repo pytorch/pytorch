@@ -16,9 +16,8 @@ from . import MP_STATUS_CHECK_INTERVAL
 
 
 def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device) -> None:
-    # This setting is thread local, and prevents the copy in pin_memory from
-    # consuming all CPU cores.
-    torch.set_num_threads(1)
+    # torch.set_num_threads(1) would also apply to threads started later.
+    torch._C._set_thread_local_num_threads(1)
 
     torch.multiprocessing._set_thread_name("pt_data_pin")
     torch.accelerator.set_device_index(device_id)
