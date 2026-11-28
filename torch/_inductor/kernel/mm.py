@@ -61,6 +61,7 @@ from ..utils import (
     _use_autotune_backend,
     _use_cutlass_for_op,
     ceildiv,
+    flydsl_xcc_count,
     FOLDED_SCALED_MM_OUTPUT_SCALE,
     GPU_ALIGN_BYTES,
     is_bf16x9_matmul,
@@ -469,6 +470,7 @@ def get_flydsl_mm_template_kwargs(
         extra["OUT_DTYPE_ID"] = out_dtype_id
         validity["out_dtype_id"] = out_dtype_id
         validity["has_bias"] = has_bias
+    num_xccs = flydsl_xcc_count(layout.device)
     # Filter shape-incompatible configs before autotuning.
     return [
         {
@@ -480,6 +482,7 @@ def get_flydsl_mm_template_kwargs(
             "GEMM_K": k_static,
             "A_IS_TRANSPOSED": a_is_transposed,
             "B_IS_TRANSPOSED": b_is_transposed,
+            "NUM_XCCS": num_xccs,
         }
         for gemm_config in get_gemm_configs(m_static, n_static, k_static, mxfp_format)
         if is_gemm_config_valid_for_shape(

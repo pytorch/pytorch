@@ -3316,6 +3316,20 @@ def use_flydsl_gemm_template(layout: Layout) -> bool:
     return True
 
 
+def flydsl_device_properties(device: torch.device) -> DeviceProperties:
+    # An index-less device resolves to 0, as in use_flydsl_gemm_template.
+    index = device.index if device.index is not None else 0
+    return DeviceProperties.create(torch.device(device.type, index))
+
+
+def flydsl_xcc_count(device: torch.device) -> int:
+    """XCCs the FlyDSL gfx950 kernels swizzle tiles across. A compute partition
+    enumerates as its own device with its own XCC count. Without a reported
+    count (torch not built with ROCm 7.0+), assume gfx950's 32 CUs per XCC."""
+    props = flydsl_device_properties(device)
+    return props.xcc_count or max(1, props.multi_processor_count // 32)
+
+
 def use_blackwell_cutedsl_grouped_mm(
     mat_a: Any,
     mat_b: Any,
