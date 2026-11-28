@@ -95,9 +95,14 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
     // (in row-major block order); each range needs its own buffer.
     int64_t row_blocks = (NR + BLOCK_SZ - 1) / BLOCK_SZ;
     int64_t col_blocks = (NC + BLOCK_SZ - 1) / BLOCK_SZ;
-    int64_t grain_size =
-        std::max<int64_t>(1, at::internal::GRAIN_SIZE / (BLOCK_SZ * BLOCK_SZ));
-    at::parallel_for(0, row_blocks * col_blocks, grain_size, [&](int64_t first, int64_t last) {
+    int64_t num_blocks = row_blocks * col_blocks;
+    // Below this size, starting threads costs more than splitting the copy
+    // saves (e.g. uint8 128 x 128, which is 4 blocks), so keep it on one.
+    const int64_t MIN_SPLIT_BYTES = 24 << 10;
+    int64_t grain_size = self.nbytes() < MIN_SPLIT_BYTES
+        ? num_blocks
+        : std::max<int64_t>(1, at::internal::GRAIN_SIZE / (BLOCK_SZ * BLOCK_SZ));
+    at::parallel_for(0, num_blocks, grain_size, [&](int64_t first, int64_t last) {
       auto buf = std::make_unique<scalar_t[]>(BLOCK_SZ * BLOCK_SZ);
       scalar_t* bp = buf.get();
       for (const auto b : c10::irange(first, last)) {
@@ -127,6 +132,101 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
         }
 
         // 3. copy rows from buf to dst
+        for (const auto r : c10::irange(nr)) {
+          memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(scalar_t));
+        }
+      }
+    });
+  });
+}
+
+// src is a stack of transposed matrices that copy_transpose_valid doesn't take:
+// the last two dims have unit stride down the columns and a column pitch of at
+// least the column length (padded or narrowed), and the leading (batch) dims may
+// have any strides.
+bool copy_batched_transpose_valid(const Tensor& self, const Tensor& src) {
+  // The generic loop is faster unless the copy no longer fits in cache and each
+  // matrix is large. With fewer columns, the source lines read for one row of
+  // self stay in cache for the next rows.
+  const int64_t MIN_BYTES = 4 << 20;
+  const int64_t MIN_ROWS = 512;
+  const int64_t MIN_COLS = 2048;
+  return self.is_contiguous() && src.dim() >= 2 && src.stride(-2) == 1 &&
+      src.stride(-1) >= src.size(-2) &&
+      self.scalar_type() == src.scalar_type() &&
+      !isBitsType(self.scalar_type()) &&
+      self.sizes().equals(src.sizes()) &&
+      self.is_neg() == src.is_neg() &&
+      self.is_conj() == src.is_conj() &&
+      src.nbytes() > MIN_BYTES && src.size(-2) >= MIN_ROWS &&
+      src.size(-1) >= MIN_COLS && !self.is_alias_of(src);
+}
+
+// The blocked copy of copy_same_type_transpose_, run over every matrix and
+// reading the source with its real column pitch.
+void copy_batched_transpose_(Tensor& self, const Tensor& src) {
+  int64_t BLOCK_SZ = 0;
+  if (self.scalar_type() == kByte) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    BLOCK_SZ = 120;
+  } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    BLOCK_SZ = 60;
+  }
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.sizes().equals(src.sizes()));
+
+  _AT_DISPATCH_CP_TYPES(self.scalar_type(), "copy_", [&] {
+    const scalar_t* sp = src.const_data_ptr<scalar_t>();
+    scalar_t* rp = self.data_ptr<scalar_t>();
+
+    int64_t NR = src.size(-2);
+    int64_t NC = src.size(-1);
+    int64_t LD = src.stride(-1);
+    // Offset of each matrix in src, over the leading dims. self is contiguous,
+    // so matrix m starts at m * NR * NC there.
+    int64_t num_mats = src.numel() / (NR * NC);
+    std::vector<int64_t> src_offsets(num_mats);
+    for (const auto m : c10::irange(num_mats)) {
+      int64_t rem = m, offset = 0;
+      for (int64_t d = src.dim() - 3; d >= 0; --d) {
+        offset += rem % src.size(d) * src.stride(d);
+        rem /= src.size(d);
+      }
+      src_offsets[m] = offset;
+    }
+    int64_t row_blocks = (NR + BLOCK_SZ - 1) / BLOCK_SZ;
+    int64_t col_blocks = (NC + BLOCK_SZ - 1) / BLOCK_SZ;
+    int64_t blocks_per_mat = row_blocks * col_blocks;
+    int64_t grain_size =
+        std::max<int64_t>(1, at::internal::GRAIN_SIZE / (BLOCK_SZ * BLOCK_SZ));
+    at::parallel_for(0, num_mats * blocks_per_mat, grain_size, [&](int64_t first, int64_t last) {
+      auto buf = std::make_unique<scalar_t[]>(BLOCK_SZ * BLOCK_SZ);
+      scalar_t* bp = buf.get();
+      for (const auto i : c10::irange(first, last)) {
+        int64_t m = i / blocks_per_mat;
+        int64_t b = i % blocks_per_mat;
+        int64_t R = b / col_blocks * BLOCK_SZ;
+        int64_t C = b % col_blocks * BLOCK_SZ;
+        const scalar_t* spo = sp + src_offsets[m] + R + C * LD;
+        scalar_t* rpo = rp + m * NR * NC + C + R * NC;
+
+        int nr = std::min(NR - R, BLOCK_SZ);
+        int nc = std::min(NC - C, BLOCK_SZ);
+
+        for (const auto c : c10::irange(nc)) {
+          memcpy(bp + c * BLOCK_SZ, spo + c * LD, nr * sizeof(scalar_t));
+        }
+        int rc_max = std::max(nr, nc);
+        int rc_min = std::min(nr, nc);
+        for (const auto r : c10::irange(rc_max)) {
+          int end = std::min(r, rc_min);
+          for (const auto c : c10::irange(end)) {
+            scalar_t tmp = bp[r + BLOCK_SZ * c];
+            bp[r + BLOCK_SZ * c] = bp[r * BLOCK_SZ + c];
+            bp[r * BLOCK_SZ + c] = tmp;
+          }
+        }
         for (const auto r : c10::irange(nr)) {
           memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(scalar_t));
         }
@@ -352,6 +452,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // TODO: if we need to, we can also enable this path for quantized tensor
   if (device_type == kCPU && copy_transpose_valid(self, src) && !self.is_quantized()) {
     copy_same_type_transpose_(self, src);
+    return self;
+  }
+  if (device_type == kCPU && copy_batched_transpose_valid(self, src) && !self.is_quantized()) {
+    copy_batched_transpose_(self, src);
     return self;
   }
 
