@@ -27,6 +27,21 @@ TEST(SourceRangeTest, test_find) {
     auto x = view.find("rldni", 0);
     EXPECT_EQ(x, 8) << view.str();
     EXPECT_EQ(view.find("ello", 0), 1);
+    EXPECT_EQ(view.find("hello", 1), std::string::npos);
+  }
+
+  StringCordView view({"ab", "ab", "c"}, {});
+  EXPECT_EQ(view.find("abc", 0), 2);
+}
+
+TEST(SourceRangeTest, FindFromIndexedPiece) {
+  StringCordView view({"", "ab", "", "cd", "ef", ""}, {});
+  const std::string text = view.str();
+  for (const auto start : c10::irange(text.size() + 2)) {
+    for (const auto& needle : {"a", "cd", "bcde", "ef", "fg"}) {
+      EXPECT_EQ(view.find(needle, start), text.find(needle, start))
+          << "start=" << start << ", needle=" << needle;
+    }
   }
 }
 
@@ -74,4 +89,22 @@ TEST(SourceRangeTest, SimpleString) {
   EXPECT_EQ(src.num_lines(), 1);
   EXPECT_EQ(src.get_line(0), "hello");
   EXPECT_EQ(src.text_str().str(), "hello");
+}
+
+TEST(SourceRangeTest, MultilineSource) {
+  Source src("first\nsecond\n");
+
+  EXPECT_EQ(src.num_lines(), 3);
+  EXPECT_EQ(src.offset_for_line(1), 6);
+  EXPECT_EQ(src.lineno_for_offset(12), 1);
+  EXPECT_EQ(src.get_line(1), "second\n");
+}
+
+TEST(SourceRangeTest, MultilineMultiPieceSource) {
+  Source src(StringCordView({"", "first\n", "", "second", "\n", ""}, {}));
+
+  EXPECT_EQ(src.num_lines(), 3);
+  EXPECT_EQ(src.offset_for_line(1), 6);
+  EXPECT_EQ(src.offset_for_line(2), 13);
+  EXPECT_EQ(src.get_line(1).str(), "second\n");
 }
