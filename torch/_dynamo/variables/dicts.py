@@ -769,12 +769,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 recompile_hint=recompile_hint,
             )
 
-    def install_dict_order_guard(
-        self,
-        tx: "InstructionTranslatorBase",
-        *,
-        view: "DictViewVariable | None" = None,
-    ) -> None:
+    def install_dict_order_guard(self, tx: "InstructionTranslatorBase") -> None:
         if self.source and not is_constant_source(self.source):
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
@@ -1201,6 +1196,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             tx.output.side_effects.mutation(self)
         if args:
             other = args[0]
+            seqs = (variables.ListVariable, variables.TupleVariable)
             if fast_merge_verified and isinstance(other, ConstDictVariable):
                 other.install_dict_order_guard(tx)
                 self._update_items(other.materialize_keys())
@@ -1208,10 +1204,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 pyanydict_checkexact(other)
                 or pyodict_checkexact(other)
                 or (
-                    not istype(
-                        other.realize(),
-                        (variables.ListVariable, variables.TupleVariable),
-                    )
+                    not istype(other.realize(), seqs)
                     and generic_hasattr_str(tx, other, "keys")
                 )
             ):
@@ -1244,10 +1237,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     def _can_fast_update(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> bool:
-        if not self._can_fast_merge(other):
-            return False
         # A storage copy bypasses an OrderedDict source's instance keys() override.
-        return other.lookup_instance_dict(tx, "keys") is None
+        safe = self._can_fast_merge(other)
+        return safe and other.lookup_instance_dict(tx, "keys") is None
 
     def _can_fast_merge(self, other: VariableTracker) -> bool:
         other = other.realize()
@@ -1286,12 +1278,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         # A direct method call can fall back here. DICT_MERGE instead skips the
         # frame because it is partway through expanding call keyword arguments.
         if isinstance(other, (ConstDictVariable, FrozenDictVariable)):
-            side_effects = tx.output.side_effects
+            effects = tx.output.side_effects
             if any(
-                cls in side_effects
-                and side_effects.has_pending_mutation_of_attr(
-                    side_effects[cls], "__iter__"
-                )
+                cls in effects
+                and effects.has_pending_mutation_of_attr(effects[cls], "__iter__")
                 for cls in get_type_mro_no_user_code(other.python_type())
             ):
                 unimplemented(
@@ -1301,25 +1291,19 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
             obj_type = other.python_type()
-            owner, iterator = next(
-                (
-                    (cls, ns["__iter__"])
-                    for cls, ns in iter_mro_static_dicts(obj_type)
-                    if "__iter__" in ns
-                ),
-                (None, NO_SUCH_SUBOBJ),
+            cls_source = getattr(other, "cls_source", None)
+            source = (
+                mro_attr_source(tx, obj_type, cls_source, "__iter__")
+                if cls_source
+                else None
             )
-            if (
-                isinstance(other, variables.UserDefinedObjectVariable)
-                and other.cls_source
-            ):
-                source = mro_attr_source(tx, obj_type, other.cls_source, "__iter__")
-                if (
-                    source is not None
-                    and owner is not None
-                    and not type_is_immutable(owner)
-                ):
-                    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            iterator = NO_SUCH_SUBOBJ
+            for owner, namespace in iter_mro_static_dicts(obj_type):
+                if "__iter__" in namespace:
+                    iterator = namespace["__iter__"]
+                    if source and not type_is_immutable(owner):
+                        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+                    break
             # Incompatible descriptor owners install a generic iteration slot.
             if (
                 (pydict_check(other) and iterator is dict.__iter__)
@@ -1330,8 +1314,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             ):
                 if isinstance(other, ConstDictVariable):
                     other.install_dict_order_guard(tx)
-                    other.materialize_keys()
-                self._update_items(other.items)
+                self._update_items(other.materialize_keys())
                 return
         keys = generic_getattr(tx, other, "keys").call_function(tx, [], {})
         for key in unpack_iterable(tx, keys):
@@ -1605,19 +1588,13 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         value = namespace.dict_get(tx, [ConstantVariable.create(name), missing], {})
         return None if value is missing else value
 
-    def install_dict_order_guard(
-        self,
-        tx: "InstructionTranslatorBase",
-        *,
-        view: "DictViewVariable | None" = None,
-    ) -> None:
-        super().install_dict_order_guard(tx, view=view)
+    def install_dict_order_guard(self, tx: "InstructionTranslatorBase") -> None:
+        super().install_dict_order_guard(tx)
         # Even empty inputs need a guard: raw dict writes can leave orphaned links.
         if (
             self.source
             and not is_constant_source(self.source)
             and issubclass(self.python_type(), collections.OrderedDict)
-            and (view is None or view.is_ordered)
         ):
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
@@ -2789,7 +2766,10 @@ class DictViewVariable(VariableTracker):
 
     def install_order_guard(self, tx: "InstructionTranslatorBase") -> None:
         if isinstance(self.dv_dict, ConstDictVariable):
-            self.dv_dict.install_dict_order_guard(tx, view=self)
+            if self.is_ordered:
+                self.dv_dict.install_dict_order_guard(tx)
+            else:
+                ConstDictVariable.install_dict_order_guard(self.dv_dict, tx)
 
     def is_hashable(self) -> bool:
         return False
@@ -2818,10 +2798,9 @@ class DictViewVariable(VariableTracker):
         def load_method() -> None:
             if isinstance(self.dv_dict, FrozenDictVariable):
                 codegen.load_import_from("builtins", "frozendict")
-            elif self.is_ordered:
-                codegen.load_import_from("collections", "OrderedDict")
             else:
-                codegen.load_import_from("builtins", "dict")
+                owner = collections.OrderedDict if self.is_ordered else dict
+                codegen.load_import_from(owner.__module__, owner.__name__)
             codegen.append_output(codegen.create_load_attr(self.kv))
 
         codegen.add_push_null(load_method)
