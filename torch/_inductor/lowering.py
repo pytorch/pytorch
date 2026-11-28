@@ -2710,11 +2710,93 @@ def cat(inputs, dim=0):
         horizontal_fuse_cat = (
             all(should_lower_cat_input(inp) for inp in inputs) and not fusable_reduction
         )
+        if horizontal_fuse_cat and not fuse_pointwise_use:
+            groups = innermost_cat_slice_groups(inputs, dim, dtype)
+            if groups is not None:
+                return innermost_concat_kernel(groups, dim)
 
         if not has_multi_consumers and (fuse_pointwise_use or horizontal_fuse_cat):
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
+
+
+def innermost_cat_rules_supported(device: torch.device | None) -> bool:
+    # On ROCm the narrow-slice kernel these rules generate returns wrong values
+    # at large N (suspected Triton AMD backend miscompile): keep the pointwise cat.
+    return (
+        config.wide_cat_and_tiled_reductions
+        and device is not None
+        and device.type == "cuda"
+        and torch.version.hip is None
+    )
+
+
+def _has_gather(x) -> bool:
+    if isinstance(x, TensorBox):
+        data = x.data
+        return _has_gather(
+            data.unwrap_view() if isinstance(data, ir.BaseView) else data
+        )
+    if isinstance(x, ir.StorageBox):
+        return _has_gather(x.data)
+    if not isinstance(x, ir.Pointwise):
+        return False
+    return "indirect_indexing" in x.inner_fn_opcount().used_ops or any(
+        _has_gather(V.graph.get_buffer(read)) for read in x.get_read_names()
+    )
+
+
+def innermost_cat_slice_groups(inputs, dim, dtype) -> list[list[TensorBox]] | None:
+    """
+    ConcatKernel slices for a wide innermost-dim cat of many gather inputs
+    (config.wide_cat_and_tiled_reductions), or None when the cat does not qualify.
+    An input narrower than `pointwise_cat_innermost_dim_min_slice_bytes` per row
+    joins its neighbor in a pointwise cat, so no kernel writes sub-sector pieces
+    of a row.
+    """
+    max_inputs = config.max_pointwise_cat_inputs_innermost_dim
+    if (
+        max_inputs is None
+        or len(inputs) <= max_inputs
+        or not innermost_cat_rules_supported(inputs[0].get_device())
+        or dim != len(inputs[0].get_size()) - 1
+        or not V.graph.sizevars.statically_known_geq(
+            sum((x.get_numel() for x in inputs), sympy.S.Zero),
+            config.pointwise_cat_innermost_dim_min_numel,
+        )
+        or sum(map(_has_gather, inputs))
+        < config.pointwise_cat_innermost_dim_min_gather_inputs
+    ):
+        return None
+    min_width = max(
+        1, config.pointwise_cat_innermost_dim_min_slice_bytes // dtype.itemsize
+    )
+
+    def is_narrow(x):
+        return not V.graph.sizevars.statically_known_geq(x.get_size()[dim], min_width)
+
+    groups: list[list[TensorBox]] = []
+    pending: list[TensorBox] = []
+    for x in inputs:
+        if is_narrow(x):
+            pending.append(x)
+            continue
+        groups.append([*pending, x] if pending and not groups else [x])
+        if pending and len(groups) > 1:
+            groups[-2].extend(pending)
+        pending = []
+    if pending:
+        if groups:
+            groups[-1].extend(pending)
+        else:
+            groups.append(pending)
+    return groups if len(groups) > 1 else None
+
+
+def innermost_concat_kernel(groups: list[list[TensorBox]], dim: int) -> TensorBox:
+    slices = [g[0] if len(g) == 1 else pointwise_cat(g, dim) for g in groups]
+    return TensorBox(ir.ConcatKernel.create(slices, dim))
 
 
 @register_lowering(aten.diagonal, type_promotion_kind=None)

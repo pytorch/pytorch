@@ -6632,11 +6632,20 @@ class SIMDScheduling(BaseScheduling):
                 tiling = cls.create_tiling([numel // split, split], [reduction_numel])
             return _TilingSelection(tiling, None, None)
 
+        # Reductions over non-contiguous dims take the ND tilings below when
+        # tile_reductions is set; the coalescing analysis only splits pointwise
+        # dims, so it would leave their loads uncoalesced.
+        nd_tile_reduction = (
+            not is_pointwise
+            and config.triton.tile_reductions
+            and config.wide_cat_and_tiled_reductions
+        )
         # # TODO: enable by default
         if (
             torch._inductor.config.triton.coalesce_tiling_analysis
             and coalesce_analysis
             and not config.triton.prefer_nd_tiling
+            and not nd_tile_reduction
         ):
             return cls.compute_tiling_strategy(
                 node_schedule, numel, reduction_numel, coalesce_analysis
@@ -6734,7 +6743,7 @@ class SIMDScheduling(BaseScheduling):
 
         # Optionally, prefer tiling into as many dimensions as possible.
         # pyrefly: ignore [unbound-name]
-        if config.triton.prefer_nd_tiling:
+        if config.triton.prefer_nd_tiling or nd_tile_reduction:
             ranked_tilings = (
                 cls.get_nd_tilings(node_schedule, numel, reduction_numel)
                 + ranked_tilings
