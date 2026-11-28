@@ -399,6 +399,11 @@ def update_bn(
         is either a tensor or a list or tuple of tensors; in the latter case it
         is assumed that :meth:`model.forward()` should be called on the first
         element of the list or tuple corresponding to the data batch.
+
+    .. note::
+        `update_bn` restores the training mode of :attr:`model` and of each
+        submodule afterwards. The running statistics of every BatchNorm layer
+        are still reset and re-estimated, including layers in eval mode.
     """
     momenta = {}
     for module in model.modules():
@@ -409,7 +414,8 @@ def update_bn(
     if not momenta:
         return
 
-    was_training = model.training
+    # Save every module's mode, not just the root's.
+    was_training = {module: module.training for module in model.modules()}
     model.train()
     for module in momenta:
         module.momentum = None
@@ -424,7 +430,12 @@ def update_bn(
 
     for bn_module in momenta:
         bn_module.momentum = momenta[bn_module]
-    model.train(was_training)
+    # A shared module is visited once per parent, so its last check runs after
+    # every parent's train(). Modules created in forward() take their parent's mode.
+    for module in model.modules(remove_duplicate=False):
+        training = was_training.get(module)
+        if training is not None and module.training != training:
+            module.train(training)
 
 
 class SWALR(LRScheduler):

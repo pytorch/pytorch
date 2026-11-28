@@ -168,6 +168,91 @@ class TestSWAUtilsGeneric(TestCase):
 
         self.assertEqual(cnn.bn.momentum, 0.3)
 
+    def test_bn_update_restores_submodule_modes(self):
+        # Submodules in eval mode stay in eval mode
+        x = torch.rand(20, 4)
+        dl_x = torch.utils.data.DataLoader(x, batch_size=5)
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.BatchNorm1d(4),
+            torch.nn.Dropout(0.5),
+            torch.nn.BatchNorm1d(4),
+        )
+        model.train()
+        model[2].eval()
+        model[3].eval()
+        update_bn(dl_x, model)
+        self.assertEqual(
+            [m.training for m in model.modules()], [True, True, True, False, False]
+        )
+
+    def test_bn_update_calls_overridden_train(self):
+        # A module that overrides train() gets train(False) called on it
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bn = torch.nn.BatchNorm1d(4)
+                self.modes = []
+
+            def forward(self, x):
+                return self.bn(x)
+
+            def train(self, mode=True):
+                self.modes.append(mode)
+                return super().train(mode)
+
+        dl_x = torch.utils.data.DataLoader(torch.rand(20, 4), batch_size=5)
+        model = torch.nn.Sequential(Net())
+        model.train()
+        model[0].eval()
+        model[0].modes.clear()
+        update_bn(dl_x, model)
+        self.assertFalse(model[0].modes[-1])
+        self.assertFalse(model[0].training)
+        self.assertTrue(model.training)
+
+    def test_bn_update_restores_shared_submodule_mode(self):
+        # A module with two parents keeps its own mode
+        dl_x = torch.utils.data.DataLoader(torch.rand(20, 4), batch_size=5)
+        shared = torch.nn.Dropout()
+        a = torch.nn.Sequential(shared)
+        b = torch.nn.Sequential(shared)
+        model = torch.nn.Sequential(torch.nn.BatchNorm1d(4), a, b)
+        model.train()
+        b.eval()
+        shared.train()
+        update_bn(dl_x, model)
+        self.assertFalse(b.training)
+        self.assertTrue(shared.training)
+
+    def test_bn_update_submodule_created_in_forward(self):
+        # A module created in forward() takes its parent's mode
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bn = torch.nn.BatchNorm1d(4)
+
+            def forward(self, x):
+                if not hasattr(self, "head"):
+                    self.head = torch.nn.Linear(4, 4)
+                return self.head(self.bn(x))
+
+        dl_x = torch.utils.data.DataLoader(torch.rand(20, 4), batch_size=5)
+        model = Net()
+        model.eval()
+        update_bn(dl_x, model)
+        self.assertFalse(model.training)
+        self.assertFalse(model.head.training)
+
+    def test_bn_update_restores_train_submodule_in_eval_model(self):
+        # Dropout left in train mode in an eval model (MC dropout) stays on
+        dl_x = torch.utils.data.DataLoader(torch.rand(20, 4), batch_size=5)
+        model = torch.nn.Sequential(torch.nn.BatchNorm1d(4), torch.nn.Dropout())
+        model.eval()
+        model[1].train()
+        update_bn(dl_x, model)
+        self.assertEqual([m.training for m in model.modules()], [False, False, True])
+
 
 instantiate_parametrized_tests(TestSWAUtilsGeneric)
 
