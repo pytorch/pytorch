@@ -23,6 +23,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoONEDNN,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
@@ -243,6 +244,8 @@ class TestPatternMatcherBase(TestCase):
 
 
 class TestPatternMatcherGeneric(TestPatternMatcherBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_conv_unary_base(self, dim=4):
         if dim != 4 and dim != 5:
             raise AssertionError(f"Expected dim to be 4 or 5, got {dim}")
@@ -822,6 +825,9 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 class TestPatternMatcher(TestPatternMatcherBase):
     # Note: tests containing the pattern *qconv2d* were removed in PR #169151 (PT2E migration to torchao).
     # See issue #168635 and its sub-issues.
+
+    hw_classification = HardwareClassification.GENERIC
+
     @reduced_f32_on_and_off()
     def test_linear_unary(self, device="cpu"):
         self.device = device
@@ -1830,6 +1836,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
 
 class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         self.ctx_stack.enter_context(
@@ -1926,6 +1934,8 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
 
 
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
+    hw_classification = HardwareClassification.GENERIC
+
     test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
     test_linear_input_non_contiguous_3D_wo_bias_dynamic_shapes = (
         TestPatternMatcher.test_linear_input_non_contiguous_3D_wo_bias
