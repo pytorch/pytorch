@@ -1490,9 +1490,7 @@ static at::Tensor _fp8_convolution_onednn_ref(
       y_f32 = y_f32.to(at::kHalf);
     }
     x1.copy_(y_f32.to(x1.scalar_type()).view(x1.sizes()));
-    // Return a copy: custom ops must not return tensors that alias inputs.
-    // The accum buffer has already been mutated in-place above.
-    return x1.clone();
+    return x1;
   } else {
     TORCH_CHECK(
         false,
@@ -1754,9 +1752,7 @@ static at::Tensor _quantized_convolution_onednn(
               c10::MemoryFormat::ChannelsLast3d)
     );
   if (output.numel() == 0) {
-    // When has_accum_postop_sum, output aliases accum (the input). Custom ops
-    // must not return tensors that alias inputs, so return a copy.
-    return has_accum_postop_sum ? output.clone() : output;
+    return output;
   }
   at::native::mkldnn::MkldnnMemory dst = at::native::itensor_view_from_dense(output);
   static at::native::mkldnn::MkldnnMemory::desc dummy_accum_desc;
@@ -1891,14 +1887,8 @@ static at::Tensor _quantized_convolution_onednn(
   if (is_1d) {
     output.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
   }
-  if (has_accum_postop_sum) {
-    // When has_accum_postop_sum, output aliases accum (the input) — see
-    // assignment above. Return a copy: custom ops must not return tensors
-    // that alias inputs.
-    return output.clone();
-  } else {
-    return output;
-  }
+  // With post op sum, output is accum itself.
+  return output;
 }
 
 #endif // #if AT_MKLDNN_ENABLED()
@@ -1995,14 +1985,15 @@ namespace at::native {
   }
 
 
-  at::Tensor QConvoneDNN::run_pointwise_binary(
+  // Conv2d with post op sum, computed in place into accum.
+  static at::Tensor& qconv2d_pointwise_binary_onednn_(
+      at::Tensor& accum, // contains quantized values but not QTensor
       at::Tensor act, // contains quantized values but not QTensor
       double act_scale,
       int64_t act_zero_point,
       at::Tensor weight, // contains quantized values but not QTensor
       at::Tensor weight_scales,
       at::Tensor weight_zero_points,
-      at::Tensor accum, // contains quantized values but not QTensor
       std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
@@ -2034,7 +2025,7 @@ namespace at::native {
       " unary_post_op: ",
       unary_attr.has_value() ? unary_attr.value() : "none",
       ".")
-    return _quantized_convolution_onednn(
+    _quantized_convolution_onednn(
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
         bias, stride, padding, dilation, /*transposed*/false,
@@ -2043,9 +2034,44 @@ namespace at::native {
         /*output_dtype*/output_dtype, binary_attr, alpha,
         unary_attr, unary_scalars, unary_algorithm
     );
+    return accum;
 #else
     TORCH_CHECK(false, "Unimplemented as onednn is not available.")
 #endif
+  }
+
+  at::Tensor QConvoneDNN::run_pointwise_binary(
+      at::Tensor act, // contains quantized values but not QTensor
+      double act_scale,
+      int64_t act_zero_point,
+      at::Tensor weight, // contains quantized values but not QTensor
+      at::Tensor weight_scales,
+      at::Tensor weight_zero_points,
+      at::Tensor accum, // contains quantized values but not QTensor
+      std::optional<at::Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      double output_scale,
+      int64_t output_zero_point,
+      std::optional<c10::ScalarType> output_dtype,
+      double accum_scale,
+      int64_t accum_zero_point,
+      std::string_view binary_attr,
+      std::optional<at::Scalar> alpha,
+      std::optional<std::string_view> unary_attr,
+      torch::List<std::optional<at::Scalar>> unary_scalars,
+      std::optional<std::string_view> unary_algorithm) {
+    // The schema does not let the output alias the mutated accum, so return a
+    // copy. Inductor avoids this copy by using qconv2d_pointwise_.binary_tensor.
+    return qconv2d_pointwise_binary_onednn_(
+      accum, act, act_scale, act_zero_point,
+      weight, weight_scales, weight_zero_points, bias,
+      stride, padding, dilation, groups,
+      output_scale, output_zero_point, output_dtype, accum_scale, accum_zero_point,
+      binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm
+    ).clone();
   }
 
   at::Tensor QConvoneDNN::run_pointwise_binary_tensor(
@@ -2082,6 +2108,40 @@ namespace at::native {
       binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm
     );
 }
+
+  void QConvoneDNN::run_pointwise_binary_tensor_(
+      at::Tensor& accum, // contains quantized values but not QTensor
+      at::Tensor act, // contains quantized values but not QTensor
+      at::Tensor act_scale,
+      at::Tensor act_zero_point,
+      at::Tensor weight, // contains quantized values but not QTensor
+      at::Tensor weight_scales,
+      at::Tensor weight_zero_points,
+      std::optional<at::Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      double output_scale,
+      int64_t output_zero_point,
+      std::optional<c10::ScalarType> output_dtype,
+      double accum_scale,
+      int64_t accum_zero_point,
+      std::string_view binary_attr,
+      std::optional<at::Scalar> alpha,
+      std::optional<std::string_view> unary_attr,
+      torch::List<std::optional<at::Scalar>> unary_scalars,
+      std::optional<std::string_view> unary_algorithm) {
+    TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
+        "onednn int8 conv: act scale/zp size should be 1");
+    qconv2d_pointwise_binary_onednn_(
+      accum, act, act_scale.item().toDouble(), act_zero_point.item().toLong(),
+      weight, weight_scales, weight_zero_points, bias,
+      stride, padding, dilation, groups,
+      output_scale, output_zero_point, output_dtype, accum_scale, accum_zero_point,
+      binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm
+    );
+  }
 
 
 namespace {
@@ -2255,6 +2315,7 @@ TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
   // Conv2D with binary postop
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary"), at::native::QConvoneDNN::run_pointwise_binary);
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary_tensor"), at::native::QConvoneDNN::run_pointwise_binary_tensor);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise_.binary_tensor"), at::native::QConvoneDNN::run_pointwise_binary_tensor_);
 }
 
 TORCH_LIBRARY_IMPL(onednn, CPU, m) {
@@ -2262,6 +2323,7 @@ TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_pointwise.tensor"), at::native::QConvoneDNN::run_pointwise_tensor);
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary"), at::native::QConvoneDNN::run_pointwise_binary);
   m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary_tensor"), at::native::QConvoneDNN::run_pointwise_binary_tensor);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise_.binary_tensor"), at::native::QConvoneDNN::run_pointwise_binary_tensor_);
 }
 
 } // namespace
