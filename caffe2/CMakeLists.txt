@@ -952,6 +952,31 @@ if(USE_ROCM)
   set(__caffe2_hip_srcs_hip ${Caffe2_HIP_SRCS})
   list(FILTER __caffe2_hip_srcs_hip INCLUDE REGEX "\\.(cu|hip)$")
   set_source_files_properties(${__caffe2_hip_srcs_hip} PROPERTIES LANGUAGE HIP)
+
+  # These TUs dominate the tail of a fresh build (10+ minutes each with several
+  # archs). --offload-jobs lets clang compile the per-arch device code in
+  # parallel within one TU. Ninja still counts each of them as a single job.
+  list(LENGTH PYTORCH_ROCM_ARCH _num_rocm_archs)
+  include(CheckCompilerFlag)
+  check_compiler_flag(HIP "--offload-jobs=2" HIP_SUPPORTS_OFFLOAD_JOBS)
+  if(_num_rocm_archs GREATER 1 AND HIP_SUPPORTS_OFFLOAD_JOBS)
+    set(_hip_native "${TORCH_ROOT}/aten/src/ATen/native/hip")
+    set_property(SOURCE
+        ${_hip_native}/TensorTopK.hip
+        ${_hip_native}/SortStable.hip
+        ${_hip_native}/group_norm_kernel.hip
+        ${_hip_native}/ReduceNormKernel.hip
+        ${_hip_native}/PowKernel.hip
+        ${_hip_native}/Sorting.hip
+        ${_hip_native}/MaxMinElementwiseKernel.hip
+        ${_hip_native}/BinaryRemainderKernel.hip
+        ${_hip_native}/PointwiseOpsKernel.hip
+        ${_hip_native}/BinaryLogicalOpsKernels.hip
+        APPEND PROPERTY COMPILE_OPTIONS "--offload-jobs=${_num_rocm_archs}")
+    set_property(SOURCE ${_hip_native}/ck_tile_group_gemm.hip
+        DIRECTORY ${TORCH_ROOT}/aten/src/ATen
+        APPEND PROPERTY COMPILE_OPTIONS "--offload-jobs=${_num_rocm_archs}")
+  endif()
 endif()
 
 # Compile exposed libraries.
