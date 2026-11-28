@@ -3659,6 +3659,11 @@ class CppVecKernel(CppKernel):
     ):
         """Emit the C++ expression for combining vector reduction values."""
         is_bool = src_dtype == torch.bool
+        if reduction_type in ("min", "max") and is_bool:
+            if isinstance(next_value, CppCSEVariable) and next_value.is_vec:
+                (next_value,) = unify_mask_base_type(
+                self.compute, (next_value,)
+                )
         if reduction_type == "max":
             if self.tail_size:
                 return f"max_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
