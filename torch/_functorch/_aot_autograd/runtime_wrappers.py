@@ -49,7 +49,7 @@ from torch._library.opaque_object import is_custom_class
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
-from torch._prims_common import CUDARngStateHelper
+from torch._prims_common import clone_preserve_strides, CUDARngStateHelper
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -3487,6 +3487,17 @@ class _AOTDispatchAutogradFunctionFactory:
         aot_config = self.spec.aot_config
         fw_metadata = self.spec.fw_metadata
 
+        # Backward inputs start with symints, then tensors passed to
+        # save_for_backward, then tensors stashed directly on ctx (without hooks).
+        hookable_end = (
+            num_symints_saved_for_bw_
+            + len(fw_metadata.saved_tensor_is_graph_input)
+            - (fw_metadata.num_tensors_saved_with_no_vc_check or 0)
+        )
+        hookable_donated_idxs = tuple(
+            i for i in fw_metadata.bw_donated_idxs or () if i < hookable_end
+        )
+
         _codegen_bw_unwrap_fn = None
         _codegen_bw_wrap_fn = None
         if maybe_subclass_meta is not None:
@@ -3641,6 +3652,14 @@ class _AOTDispatchAutogradFunctionFactory:
             @staticmethod
             # pyrefly: ignore [bad-override]
             def forward(ctx: Any, *deduped_flat_tensor_args: Any) -> Any:
+                if hookable_donated_idxs:
+                    # Hooks registered later on a single SavedTensor are not seen.
+                    ctx._had_saved_tensors_hooks = (
+                        torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
+                        is None
+                        and torch._C._autograd._top_saved_tensors_default_hooks(False)
+                        is not None
+                    )
                 return CompiledFunction._fwd_fn(
                     ctx,
                     deduped_flat_tensor_args,
@@ -3729,6 +3748,17 @@ class _AOTDispatchAutogradFunctionFactory:
                             "donated buffer."
                         ),
                     )
+
+                # Saved tensor hooks may keep donated buffers alive, so the
+                # backward must not overwrite them. bw_donated_idxs is emptied
+                # when the backward was compiled for retain_graph.
+                if (
+                    hookable_donated_idxs
+                    and ctx._had_saved_tensors_hooks
+                    and fw_metadata.bw_donated_idxs
+                ):
+                    for idx in hookable_donated_idxs:
+                        all_args[idx] = clone_preserve_strides(all_args[idx])
 
                 for idx, obj in getattr(ctx, "_external_objects", {}).items():
                     set_external_object_by_index(idx, obj)
