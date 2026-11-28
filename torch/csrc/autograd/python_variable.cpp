@@ -2268,18 +2268,34 @@ static bool contains_any_symint(const py::tuple& tup) {
   return false;
 }
 
+static bool tensor_meta_field_has_symints(
+    const py::object& tensor_meta,
+    PyObject* field,
+    const char* error_msg) {
+  py::object raw = tensor_meta.attr(field);
+  if (!PyTuple_Check(raw.ptr())) {
+    PyErr_SetString(PyExc_TypeError, error_msg);
+    throw py::error_already_set();
+  }
+  return contains_any_symint(py::reinterpret_steal<py::tuple>(raw.release()));
+}
+
 static bool dtensor_spec_has_symints(py::handle spec) {
   const auto tensor_meta = spec.attr(dtensor_interned_strings.tensor_meta);
   if (tensor_meta.is_none()) {
     return false;
   }
-  py::object raw_shape = tensor_meta.attr(dtensor_interned_strings.shape);
-  if (!PyTuple_Check(raw_shape.ptr())) {
-    PyErr_SetString(PyExc_TypeError, "TensorMeta.shape must be a tuple!");
-    throw py::error_already_set();
-  }
-  const auto shape = py::reinterpret_steal<py::tuple>(raw_shape.release());
-  return contains_any_symint(shape);
+  // DTensorSpec's hash covers both shape and stride, so a SymInt in either
+  // makes the spec unhashable. The stride can be symbolic even when the shape
+  // is static, e.g. for a fixed-size slice of a dynamically sized tensor.
+  return tensor_meta_field_has_symints(
+             tensor_meta,
+             dtensor_interned_strings.shape,
+             "TensorMeta.shape must be a tuple!") ||
+      tensor_meta_field_has_symints(
+             tensor_meta,
+             dtensor_interned_strings.stride,
+             "TensorMeta.stride must be a tuple!");
 }
 
 // set to false to bail out of the C++ fast path for ops that need pytree
