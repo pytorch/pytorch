@@ -1,6 +1,8 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 
-#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/Context.h>
+#include <ATen/DeviceAccelerator.h>
+#include <c10/core/Device.h>
 #include <c10/util/FileSystem.h>
 #include <c10/util/string_view.h>
 #include <c10/util/tempfile.h>
@@ -467,18 +469,30 @@ void validate_package_device(
       device_key_iter != metadata.end() && !device_key_iter->second.empty(),
       "No device information found.");
 
-  if (device_key_iter->second == "cuda") {
-#if defined(USE_ROCM)
-    const char* backend_name = "ROCm";
-#else
-    const char* backend_name = "CUDA";
-#endif
-    TORCH_CHECK(
-        at::detail::getCUDAHooks().getNumGPUs() > 0,
-        "Cannot load AOTInductor package for device 'cuda' because ",
-        backend_name,
-        " is not available in this process. Check that this host or container has GPU access, or compile/package the model for CPU.");
+  const std::string& device_key = device_key_iter->second;
+  const auto device_type = c10::Device(device_key).type();
+
+  if (!at::accelerator::isAcceleratorExcluded(device_type, at::kPrivateUse1)) {
+    return;
   }
+
+#if defined(USE_ROCM)
+  const std::string backend_name =
+      device_type == at::kCUDA ? "ROCm" : c10::DeviceTypeName(device_type);
+#else
+  const std::string backend_name = c10::DeviceTypeName(device_type);
+#endif
+
+  TORCH_CHECK(
+      at::globalContext()
+          .getAcceleratorHooksInterface(device_type)
+          .isAvailable(),
+      "Cannot load AOTInductor package for device '",
+      device_key,
+      "' because ",
+      backend_name,
+      " is not available in this process. Check that this host or container "
+      "has GPU access, or compile/package the model for CPU.");
 }
 
 } // namespace
