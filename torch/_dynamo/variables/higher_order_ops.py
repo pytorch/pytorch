@@ -151,6 +151,7 @@ class SubgraphTracingInfo:
     traced_sources: OrderedSet[Any] = field(default_factory=OrderedSet)
     has_container_identity: bool = False
     has_builtin_method_identity: bool = False
+    has_sourceless_grad: bool = False
     lexical_sources: set[tuple[Source, int]] = field(default_factory=set)
 
 
@@ -2041,6 +2042,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 lexical_sources=subtracer.lexical_sources,
                 has_container_identity=subtracer.has_container_identity,
                 has_builtin_method_identity=subtracer.has_builtin_method_identity,
+                has_sourceless_grad=subtracer.has_sourceless_grad,
             )
 
             return (
