@@ -19,7 +19,11 @@ from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import ArgName, CSEVariable, SizeArg, TensorArg
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.simd import IterationRangesRoot
-from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+from torch._inductor.codegen.simd_kernel_features import (
+    DisableReduction,
+    EnableReduction,
+    SIMDKernelFeatures,
+)
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
     BlockParameters,
@@ -42,15 +46,19 @@ from torch._inductor.codegen.wrapper import (
 )
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
-from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
+from torch._inductor.heuristics.triton_codegen.reduction import ReductionHeuristic
+from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties, ReductionHint
+from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     get_importable_constexpr_types,
     is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
+    sympy_product,
 )
 from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -72,7 +80,7 @@ from torch.utils._sympy.functions import (
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
-from torch.utils._triton import has_triton_package
+from torch.utils._triton import get_triton_version, has_triton_package
 
 
 try:
@@ -2416,6 +2424,310 @@ def helper(x):
             repr(hints),
             "(AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS)",
         )
+
+
+def _device_props(cc: int, device_type: str = "cuda") -> DeviceProperties:
+    return DeviceProperties(
+        type=device_type,
+        index=0,
+        multi_processor_count=1,
+        cc=cc,
+        major=cc // 10,
+        warp_size=32,
+    )
+
+
+def _node_schedule(entries: str) -> list:
+    markers = {"disable": DisableReduction, "enable": EnableReduction}
+    schedule = []
+    for entry in entries.split("_"):
+        schedule.append(markers.get(entry, MagicMock(spec=SchedulerNode)))
+    return schedule
+
+
+@instantiate_parametrized_tests
+class TestReductionLoopUnroll(InductorTestCase):
+    def setUp(self):
+        super().setUp()
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        self._graph = GraphLowering(gm)
+        self._stack = contextlib.ExitStack()
+        self._stack.enter_context(V.set_graph_handler(self._graph))
+
+    def tearDown(self):
+        self._stack.close()
+        super().tearDown()
+
+    def _heuristic_unroll_factor(self, heuristic=None, **overrides):
+        kwargs = {
+            "rnumel": 50257,
+            "reduction_hint": ReductionHint.INNER,
+            "scalar_accumulators": False,
+            "device": _device_props(107),
+        }
+        kwargs.update(overrides)
+        return (heuristic or ReductionHeuristic()).get_loop_unroll_factor(**kwargs)
+
+    @parametrize(
+        "rnumel,expected",
+        [
+            (8191, None),  # 8 iterations of R0_BLOCK=1024, masked tail.
+            (8192, None),  # 8 iterations, no masked tail.
+            (8193, 4),  # 9 iterations, masked tail.
+            (9216, None),  # 9 iterations, no masked tail.
+            (50257, 4),  # 50 iterations, masked tail.
+        ],
+    )
+    def test_heuristic_unroll_factor(self, rnumel, expected):
+        self.assertEqual(self._heuristic_unroll_factor(rnumel=rnumel), expected)
+
+    @parametrize(
+        "cc,device_type,hint",
+        [
+            (90, "cuda", ReductionHint.INNER),
+            (100, "cuda", ReductionHint.INNER),
+            (103, "cuda", ReductionHint.INNER),
+            (107, "hip", ReductionHint.INNER),
+            (107, "cuda", ReductionHint.DEFAULT),
+            (107, "cuda", ReductionHint.OUTER),
+            (107, "cuda", ReductionHint.OUTER_TINY),
+        ],
+    )
+    def test_heuristic_unroll_factor_only_sm107_inner(self, cc, device_type, hint):
+        kwargs = {"reduction_hint": hint, "device": _device_props(cc, device_type)}
+        self.assertIsNone(self._heuristic_unroll_factor(**kwargs))
+
+    def test_heuristic_unroll_factor_scalar_accumulators(self):
+        self.assertIsNone(self._heuristic_unroll_factor(scalar_accumulators=True))
+
+    def test_heuristic_unroll_factor_uses_max_r0_block_hook(self):
+        # Iterations and the masked tail follow the R0_BLOCK cap get_configs
+        # uses, including device-specific overrides of _max_r0_block.
+        class WideR0BlockHeuristic(ReductionHeuristic):
+            def _max_r0_block(self, device_major):
+                return 2048
+
+        wide = WideR0BlockHeuristic()
+        # 17 full blocks of 1024, but 9 blocks of 2048 with a masked tail.
+        self.assertIsNone(self._heuristic_unroll_factor(rnumel=1024 * 17))
+        self.assertEqual(self._heuristic_unroll_factor(wide, rnumel=1024 * 17), 4)
+        # 10 blocks of 1024, but only 5 blocks of 2048.
+        self.assertEqual(self._heuristic_unroll_factor(rnumel=10000), 4)
+        self.assertIsNone(self._heuristic_unroll_factor(wide, rnumel=10000))
+
+    def _make_looped_reduction_kernel(
+        self, numels=None, node_schedule="red", **kernel_kwargs
+    ):
+        numels = numels or {"x": sympy.Integer(16), "r0_": sympy.Integer(50257)}
+        xnumel = numels["x"]
+        rnumel = sympy_product(v for k, v in numels.items() if k.startswith("r"))
+        features = SIMDKernelFeatures([], xnumel, rnumel)
+        kernel = TritonKernel(
+            numels,
+            features=features,
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+            **kernel_kwargs,
+        )
+        self.assertTrue(kernel.range_trees[-1].is_loop)
+        features.node_schedule.extend(_node_schedule(node_schedule))
+        return kernel
+
+    def _patch_device_and_hint(self, kernel, cc=107):
+        stack = contextlib.ExitStack()
+        stack.enter_context(
+            patch.object(
+                self._graph,
+                "get_current_device_or_throw",
+                return_value=torch.device("cuda"),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "torch._inductor.codegen.triton.triton_meta_device_props",
+                return_value=_device_props(cc),
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                kernel.features,
+                "get_reduction_hint",
+                return_value=ReductionHint.INNER,
+            )
+        )
+        return stack
+
+    def _kernel_unroll_factor(self, kernel, cc=107):
+        with self._patch_device_and_hint(kernel, cc):
+            return kernel._reduction_loop_unroll_factor(kernel.range_trees[-1])
+
+    @parametrize("rnumel,unroll", [(50257, True), (46080, False)])
+    def test_codegen_body_loop_header(self, rnumel, unroll):
+        hip_stages = torch.version.hip and get_triton_version() > (3, 2)
+        num_stages = ", num_stages = 2" if hip_stages else ""
+        loop_unroll = ", loop_unroll_factor=4" if unroll else ""
+        numels = {"x": sympy.Integer(16), "r0_": sympy.Integer(rnumel)}
+        kernel = self._make_looped_reduction_kernel(numels)
+        kernel.loads.writeline("tmp0 = 0.0")
+        with self._patch_device_and_hint(kernel), V.set_kernel_handler(kernel):
+            kernel.codegen_body()
+        header = f"for r0_offset in tl.range(0, r0_numel, R0_BLOCK{num_stages}{loop_unroll}):"
+        self.assertIn(header, kernel.body.getvalue())
+
+    def test_kernel_unroll_factor(self):
+        kernel = self._make_looped_reduction_kernel()
+        self.assertEqual(self._kernel_unroll_factor(kernel), 4)
+        self.assertIsNone(self._kernel_unroll_factor(kernel, cc=100))
+        # The x tree is never a reduction loop.
+        self.assertIsNone(kernel._reduction_loop_unroll_factor(kernel.range_trees[0]))
+
+    @parametrize(
+        "node_schedule,expected",
+        [
+            ("red_disable_pw_enable", 4),  # Pointwise epilogue after the loop.
+            ("disable_pw_enable_red", 4),  # Pointwise prologue before the loop.
+            ("red_disable_pw_enable_red", None),  # Second reduction loop.
+            ("pw_disable_enable_red_disable_pw_enable", None),  # Loop split in two.
+        ],
+    )
+    def test_kernel_unroll_factor_reduction_loops(self, node_schedule, expected):
+        kernel = self._make_looped_reduction_kernel(node_schedule=node_schedule)
+        self.assertEqual(self._kernel_unroll_factor(kernel), expected)
+
+    def test_kernel_unroll_factor_register_intensive(self):
+        # Register-intensive kernels (x >= 1024, many loads) are not excluded.
+        numels = {"x": sympy.Integer(1024), "r0_": sympy.Integer(50257)}
+        kernel = self._make_looped_reduction_kernel(numels)
+        kernel.num_load, kernel.num_reduction = 10, 1
+        self.assertEqual(self._kernel_unroll_factor(kernel), 4)
+
+    def test_kernel_unroll_factor_skips_analysis_off_sm107(self):
+        kernel = self._make_looped_reduction_kernel()
+        tree = kernel.range_trees[-1]
+        registry = "torch._inductor.heuristics.registry.get_codegen_heuristic"
+        with (
+            self._patch_device_and_hint(kernel, cc=100),
+            patch.object(kernel.features, "get_reduction_hint") as get_hint,
+            patch(registry) as get_heuristic,
+        ):
+            self.assertIsNone(kernel._reduction_loop_unroll_factor(tree))
+        get_hint.assert_not_called()
+        get_heuristic.assert_not_called()
+
+    def test_kernel_unroll_factor_needs_reduction_heuristic(self):
+        # Only a ReductionHeuristic is asked for an unroll factor.
+        kernel = self._make_looped_reduction_kernel()
+        registry = "torch._inductor.heuristics.registry.get_codegen_heuristic"
+        with patch(registry, return_value=object()):
+            self.assertIsNone(self._kernel_unroll_factor(kernel))
+
+    def test_kernel_unroll_factor_static_size(self):
+        kernel = self._make_looped_reduction_kernel()
+        s0 = sympy.Symbol("s0", positive=True)
+        with patch.object(kernel.range_trees[-1], "numel", s0):
+            self.assertIsNone(self._kernel_unroll_factor(kernel))
+            # A size that simplifies to a constant counts as static.
+            replacements = {s0: sympy.Integer(50257)}
+            with patch.dict(self._graph.sizevars.replacements, replacements):
+                self.assertEqual(self._kernel_unroll_factor(kernel), 4)
+
+    def test_kernel_unroll_factor_exclusions(self):
+        kernel = self._make_looped_reduction_kernel(is_combo_kernel=True)
+        self.assertIsNone(self._kernel_unroll_factor(kernel))
+
+        kernel = self._make_looped_reduction_kernel()
+        kernel.cooperative_reduction = True
+        self.assertIsNone(self._kernel_unroll_factor(kernel))
+
+        kernel = self._make_looped_reduction_kernel()
+        kernel.is_native_matmul = True
+        self.assertIsNone(self._kernel_unroll_factor(kernel))
+
+        # Strict-numerics and fixed-config kernels run a known R0_BLOCK.
+        kernel = self._make_looped_reduction_kernel()
+        with patch.object(kernel, "_strict_reduction_rblock", return_value=8192):
+            self.assertIsNone(self._kernel_unroll_factor(kernel))
+
+        kernel = self._make_looped_reduction_kernel()
+        kernel.fixed_config = FixedTritonConfig({"XBLOCK": 1, "R0_BLOCK": 4096})
+        self.assertIsNone(self._kernel_unroll_factor(kernel))
+
+        kernel = self._make_looped_reduction_kernel()
+        kernel.autotune_hints.add(AutotuneHint.SCALAR_ACCUMULATORS)
+        self.assertIsNone(self._kernel_unroll_factor(kernel))
+
+        # Nested and sub-parent reductions index through a separate schedule.
+        kernel = self._make_looped_reduction_kernel()
+        kernel.features.indexing_node_schedule = list(kernel.features.node_schedule)
+        self.assertIsNone(self._kernel_unroll_factor(kernel))
+
+        # Tile reductions loop over r0 and r1.
+        numels = {
+            "x": sympy.Integer(16),
+            "r0_": sympy.Integer(64),
+            "r1_": sympy.Integer(50257),
+        }
+        kernel = self._make_looped_reduction_kernel(numels)
+        self.assertIsNone(self._kernel_unroll_factor(kernel))
+
+
+class TestReductionLoopUnrollDevice(InductorTestCase):
+    def _assert_loop_unroll(self, device, fn, inputs, unroll):
+        if torch.version.hip or torch.cuda.get_device_capability(device) != (10, 7):
+            self.skipTest("requires sm_107")
+        result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *inputs)
+        self.assertEqual(result, fn(*inputs))
+        code = "\n".join(codes)
+        # One kernel holds the reduction loop and any fused epilogue.
+        self.assertEqual(code.count("@triton.jit"), 1)
+        self.assertIn("for r0_offset in tl.range(", code)
+        if unroll:
+            self.assertIn("tl.range(0, r0_numel, R0_BLOCK, loop_unroll_factor=4)", code)
+        else:
+            self.assertNotIn("loop_unroll_factor", code)
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.persistent_reductions": False,
+        }
+    )
+    @parametrize(
+        "rnumel,unroll",
+        [
+            (8191, False),  # 8 iterations of R0_BLOCK=1024, masked tail.
+            (8192, False),  # 8 iterations, no masked tail.
+            (8193, True),  # 9 iterations, masked tail.
+            (9216, False),  # 9 iterations, no masked tail.
+            (50257, True),  # 50 iterations, masked tail.
+        ],
+    )
+    def test_sm107_reduction_loop_unroll(self, device, rnumel, unroll):
+        x = torch.rand(16, rnumel, device=device)
+        self._assert_loop_unroll(device, lambda x: x.sum(dim=-1), (x,), unroll)
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.persistent_reductions": False,
+        }
+    )
+    @parametrize("epilogue", ["mean", "sum_mul"])
+    def test_sm107_reduction_loop_unroll_epilogue(self, device, epilogue):
+        def fn(x, scale):
+            if epilogue == "mean":
+                return x.mean(dim=-1)
+            return x.sum(dim=-1) * scale
+
+        inputs = (torch.rand(16, 50257, device=device), torch.rand(16, device=device))
+        self._assert_loop_unroll(device, fn, inputs, unroll=True)
+
+
+instantiate_device_type_tests(TestReductionLoopUnrollDevice, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
