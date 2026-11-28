@@ -1031,7 +1031,7 @@ INSTANTIATE_GEMM_LU(32, 64, 2)
 
 #endif // C10_METAL_HAS_MPP
 
-template <typename T, bool upper, bool unit, short TS>
+template <typename T, bool upper, bool unit, bool direct, short TS = kLUSolveTS>
 kernel void trsmDiagSolveLU(
     device T* A [[buffer(0)]],
     constant uint2& dims [[buffer(3)]],
@@ -1048,6 +1048,25 @@ kernel void trsmDiagSolveLU(
   const uint tid = tid3.x;
   const uint G = tpg.x;
   device T* Ab = A + ulong(tgid.x) * M * N;
+
+  // Direct path for short tail tiles, see kLUSolveDirectMaxRows.
+  if IF_CONSTEXPR (direct) {
+    const uint col = cs + tgid.y * G + tid;
+    if (col >= ce) {
+      return;
+    }
+    for (uint i = 0; i < nr; ++i) {
+      const uint r = upper ? nr - 1 - i : i;
+      device T* row = Ab + ulong(d0 + r) * N;
+      T x = row[col];
+      for (uint j = 0; j < i; ++j) {
+        const uint c = upper ? nr - 1 - j : j;
+        x = c10::metal::fma(-Ab[ulong(d0 + c) * N + col], row[d0 + c], x);
+      }
+      row[col] = unit ? x : c10::metal::div(x, row[d0 + r]);
+    }
+    return;
+  }
 
   threadgroup T Td[TS][TS + 1];
   for (uint i = tid; i < TS * TS; i += G) {
@@ -1146,15 +1165,19 @@ kernel void trsmDiagSolveLU(
   }
 }
 
-#define INSTANTIATE_TRSM_DIAG_SOLVE(T, UP, UN, SUFF)      \
+#define INSTANTIATE_TRSM_DIAG(T, UP, UN, SUFF, DIRECT)    \
   template [[host_name("trsmDiagSolveLU_" #T "_" #SUFF)]] \
-  kernel void trsmDiagSolveLU<T, UP, UN, 32>(             \
+  kernel void trsmDiagSolveLU<T, UP, UN, DIRECT>(         \
       device T * A [[buffer(0)]],                         \
       constant uint2 & dims [[buffer(3)]],                \
       constant uint4 & params [[buffer(4)]],              \
       uint3 tid3 [[thread_position_in_threadgroup]],      \
       uint3 tgid [[threadgroup_position_in_grid]],        \
       uint3 tpg [[threads_per_threadgroup]]);
+
+#define INSTANTIATE_TRSM_DIAG_SOLVE(T, UP, UN, SUFF) \
+  INSTANTIATE_TRSM_DIAG(T, UP, UN, SUFF, false)      \
+  INSTANTIATE_TRSM_DIAG(T, UP, UN, SUFF##_direct, true)
 
 INSTANTIATE_TRSM_DIAG_SOLVE(float, false, true, lower_unit)
 INSTANTIATE_TRSM_DIAG_SOLVE(float, true, false, upper_nonunit)

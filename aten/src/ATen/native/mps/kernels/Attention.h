@@ -89,6 +89,13 @@ METAL_FUNC float mask_log2e(float m) {
   const float m2 = m * M_LOG2E_F;
   return m2 == -INFINITY && m != -INFINITY ? -FLT_MAX : m2;
 }
+// Softmax logsumexp of a row from its exp2-domain running max and sum. A fully
+// masked row gets +inf, so exp(score - lse) is 0 for it in the backward.
+METAL_FUNC float prefill_lse(float max_score2, float sum_score) {
+  return max_score2 == -INFINITY
+      ? INFINITY
+      : (max_score2 + metal::log2(sum_score)) * M_LN2_F;
+}
 #define instantiate_kernel(name, func, ...) \
   template [[host_name(                     \
       name)]] [[kernel]] decltype(func<__VA_ARGS__>) func<__VA_ARGS__>

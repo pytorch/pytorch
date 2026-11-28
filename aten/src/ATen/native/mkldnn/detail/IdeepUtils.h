@@ -4,12 +4,6 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <dnnl.hpp>
-// Ported from ideep/utils.hpp.
-#ifdef _OPENMP
-#include <omp.h>
-#else
-#define omp_get_max_threads() 1
-#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -165,15 +159,6 @@ inline int conv_weight_scale_mask(
 // Ported from ideep::utils::tensor_zp_mask.
 inline int tensor_zp_mask(dnnl::memory::dim zp_size) {
   return zp_size > 1 ? 1 : 0;
-}
-
-// Ported from ideep::utils::array_cmp.
-template <typename T>
-inline bool array_cmp(const T* a1, const T* a2, size_t size) {
-  for (size_t i = 0; i < size; ++i)
-    if (a1[i] != a2[i])
-      return false;
-  return true;
 }
 
 // Ported from ideep::utils::set_verbose.
