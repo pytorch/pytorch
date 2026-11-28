@@ -438,6 +438,50 @@ class CondTests(TestCase):
         self.assertEqual(xc.grad, xe.grad)
         self.assertEqual(wc.grad, we.grad)
 
+    @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
+    @parametrize("dynamic", [False, True])
+    def test_cond_identity_branch_with_view(self, device, dynamic):
+        def model(pred, x):
+            out = torch.cond(
+                pred,
+                lambda t: (t * 3.0).view(-1),
+                lambda t: (t + 0.0).view(-1) * 1.0,
+                (x,),
+            )
+            return out.cos()
+
+        self._run_test(model, (torch.randn(4, 8),), device, dynamic=dynamic)
+
+    @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
+    def test_cond_identity_branch_slice(self, device):
+        def model(pred, x):
+            return torch.cond(
+                pred, lambda t: (t * 3.0)[4:], lambda t: (t + 0.0)[4:], (x,)
+            )
+
+        x = torch.randn(8, device=device)
+        compiled = torch.compile(model, fullgraph=True)
+        for pred, arg in prepend_predicates([x], device=device):
+            out = compiled(pred, arg)
+            self.assertEqual(out, model(pred, arg))
+            self.assertNotEqual(
+                out.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+            )
+
+    @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
+    def test_cond_identity_branch_multiple_outputs(self, device):
+        def model(pred, x, y):
+            def true_fn(a, b):
+                return a * 3.0, b * 3.0
+
+            def false_fn(a, b):
+                return a + 0.0, b * 2.0
+
+            o1, o2 = torch.cond(pred, true_fn, false_fn, (x, y))
+            return torch.cos(o1), torch.relu(o2)
+
+        self._run_test(model, (torch.randn(8), torch.randn(8)), device)
+
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_simple_with_int_closure(self, device):

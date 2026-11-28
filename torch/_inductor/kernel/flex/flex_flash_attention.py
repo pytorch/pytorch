@@ -300,6 +300,37 @@ def input_buffers_require_grads(graph_module, num_score_mod_placeholders: int):
     return any(requires_grad(n) for n in inputs[num_score_mod_placeholders:])
 
 
+def _strip_identity_arithmetic(node: object) -> object:
+    """Walk back through +0 / -0 / *1 / /1 to the tensor they pass through
+    unchanged. These are the folds remove_no_ops performs, but it now skips them
+    inside a subgraph when the fold would alias the placeholder output (see
+    pytorch/pytorch#202514), so an identity score_mod written as e.g.
+    `score * 1.0` keeps the arithmetic; unwrap it here. Only scalar identity
+    operands are stripped, so a real transform like `score * 2.0` is never
+    mistaken for the identity."""
+    while isinstance(node, torch.fx.Node) and node.op == "call_function":
+        if len(node.args) != 2 or node.kwargs.get("alpha", 1) != 1:
+            break
+        lhs, rhs = node.args
+        if node.target in (aten.add.Tensor, aten.mul.Tensor):
+            identity = 0 if node.target is aten.add.Tensor else 1
+            if isinstance(rhs, (int, float)) and rhs == identity:
+                node = lhs
+            elif isinstance(lhs, (int, float)) and lhs == identity:
+                node = rhs
+            else:
+                break
+        elif node.target in (aten.sub.Tensor, aten.div.Tensor):
+            identity = 0 if node.target is aten.sub.Tensor else 1
+            if isinstance(rhs, (int, float)) and rhs == identity:
+                node = lhs
+            else:
+                break
+        else:
+            break
+    return node
+
+
 def is_trivial_score_graph(graph_module: GraphModule) -> bool:
     """Backwards currently doesn't support score_mods, match against identity"""
     graph = graph_module.graph
@@ -309,8 +340,9 @@ def is_trivial_score_graph(graph_module: GraphModule) -> bool:
     if len(output) != 1:
         raise AssertionError("Got graph w/ multiple outputs")
     output_val = output[0].args[0]
-    # The identity graph just sends the score straight through
-    return output_val == placeholders[0]
+    # The identity graph sends the score straight through, possibly via no-op
+    # arithmetic that remove_no_ops no longer folds inside subgraphs.
+    return _strip_identity_arithmetic(output_val) is placeholders[0]
 
 
 def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
