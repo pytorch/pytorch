@@ -120,7 +120,7 @@ from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
 )
-from .lists import ListVariable, SizeVariable, TupleVariable
+from .lists import ListVariable, RangeVariable, SizeVariable, TupleVariable
 from .object_protocol import (
     mro_lookup,
     pynumber_index,
@@ -701,7 +701,9 @@ class BaseTorchVariable(VariableTracker):
             # interaction with Kineto is not a valid usecase. So, this is ok.
             return True
 
-        return getattr(self.value, "__module__", None) in ("math", "cmath")
+        module = getattr(self.value, "__module__", None)
+        # handle_prod preserves start aliases and tracked iterator consumption.
+        return self.value is not math.prod and module in ("math", "cmath")
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return python_constant_repr_impl(self, tx)
@@ -1430,6 +1432,58 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return None
 
             return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
+
+        @register(math.prod)
+        def handle_prod(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if len(args) != 1 or kwargs.keys() - {"start"}:
+                # Let CPython report version-specific errors without evaluating inputs.
+                try:
+                    math.prod(*[()] * len(args), **dict.fromkeys(kwargs, 1))
+                except TypeError as exc:
+                    raise_observed_exception(TypeError, tx, args=list(exc.args))
+
+            iterable = args[0]
+            start = kwargs.get("start", ConstantVariable.create(1))
+            if isinstance(
+                iterable, (ListVariable, TupleVariable, RangeVariable)
+            ) and any(
+                iterable.python_type() is cls
+                for cls in (list, tuple, range, torch.Size)
+            ):
+                if not iterable.items:
+                    return start
+                is_range = isinstance(iterable, RangeVariable)
+                if (is_range or isinstance(start, ConstantVariable)) and all(
+                    isinstance(value, ConstantVariable) for value in iterable.items
+                ):
+                    try:
+                        values = iterable.as_python_constant()
+                        if not values:
+                            return start
+                        if isinstance(start, ConstantVariable):
+                            result = math.prod(values, start=start.as_python_constant())
+                            return VariableTracker.build(tx, result)
+                    except (OverflowError, TypeError, ValueError) as exc:
+                        raise_observed_exception(type(exc), tx, args=list(exc.args))
+                if (
+                    not is_range
+                    and not isinstance(iterable, SizeVariable)
+                    and iterable.is_proxy()
+                    and start.is_proxy()
+                    and not check_unspec_or_constant_args(args, kwargs)
+                ):
+                    return None
+            elif isinstance(iterable, TensorVariable):
+                return None
+
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.math_prod), list(args), kwargs
+            )
 
         @register(math.lcm)
         def handle_lcm(

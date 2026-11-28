@@ -3,6 +3,7 @@
 import _json
 import copy
 import dataclasses
+import fractions
 import os
 import re
 import sys
@@ -2283,6 +2284,57 @@ class TestGetattributeName(TestCase):
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x, Plain())[1], fn(x, Plain())[1])
+
+
+@instantiate_parametrized_tests
+class TestFraction(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "args,error_type",
+        [((1, 0), ZeroDivisionError), (("abc",), ValueError), ((1.5, 2), TypeError)],
+    )
+    def test_fraction_constructor_errors(self, args, error_type):
+        def fn(x):
+            try:
+                fractions.Fraction(*args)
+            except error_type as exc:
+                return x + 1, str(exc)
+            return x, "no error"
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x), fn(x))
+
+    @parametrize("construct", [False, True])
+    def test_fraction_methods(self, construct):
+        def fn(x, value):
+            if construct:
+                value = fractions.Fraction(22, 7)
+            return (
+                x + 1,
+                value.limit_denominator(5),
+                value.as_integer_ratio(),
+                value * value,
+            )
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            value = fractions.Fraction(22, 7)
+            self.assertEqual(compiled(x, value), fn(x, value))
+
+    @unittest.skipUnless(hasattr(fractions.Fraction, "is_integer"), "Python 3.12+")
+    @parametrize("value", [fractions.Fraction(2), fractions.Fraction(3, 2)])
+    def test_fraction_is_integer(self, value):
+        def fn(x, value):
+            return x + 1, value.is_integer()
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x, value), fn(x, value))
 
 
 if __name__ == "__main__":
