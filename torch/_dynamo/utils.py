@@ -1507,8 +1507,9 @@ def is_function_or_wrapper(
 def is_function(
     value: object,
 ) -> TypeIs[_FuncTypes]:
-    return isinstance(
-        value,
+    # Use actual types to ignore spoofed __class__ while retaining CPython subtypes.
+    return issubclass(
+        type(value),
         (
             types.FunctionType,
             types.BuiltinFunctionType,
@@ -3063,6 +3064,14 @@ if has_triton_package():
 
     common_constant_types.add(triton.language.dtype)
 
+
+def is_identity_singleton(value: object) -> bool:
+    """Constants whose process-wide identity does not depend on their source."""
+    return any(
+        value is item for item in (None, True, False, Ellipsis, NotImplemented)
+    ) or istype(value, (torch.dtype, torch.layout, torch.memory_format))
+
+
 """
     Difference between is_safe_constant and common_constant_types.
     * common_constant_types: Constants would be wrapped by VariableBuilder.wrap_literal
@@ -3162,7 +3171,7 @@ def specialize_symnode(arg: Any) -> Any:
         arg = arg.realize()
 
     if isinstance(arg, SymNodeVariable):
-        return ConstantVariable.create(arg.evaluate_expr())
+        return ConstantVariable.create(arg.evaluate_expr(), source=arg.source)
     return arg
 
 
@@ -3429,14 +3438,6 @@ def to_subclass(t: Any, cls: type) -> Any:
 
 
 dict_getitem = dict.__getitem__
-
-
-@torch.fx.wrap
-def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
-    # Use dict.keys() to match the iteration order of PyDict_Next used by
-    # the C++ DictGuardManager and by ConstDictKeySource._name_template.
-    # pyrefly: ignore [bad-argument-type]
-    return next(itertools.islice(dict.keys(d), n, n + 1))
 
 
 def set_base_iter(s: Iterable[T]) -> Iterator[T]:
@@ -4360,6 +4361,7 @@ def _get_fake_value_impl(
     if (
         torch._dynamo.config.use_graph_deduplication
         or torch._dynamo.config.track_nodes_for_deduplication
+        or tx.output.has_deferred_tensor_format
     ):
         flat_args_kwargs = get_fake_values_from_nodes(
             tx, _get_flat_args(node, {}), allow_non_graph_fake
@@ -4596,6 +4598,19 @@ def _get_fake_value_impl(
             raise_observed_exception(RuntimeError, tx, args=[msg])
         except ObservedException as e:
             raise FakeTensorObservedException(msg, real_stack=e.real_stack) from None
+
+    # Other inputs may alias the tensor when the graph is reused.
+    if tx.output.has_deferred_tensor_format and any(
+        arg._version != id_to_initial_version[id(arg)]
+        for arg in flat_args_kwargs
+        if id(arg) in id_to_initial_version
+    ):
+        unimplemented(
+            gb_type="Tensor mutation after formatting",
+            context=f"{node.op} {node.target}",
+            explanation="Dynamo would reconstruct the string using the tensor's mutated value.",
+            hints=["Move tensor formatting outside the compiled region."],
+        )
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(

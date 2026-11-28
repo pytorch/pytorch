@@ -3346,6 +3346,16 @@
       ]
     }
   ],
+  "GB1551": [
+    {
+      "Gb_type": "Operation requires stable Python identity",
+      "Context": "context",
+      "Explanation": "Dynamo cannot preserve the object identity required by this operation.",
+      "Hints": [
+        "Pass the computed result as an input to the compiled function."
+      ]
+    }
+  ],
   "GB0176": [
     {
       "Gb_type": "call_id() without associated real value",
@@ -7511,6 +7521,16 @@
       "Explanation": "Dynamo cannot safely replay global deletes for a frame whose globals dict is not the registered module __dict__.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2469": [
+    {
+      "Gb_type": "Tensor mutation after formatting",
+      "Context": "{node.op} {node.target}",
+      "Explanation": "Dynamo would reconstruct the string using the tensor's mutated value.",
+      "Hints": [
+        "Move tensor formatting outside the compiled region."
       ]
     }
   ]
