@@ -412,6 +412,19 @@ pub fn _rules_torch_forms() -> Vec<(String, String, String)> {
     members().all.iter().flat_map(|m| m.forms.iter().map(|(form, taken)| (m.name.to_string(), form.to_string(), status(*taken)))).collect()
 }
 
+/// What the line of one form means for a member that only a value read
+/// under some of its calls stands against, for tests: ``columns`` are the
+/// line's (the head of ``torch_members.tsv`` names them). ``"row"`` or
+/// ``"stop: WHY"``.
+#[pyfunction]
+pub fn _rules_torch_form_reads(columns: Vec<String>) -> String {
+    let line: Vec<&str> = columns.iter().map(String::as_str).collect();
+    match form_that_reads(&line, &ROW) {
+        Taken::Stop(why) => format!("stop: {why}"),
+        other => status(other),
+    }
+}
+
 /// The classes of operands each member of the table was measured on:
 /// ``(member, place, classes)`` for every place among the operands (a
 /// position, the receiver first, or the name of a keyword) that a returning

@@ -25,12 +25,17 @@
 //     read reads.rs holds by identity; Value by an input the list is
 //     specialized on, by a read held by value (an exact int, float or str),
 //     by a key fact of a tensor; Object for any of these if the object is a
-//     singleton. A load or a store of a local keeps the kind.
+//     singleton. A load or a store of a local keeps the kind, and so does
+//     the instruction that names one result of an instruction that hands
+//     back several (PARTS).
 //     Consumed: an operand taken by value (origins.rs), the test of a
 //     jump (a bool), IsNone (None is the one object of its class) and the
 //     key of a dict item ask for Value; `is` / `is not` and the dict of a
 //     dict item ask for Object: which object an operand is cannot be told
-//     from its value. Nothing else of the neutral kinds asks about a value;
+//     from its value; the callee of an entry asks for Object too: the list
+//     calls the recorded callee, and only a callee that is the same object
+//     on every arrival is the one the body calls (record.rs). Nothing else
+//     of the neutral kinds asks about a value;
 //   - lit() is true only for a value that is a constant of the code object,
 //     a copy of one through locals the run itself stored, one record.rs
 //     set as a fact that the list checks (the key of an input or a result),
@@ -65,6 +70,13 @@
 //     on every call, and reads of it make the reads no check: reading.rs);
 //     an attribute of a module or an object, a method, a membership test
 //     (no row says what the lookup resolves to);
+//   - PARTS. A method load hands back two values: (the function, the
+//     receiver) or (nothing, the attribute). What is known of each is kept
+//     by its place (parted) and taken by the instruction that names it
+//     (project): the function or the attribute as the load is known (one
+//     of the kinds of FOUND, asked about the first of the two that is
+//     there), the receiver as it was known as an operand. Of any other
+//     instruction that hands back several, nothing is known of any;
 //   - TRUTH, what the row of a truth test (ToBool, UNARY_NOT) says its
 //     result is known by, taken from the row's columns and from nothing
 //     else (Truth::of; a row of any other shape is a reason, as for every
@@ -262,6 +274,9 @@ pub struct Known {
     slots: HashMap<(u32, u32), Kind>,
     // (activation, value) -> what made a value that is not known.
     makers: HashMap<(u32, u32), String>,
+    // (activation, value) -> what is known of each value an instruction
+    // that hands back several handed back, by its place (PARTS).
+    parts: HashMap<(u32, u32), Vec<Option<Kind>>>,
     // The body's activation, how many params its block has, the local
     // slots of its frame that the run changed, and value -> the position
     // (among the params, then the frame's locals) of the input it is.
@@ -275,7 +290,8 @@ impl Known {
     // A run begins whose body is activation `body`, on a block with these
     // param values.
     pub fn begin(body: u32, params: &[u32]) -> Known {
-        Known { body, nparams: params.len() as u32, inputs: params.iter().enumerate().map(|(i, v)| (*v, i as u32)).collect(), ..Known::default() }
+        let makers = params.iter().map(|v| ((body, *v), "a parameter of the block (an input of the run)".to_string())).collect();
+        Known { body, nparams: params.len() as u32, inputs: params.iter().enumerate().map(|(i, v)| (*v, i as u32)).collect(), makers, ..Known::default() }
     }
 
     pub fn plain(&mut self, depth: u32, v: u32, op: Plain) {
@@ -331,6 +347,30 @@ impl Known {
         self.lit.get(&at) == Some(&Kind::Object)
     }
 
+    // How the value `at` is known, if it is.
+    pub fn kind(&self, at: (u32, u32)) -> Option<Kind> {
+        self.lit.get(&at).copied()
+    }
+
+    // The instruction `at` handed back several values: what is known of
+    // each, by its place.
+    pub fn parted(&mut self, at: (u32, u32), parts: Vec<Option<Kind>>) {
+        self.parts.insert(at, parts);
+    }
+
+    // The value `v` of activation `depth` names result `k` of the
+    // instruction `from`: it is known as that result is, or made by what
+    // made `from`.
+    pub fn project(&mut self, depth: u32, v: u32, from: u32, k: u32) {
+        match self.parts.get(&(depth, from)).and_then(|parts| parts.get(k as usize)).copied().flatten() {
+            Some(kind) => drop(self.lit.insert((depth, v), kind)),
+            None => {
+                let maker = self.maker((depth, from)).to_string();
+                self.makers.insert((depth, v), maker);
+            }
+        }
+    }
+
     // The value `at` is known in the kind `lit`, or (None) made by `maker`.
     pub fn set(&mut self, at: (u32, u32), lit: Option<Kind>, maker: impl FnOnce() -> String) {
         match lit {
@@ -351,6 +391,7 @@ impl Known {
         self.lit.retain(|(d, _), _| *d != depth);
         self.slots.retain(|(d, _), _| *d != depth);
         self.makers.retain(|(d, _), _| *d != depth);
+        self.parts.retain(|(d, _), _| *d != depth);
     }
 }
 

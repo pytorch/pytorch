@@ -73,15 +73,23 @@ pub(super) fn read_under(x: &str) -> Option<String> {
 // its own line says of every call measured, whatever its form, that it only
 // computes (`whole`: the row that line would give), and the lines of its
 // forms say which form's calls read a value. A row if none of this form's
-// did, on the samples a row needs on each device.
+// did, on the samples a row needs on each device, EVERY one of them
+// witnessed: X is `no@N`, N the calls that were witnessed, and a returning
+// sample whose call was not witnessed (N under the samples of both devices)
+// may be the one that reads. With all of them witnessed and 5 on each
+// device, 5 calls were witnessed on each device.
 pub(super) fn form_that_reads(line: &[&str], whole: &Row) -> Taken {
     let &[_, _, _, cpu, cuda, .., x, _] = line else { return Taken::Stop("its line of the table of torch's members has other columns than the rules read") };
     let stop = |why: String| Taken::Stop(Box::leak(why.into_boxed_str()));
     let enough = |n: &str| n.parse::<u32>().is_ok_and(|n| n >= 5);
+    let samples = cpu.parse::<u32>().ok().zip(cuda.parse::<u32>().ok()).map(|(cpu, cuda)| cpu + cuda);
+    let witnessed = x.split_once('@').and_then(|(_, n)| n.parse::<u32>().ok());
     if let Some(why) = read_under(x) {
         stop(why)
     } else if !enough(cpu) || !enough(cuda) {
         stop(format!("in this form it has under 5 returning samples on a device (cpu {cpu}, cuda {cuda})"))
+    } else if samples.is_none() || witnessed != samples {
+        stop(format!("in this form not every returning sample's call was witnessed (measured: {x}, of cpu {cpu} and cuda {cuda} samples): one that was not may read a value out of a tensor"))
     } else {
         Taken::Rows(Box::leak(Box::new([Row { reads: &[Read::Class], why: WHY_READS_FORM, before: Some(formed_call), ..*whole }])))
     }

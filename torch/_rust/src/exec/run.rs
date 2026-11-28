@@ -2245,7 +2245,8 @@ impl Act<'_> {
         self.reading = reading;
         if told {
             let made = &self.p.projects[v.idx()];
-            let results: Vec<*mut PyObject> = if made.is_empty() { vec![self.val(v)] } else { made.iter().flatten().map(|x| self.val(*x)).collect() };
+            // (By its place: a result nobody names is told as nothing.)
+            let results: Vec<*mut PyObject> = if made.is_empty() { vec![self.val(v)] } else { made.iter().map(|x| x.map_or(std::ptr::null_mut(), |x| self.val(x))).collect() };
             super::calls::record::after(done.is_ok(), &results);
         }
         done

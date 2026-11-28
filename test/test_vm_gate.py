@@ -9269,8 +9269,10 @@ class TestVmRulesTorch(TestCase):
                 elif line["member"] in readers:
                     # The member's line says the rest of every form; the
                     # form's own says whether its calls read, on its samples.
+                    # A row needs every sample of the form witnessed.
                     counts = [int(line[d]) for d in ("cpu", "cuda")]
                     is_row = unread and min(counts) >= 5
+                    is_row = is_row and int(line["X"].rpartition("@")[2]) == sum(counts)
                     self.assertEqual(status, "row" if is_row else "stop")
                 else:
                     is_row = clean == ["no"] * 4 + ["key", "yes"] and enough
@@ -10381,6 +10383,92 @@ def chk_fresh_code(x, i):
     # (As in chk_closure: the recording of this block stops first.)
     return (Stopper(), FRESH[k](x))[1]
 
+# A value in each place of an entry (the callee, an operand, a keyword value,
+# an item of a container built for the call) from where a later arrival may
+# find another: a parameter, a default, a global and a local alias of one, a
+# cell, an item of a dict and of a list, an unpacked tuple, a partial and a
+# bound builtin the run makes. Each program finds another there from its
+# fifth call on.
+SIGMOID = SIGMOID0 = torch.sigmoid
+SUM = torch.sum
+RESHAPE = torch.reshape
+TABLE = {"f": torch.sigmoid}
+FUNCS = [torch.sigmoid]
+SCALES = [2.0]
+
+def known_callee_param(x, fn):
+    return fn(x) + 1
+
+def known_callee_default(x, fn=torch.sigmoid):
+    return fn(x) + 1
+
+def known_callee_kwdefault(x, *, fn=torch.sigmoid):
+    return fn(x) + 1
+
+def known_callee_global(x):
+    return SIGMOID(x) + 1
+
+def known_callee_alias(x):
+    g = SIGMOID
+    return g(x) + 1
+
+def known_callee_item(x):
+    return TABLE["f"](x) + 1
+
+def known_callee_list(x):
+    return FUNCS[0](x) + 1
+
+def known_callee_unpacked(x, fs):
+    f, g = fs
+    return f(x) + 1
+
+def known_callee_partial(x):
+    f = functools.partial(SIGMOID)
+    return f(x) + 1
+
+def known_callee_bound(x, t):
+    f = t.add
+    return f(x) + 1
+
+def known_operand_param(x, k):
+    return x * k + 1
+
+def known_operand_default(x, k=2.0):
+    return x * k + 1
+
+def known_operand_item(x):
+    return x * STATE["scale"] + 1
+
+def known_operand_list(x):
+    return x * SCALES[0] + 1
+
+def known_keyword_param(x, d):
+    return SUM(x, dim=d) + 1
+
+def known_keyword_item(x):
+    return SUM(x, dim=STATE["dim"]) + 1
+
+def known_container_param(x, k):
+    return RESHAPE(x, (k, -1)) + 1
+
+def known_container_item(x):
+    return RESHAPE(x, (STATE["rows"], -1)) + 1
+
+def make_known_cell():
+    f, k = torch.sigmoid, 2.0
+    def known_callee_cell(x):
+        return f(x) + 1
+    def known_operand_cell(x):
+        return x * k + 1
+    def rebind(to):
+        nonlocal f, k
+        f, k = to
+    return known_callee_cell, known_operand_cell, rebind
+
+known_callee_cell, known_operand_cell, CELL_REBIND = make_known_cell()
+known_callee_global_replaced = known_callee_global
+known_callee_alias_replaced = known_callee_alias
+
 SETUP = {"chk_deleted_global": lambda: globals().__setitem__("max", lambda a, b: 3.0)}
 LATE = ("overlap", "shifted")
 # A collection is due after every second allocation; in `collects_garbage`
@@ -10413,6 +10501,20 @@ BETWEEN = {
     "tt_tuple": lambda: globals().__setitem__("SHAPE_T", ()),
     "tt_list": lambda: FILLED.clear(),
     "tt_python": lambda: setattr(GATE, "on", False),
+    "known_callee_default": lambda: setattr(known_callee_default, "__defaults__", (torch.relu,)),
+    "known_callee_kwdefault": lambda: setattr(known_callee_kwdefault, "__kwdefaults__", {"fn": torch.relu}),
+    "known_callee_global_replaced": lambda: globals().__setitem__("SIGMOID", torch.relu),
+    "known_callee_alias_replaced": lambda: globals().__setitem__("SIGMOID", torch.relu),
+    "known_callee_cell": lambda: CELL_REBIND((torch.relu, 3.0)),
+    "known_callee_item": lambda: TABLE.__setitem__("f", torch.relu),
+    "known_callee_list": lambda: FUNCS.__setitem__(0, torch.relu),
+    "known_callee_partial": lambda: globals().__setitem__("SIGMOID", torch.relu),
+    "known_operand_default": lambda: setattr(known_operand_default, "__defaults__", (3.0,)),
+    "known_operand_item": lambda: STATE.__setitem__("scale", 3.0),
+    "known_operand_list": lambda: SCALES.__setitem__(0, 3.0),
+    "known_operand_cell": lambda: CELL_REBIND((torch.relu, 3.0)),
+    "known_keyword_item": lambda: STATE.__setitem__("dim", 2),
+    "known_container_item": lambda: STATE.__setitem__("rows", 3),
 }
 # What a program is called with besides (or in place of) the tensor, by call.
 ARGS = {"float_input": lambda i: (1.5,) if i < 4 else (2.5,)}
@@ -10428,6 +10530,10 @@ ARGS.update(chk_closure=lambda i: (i % 2,), chk_own_cell=lambda i: (OWN_W[i],), 
 # The programs that draw: each run begins from the same seed.
 DRAWS = ("draws_dropout", "draws_like", "draws_in_place", "draws_off")
 ARGS.update(tt_body_param=lambda i: (i < 4,))
+ARGS.update(known_callee_param=lambda i: (torch.sigmoid if i < 4 else torch.relu,), known_operand_param=lambda i: (2.0 if i < 4 else 3.0,))
+ARGS.update(known_callee_unpacked=lambda i: ((torch.sigmoid, torch.relu) if i < 4 else (torch.relu, torch.sigmoid),))
+ARGS.update(known_callee_bound=lambda i: (OWN_W[0] if i < 4 else OWN_W[1],))
+ARGS.update(known_keyword_param=lambda i: (1 if i < 4 else 2,), known_container_param=lambda i: (2 if i < 4 else 3,))
 KWARGS = ("in_kwargs",)
 # What a program changes before its second call: a way its first call, the
 # one the optimizer judged it by, did not take.
@@ -10447,6 +10553,12 @@ def run(f):
     KEEP.clear()
     globals().update(SCALE=SCALE0, SCALE_TOO=SCALE0, MODE_TOO=MODE, m=M0, NONE_FLAG=None, SHAPE_T=SHAPE_T0)
     FILLED[:] = [1]
+    STATE.update(scale=2.0, dim=1, rows=2)
+    globals().update(SIGMOID=SIGMOID0)
+    TABLE["f"], FUNCS[0], SCALES[0] = torch.sigmoid, torch.sigmoid, 2.0
+    CELL_REBIND((torch.sigmoid, 2.0))
+    known_callee_default.__defaults__, known_operand_default.__defaults__ = (torch.sigmoid,), (2.0,)
+    known_callee_kwdefault.__kwdefaults__ = {"fn": torch.sigmoid}
     GATE.on = True
     if name in DRAWS:
         torch.manual_seed(7)
@@ -10579,6 +10691,40 @@ SHADOW_DRAWS = {
     "draws_in_place": ("torch.Tensor.uniform_(r0) of (Tensor)", "[draws writes(0)] assert is(operand 0)"),
 }  # fmt: skip
 
+# program: (the start of its recording's status under ``1``; what made the
+# callee of its entry, if the callee is not known as an object, else None;
+# what its arrivals behind the program's change are: "DIFFERENT" from the
+# block, misses by this check, or None for a recording that stopped). Each
+# program has a value in one place of an entry (the callee, an operand, a
+# keyword value, an item of a container built for the call) that comes from
+# where a later arrival finds another from the program's fifth call on. A
+# list that is the body ("replayable") must miss there; one that differs
+# must say why it is not the body.
+SHADOW_CALLEE = "the callee of an entry is not known as an object: "
+SHADOW_PARAMETER = "a parameter of the block (an input of the run)"
+SHADOW_HUNT = {
+    "known_callee_param": ("partial: " + SHADOW_CALLEE, SHADOW_PARAMETER, "DIFFERENT"),
+    "known_callee_default": ("partial: " + SHADOW_CALLEE, SHADOW_PARAMETER, "DIFFERENT"),
+    "known_callee_kwdefault": ("partial: " + SHADOW_CALLEE, SHADOW_PARAMETER, "DIFFERENT"),
+    "known_callee_global_replaced": ("replayable", None, "a read: a namespace or a container"),
+    "known_callee_alias_replaced": ("replayable", None, "a read: a namespace or a container"),
+    "known_callee_cell": ("partial: " + SHADOW_CALLEE, SHADOW_PARAMETER, "DIFFERENT"),
+    "known_callee_item": ("partial: no row: BINARY_SUBSCR (later: subscripts) x dict", None, "a read: a namespace or a container"),
+    "known_callee_list": ("partial: no row: BINARY_SUBSCR (later: subscripts) x list", "the result of BINARY_SUBSCR (later: subscripts)", "a read: a namespace or a container"),
+    "known_callee_unpacked": ("partial: no row: UNPACK_SEQUENCE (later: iteration) x tuple", "the result of UNPACK_SEQUENCE (later: iteration)", "DIFFERENT"),
+    "known_callee_partial": ("stopped", None, None),
+    "known_callee_bound": ("stopped", None, None),
+    "known_operand_param": ("replayable", None, "input value"),
+    "known_operand_default": ("replayable", None, "input value"),
+    "known_operand_item": ("partial: no row: BINARY_SUBSCR (later: subscripts) x dict", None, "a read: a namespace or a container"),
+    "known_operand_list": ("partial: no row: BINARY_SUBSCR (later: subscripts) x list", None, "a read: a namespace or a container"),
+    "known_operand_cell": ("replayable", None, "input value"),
+    "known_keyword_param": ("replayable", None, "input value"),
+    "known_keyword_item": ("partial: no row: BINARY_SUBSCR (later: subscripts) x dict", None, "a read: a namespace or a container"),
+    "known_container_param": ("stopped", None, None),
+    "known_container_item": ("stopped", None, None),
+}  # fmt: skip
+
 # What the recorder's validation answers for a list of one entry, a slice of
 # its input, when the block made something else: (what the block made of the
 # input, the answer).
@@ -10658,6 +10804,9 @@ class TestVmCallsShadow(TestCase):
             "attr_on_result",
             "attr_on_input",
             "attr_under",
+            *SHADOW_HUNT,
+            "known_callee_global",
+            "known_callee_alias",
         }  # fmt: skip
     )
 
@@ -11164,6 +11313,51 @@ class TestVmCallsShadow(TestCase):
             else:
                 self.assertTrue(found["again"].startswith("equal on "), found["again"])
                 self.assertIn(", 0 not comparable", found["again"])
+
+    @parametrize("name", list(SHADOW_HUNT))
+    def test_a_list_is_not_the_body_where_a_later_arrival_finds_another_value(
+        self, name
+    ):
+        status, callee, later = SHADOW_HUNT[name]
+        place = name.removesuffix("_replaced") + ":"
+        if name.endswith("_cell"):
+            place = "make_known_cell.<locals>." + place
+        for mode in ("shadow", "1"):
+            out = self.program(name, mode)
+            for s in out["shadow"]:
+                self.assertFalse(
+                    s["status"] == "replayable" and s["again"].startswith("DIFFERENT"),
+                    s,
+                )
+            found = next(s for s in out["shadow"] if s["place"].startswith(place))
+            # The callee of an entry is known as an object, or the list
+            # says what made it.
+            reasons = [why for why, _ in found["reasons"]]
+            unknown = [why for why in reasons if why.startswith(SHADOW_CALLEE)]
+            self.assertEqual(unknown, [SHADOW_CALLEE + callee] if callee else [])
+            if mode == "shadow":
+                continue
+            self.assertTrue(found["status"].startswith(status), found["status"])
+            if later == "DIFFERENT":
+                # The list calls what the recorded run was handed.
+                self.assertTrue(found["again"].startswith("DIFFERENT"), found)
+            elif later is not None:
+                self.assertEqual(found["missed"], [[later, 2]], found)
+                self.assertTrue(found["again"].startswith("equal on 0 later"), found)
+
+    def test_a_callee_loaded_from_a_namespace_is_known_as_an_object(self):
+        # The global itself, and a local the run stored it in: the list is
+        # the body, and equal on the arrivals behind it.
+        for name in ("known_callee_global", "known_callee_alias"):
+            found = next(
+                s
+                for s in self.program(name, "1")["shadow"]
+                if s["place"].startswith(name + ":")
+            )
+            self.assertEqual(found["status"], "replayable", found)
+            self.assertIn("r0 = torch.sigmoid(in0)", found["text"])
+            self.assertEqual(found["missed"], [])
+            self.assertTrue(found["again"].startswith("equal on 2 later"), found)
 
     def test_a_callee_that_reads_a_value_is_no_entry(self):
         # Under linalg.cond an operator reads a value out of a tensor (its
@@ -22899,6 +23093,135 @@ class TestVmLookups(TestCase):
 
 
 instantiate_device_type_tests(TestVmLookups, globals())
+
+
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmRulesTorchLines(TestCase):
+    """What stands between the samples of a form and a row for it. A form
+    of a member that only a value read under some calls stands against is
+    a row only if every returning sample of the form was witnessed and none
+    read; and the generator of the table cuts a form by the keywords a call
+    passes only for the forms it lists, each with why the keyword selects
+    the overload that reads."""
+
+    hw_classification = HardwareClassification.GENERIC
+    COLUMNS = TestVmRulesTorch.COLUMNS
+    lines = TestVmRulesTorch.lines
+    only_reads = TestVmRulesTorch.only_reads
+
+    def test_a_form_that_reads_is_a_row_only_with_every_sample_witnessed(self):
+        reads = torch._rust._rules_torch_form_reads
+        columns = TestVmRulesTorch.COLUMNS
+        members = {x["member"]: x for x in TestVmRulesTorch.lines(self)}
+        statuses = {
+            (m, form): status for m, form, status in torch._rust._rules_torch_forms()
+        }
+        rows = 0
+        for line in TestVmRulesTorch.lines(self, forms=True):
+            if not self.only_reads(members[line["member"]]):
+                continue
+            with self.subTest(member=line["member"], form=line["form"]):
+                # (The door reads a line as the table read it.)
+                answer = reads([line[c] for c in columns])
+                status = statuses[line["member"], line["form"]]
+                self.assertEqual(answer.partition(":")[0], status)
+                said, _, witnessed = line["X"].rpartition("@")
+                samples = int(line["cpu"]) + int(line["cuda"])
+                if status != "row":
+                    continue
+                rows += 1
+                self.assertEqual((said, int(witnessed)), ("no", samples))
+                # One call fewer witnessed, or a count that is not the
+                # samples': the one that was not witnessed may read.
+                for other in (samples - 1, samples + 1, 5, 0, "", "x"):
+                    changed = [f"no@{other}" if c == "X" else line[c] for c in columns]
+                    self.assertTrue(
+                        reads(changed).startswith(
+                            "stop: in this form not every returning sample's call was witnessed"
+                        ),
+                        msg=f"{other}: {reads(changed)}",
+                    )
+                # As before: a call that read, and too few samples.
+                changed = [
+                    f"yes(1)@{samples}" if c == "X" else line[c] for c in columns
+                ]
+                self.assertIn(
+                    "an operator handed a value out of a tensor", reads(changed)
+                )
+                changed = [
+                    {"X": f"no@{4 + int(line['cuda'])}", "cpu": "4"}.get(c, line[c])
+                    for c in columns
+                ]
+                self.assertIn("under 5 returning samples on a device", reads(changed))
+        self.assertGreater(rows, 4)
+
+    def test_a_form_is_cut_by_keywords_only_for_a_stated_reason(self):
+        path = os.path.join(os.path.dirname(CRATE), "tools", "gen_torch_members.py")
+        if not os.path.exists(path):
+            self.skipTest("the executor's tools are not beside the tests")
+        spec = importlib.util.spec_from_file_location("rules_torch_generator", path)
+        tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tool)
+        # Of the table: the forms whose lines tell keywords are the forms
+        # the generator lists, and each reason names the keywords.
+        cut = TestVmRulesTorch.keyword_lines(self)
+        self.assertEqual(set(cut), set(tool.KEYWORD_SELECTS))
+        for key, lines in cut.items():
+            told = {keyword for names, _ in lines for keyword in names}
+            for name in sorted(told):
+                self.assertIn(f"`{name}`", tool.KEYWORD_SELECTS[key], msg=str(key))
+
+        # Of the generator: samples of one form that read a value exactly
+        # when they pass no keyword (5 of each on each device). The form is
+        # cut only once it is listed.
+        def sample(at, keywords):
+            return {
+                "id": f"made:{at}",
+                "classes": {
+                    "args": [{"list": ["torch.Tensor"]}, "torch.Tensor"],
+                    "kwargs": keywords,
+                },
+                "has_out": False,
+                "returned": 1,
+                "enters": 0,
+                "draws": [],
+                "data_sized": False,
+                "repeatable": True,
+                "writes": {},
+                "rekeys": {},
+                "alias": {"r": ["fresh"]},
+                "fills": {"comparable": 1},
+                "ops_follow_data": False,
+            }
+
+        samples = [sample(at, {} if at < 5 else {"alpha": "float"}) for at in range(10)]
+        member, form = "torch.made_up", "0:[T] 1:T"
+        device = {"summary": {"W": {"writes": {}}}, "samples": samples}
+        tool.WITNESS.clear()
+        for name, at in itertools.product(("cpu", "cuda"), range(10)):
+            tool.WITNESS[member, name, f"made:{at}"] = (True, at < 5, False)
+        with tempfile.TemporaryDirectory() as scratch:
+            record = os.path.join(scratch, "made_up.json")
+            with open(record, "w") as f:
+                json.dump({"devices": {"cpu": device, "cuda": device}}, f)
+
+            def forms():
+                said = io.StringIO()
+                with contextlib.redirect_stderr(said):
+                    lines = list(tool.form_lines(member, "builtin", record, False))
+                found = {x.split("\t")[1]: x.split("\t")[17] for x in lines}
+                return found, said.getvalue()
+
+            found, said = forms()
+            self.assertEqual(found, {form: "yes(10)@20"})
+            self.assertIn(f"{member} ({form}): not cut by keywords", said)
+            listed = {**tool.KEYWORD_SELECTS, (member, form): "made for this test"}
+            with unittest.mock.patch.object(tool, "KEYWORD_SELECTS", listed):
+                found, said = forms()
+            self.assertEqual(
+                found, {f"{form} -:K": "yes(10)@10", f"{form} alpha:K": "no@10"}
+            )
+            self.assertEqual(said, "")
 
 
 if __name__ == "__main__":

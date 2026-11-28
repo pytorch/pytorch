@@ -66,7 +66,10 @@
 //     an instruction that is no entry, no kind of known::neutral, no
 //     truth test whose row is of a shape known.rs lists (TRUTH) and no key
 //     fact of a tensor whose key the list compares; an operand taken by
-//     value that is no constant of the code; a conditional jump under the
+//     value that is no constant of the code; the callee of an entry that
+//     is not known as an object (the list calls the recorded one whatever
+//     a later arrival has there: a parameter, a default, the result of a
+//     load that is not known); a conditional jump under the
 //     body on a value that is not known; reads that are no check of a later
 //     arrival (reading.rs: one that no check covers, one of a cell the
 //     body's frame made for the call); an output that the list does not
@@ -189,8 +192,9 @@ enum Pending {
     // its result is a known value if all goes well (None: known.rs was
     // told), and whether by identity or by value only; what is asked
     // behind it if its result is what a recorded read found, and the reason
-    // it is if that read is not held (known.rs Found).
-    Other { what: String, makes: bool, why: Option<String>, operands: Vec<usize>, frames: Frames, known: Option<Option<bool>>, found: Option<(Found, Option<String>)> },
+    // it is if that read is not held (known.rs Found); for a method load,
+    // how its receiver is known as an operand (known.rs PARTS).
+    Other { what: String, makes: bool, why: Option<String>, operands: Vec<usize>, frames: Frames, known: Option<Option<bool>>, found: Option<(Found, Option<String>)>, method: Option<Option<Kind>> },
 }
 
 // An instruction in flight: with the operators the run's witness had seen
@@ -340,7 +344,7 @@ impl Rec {
             };
             if let Some(made) = self.maker().built(ins, all) {
                 self.origins.built(at, made);
-                return self.push(Pending::Other { what: name, makes: false, why: None, operands: Vec::new(), frames: Frames::of(row, &what, &ins.op, site, callee), known: Some(None), found: None }, at);
+                return self.push(Pending::Other { what: name, makes: false, why: None, operands: Vec::new(), frames: Frames::of(row, &what, &ins.op, site, callee), known: Some(None), found: None, method: None }, at);
             }
             let facts = self.shadow.facts;
             let call = match (row, callee) {
@@ -354,6 +358,14 @@ impl Rec {
                     // each is made under the word the run began under.
                     if self.word.is_none_or(|word| ambient::state() != Ok(word)) {
                         return self.stop(&name, "the thread's state is not the one the run began under: no entry of a list changes it".into());
+                    }
+                    // Which callee it is, is known only as an object: the
+                    // list calls this one whatever a later arrival has there.
+                    if callee.is_some() {
+                        let value = (depth, ins.args[if all[0].is_null() { 1 } else { 0 }].0);
+                        if !self.origins.known.object(value) {
+                            self.reasons.add(format!("the callee of an entry is not known as an object: {}", self.origins.known.maker(value)));
+                        }
                     }
                     self.flush();
                     self.baked();
@@ -393,6 +405,8 @@ impl Rec {
             let truth = row.and_then(|row| Truth::of(&ins.op, row));
             let known = match (&ins.op, &plain, truth) {
                 (_, Some(_), _) => None,
+                // (Known as the result it names is: known.rs PARTS.)
+                (Op::Project(_), ..) => None,
                 (Op::IsNone, ..) => Some((self.origins.known.lit((depth, ins.args[0].0)) || self.keyed(all[0])).then_some(true)),
                 (Op::Bytecode { opcode: IS_OP, .. }, ..) => Some(ins.args.iter().all(|x| self.origins.known.object((depth, x.0))).then_some(true)),
                 (_, _, Some(Truth::Operand(Kind::Value))) => Some(self.origins.known.lit((depth, ins.args[0].0)).then_some(true)),
@@ -406,6 +420,10 @@ impl Rec {
             if let Op::MakeCell { slot } = ins.op {
                 self.origins.known.changes(depth, slot);
             }
+            if let Op::Project(k) = ins.op {
+                self.origins.known.project(depth, v, ins.args[0].0, k);
+            }
+            let method = matches!(ins.op, Op::LoadMethod(_)).then(|| self.origins.known.kind((depth, ins.args[0].0)));
             let mut found = Found::of(&ins.op, row, site, &ins.args, depth, &self.origins.known).map(|f| (f, None));
             match row {
                 None if fact => {}
@@ -446,7 +464,7 @@ impl Rec {
             } else {
                 format!("{name}{later}")
             };
-            self.push(Pending::Other { what, makes, why, operands, frames, known, found }, at)
+            self.push(Pending::Other { what, makes, why, operands, frames, known, found, method }, at)
         }
     }
 
@@ -466,10 +484,14 @@ impl Rec {
             // entry inside it.
             let direct = now.saturating_sub(ops).saturating_sub(self.claimed - claimed);
             match pending {
-                Pending::Other { what, makes, why, operands, known, found, .. } => {
+                Pending::Other { what, makes, why, operands, known, found, method, .. } => {
+                    // A method load hands back (the function, the receiver)
+                    // or (nothing, the attribute): what the load found is
+                    // the first of the two that is there.
+                    let place = usize::from(method.is_some() && results.len() == 2 && results[0].is_null());
                     // The result is what a recorded read found only if
                     // reads.rs holds that read; the list then rests on it.
-                    let result = results.first().copied().unwrap_or(std::ptr::null_mut());
+                    let result = results.get(place).copied().unwrap_or(std::ptr::null_mut());
                     let held = match found {
                         Some((found, unread)) => match found.holds(result).filter(|_| ok) {
                             Some(kind) => Some(kind),
@@ -480,6 +502,15 @@ impl Rec {
                         },
                         None => None,
                     };
+                    if let Some(operand) = method.filter(|_| results.len() == 2) {
+                        // (The receiver is handed back as it was handed in.)
+                        let mut parts = vec![None, None];
+                        parts[place] = held;
+                        if place == 0 && ok {
+                            parts[1] = operand;
+                        }
+                        self.origins.known.parted(at, parts);
+                    }
                     if let Some(known) = known {
                         // (A result that is not there is not known.)
                         let by_what_it_is = known.filter(|_| ok && !result.is_null()).map(|object| Kind::of(result, object));

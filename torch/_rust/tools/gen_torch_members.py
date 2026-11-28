@@ -42,10 +42,14 @@ Which KEYWORDS a call passes is in a form only where it tells the calls that
 read a value from those that do not: a value was read under some samples of
 the form and not under others, nothing else was measured against the form
 (no Python frame, no generator moved, no result sized by data, no two calls
-that differ), and the samples of each set of keywords (those that hold no
-tensor and no container with one: `alpha=1.0`) agree on X. The form then has
-a line per set (`0:[T] 1:T alpha:K`; `-:K` for the calls that pass none),
-each on the samples of that set alone.
+that differ), the samples of each set of keywords (those that hold no
+tensor and no container with one: `alpha=1.0`) agree on X, AND the form is
+listed in KEYWORD_SELECTS with the reason why the presence of the keyword
+selects the overload that reads (the samples alone do not show that: a few
+of them can agree by accident). The form then has a line per set (`0:[T]
+1:T alpha:K`; `-:K` for the calls that pass none), each on the samples of
+that set alone. A form whose samples would cut it and that is not listed
+stays whole (a stop), and is named on stderr.
 
 Every line has, per device, the count of samples whose results were compared
 on other data (what S rests on), whether the operators under the call differ
@@ -330,6 +334,25 @@ def keywords(sample):
     )
 
 
+# The forms that the keywords a call passes may cut (form_lines), each with
+# why the PRESENCE of the keyword tells the calls that read a value from
+# those that do not: the overloads the argument parser chooses between
+# differ in exactly that keyword. A form that is not here is never cut,
+# whatever its samples say: on a handful of samples the sets of keywords
+# can agree on X by accident (a keyword that the samples pass only with the
+# data that is read), and the lines of the sets would then be rows for calls
+# that nobody looked at. A form is added here by whoever read the
+# operator's overloads, with what they say.
+KEYWORD_SELECTS = {
+    ("torch._foreach_add_", "0:[T] 1:T"): (
+        "_foreach_add_(TensorList self, Scalar scalar) has no `alpha` and "
+        "takes a 0-dim tensor as the number it holds, which it reads; with "
+        "`alpha` the parser can only take _foreach_add_(TensorList self, "
+        "Tensor other, *, Scalar alpha), which hands the tensor on"
+    ),
+}
+
+
 def form_text(key):
     """`0:T 1:[T] dim:T 5:True`: places in the order of their names; `plain`
     for a call that hands no tensor and no bool that is told apart. A key
@@ -435,6 +458,14 @@ def form_lines(member, kind, path, valued):
             for _, s in forms[key]
         )
         if only_reads and all(len(reading(member, s)) < 2 for s in sets.values()):
+            if (member, form_text(key)) not in KEYWORD_SELECTS:
+                print(
+                    f"{member} ({form_text(key)}): not cut by keywords, though "
+                    f"the samples of each set agree ({sorted(sets)}): no reason "
+                    "is stated for it in KEYWORD_SELECTS",
+                    file=sys.stderr,
+                )
+                continue
             del forms[key]
             forms.update({(*key, names): found for names, found in sets.items()})
     texts = sorted(("?" if key is None else form_text(key), key) for key in forms)

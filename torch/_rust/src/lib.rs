@@ -140,6 +140,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_callee_kind, m)?)?;
     m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch, m)?)?;
     m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch_forms, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch_form_reads, m)?)?;
     m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch_domain, m)?)?;
     m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch_befores, m)?)?;
     m.add_class::<exec::graph::Ref>()?;
