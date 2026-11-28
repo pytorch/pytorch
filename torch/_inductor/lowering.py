@@ -9035,6 +9035,15 @@ exp = register_pointwise_numeric_ldf64(aten.exp)
 exp2 = register_pointwise_numeric(aten.exp2)
 expm1 = register_pointwise_numeric(aten.expm1)
 relu = register_pointwise(aten.relu)
+
+
+@register_lowering(aten.relu)
+def relu(x):
+    if is_boolean_dtype(x.get_dtype()):
+        raise NotImplementedError("Boolean inputs not supported for relu")
+    return make_pointwise(ops_wrapper("relu"))(x)
+
+
 sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
