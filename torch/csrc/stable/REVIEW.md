@@ -57,6 +57,7 @@ a new one is added, the difference should be documented.
 Public declarations must use stable or header-only types and headers. They must
 not expose ATen or other unstable implementation types. Route C shim failures
 through `STABLE_TORCH_ERROR_CODE_CHECK` NOT the outdated `TORCH_ERROR_CODE_CHECK`.
+
 Reuse `torch::stable::detail::from` and `torch::stable::detail::to` for boxing and
 unboxing where applicable. Avoid redundant conversion layers or round trips in
 high-level wrappers.
@@ -75,6 +76,14 @@ existing reference without changing its count.
 Keep the patch limited to the wrapper, its required ABI plumbing, and focused
 tests. Unrelated refactors and speculative convenience APIs make compatibility
 changes harder to audit.
+
+## Check encoding stability
+
+Call out any encodings between an extension and the library that the change may
+implicitly require to remain stable, for example raw casts between enums and
+integers. Reuse `torch::stable::detail::from` and `torch::stable::detail::to`
+instead; if no conversion exists, define and document how an encoding must be
+kept stable.
 
 ## Check the version boundary
 
@@ -121,6 +130,8 @@ unless the stable wrapper itself branches on those cases.
 2. which shim or dispatcher overload implements the bridge;
 3. any intentional difference from the unstable API;
 4. the minimum supported build-time version;
-5. the oldest supported runtime; and
-6. which test demonstrates each compatibility-sensitive seam introduced by the
+5. the oldest supported runtime;
+6. which extension/library encodings the change implicitly requires to remain
+   stable and how they are kept stable; and
+7. which test demonstrates each compatibility-sensitive seam introduced by the
    wrapper.

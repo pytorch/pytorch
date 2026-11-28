@@ -918,6 +918,30 @@ class TestOpSchemaMetaProperties(TestCase):
         self.assertEqual(indices_plc.dim, 0)
         self.assertEqual(input_plc.dim, 1)
 
+    def test_reduction_strategy_ops_are_unary_reductions(self):
+        # The reduction strategies read args_schema[1] as dims, so every op in these
+        # lists must take exactly one input tensor and must not also be registered
+        # as a pointwise op (registration order would pick the winner).
+        from torch.distributed.tensor._ops._math_ops import (
+            LINEAR_REDUCTION_OP_MAP,
+            MEAN_REDUCTION_OPS,
+        )
+
+        def num_input_tensors(op):
+            return sum(
+                not a.is_out and isinstance(a.type, torch.TensorType)
+                for a in op._schema.arguments
+            )
+
+        bad = [
+            str(op)
+            for op in [*LINEAR_REDUCTION_OP_MAP, *MEAN_REDUCTION_OPS]
+            if num_input_tensors(op) != 1 or torch.Tag.pointwise in op.tags
+        ]
+        self.assertFalse(
+            bad, f"reduction strategy on non-unary or pointwise ops: {bad}"
+        )
+
     def test_foreach_max_single_dim_strategy(self):
         from torch.distributed.tensor._ops._math_ops import (
             linear_reduction_single_dim_strategy,

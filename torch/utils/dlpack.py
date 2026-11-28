@@ -29,6 +29,7 @@ class DLDeviceType(enum.IntEnum):
     kDLWebGPU = 15,
     kDLHexagon = 16,
     kDLMAIA = 17,
+    kDLTrn = 18,
 
 
 class ReadOnlyTensorWrapper(torch.Tensor):
