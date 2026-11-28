@@ -8508,6 +8508,7 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
 
 
 @register_meta([aten.bucketize.Scalar, aten.bucketize.Scalar_out])
+@out_wrapper()
 def meta_bucketize_scalar(
     self: NumberType,
     boundaries: Tensor,

@@ -3038,6 +3038,19 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(diff_b1.shape, expected_bias_shape)
         self.assertEqual(diff_b2.shape, expected_bias_shape)
 
+    def test_bucketize_scalar_out(self):
+        # aten.bucketize.Scalar_out used to fail under FakeTensorMode: the
+        # meta kernel did not accept the ``out`` kwarg (see #206167).
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            boundaries = torch.tensor([0.0, 1.0])
+            out = torch.empty((), dtype=torch.int64)
+            result = torch.ops.aten.bucketize.Scalar_out(0.5, boundaries, out=out)
+            self.assertIs(result, out)
+            self.assertEqual(result.shape, torch.Size([]))
+            self.assertEqual(result.dtype, torch.int64)
+
 
 instantiate_device_type_tests(TestMeta, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestMetaCudaRef, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
