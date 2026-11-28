@@ -1619,6 +1619,71 @@ class MixOrderReductionTest(TestBase):
         self.assertEqual(list(act[1].shape), list(ref[1].shape))
         self.assertTrue(same(ref, act, tol=1e-3))
 
+    @parametrize("split", (False, True))
+    @parametrize("perm", ("identity", "swap", "cycle"))
+    def test_outer_reduction_of_permuted_view(self, perm, split):
+        # The kernel accumulates the outer reduction in its loop order, which
+        # follows the reads, e.g. (g, f), while the output is (f, g). A cycle,
+        # unlike a swap, is not its own inverse.
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        dims, shape = {
+            "identity": ((0, 1, 2), (8192, 16, 128)),
+            "swap": ((0, 2, 1), (8192, 16, 128)),
+            "cycle": ((0, 2, 3, 1), (16384, 4, 8, 16)),
+        }[perm]
+
+        def f(x, dy):
+            t = x * dy
+            return t.sum(tuple(range(1, t.dim()))), t.permute(dims).sum(0)
+
+        x, dy = (torch.randn(shape, device=GPU_TYPE) for _ in range(2))
+        with inductor_config.patch("split_reductions", split):
+            self.check_numeric(f, (x, dy))
+        self.assertEqual(1, metrics.codegen_mix_order_reduction)
+
+    @parametrize("split", (False, True))
+    def test_outer_reduction_with_transposed_layout(self, split):
+        # mm lays out the outer reduction's output transposed, which the
+        # finalized partials must keep.
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        w = torch.randn(16, 64, device=GPU_TYPE)
+
+        def f(x, dy):
+            t = x * dy
+            return t.sum((1, 2)), t.transpose(1, 2).sum(0) @ w
+
+        x, dy = (torch.randn(8192, 16, 128, device=GPU_TYPE) for _ in range(2))
+        ref = f(x, dy)
+        with inductor_config.patch("split_reductions", split):
+            act, (code,) = utils.run_and_get_code(torch.compile(f), x, dy)
+        self.assertTrue(same(ref, act, tol=1e-3))
+        self.assertEqual(1, metrics.codegen_mix_order_reduction)
+        # a split reduction reorders its partials through a temporary
+        self.assertIn("_partials" if split else ".as_strided(", code)
+
+    @parametrize("split", (False, True))
+    @parametrize("permuted", (False, True))
+    def test_outer_reductions_into_cat(self, permuted, split):
+        # The outer reductions are slices of a cat, so their partials are
+        # written through views.
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x, y):
+            t, u = x * y, x + y
+            if permuted:
+                t, u = t.transpose(1, 2), u.transpose(1, 2)
+            return t.sum((1, 2)) + u.sum((1, 2)), torch.cat([t.sum(0), u.sum(0)], -1)
+
+        x, y = (torch.randn(16384, 16, 32, device=GPU_TYPE) for _ in range(2))
+        with inductor_config.patch("split_reductions", split):
+            self.check_numeric(f, (x, y))
+        self.assertEqual(1, metrics.codegen_mix_order_reduction)
+
 
 class OverFusionTest(TestBase):
     """
