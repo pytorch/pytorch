@@ -8,8 +8,8 @@ import sympy
 import torch
 from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
 
+from ...codegen.flydsl import flydsl_utils
 from ...codegen.flydsl.flydsl_template import FlyDSLTemplate
-from ...codegen.flydsl.flydsl_utils import runtime_available
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
 from ...select_algorithm import autotune_select_algorithm
@@ -240,7 +240,11 @@ def create_flydsl_flex_attention_backward_kernel(
     """Create a FlyDSL backward kernel, or return None for Triton fallback."""
     if not isinstance(dq_accum_fp32, bool):
         raise ValueError("FlyDSL FLYDSL_DQ_ACCUM_FP32 must be a bool")
-    if not runtime_available():
+    if (
+        not flydsl_utils.runtime_available()
+        or query is None
+        or not flydsl_utils.is_gfx950_device(query.get_device())
+    ):
         return None
     if fw_subgraph is None or mask_graph is None:
         raise AssertionError("FlyDSL backward requires the original mod graphs")
