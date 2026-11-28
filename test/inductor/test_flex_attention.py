@@ -7,6 +7,7 @@ import json
 import math
 import os
 import random
+import re
 import string
 import tempfile
 import types
@@ -872,6 +873,63 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
         self.assertIn("block width is not 128-byte aligned", reasons)
         self.assertNotIn("innermost request extent", reasons)
 
+    def test_flex_tdm_gate_checks_backward_grad_out(self):
+        """Backward admission gates dO under the same rules as Q, K and V.
+
+        The backward lowering realizes grad_out with require_stride1, which
+        keeps any layout that has a unit stride on some axis. A non-unit
+        head-dim stride, unaligned rows or an offset can therefore reach the
+        gate, so dO is its fourth operand. Q, K and V are admissible
+        throughout, so only dO decides the result.
+        """
+        from torch._inductor import config
+        from torch._inductor.utils import use_flex_tdm_descriptor
+        from torch._inductor.virtualized import V
+
+        good = _tdm_operand("good", [32768, 8192, 64, 1])
+        blocks = [(128, 64)] * 4
+        cases = {
+            "good": (good, True),
+            # Every 2nd element of a 128-wide row: a non-unit inner stride.
+            "inner_stride": (_tdm_operand("do_inner", [65536, 16384, 128, 2]), False),
+            # Rows of D + 1 = 65 elements: 130 bytes is not 16-byte aligned.
+            "row_stride": (_tdm_operand("do_row", [33280, 8320, 65, 1]), False),
+            # 96 elements * 2 bytes = 192 bytes: 16-byte but not 128-byte aligned.
+            "row_policy": (_tdm_operand("do_policy", [49152, 12288, 96, 1]), False),
+            "offset": (
+                _tdm_operand("do_offset", [32768, 8192, 64, 1], offset=1),
+                False,
+            ),
+            # A transposed but row-aligned dO keeps a unit inner stride.
+            "aligned_transpose": (
+                _tdm_operand("do_transposed", [32768, 64, 256, 1]),
+                True,
+            ),
+        }
+
+        graph = _tdm_graph()
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(self._PREREQS, return_value=True) as device_prereqs,
+        ):
+            for name, (grad_out, admitted) in cases.items():
+                with self.subTest(case=name):
+                    self.assertEqual(
+                        use_flex_tdm_descriptor(
+                            good, good, good, grad_out, block_shapes=blocks
+                        ),
+                        admitted,
+                    )
+
+            with config.patch({"triton.enable_flex_tdm": False}):
+                self.assertFalse(
+                    use_flex_tdm_descriptor(good, good, good, good, block_shapes=blocks)
+                )
+            device_prereqs.return_value = False
+            self.assertFalse(
+                use_flex_tdm_descriptor(good, good, good, good, block_shapes=blocks)
+            )
+
 
 # Forward builds descriptors for all three operands; decode builds them for K/V
 # only, because its reshaped query uses ordinary tl.load.
@@ -884,8 +942,31 @@ _TDM_TOLERANCES = {
 }
 
 
+# The backward names each descriptor after what it loads. The dQ block loads Q
+# and dO once and K/V in its inner loop; the dK/dV block loads K/V once
+# (desc_k_dkdv, desc_v_dkdv) and Q/dO in its inner loop.
+_TDM_BACKWARD_OPERANDS = ("q", "do", "k", "v", "k_dkdv", "v_dkdv")
+# The same loads on the backward pointer path. The forward helper below would
+# miss most of them: the backward offsets its bases (Q2, DO2) and loads its
+# inner-loop tiles through transposed pointer blocks.
+_BACKWARD_POINTER_LOADS = (
+    "Q2",
+    "DO2",
+    "K",
+    "V",
+    "kT_ptrs",
+    "vT_ptrs",
+    "qT_ptrs",
+    "do_ptrs",
+)
+
+
 def _descriptor_load_pattern(operand):
     return rf"tl\.load_tensor_descriptor\(\s*desc_{operand}\s*,"
+
+
+def _backward_pointer_load_pattern(base):
+    return rf"\bload_checked_2d(?:_\w+)?\(\s*{base}\s*,"
 
 
 def _pointer_load_pattern(operand):
@@ -987,6 +1068,224 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
         tail = padded[..., :65]
         self.assertEqual(tail.stride()[-2], 128)
         return tail
+
+    # ---- backward helpers -------------------------------------------------
+
+    def _split_code(self, code):
+        """Split captured code into the forward graphs and the one flex backward.
+
+        Each compiled graph is captured separately, and only the flex backward
+        renders bwd_dkdv_inner. The captured code holds only the choice that
+        was selected, so autotuning candidates cannot satisfy an assertion.
+        """
+        backward = [c for c in code if "bwd_dkdv_inner" in c]
+        self.assertEqual(len(backward), 1, "expected one compiled flex backward")
+        forward = "\n".join(c for c in code if "bwd_dkdv_inner" not in c)
+        return forward, backward[0]
+
+    def _assert_backward_descriptor_path(self, backward):
+        for name in _TDM_BACKWARD_OPERANDS:
+            self.assertRegex(backward, _descriptor_load_pattern(name))
+        # Q and dO are loaded both by the dQ block and inside the dK/dV
+        # helper, so one match anywhere would also accept a helper that loads
+        # them through pointers. Require both loads, and reject every operand
+        # pointer load: the template emits those only when USE_TMA is off.
+        for name in ("q", "do"):
+            self.assertGreaterEqual(
+                len(re.findall(_descriptor_load_pattern(name), backward)),
+                2,
+                f"desc_{name} is not loaded by both the dQ and dK/dV blocks",
+            )
+        for base in _BACKWARD_POINTER_LOADS:
+            self.assertNotRegex(backward, _backward_pointer_load_pattern(base))
+        # The dQ block builds its K/V descriptors and passes them to its loop.
+        for name in ("k_dq", "v_dq"):
+            self.assertRegex(
+                backward, rf"desc_{name}\s*=\s*tl\.make_tensor_descriptor\("
+            )
+
+    def _assert_backward_pointer_path(self, backward):
+        self.assertNotIn("tl.load_tensor_descriptor(", backward)
+        self.assertNotIn("tl.make_tensor_descriptor(", backward)
+        for base in _BACKWARD_POINTER_LOADS:
+            self.assertRegex(backward, _backward_pointer_load_pattern(base))
+
+    def _grads_like(self, outputs, seed=0):
+        # Explicit upstream gradients: identical across the compared arms, and
+        # contiguous, so the backward sees a known dO layout.
+        generator = torch.Generator(device=outputs[0].device).manual_seed(seed)
+        return tuple(
+            torch.randn(o.shape, generator=generator, device=o.device, dtype=o.dtype)
+            for o in outputs
+        )
+
+    def _run_fwd_bwd(self, fn, inputs, grad_outputs=None, **compile_kwargs):
+        """Compile fn, run its forward and backward once, and capture both.
+
+        autograd.grad rather than .backward(): leaf .grad buffers are never
+        accumulated, and the backward compiled for this call is the one whose
+        code is captured.
+        """
+        compiled = torch.compile(fn, **compile_kwargs)
+
+        def step():
+            outputs = compiled(*inputs)
+            outputs = outputs if isinstance(outputs, tuple) else (outputs,)
+            upstream = (
+                self._grads_like(outputs) if grad_outputs is None else grad_outputs
+            )
+            return outputs, torch.autograd.grad(outputs, inputs, upstream), upstream
+
+        (outputs, grads, upstream), code = run_and_get_code(step)
+        return outputs, grads, upstream, code
+
+    def _gold_grads(self, fn, inputs, grad_outputs):
+        """Eager float64 gradients, the accuracy reference for both arms."""
+        gold_inputs = [t.detach().double().requires_grad_(True) for t in inputs]
+        outputs = fn(*gold_inputs)
+        outputs = outputs if isinstance(outputs, tuple) else (outputs,)
+        return torch.autograd.grad(
+            outputs, gold_inputs, [g.double() for g in grad_outputs]
+        )
+
+    def _eager_run(self, fn, inputs, grad_outputs):
+        """Eager outputs and gradients in the inputs' dtype: the baseline."""
+        ref_inputs = [t.detach().clone().requires_grad_(True) for t in inputs]
+        outputs = fn(*ref_inputs)
+        outputs = outputs if isinstance(outputs, tuple) else (outputs,)
+        return outputs, torch.autograd.grad(outputs, ref_inputs, grad_outputs)
+
+    def _assert_grads_match(self, actual, pointer, gold, ref, dtype):
+        """Both arms must match the float64 gradients as well as eager does.
+
+        Each gradient's mean absolute error against float64 is bounded by the
+        same-dtype eager error, with the factors of _check_out_and_grad, so an
+        error both compiled arms share fails too. The two arms run the same
+        configs and arithmetic and differ only in how operands are loaded, so
+        they must also agree within the forward's tolerances.
+        """
+        tol = _TDM_TOLERANCES[dtype]
+        fudge = 10.0 if dtype == torch.float32 else 1.1
+        for name, a, p, g, r in zip(("dq", "dk", "dv"), actual, pointer, gold, ref):
+            with self.subTest(grad=name):
+                ref_error = (g - r.double()).abs().mean().item()
+                for arm, x in (("descriptor", a), ("pointer", p)):
+                    self.assertTrue(torch.isfinite(x).all(), f"{arm} {name}")
+                    error = (g - x.double()).abs().mean().item()
+                    self.assertLessEqual(
+                        error,
+                        (1 + fudge) * ref_error + 1e-7,
+                        f"{arm} {name} error {error} exceeds eager error {ref_error}",
+                    )
+                torch.testing.assert_close(a, p, atol=tol.atol, rtol=tol.rtol)
+
+    def _check_backward(
+        self,
+        fn,
+        inputs,
+        *,
+        dtype,
+        descriptors=True,
+        options=None,
+        **compile_kwargs,
+    ):
+        """Run the given options and a bwd_USE_TMA=False arm; compare gradients.
+
+        fn takes (q, k, v, kernel_options). The pointer arm adds
+        bwd_USE_TMA=False to the same options, so it differs only in how the
+        backward loads its operands. Returns the first arm's forward and
+        backward code so callers can make further assertions.
+        """
+        options = {} if options is None else options
+        inputs = [t.detach().requires_grad_(True) for t in inputs]
+        _, grads, upstream, code = self._run_fwd_bwd(
+            functools.partial(fn, kernel_options=options), inputs, **compile_kwargs
+        )
+        forward, backward = self._split_code(code)
+        if descriptors:
+            self._assert_backward_descriptor_path(backward)
+        else:
+            self._assert_backward_pointer_path(backward)
+
+        torch._dynamo.reset()
+        _, pointer_grads, _, pointer_code = self._run_fwd_bwd(
+            functools.partial(fn, kernel_options=dict(options, bwd_USE_TMA=False)),
+            inputs,
+            grad_outputs=upstream,
+            **compile_kwargs,
+        )
+        self._assert_backward_pointer_path(self._split_code(pointer_code)[1])
+
+        eager_fn = functools.partial(fn, kernel_options={})
+        gold = self._gold_grads(eager_fn, inputs, upstream)
+        _, ref = self._eager_run(eager_fn, inputs, upstream)
+        self._assert_grads_match(grads, pointer_grads, gold, ref, dtype)
+        return forward, backward
+
+    def _direct_backward(self, q, k, v, grad_out, kernel_options):
+        """Compile flex_attention_backward with dO as a plain graph input.
+
+        Through the public API, AOTAutograd may re-stride the upstream gradient
+        before it reaches the lowering, so a layout chosen there is not the
+        layout the gate sees. Calling the backward operator directly keeps dO
+        exactly as constructed. Returns (dq, dk, dv), the backward code, the
+        float64 reference gradients and the same-dtype eager gradients.
+        """
+        scale = 1.0 / q.size(-1) ** 0.5
+        block_mask = create_block_mask(
+            noop_mask, None, None, q.size(-2), k.size(-2), device=q.device
+        )
+
+        def run(query, key, value, out, lse, upstream, options):
+            return torch.ops.higher_order.flex_attention_backward(
+                query,
+                key,
+                value,
+                out,
+                lse,
+                upstream,
+                None,
+                _identity,
+                None,
+                block_mask.as_tuple(),
+                scale,
+                options,
+                (),
+                (),
+            )
+
+        out, lse = flex_attention_fwd(q, k, v, _identity, block_mask, scale)
+        compiled = torch.compile(
+            functools.partial(run, options=kernel_options), fullgraph=True
+        )
+        with torch.no_grad():
+            (dq, dk, dv, _), code = run_and_get_code(
+                compiled, q, k, v, out, lse, grad_out
+            )
+        backward = [c for c in code if "bwd_dkdv_inner" in c]
+        self.assertEqual(len(backward), 1)
+
+        gold_q, gold_k, gold_v, gold_do = (t.double() for t in (q, k, v, grad_out))
+        gold_out, gold_lse = flex_attention_fwd(
+            gold_q, gold_k, gold_v, _identity, block_mask, scale
+        )
+        with torch.no_grad():
+            gold = run(gold_q, gold_k, gold_v, gold_out, gold_lse, gold_do, {})[:3]
+            ref = run(q, k, v, out, lse, grad_out, {})[:3]
+        return (dq, dk, dv), backward[0], gold, ref
+
+    def _check_direct_backward(self, q, k, v, grad_out, *, descriptors):
+        grads, backward, gold, ref = self._direct_backward(q, k, v, grad_out, {})
+        if descriptors:
+            self._assert_backward_descriptor_path(backward)
+        else:
+            self._assert_backward_pointer_path(backward)
+        torch._dynamo.reset()
+        pointer, pointer_backward, _, _ = self._direct_backward(
+            q, k, v, grad_out, {"USE_TMA": False}
+        )
+        self._assert_backward_pointer_path(pointer_backward)
+        self._assert_grads_match(grads, pointer, gold, ref, q.dtype)
 
     @dtypes(*_TDM_TOLERANCES)
     def test_tdm_flex_forward_correctness_and_selection(self, device, dtype):
@@ -1272,9 +1571,8 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
         )
 
     def test_tdm_flex_training_and_gqa_keep_backward_correct(self, device):
-        # The skip-odd-keys score_mod plus GQA, run through the existing
-        # backward: PR3 changes forward and decode only, so the gradients and
-        # LSE have to stay correct while the forward takes the descriptor path.
+        # The skip-odd-keys score_mod plus GQA: the forward takes the descriptor
+        # path, and its outputs, LSE and gradients have to stay correct.
         def score_mod(score, b, h, q, kv):
             return torch.where(kv % 2 == 0, score, float("-inf"))
 
@@ -1315,6 +1613,132 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
         ref_out.sum().backward()
         for actual, expected in ((q, ref_q), (k, ref_k), (v, ref_v)):
             torch.testing.assert_close(actual.grad, expected.grad, atol=5e-2, rtol=5e-2)
+
+    # ---- backward ---------------------------------------------------------
+
+    @common_utils.parametrize(
+        "dtype, qk_head_dim, v_head_dim, lengths",
+        [
+            (torch.float16, 64, 64, "divisible"),
+            (torch.bfloat16, 128, 128, "tail"),
+            # dO and V take the V width, Q and K the QK width.
+            (torch.float16, 64, 128, "tail"),
+        ],
+        name_fn=lambda dtype, qk, v, lengths: f"qk{qk}_v{v}_{lengths}",
+    )
+    def test_tdm_flex_backward_correctness_and_selection(
+        self, device, dtype, qk_head_dim, v_head_dim, lengths
+    ):
+        def fn(q, k, v, kernel_options):
+            return flex_attention(q, k, v, kernel_options=kernel_options)
+
+        q_len, kv_len = (self.Q_LEN, self.KV_LEN) if lengths == "tail" else (512, 512)
+
+        def make(seq_len, head_dim):
+            return torch.randn(2, 4, seq_len, head_dim, device=device, dtype=dtype)
+
+        q, k = make(q_len, qk_head_dim), make(kv_len, qk_head_dim)
+        v = make(kv_len, v_head_dim)
+        forward, _ = self._check_backward(fn, (q, k, v), dtype=dtype)
+        self._assert_descriptor_path([forward], _TDM_FORWARD_OPERANDS)
+
+    @common_utils.parametrize(
+        "options, forward_descriptors, backward_descriptors",
+        [
+            # A direction-prefixed option wins over the unprefixed one, and
+            # affects only its own direction; an explicit falsy value other
+            # than False (here None) also forces pointers.
+            ({"USE_TMA": True, "bwd_USE_TMA": None}, True, False),
+            ({"USE_TMA": False, "bwd_USE_TMA": True}, False, True),
+        ],
+    )
+    def test_tdm_flex_backward_use_tma_option(
+        self, device, options, forward_descriptors, backward_descriptors
+    ):
+        def fn(q, k, v):
+            return flex_attention(q, k, v, kernel_options=options)
+
+        inputs = [t.requires_grad_(True) for t in self._qkv(device, torch.float16)]
+        _, grads, upstream, code = self._run_fwd_bwd(fn, inputs)
+        forward, backward = self._split_code(code)
+        if forward_descriptors:
+            self._assert_descriptor_path([forward], _TDM_FORWARD_OPERANDS)
+        else:
+            self._assert_pointer_path([forward], _TDM_FORWARD_OPERANDS)
+        if backward_descriptors:
+            self._assert_backward_descriptor_path(backward)
+        else:
+            self._assert_backward_pointer_path(backward)
+
+        gold = self._gold_grads(fn, inputs, upstream)
+        for actual, expected in zip(grads, gold):
+            torch.testing.assert_close(
+                actual, expected.to(actual.dtype), atol=5e-2, rtol=5e-2
+            )
+
+    def test_tdm_flex_backward_config_flag_overrides_request(self, device):
+        """`enable_flex_tdm=False` keeps the backward on pointers even when asked."""
+        from torch._inductor import config as inductor_config
+
+        def fn(q, k, v, kernel_options):
+            return flex_attention(q, k, v, kernel_options=kernel_options)
+
+        q, k, v = self._qkv(device, torch.float16)
+        # The patch spans both compilations, including the backward, which is
+        # compiled when autograd first reaches it.
+        with inductor_config.patch({"triton.enable_flex_tdm": False}):
+            forward, _ = self._check_backward(
+                fn,
+                (q, k, v),
+                dtype=torch.float16,
+                descriptors=False,
+                options={"USE_TMA": True, "bwd_USE_TMA": True},
+            )
+        self._assert_pointer_path([forward], _TDM_FORWARD_OPERANDS)
+
+    def test_tdm_flex_direct_backward_seq_major_grad_out_falls_back(self, device):
+        # Q, K and V are admissible; only dO decides, which catches a lowering
+        # that does not pass dO to the gate. The lowering realizes dO with
+        # require_stride1, which keeps any layout with a unit stride on some
+        # axis. Stored [B, H, D, L], dO has a unit sequence stride, so the view
+        # reaches the gate with head-dim stride L and must take pointer loads.
+        q, k, v = self._qkv(device, torch.float16)
+        grad_out = torch.randn(
+            2, 4, 64, self.Q_LEN, device=device, dtype=torch.float16
+        ).transpose(-1, -2)
+        self.assertEqual(grad_out.stride()[-2:], (1, self.Q_LEN))
+        self._check_direct_backward(q, k, v, grad_out, descriptors=False)
+
+
+# The complement of TestFlexAttentionTDMEndToEnd: on ROCm without the gfx1250
+# TDM capability (MI300, MI355, ...), the default backward must stay on pointers.
+@unittest.skipUnless(
+    TEST_WITH_ROCM and HAS_GPU and not running_on_tdm_device(),
+    "requires a ROCm GPU without gfx1250 TDM",
+)
+class TestFlexAttentionTDMUnavailable(InductorTestCase):
+    def test_flex_backward_without_tdm_keeps_pointer_path(self, device):
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        inputs = [
+            torch.randn(
+                2, 4, 256, 64, device=device, dtype=torch.float16, requires_grad=True
+            )
+            for _ in range(3)
+        ]
+        compiled = torch.compile(fn)
+
+        def step():
+            out = compiled(*inputs)
+            return torch.autograd.grad(out, inputs, torch.randn_like(out))
+
+        _, code = run_and_get_code(step)
+        backward = [c for c in code if "bwd_dkdv_inner" in c]
+        self.assertEqual(len(backward), 1)
+        for base in _BACKWARD_POINTER_LOADS:
+            self.assertRegex(backward[0], _backward_pointer_load_pattern(base))
+        self.assertNotIn("tl.load_tensor_descriptor(", "\n".join(code))
 
 
 @large_tensor_test_class("2GB", device=test_device[0])
@@ -12164,6 +12588,9 @@ instantiate_device_type_tests(
     only_for=(test_device[0],),
     allow_xpu=True,
     allow_mps=True,
+)
+instantiate_device_type_tests(
+    TestFlexAttentionTDMUnavailable, globals(), only_for=(test_device[0],)
 )
 
 if LONG_COMPILATION_ON_CPU:

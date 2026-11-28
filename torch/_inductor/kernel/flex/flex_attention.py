@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 from collections.abc import Sequence
@@ -944,6 +945,26 @@ def process_joint_outputs(
     )
 
 
+def _query_device_context(
+    device: torch.device,
+) -> contextlib.AbstractContextManager[Any]:
+    """Make the query's GPU current on ROCm for the backward config lookup.
+
+    The ROCm backward tile tables are keyed by the gfx target of the current
+    GPU, while the lookup receives only the device type. With GPUs of different
+    targets in one process, the tiles then follow the GPU that runs the kernel,
+    as the descriptor gate does.
+    """
+    if (
+        torch.version.hip is not None
+        and device.type == "cuda"
+        and device.index is not None
+        and torch.cuda.is_available()
+    ):
+        return torch.cuda.device(device)
+    return contextlib.nullcontext()
+
+
 # TODO: We probably also need a layout constraint?
 @register_lowering(
     torch.ops.higher_order.flex_attention_backward, type_promotion_kind=None
@@ -1264,12 +1285,17 @@ def flex_attention_backward(*args, **kwargs):
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
-        head_dim,
-        dtype,
-        query.get_device().type,
-        V.graph.sizevars.guard_int(v_head_dim),
-    )
+    device = query.get_device()
+    # ROCm reports device type "cuda"; it selects descriptors with its own gate
+    # after the tile checks below, and CUDA/XPU keep theirs before them.
+    is_rocm_cuda = torch.version.hip is not None and device.type == "cuda"
+    with _query_device_context(device):
+        configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
+            head_dim,
+            dtype,
+            device.type,
+            V.graph.sizevars.guard_int(v_head_dim),
+        )
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
@@ -1328,11 +1354,12 @@ def flex_attention_backward(*args, **kwargs):
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # Intel GPU enables TMA by default
-        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+        if not is_rocm_cuda:
+            # Intel GPU enables TMA by default
+            cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
 
-        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
-            cur_kernel_options["USE_TMA"] = False
+            if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+                cur_kernel_options["USE_TMA"] = False
 
         # Shrink default tiles to fit smaller pow2 sparse block sizes;
         # user-pinned tiles and non-pow2 sparse sizes still error out below.
@@ -1384,6 +1411,46 @@ def flex_attention_backward(*args, **kwargs):
                     SPARSE_KV_BLOCK_SIZE,
                 )
             continue
+
+        # The ROCm descriptor selection runs after the tile rejection above, as
+        # in the forward, so a config that is about to be discarded cannot
+        # install descriptor range bounds. dO is gated alongside Q, K and V
+        # because the template describes it with a unit head-dim stride, and
+        # realizing grad_out (require_stride1) keeps any layout that has a unit
+        # stride on some axis, so a transposed dO, unaligned rows or an offset
+        # can reach here.
+        if is_rocm_cuda:
+            # A default of True means "absent": omission keeps automatic
+            # selection, while any explicit falsy value (False, 0, None) forces
+            # pointer loads.
+            tdm_requested = bool(cur_kernel_options.get("USE_TMA", True))
+            # The dQ (BLOCK_M2/BLOCK_N2) and dK/dV (BLOCK_M1/BLOCK_N1) branches
+            # request the same rounded head-dim widths, which is all the block
+            # rules check, so one admission covers both.
+            cur_kernel_options["USE_TMA"] = tdm_requested and use_flex_tdm_descriptor(
+                query,
+                key,
+                value,
+                grad_out,
+                block_shapes=[
+                    (
+                        cur_kernel_options["BLOCK_M2"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N2"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N2"],
+                        cur_kernel_options["V_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_M2"],
+                        cur_kernel_options["V_HEAD_DIM_ROUNDED"],
+                    ),
+                ],
+            )
 
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
