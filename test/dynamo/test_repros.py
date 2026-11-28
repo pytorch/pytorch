@@ -44,6 +44,7 @@ import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.debug_utils import same_two_models
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounter,
@@ -4996,6 +4997,353 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x1, x2)
         self.assertEqual(x1.data, x2.data)
         self.assertEqual(y1, y2)
+
+    def test_set_stale_base_not_aliased(self):
+        # Regression guard for set_() inside the compiled region. The
+        # entry-stale reproducers below own the #199229 failure evidence.
+        def fn(dest, src, storage):
+            dest.set_(src)
+            storage[0] = 10.0
+            return dest[0].clone()
+
+        def fresh():
+            storage = torch.arange(5, dtype=torch.float32)
+            return storage[:3], torch.full((3,), 7.0), storage
+
+        expected = fn(*fresh())
+        for backend in ["eager", "aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
+
+    def test_stale_base_at_entry_not_merged(self):
+        # https://github.com/pytorch/pytorch/issues/199229
+        # The input is already stale when the compiled function is called:
+        # dest.set_(src) runs before compile, so dest._base still points at
+        # `storage` while dest now owns src's storage. Fakification must
+        # describe dest as standalone, otherwise it is merged with `storage`
+        # and the write through dest leaks into it.
+        def fn(dest, storage):
+            dest[0] = 10.0
+            return storage[0].clone()
+
+        for backend in ["eager", "aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                storage = torch.arange(5, dtype=torch.float32)
+                dest = storage[:3]
+                dest.set_(torch.full((3,), 7.0))  # rebase: dest._base is stale
+                self.assertEqual(
+                    torch.compile(fn, backend=backend)(dest, storage),
+                    torch.tensor(0.0),
+                )
+                self.assertEqual(storage, torch.arange(5, dtype=torch.float32))
+
+    def test_stale_base_at_entry_runtime_base_fallback(self):
+        # dest.set_(src) before compile makes dest share src's storage while
+        # dest._base still points at an unrelated tensor. The synthetic-base
+        # wrapper must not adopt that stale base, or the mutation is applied to
+        # the wrong storage and never reaches src.
+        def fn(dest, src):
+            src[0] = 10.0
+            return dest[0].clone()
+
+        for backend in ["aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                stale_base = torch.arange(5, dtype=torch.float32)
+                src = torch.full((3,), 7.0)
+                dest = stale_base[:3]
+                dest.set_(src)  # dest aliases src; dest._base is stale
+                self.assertEqual(
+                    torch.compile(fn, backend=backend)(dest, src),
+                    torch.tensor(10.0),
+                )
+                self.assertEqual(src, torch.tensor([10.0, 7.0, 7.0]))
+                self.assertEqual(stale_base, torch.arange(5, dtype=torch.float32))
+
+    def test_stale_base_at_entry_view_source_storage_fallback(self):
+        # Read dest as well as mutating src so Dynamo keeps both aliases in the
+        # graph. Their fake _base states differ, so the wrapper must use their
+        # common storage rather than rejecting the group. Training groups with
+        # mixed autograd histories remain unsupported.
+        def fn(dest, src):
+            src.add_(1)
+            return src * 2 + dest[0].detach()
+
+        for backend in ["aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                old = torch.arange(3, dtype=torch.float32)
+                y = torch.arange(5, dtype=torch.float32)
+                dest = old[:3]
+                src = y[2:5]
+                dest.set_(src)
+                out = torch.compile(fn, backend=backend)(dest, src)
+                self.assertEqual(out, torch.tensor([9.0, 11.0, 13.0]))
+                self.assertEqual(src, torch.tensor([3.0, 4.0, 5.0]))
+                self.assertEqual(old, torch.arange(3, dtype=torch.float32))
+
+    def test_synthetic_base_rebound_between_calls_recompiles_static(self):
+        def fn(a, b):
+            b[0] = 10.0
+            return a[0].clone()
+
+        x = torch.arange(5, dtype=torch.float32)
+        a = x[:3]
+        b = x
+        cnt = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=cnt, dynamic=False)
+        self.assertEqual(compiled(a, b), torch.tensor(10.0))
+
+        cache_entries = _debug_get_cache_entry_list(
+            compiled._torchdynamo_orig_callable.__code__
+        )
+        self.assertEqual(len(cache_entries), 1)
+        guard_str = str(cache_entries[0].guard_manager)
+        self.assertIn("untyped_storage()._cdata ==", guard_str)
+        self.assertNotIn("check_overlapping(", guard_str)
+
+        a.set_(torch.tensor([3.0, 4.0, 5.0]))
+        self.assertEqual(compiled(a, b), torch.tensor(3.0))
+        self.assertEqual(b, torch.tensor([10.0, 1.0, 2.0, 3.0, 4.0]))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_synthetic_base_non_overlapping_member_rebind_recompiles_static(self):
+        def fn(a, b, c):
+            a[0] = 10.0
+            return b[0].clone() + c[0].clone()
+
+        base = torch.arange(8, dtype=torch.float32)
+        a = base[2:5]
+        b = base[3:6]
+        c = base[:2]
+        cnt = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=cnt, dynamic=False)
+        self.assertEqual(compiled(a, b, c), torch.tensor(3.0))
+
+        c.set_(torch.zeros(2))
+        self.assertEqual(compiled(a, b, c), torch.tensor(3.0))
+        self.assertEqual(base[2], torch.tensor(10.0))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_storage_identity_skips_intermediate_none_sources(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
+        )
+
+        sources = {
+            0: types.SimpleNamespace(name="a"),
+            1: None,
+            2: types.SimpleNamespace(name="c"),
+        }
+        tracing_context = types.SimpleNamespace(
+            fake_mode=types.SimpleNamespace(shape_env=None),
+            shape_env=None,
+            guards_context=types.SimpleNamespace(aotautograd_guards=[]),
+        )
+        aot_config = types.SimpleNamespace(
+            aot_autograd_arg_pos_to_source=sources, cache_info=object()
+        )
+        wrapper = AOTSyntheticBaseWrapper(trace_joint=False)
+        wrapper.base_groups = {0: [0, 1, 2]}
+        wrapper.base_group_names = {0: ["a", "b", "c"]}
+
+        with mock.patch.object(
+            torch._guards.TracingContext, "try_get", return_value=tracing_context
+        ):
+            wrapper.post_compile(lambda *args: args, aot_config, runtime_metadata=None)
+
+        self.assertIsNotNone(aot_config.cache_info)
+        self.assertEqual(tracing_context.guards_context.aotautograd_guards, [])
+
+    def test_synthetic_base_post_compile_restores_storage_identity(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
+        )
+        from torch._guards import StorageIdentity
+
+        sources = {index: types.SimpleNamespace(name=f"s{index}") for index in range(3)}
+        tracing_context = types.SimpleNamespace(
+            fake_mode=types.SimpleNamespace(shape_env=None),
+            shape_env=None,
+            guards_context=types.SimpleNamespace(aotautograd_guards=[]),
+        )
+        cache_info = object()
+        aot_config = types.SimpleNamespace(
+            aot_autograd_arg_pos_to_source=sources, cache_info=cache_info
+        )
+        wrapper = AOTSyntheticBaseWrapper(trace_joint=False)
+        wrapper.base_groups = {0: [0, 1, 2]}
+        wrapper.base_group_names = {0: ["a", "b", "c"]}
+
+        with mock.patch.object(
+            torch._guards.TracingContext, "try_get", return_value=tracing_context
+        ):
+            wrapper.post_compile(lambda *args: args, aot_config, runtime_metadata=None)
+
+        guards = tracing_context.guards_context.aotautograd_guards
+        self.assertEqual(len(guards), 1)
+        self.assertIsInstance(guards[0], StorageIdentity)
+        self.assertEqual(guards[0].aliased_sources, list(sources.values()))
+        self.assertIs(aot_config.cache_info, cache_info)
+
+        base = torch.arange(8, dtype=torch.float32)
+        aliased_args = [base[:3], base[3:6], base[6:]]
+        self.assertIsNone(wrapper.cache_entry_bypass_reason(aliased_args, aot_config))
+        aliased_args[1] = torch.empty(3)
+        self.assertIn(
+            "flat input group [0, 1, 2]",
+            wrapper.cache_entry_bypass_reason(aliased_args, aot_config),
+        )
+
+    def test_synthetic_base_cache_validation_skips_none_sources(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
+        )
+
+        aot_config = types.SimpleNamespace(
+            aot_autograd_arg_pos_to_source={0: None, 1: None}
+        )
+        wrapper = AOTSyntheticBaseWrapper(trace_joint=False)
+        wrapper.base_groups = {0: [0, 1]}
+        args = [torch.empty(3), torch.empty(3)]
+        self.assertIsNone(wrapper.cache_entry_bypass_reason(args, aot_config))
+
+    def test_synthetic_base_cache_validation_allows_unavailable_args(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
+        )
+
+        aot_config = types.SimpleNamespace(
+            aot_autograd_arg_pos_to_source={
+                0: types.SimpleNamespace(name="a"),
+                1: types.SimpleNamespace(name="b"),
+            }
+        )
+        wrapper = AOTSyntheticBaseWrapper(trace_joint=False)
+        wrapper.base_groups = {0: [0, 1]}
+
+        self.assertIsNone(wrapper.cache_entry_bypass_reason([], aot_config))
+        self.assertIsNone(
+            wrapper.cache_entry_bypass_reason([torch.empty(3)], aot_config)
+        )
+
+    def test_stale_base_adds_no_base_guard_and_no_recompile(self):
+        # A rebound tensor's _base is not a live view base, so dynamo must not
+        # fakify it or build a symbolic context from it. Before this change both
+        # call sites read e._base directly: a tracked fake showed up under
+        # AttrSource(source, "_base") and _automatic_dynamic unified its size
+        # with unrelated inputs under duck sizing, adding a guard that forced a
+        # recompile.
+        def fn(dest, storage):
+            return dest[0] + storage[0]
+
+        def fresh(n):
+            stale_base = torch.arange(5.0)
+            dest = stale_base[:3]
+            dest.set_(torch.full((3,), 7.0))
+            storage = torch.arange(float(n))
+            return dest, storage
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt, dynamic=True)
+
+        dest, storage = fresh(5)
+        self.assertEqual(opt(dest, storage), storage[0] + 7.0)
+
+        cache_entries = _debug_get_cache_entry_list(
+            opt._torchdynamo_orig_callable.__code__
+        )
+        self.assertEqual(len(cache_entries), 1)
+        guard_str = str(cache_entries[0].guard_manager)
+
+        # A different storage length must not recompile. A spurious duck-sized
+        # guard on the stale base's size is what would trip this.
+        dest2, storage2 = fresh(6)
+        self.assertEqual(opt(dest2, storage2), storage2[0] + 7.0)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertNotIn("_base", guard_str)
+
+    def test_storage_base_2d_root_inductor(self):
+        # The traced graph saw a 1-D whole-storage base, but the runtime
+        # wrapper must rebuild from storage (not from a member's 2-D _base)
+        # so assert_size_stride matches. Before storage_base_groups the
+        # wrapper passed x (2,5) where the graph expected (10,).
+        def fn(a, b):
+            a.mul_(2)
+            return a + b
+
+        for backend in ["aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                x = torch.arange(10.0).reshape(2, 5).clone()
+                v1 = x[0]
+                v2 = torch.empty(5)
+                v2.set_(x.untyped_storage(), 0, (5,), (1,))
+                out = torch.compile(fn, backend=backend)(v1, v2)
+                self.assertEqual(out, torch.arange(5.0) * 4)
+                self.assertEqual(v1, torch.arange(5.0) * 2)
+                self.assertEqual(x[1], torch.arange(5.0, 10.0))
+
+    def test_storage_base_training_gradient_guard(self):
+        # p.detach()[:3] next to p: storage mode would detach the base and
+        # lose p's gradient. The guard must keep the existing error instead
+        # of silently producing wrong gradients.
+        def fn(p, v):
+            v.add_(1)
+            return p * 2
+
+        torch._dynamo.reset()
+        p = torch.randn(5, requires_grad=True)
+        v = p.detach()[:3]
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed, "non-differentiable view"
+        ):
+            torch.compile(fn, backend="aot_eager")(p, v)
+
+    def test_stale_base_training_mixed_history_is_rejected(self):
+        def fn(dest, src):
+            src.add_(1)
+            return src * 2 + dest
+
+        def fresh():
+            old_base = torch.arange(5.0, requires_grad=True)
+            new_base = torch.arange(5.0, requires_grad=True)
+            dest = old_base.clone()[2:5]
+            src = new_base.clone()[2:5]
+            with torch.no_grad():
+                dest.set_(src)
+            return old_base, new_base, dest, src
+
+        old_base, new_base, dest, src = fresh()
+        fn(dest, src).sum().backward()
+        self.assertEqual(old_base.grad, torch.tensor([0.0, 0.0, 1.0, 1.0, 1.0]))
+        self.assertEqual(new_base.grad, torch.tensor([0.0, 0.0, 2.0, 2.0, 2.0]))
+
+        torch._dynamo.reset()
+        _, _, dest, src = fresh()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed, "non-differentiable view"
+        ):
+            torch.compile(fn, backend="aot_eager")(dest, src)
+
+    def test_set_new_base_stays_aliased(self):
+        # Regression guard for aliasing the new source after set_(), not the old base.
+        def fn(dest, src):
+            dest.set_(src)
+            src[0] = 42.0
+            return dest[0].clone()
+
+        def fresh():
+            storage = torch.arange(5, dtype=torch.float32)
+            return storage[:3], torch.full((3,), 7.0)
+
+        expected = fn(*fresh())
+        for backend in ["eager", "aot_eager", "inductor"]:
+            with self.subTest(backend=backend):
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend=backend)(*fresh()), expected)
 
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:

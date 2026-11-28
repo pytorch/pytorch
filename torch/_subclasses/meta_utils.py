@@ -184,13 +184,14 @@ def assert_metadata_eq(
             if not skip_symbolic:
                 assert_eq(m1.stride, m2.stride())
                 assert_eq(m1.storage_offset, m2.storage_offset())
-            assert_eq(m1.is_view, m2._is_view())
+            m2_live_base = _live_view_base(m2) if m2._is_view() else None
+            assert_eq(m1.is_view, m2_live_base is not None)
             if m1.is_view:
                 if m1.base is None:
                     raise AssertionError("m1.base must not be None for a view tensor")
-                if m2._base is None:
-                    raise AssertionError("m2._base must not be None for a view tensor")
-                go(m1.base, m2._base)
+                if m2_live_base is None:
+                    raise AssertionError("m2.base must not be None for a view tensor")
+                go(m1.base, m2_live_base)
         # TODO: test if is resizable (no direct query for this atm)
         # TODO: audit AutogradMeta to see if it matches
         # TODO: test forward AD
@@ -236,6 +237,49 @@ def _set_real_storage(
     base: torch.UntypedStorage, real_storage: torch.UntypedStorage
 ) -> None:
     base.real_storage = real_storage  # type: ignore[attr-defined]
+
+
+def _live_view_base(t: torch.Tensor, t_cdata: int | None = None) -> torch.Tensor | None:
+    """Return ``t._base`` only when it is still a real alias of ``t``.
+
+    ``Tensor.set_()`` can rebind storage without clearing the autograd ``_base``
+    link. For plain strided tensors, compare storage identity through
+    ``untyped_storage()._cdata``. A mismatch means the base is stale and the
+    tensor must be treated as standalone.
+
+    Nested tensors, traceable wrapper subclasses, non-strided layouts,
+    functorch-wrapped tensors, and legacy batched tensors are exempt because
+    their outer storage does not reliably describe aliasing. Non-traceable
+    wrapper subclasses still use the storage check.
+
+    Some readers, including ``merge_view_inputs`` and
+    ``collect_metadata_analysis``, still read raw ``_base`` directly.
+    TODO(#199229): Evaluate clearing stale view links in ``set_()``.
+    """
+    base = t._base
+    if base is None:
+        return None
+    if (
+        t.is_nested
+        or base.is_nested
+        or is_traceable_wrapper_subclass(t)
+        or is_traceable_wrapper_subclass(base)
+    ):
+        return base
+    if (
+        t.layout is not torch.strided
+        or base.layout is not torch.strided
+        or is_functorch_wrapped_tensor(t)
+        or is_functorch_wrapped_tensor(base)
+        or is_legacy_batchedtensor(t)
+        or is_legacy_batchedtensor(base)
+    ):
+        return base
+    if t_cdata is None:
+        t_cdata = t.untyped_storage()._cdata
+    if t_cdata == base.untyped_storage()._cdata:
+        return base
+    return None
 
 
 # Don't use id() directly, because those can get reallocated over time.
@@ -340,8 +384,14 @@ class MetaTensorDescriber:
         ):
             # NB: We actually don't use storage to do views, but might as well
             # put it in for accuracy
-            storage = self.describe_storage(t.untyped_storage(), data=data, trace=trace)
+            storage_obj = t.untyped_storage()
+            storage = self.describe_storage(storage_obj, data=data, trace=trace)
             storage_offset = t.storage_offset()  # type: ignore[assignment]
+            if is_view and _live_view_base(t, storage_obj._cdata) is None:
+                # set_() can leave _base pointing at a tensor this one no longer
+                # aliases, so it is stale and the tensor must be built standalone
+                # from its own storage instead of being merged with that base.
+                is_view = False
 
         stride = None
         if not (
@@ -508,7 +558,10 @@ class MetaTensorDescriber:
                 else None
             ),
             creation_meta=(
-                torch._C._autograd._get_creation_meta(t) if t._is_view() else None
+                # Gate on the local ``is_view`` (which the stale-_base check may
+                # have downgraded), not ``t._is_view()``: a downgraded descriptor
+                # must not carry creation_meta alongside ``is_view=False``.
+                torch._C._autograd._get_creation_meta(t) if is_view else None
             ),
             unwrapped=unwrapped,
             level=(
@@ -519,7 +572,7 @@ class MetaTensorDescriber:
             bdim=maybe_get_bdim(t) if is_batchedtensor_v else None,
             base=(
                 self.describe_tensor(t._base, trace=trace)
-                if recurse and t._is_view() and t._base is not None
+                if recurse and is_view and t._base is not None
                 else None
             ),
             fake_mode=torch._subclasses.fake_tensor.maybe_get_fake_mode(t),
@@ -696,6 +749,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     is_batchedtensor: bool = False
     is_legacy_batchedtensor: bool = False
     is_gradtrackingtensor: bool = False
+    # Whether this is a view of a live base, not merely raw autograd _is_view().
     is_view: bool = False
     is_nested: bool = False
     # We eagerly symbolicize the associated nested int for e.g. offsets / lengths
