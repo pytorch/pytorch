@@ -82,6 +82,7 @@ tests = [
     test_sdpa.TestSDPA,
 ]
 tests.extend(test_functions.get_function_device_test_classes())
+tests.extend(test_misc.get_misc_device_test_classes())
 for test in tests:
     make_dynamic_cls(test)
 del test
