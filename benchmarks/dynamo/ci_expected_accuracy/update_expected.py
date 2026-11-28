@@ -1,9 +1,8 @@
 """
 Update committed CSV files used as reference points by dynamo/inductor CI.
 
-Saves the dynamo metric columns tracked by check_graph_breaks.py (graph_breaks
-plus the coverage metrics calls_captured/unique_graphs/fallbacks_to_eager when
-the run produced them).
+Saves the dynamo metric columns tracked by check_graph_breaks.py (graph_breaks,
+recompiles, calls_captured, and fallbacks_to_eager when the run produced them).
 
 Hardcodes a list of job names and artifacts per job, but builds the lookup
 by querying github sha and finding associated github actions workflow ID and CI jobs,
@@ -80,13 +79,14 @@ CSV_LINTER = str(
 
 # Integer dynamo metric columns saved to the reference CSVs, in output order.
 # Keep in sync with TRACKED_METRICS in benchmarks/dynamo/check_graph_breaks.py
-# (the CI checker). graph_breaks is always present; calls_captured and
+# (the CI checker). graph_breaks is always present; recompiles, calls_captured and
 # fallbacks_to_eager appear only once the benchmark run's get_dynamo_stats writes
 # them, and check_graph_breaks skips any metric absent from the baseline, so
 # older CSVs stay valid. unique_graphs is deliberately not saved/gated -- a
 # change in it is ambiguous (fewer graphs can mean merging, not less capture).
 METRIC_COLUMNS = [
     "graph_breaks",
+    "recompiles",
     "calls_captured",
     "fallbacks_to_eager",
 ]
@@ -203,7 +203,10 @@ def download_single_artifact(suite, shard, url_candidates):
                         df = pd.read_csv(artifact.open(name))
                         for col in METRIC_COLUMNS:
                             if col in df.columns:
-                                df[col] = df[col].fillna(0).astype(int)
+                                if col == "recompiles":
+                                    df[col] = df[col].astype("Int64")
+                                else:
+                                    df[col] = df[col].fillna(0).astype(int)
                         result[(suite, phase)] = df
                         found = True
                         break
@@ -264,11 +267,15 @@ def write_filtered_csvs(root_path, dataframes):
             df = existing_df.combine_first(df).reset_index()
         df = df.sort_values(by="name")
         # Save every metric column present in the run. Entries carried over
-        # from a prior CSV that predates a column are NaN after the merge;
-        # backfill them to 0 so the column stays integer-typed.
+        # from a prior CSV that predates a column are NaN after the merge.
+        # Keep unmeasured recompiles missing; retain zero backfills for the
+        # existing metrics.
         metric_columns = [c for c in METRIC_COLUMNS if c in df.columns]
         for col in metric_columns:
-            df[col] = df[col].fillna(0).astype(int)
+            if col == "recompiles":
+                df[col] = df[col].astype("Int64")
+            else:
+                df[col] = df[col].fillna(0).astype(int)
         df.to_csv(out_fn, index=False, columns=["name", "accuracy", *metric_columns])
         apply_lints(out_fn)
 
