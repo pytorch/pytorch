@@ -594,8 +594,8 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         if self.guards_expr:
             from .autograd_cache import AOTAutogradCache
 
-            symints = AOTAutogradCache._filter_backed_symints(args)
-            check = bool(AOTAutogradCache.evaluate_guards(self.guards_expr, symints))
+            symbols = AOTAutogradCache._filter_backed_symbols(args)
+            check = bool(AOTAutogradCache.evaluate_guards(self.guards_expr, symbols))
             if check is not True:
                 raise AssertionError(f"guards check failed: {check}")
 

@@ -26,7 +26,7 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
-from collections.abc import Set as AbstractSet
+from collections.abc import Sequence, Set as AbstractSet
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
@@ -166,6 +166,7 @@ from .virtualized import V
 
 
 T = TypeVar("T")
+_GuardedCacheHintsT = TypeVar("_GuardedCacheHintsT", bound=Sequence[Any])
 
 
 class SystemDeviceInfo(TypedDict):
@@ -208,7 +209,7 @@ class CacheInfo(TypedDict, total=False):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, KeysView, Sequence
+    from collections.abc import Callable, Generator, KeysView
     from concurrent.futures import Future
 
     from .compile_fx import _CompileFxKwargs
@@ -2064,8 +2065,8 @@ class GuardedCache(Generic[T]):
         key: str,
         local: bool,
         remote_cache: RemoteCache[JsonDataTy] | None,
-        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool],
-        hints: list[int],
+        evaluate_guards: Callable[[str, _GuardedCacheHintsT], bool],
+        hints: _GuardedCacheHintsT,
     ) -> tuple[T | None, bytes | None, CacheInfo]:
         """
         Find the first cache entry in iterate_over_candidates that passes `evaluate_guards`.
@@ -2076,7 +2077,7 @@ class GuardedCache(Generic[T]):
             remote_cache: The remote cache to check, if any
             evaluate_guards: Function that evaluates whether a guard passes the check,
                 given a list of hint values and the guard expression.
-            hints: List of symint hints paired with evaluate_guards
+            hints: List of symbol hints paired with evaluate_guards
 
         Returns:
             A tuple of (entry, pickled_content, cache_info). entry and

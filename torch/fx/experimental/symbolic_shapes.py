@@ -7151,7 +7151,7 @@ class ShapeEnv:
 
     def produce_guards_expression(
         self,
-        placeholders: Sequence[SymInt | FakeTensor],
+        placeholders: Sequence[SymInt | SymFloat | FakeTensor | None],
         *,
         guards: list[ShapeGuard] | None = None,
         ignore_static: bool = True,
@@ -7206,19 +7206,22 @@ class ShapeEnv:
             return self.evaluate_guards_expression(code, args)
         return True
 
-    def get_pruned_guards(self, symints: Sequence[torch.SymInt]) -> list[ShapeGuard]:
+    def get_pruned_guards(
+        self, symints: Sequence[torch.SymInt | torch.SymFloat]
+    ) -> list[ShapeGuard]:
         """
         Get a list of guards, but pruned so it only provides guards that
-        reference symints from the passed in input
+        reference symbols from the passed in input
         """
-        # pyrefly: ignore [bad-assignment]
-        symints = {
-            s.node.expr for s in symints if isinstance(s.node.expr, sympy.Symbol)
+        allowed = {
+            e
+            for s in symints
+            for e in (s.node.expr, s.node._expr)
+            if isinstance(e, sympy.Symbol)
         }
-        guards = [
-            g for g in self.guards if all(s in symints for s in g.expr.free_symbols)
+        return [
+            g for g in self.guards if all(s in allowed for s in g.expr.free_symbols)
         ]
-        return guards
 
     def bind_symbols(
         self, placeholders: Sequence[FakeTensor], args: Sequence[Tensor]

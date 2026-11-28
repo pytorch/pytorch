@@ -12,6 +12,7 @@ import functools
 import hashlib
 import json
 import logging
+import math
 import os
 import pickle
 import shutil
@@ -22,6 +23,8 @@ import weakref
 from copy import copy
 from typing import Any, TYPE_CHECKING
 from typing_extensions import override
+
+import sympy
 
 import torch
 from torch._dynamo.precompile_context import PrecompileContext
@@ -60,13 +63,18 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import LazyString
+from torch._subclasses.fake_tensor import maybe_get_item_memo
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
     CacheArtifactRecorder,
 )
-from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
+from torch.fx.experimental.symbolic_shapes import (
+    guarding_hint_or_throw,
+    has_guarding_hint,
+    SYMPY_INTERP,
+)
 from torch.fx.node import Node
 from torch.utils._triton import has_triton_package
 
@@ -107,6 +115,38 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+
+class _MissingPlaceholder(Exception):
+    pass
+
+
+class _GuardLocals(dict[str, Any]):
+    def __missing__(self, key: str) -> Any:
+        raise _MissingPlaceholder(key)
+
+    def __getitem__(self, key: str) -> Any:
+        if (val := super().__getitem__(key)) is None:
+            raise _MissingPlaceholder(key)
+        return val
+
+
+class _GuardMath:
+    """Proxy `math` so guard checks on `SymFloat`/`SymInt` do not specialize."""
+
+    @staticmethod
+    def isnan(x: object) -> bool:
+        if isinstance(x, torch.SymFloat):
+            return False if (v := x.node.maybe_as_float()) is None else math.isnan(v)
+        return math.isnan(x)  # type: ignore[arg-type]
+
+    def __getattr__(self, name: str) -> Any:
+        if (sym_fn := getattr(torch, f"_sym_{name}", None)) is not None:
+            return sym_fn
+        return getattr(math, name)
+
+
+_GUARD_INTERP: dict[str, Any] = {**SYMPY_INTERP, "math": _GuardMath()}
 
 
 class BypassAOTAutogradCache(Exception):
@@ -1327,14 +1367,14 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
 
         if compiled_fn is None:
             # Set the cache key so we can save a cache result later
-            symints = AOTAutogradCache._filter_backed_symints(args)
+            symbols = AOTAutogradCache._filter_backed_symbols(args)
             if cache_key is not None:
                 aot_config = dataclasses.replace(
                     aot_config,
                     cache_info=AOTAutogradCacheInfo(
                         cache_key,
                         time.time_ns(),
-                        forward_symints=symints,
+                        forward_symints=symbols,
                     ),
                 )
 
@@ -1374,6 +1414,33 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         return compiled_fn, aot_config
 
     @classmethod
+    def _filter_backed_symbols(
+        cls: type[AOTAutogradCache], inputs: Sequence[Any]
+    ) -> list[torch.SymInt | torch.SymFloat | None]:
+        """Collect backed SymInt/SymFloat placeholders at stable scalar/0-d-float slots (unlike _filter_backed_symints)."""
+        symbols: list[torch.SymInt | torch.SymFloat | None] = []
+        for a in inputs:
+            if isinstance(a, (torch.SymInt, int)) and not isinstance(a, bool):
+                symbols.append(
+                    a if isinstance(a, torch.SymInt) and has_guarding_hint(a) else None
+                )
+            elif isinstance(a, (torch.SymFloat, float)) or (
+                isinstance(a, torch.Tensor) and a.ndim == 0 and a.is_floating_point()
+            ):
+                f = a if isinstance(a, torch.SymFloat) else maybe_get_item_memo(a)
+                # Check _expr, not .expr: an earlier Dynamo Eq(zf, c) replaces
+                # .expr with Float(c), and produce_guards_expression still needs
+                # the placeholder to emit L['tN'] == c.
+                symbols.append(
+                    f
+                    if isinstance(f, torch.SymFloat)
+                    and isinstance(f.node._expr, sympy.Symbol)
+                    and has_guarding_hint(f)
+                    else None
+                )
+        return symbols
+
+    @classmethod
     def generate_guards_expression(
         cls: type[AOTAutogradCache], cache_info: AOTAutogradCacheInfo
     ) -> str | None:
@@ -1382,9 +1449,12 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         if shape_env is None:
             return None
 
-        symints = cache_info.forward_symints
-        guards = shape_env.get_pruned_guards(symints)
-        return shape_env.produce_guards_expression(placeholders=symints, guards=guards)
+        placeholders = cache_info.forward_symints
+        active = [s for s in placeholders if s is not None]
+        guards = shape_env.get_pruned_guards(active)
+        return shape_env.produce_guards_expression(
+            placeholders=placeholders, guards=guards
+        )
 
     @classmethod
     def _get_tmp_dir(cls: type[AOTAutogradCache]) -> str:
@@ -1436,14 +1506,23 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             )
 
     @staticmethod
-    def evaluate_guards(guard_expr: str, hints: list[int] | list[torch.SymInt]) -> bool:
+    def evaluate_guards(
+        guard_expr: str,
+        hints: Sequence[int | float | torch.SymInt | torch.SymFloat | None],
+    ) -> bool:
         if torch._inductor.config.unsafe_skip_cache_dynamic_shape_guards:
             return True
-        shape_env = AOTAutogradCache._get_shape_env()
-        if shape_env is None:
-            raise AssertionError("shape_env must not be None")
-        result = shape_env.evaluate_guards_expression(guard_expr, hints)
-        return result
+        arg_names = [f"t{i}" for i in range(len(hints))]
+        try:
+            return bool(
+                eval(
+                    guard_expr,
+                    _GUARD_INTERP,
+                    {"L": _GuardLocals(zip(arg_names, hints))},
+                )
+            )
+        except _MissingPlaceholder:
+            return False
 
     @staticmethod
     def _lookup(
@@ -1459,8 +1538,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         if remote:
             remote_cache = AOTAutogradCache.get_remote_cache()
 
-        symints = AOTAutogradCache._filter_backed_symints(args)
-        hints = [guarding_hint_or_throw(s) for s in symints]
+        symbols = AOTAutogradCache._filter_backed_symbols(args)
+        hints: list[int | float | None] = [
+            None if s is None else guarding_hint_or_throw(s) for s in symbols
+        ]
         entry = None
         pickled_content = None
         try:

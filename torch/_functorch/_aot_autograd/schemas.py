@@ -15,7 +15,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
-from torch import SymInt, Tensor
+from torch import SymFloat, SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
 from torch._subclasses.fake_tensor import is_fake, is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
@@ -1158,7 +1158,7 @@ class GraphSignature:
 class AOTAutogradCacheInfo:
     cache_key: str
     start_time_ns: int
-    forward_symints: list[torch.SymInt]
+    forward_symints: Sequence[SymInt | SymFloat | None]
 
 
 @dataclass
