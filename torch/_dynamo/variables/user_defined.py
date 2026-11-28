@@ -149,6 +149,8 @@ from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
+    _can_guard_lookup_hooks,
+    _guard_getattribute,
     _resolve_descriptor_get,
     generic_is_true,
     guard_mro_absent,
@@ -183,12 +185,7 @@ _SAFE_C_SLOTS: OrderedSet[object] | None = None
 def _safe_c_slots() -> OrderedSet[object]:
     """C slot wrappers known to be safe to call at trace time.
 
-    Covers tp_hash and tp_richcompare slots for C extension types, used by
-    UDOV's tp_hash_impl and tp_richcompare_impl MRO walks, and the
-    __getattribute__ wrappers of builtin types whose tp_getattro is
-    PyObject_GenericGetAttr, used by object_generic_getattr. A C type that
-    sets the slot explicitly gets its own wrapper, so identity with
-    object.__getattribute__ is not enough.
+    Covers tp_hash and tp_richcompare slots for C extension types used in UDOV's MRO walks.
     """
     global _SAFE_C_SLOTS
     if _SAFE_C_SLOTS is None:
@@ -210,25 +207,6 @@ def _safe_c_slots() -> OrderedSet[object]:
             for dunder in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"):
                 if hasattr(tp, dunder):
                     _SAFE_C_SLOTS.add(getattr(tp, dunder))
-        for tp in (
-            object,
-            list,
-            tuple,
-            dict,
-            set,
-            frozenset,
-            collections.deque,
-            range,
-            str,
-            bytes,
-            bytearray,
-            int,
-            float,
-            complex,
-            slice,
-            torch.Size,
-        ):
-            _SAFE_C_SLOTS.add(tp.__getattribute__)
     return _SAFE_C_SLOTS
 
 
@@ -3969,12 +3947,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ]
         # Pending per-key writes target the old dict; replay would apply them
         # to the new one.
+        # A graph break at assignment would reload the source object's original namespace.
+        rebound = isinstance(
+            value, variables.DunderDictVariable
+        ) and se.has_pending_mutation_of_attr(
+            value.items.item, "__dict__", AttrMutationKind.GENERIC_SETATTR
+        )
+        if rebound:
+            names.append("__dict__")
         if names:
             unimplemented(
                 gb_type="Replacing an instance dictionary with pending mutations",
                 context=f"pending mutations={names}",
                 explanation="Dynamo cannot preserve mutations of the previous instance dictionary.",
                 hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=rebound,
+                preserve_skip_frame_after_inline=rebound,
             )
         self.dict_vt = None
         store_attr_mutation(tx, self, "__dict__", value)
@@ -3985,19 +3973,56 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         "__dict__": GetSet(_get_dict, _set_dict),
     }
 
-    def generic_getattr(
+    def guard_attribute_absence(
         self, tx: "InstructionTranslatorBase", name: str
+    ) -> None:
+        cls = type(self.value)
+        guard_mro = _can_guard_lookup_hooks(cls)
+        if self.cls_source and (guard_mro or not self.source):
+            # A new instance has only a class source to guard changes to its lookup hooks.
+            if not self.source:
+                _guard_getattribute(tx, cls, self.cls_source)
+            mro_attr_source(tx, cls, self.cls_source, name, raw_metadata=True)
+            mro_attr_source(tx, cls, self.cls_source, "__getattr__", raw_metadata=True)
+        effects = tx.output.side_effects
+        if (
+            not self.source
+            or is_constant_source(self.source)
+            or any(
+                effects.has_pending_mutation_of_attr(self, attr)
+                for attr in (name, "__dict__")
+            )
+        ):
+            return
+        # Guard storage rather than re-running a user getter while building/checking guards.
+        offset = type.__dict__["__dictoffset__"].__get__(cls)
+        if not guard_mro or (
+            offset
+            and not isinstance(
+                self.lookup_class_mro_attr("__dict__"), types.GetSetDescriptorType
+            )
+        ):
+            # Preserve the presence guard when class metadata or storage access is customized.
+            install_guard(
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            )
+            return
+        if offset and name not in object.__getattribute__(self.value, "__dict__"):
+            install_not_in_instance_dict_guard(self.source, name)
+
+    def generic_getattr(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        *,
+        use_getattr_hook: bool = False,
     ) -> VariableTracker:
-        """Dynamo implementation of CPython's PyObject_GenericGetAttr.
+        """Look up an attribute in descriptors and instance storage.
 
-        This mirrors object.__getattribute__ and is called from:
-        - tp_getattro_impl (for objects without a custom __getattribute__)
-        - SuperVariable.call_method (when super().__getattribute__() resolves
-          to object.__getattribute__)
-
-        The algorithm: MRO walk → data descriptor → instance __dict__ →
-        non-data descriptor / plain class attr → dynamic fallback →
-        __getattr__ → AttributeError.
+        Only ordinary attribute access dispatches to __getattr__ on a miss.
+        Explicit object.__getattribute__ and super().__getattribute__ raise directly.
         """
         source: Source | None = AttrSource(self.source, name) if self.source else None
 
@@ -4079,7 +4104,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 pass
 
         # Step 6: __getattr__ fallback.
-        result = self.call_getattr_fallback(tx, name)
+        result = self.call_getattr_fallback(tx, name) if use_getattr_hook else None
         if result is not None:
             if (
                 self.source
@@ -4095,6 +4120,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return result
 
         # Step 7: AttributeError.
+        self.guard_attribute_absence(tx, name)
         raise_observed_exception(
             AttributeError,
             tx,
@@ -4135,7 +4161,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Pass through to __getattr__ if __getattribute__ fails
                 handle_observed_exception(tx)
 
-        return self.generic_getattr(tx, name)
+        return self.generic_getattr(tx, name, use_getattr_hook=True)
 
     def resolve_data_descriptor(
         self,
@@ -4381,7 +4407,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if can_use_mro_source:
             source = self.get_source_by_walking_mro(tx, name)
         elif not source and self.cls_source is not None:
-            source = AttrSource(self.cls_source, name)
+            source = mro_attr_source(
+                tx, type(self.value), self.cls_source, name, raw_metadata=True
+            )
         return VariableTracker.build(tx, type_attr, source)
 
     def invoke_descriptor_get(
@@ -4459,13 +4487,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     self.cls_source
                 ):
                     mro_attr_source(tx, self.value_type, self.cls_source, name)
-                # Install before inlining so nested graph breaks preserve the guard.
-                # A traced deletion may leave the name present in the live dict.
+                # A traced deletion may leave the name present in the live dictionary.
                 if (
                     self.source
                     and not is_constant_source(self.source)
-                    and hasattr(self.value, "__dict__")
-                    and name not in self.value.__dict__
+                    and isinstance(
+                        self.lookup_class_mro_attr("__dict__"),
+                        types.GetSetDescriptorType,
+                    )
+                    and name not in object.__getattribute__(self.value, "__dict__")
                 ):
                     install_not_in_instance_dict_guard(self.source, name)
             if (
