@@ -2486,8 +2486,14 @@ def register_fast_op_impl(
 def infer_size(
     a: Sequence[IntLikeType], b: Sequence[IntLikeType]
 ) -> tuple[IntLikeType, ...]:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guarding_hint_or_throw,
+        has_guarding_hint,
+        is_nested_int,
+    )
 
+    backed_so = torch.fx.experimental._config.backed_size_oblivious
     dimsA = len(a)
     dimsB = len(b)
     ndim = max(dimsA, dimsB)
@@ -2498,6 +2504,20 @@ def infer_size(
         dimB = dimsB - 1 - offset
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
+
+        if (
+            backed_so
+            and not is_nested_int(sizeA)
+            and not is_nested_int(sizeB)
+            and has_guarding_hint(sizeA)
+            and has_guarding_hint(sizeB)
+        ):
+            hintA = guarding_hint_or_throw(sizeA)
+            hintB = guarding_hint_or_throw(sizeB)
+            if hintA == 1 and hintB != 1:
+                torch._check(sizeA == 1)
+            if hintB == 1 and hintA != 1:
+                torch._check(sizeB == 1)
 
         # NB: It is very important to test for broadcasting, before testing
         # sizeA == sizeB.  This is because the broadcasting tests are likely
