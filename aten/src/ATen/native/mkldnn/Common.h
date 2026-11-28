@@ -5,6 +5,7 @@
 
 #if AT_MKLDNN_ENABLED()
 
+#include <ideep/tensor.hpp>
 #include <ATen/native/mkldnn/detail/Attr.h>
 #include <ATen/native/mkldnn/detail/Memory.h>
 #include <utility>

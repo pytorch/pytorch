@@ -212,7 +212,7 @@ static Tensor _mkldnn_pooling(
   const auto padding_vec = expand_param_if_needed(padding, "padding", dims);
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
 
-  const mkldnn::MkldnnMemory& x = memory_from_mkldnn(input);
+  const mkldnn::MkldnnMemory& x = itensor_from_mkldnn(input);
   std::vector<int64_t> output_sizes;
 
   auto padding_vec_r = padding_vec;
@@ -281,7 +281,7 @@ static Tensor _mkldnn_pooling(
       algo,
       aprop_kind);
 
-  return new_with_mkldnn_memory(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()), input.options().device_opt());
+  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()), input.options().device_opt());
 }
 
 static Tensor _mkldnn_pooling_backward(
@@ -338,9 +338,9 @@ static Tensor _mkldnn_pooling_backward(
     }
   }
 
-  const mkldnn::MkldnnMemory& grady = memory_from_mkldnn(grad_output);
-  const mkldnn::MkldnnMemory& y = memory_from_mkldnn(output);
-  const mkldnn::MkldnnMemory& x = memory_from_mkldnn(input);
+  const mkldnn::MkldnnMemory& grady = itensor_from_mkldnn(grad_output);
+  const mkldnn::MkldnnMemory& y = itensor_from_mkldnn(output);
+  const mkldnn::MkldnnMemory& x = itensor_from_mkldnn(input);
   mkldnn::MkldnnMemory gradx;
   mkldnn::pooling_backward(
       grady,
@@ -353,7 +353,7 @@ static Tensor _mkldnn_pooling_backward(
       {padding_vec_r.cbegin(), padding_vec_r.cend()},
       algo);
 
-  return new_with_mkldnn_memory(std::move(gradx),
+  return new_with_itensor_mkldnn(std::move(gradx),
                                  optTypeMetaToScalarType(grad_output.options().dtype_opt()),
                                  grad_output.options().device_opt());
 }
