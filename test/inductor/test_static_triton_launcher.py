@@ -594,6 +594,19 @@ class TestStaticTritonLauncherUnit(TestCase):
             )
         return static_kernel, metadata_group
 
+
+class TestStaticTritonLauncherUnitMetadataGroup(TestCase):
+    """How the static launcher resolves the kernel cubin from a compiled
+    kernel's metadata_group: a group with exactly one binary wins, an
+    ambiguous group (zero or two binaries) rejects the static launch, and
+    reload_cubin_path rebuilds the path under TRITON_CACHE_DIR. Both tests
+    fake the compile result and touch no accelerator.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    _can_statically_launch = TestStaticTritonLauncherUnit._can_statically_launch
+
     @skipIfRocm
     def test_static_launch_takes_cubin_from_metadata_group(self):
         # Triton truncates long cache filenames, so the kernel symbol does not
