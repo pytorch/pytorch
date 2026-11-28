@@ -125,6 +125,19 @@ def _count_generated_stream_contexts(code):
     return len(re.findall(r"(?m)^\s*with (?:default_stream|stream\d+):", code))
 
 
+def _kernel_stream_contexts(code, kernel_name):
+    """Enclosing `with <stream>:` line (or None) of each launch of kernel_name in call()."""
+    ctx = None
+    contexts = []
+    for line in code[code.find("def call(") :].split("\n"):
+        match = re.match(r"\s*(with (?:default_stream|stream\d+)):", line)
+        if match:
+            ctx = match.group(1)
+        if kernel_name in line and ".run(" in line:
+            contexts.append(ctx)
+    return contexts
+
+
 class TestStreamUtils(InductorTestCase):
     """Tests for stream_utils module."""
 
@@ -2099,6 +2112,44 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(actual, expected)
         # default -> side stream -> default; the bug added extra switches.
         self.assertEqual(_count_generated_stream_contexts(code), 3)
+
+    def test_foreach_in_side_stream_stays_on_side_stream(self):
+        # Foreach kernels are grouped before stream assignment and must still
+        # run on the side stream (#205704).
+        from torch._inductor.utils import run_and_get_code
+
+        s = device_module.Stream()
+
+        def fn(a, b, c, d):
+            x = a @ b
+            ev = device_module.Event()
+            ev.record()
+            with device_module.stream(s):
+                s.wait_event(ev)
+                t1, t2 = (c @ d).clone(), (c + d).clone()
+                torch._foreach_mul_([t1, t2], 2.0)
+                torch._foreach_add_([t1, t2], 0.5)
+                ev2 = device_module.Event()
+                ev2.record()
+            device_module.current_stream().wait_event(ev2)
+            return x + t1 + t2
+
+        args = [torch.randn(16, 16, device=GPU_TYPE) for _ in range(4)]
+        expected = fn(*args)
+        device_module.synchronize()
+        actual, (code,) = run_and_get_code(torch.compile(fn), *args)
+        device_module.synchronize()
+        self.assertEqual(actual, expected)
+
+        # Small inputs rarely expose the race in the output, so check where the
+        # foreach kernels are emitted: under the side stream, not default_stream.
+        contexts = _kernel_stream_contexts(code, "triton_for_fused")
+        self.assertTrue(contexts, "no foreach kernel launch found")
+        for ctx in contexts:
+            self.assertTrue(
+                ctx is not None and ctx.startswith("with stream"),
+                f"foreach kernel must run on the side stream, got: {ctx}",
+            )
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
