@@ -48,10 +48,10 @@ def _worker(rank, pipe, capture=False):
             transport.read_stream(local_destination.to_mutable_view(), remote_source)
         stream.synchronize()
         write_graph, read_graph = torch.cuda.CUDAGraph(), torch.cuda.CUDAGraph()
-        with torch.cuda.graph(write_graph):
+        with torch.cuda.graph(write_graph, stream=stream):
             source.copy_(producer, non_blocking=True)
             transport.write_stream(local_source.to_view(), remote_destination)
-        with torch.cuda.graph(read_graph):
+        with torch.cuda.graph(read_graph, stream=stream):
             transport.read_stream(local_destination.to_mutable_view(), remote_source)
             consumer.copy_(destination, non_blocking=True)
         torch.testing.assert_close(source, torch.zeros_like(source))
@@ -117,7 +117,7 @@ def _worker(rank, pipe, capture=False):
         raise AssertionError("graph resources retained after close")
 
 
-def _callback_worker(fail, capture=False):
+def _callback_worker(fail, capture, failure_reached):
     torch.cuda.set_device(0)
     transport = NIXLTransport()
     tensor = torch.zeros(8, device="cuda")
@@ -152,6 +152,7 @@ def _callback_worker(fail, capture=False):
             raise AssertionError("transfer started before prior stream work")
         entered.set()
         if fail:
+            failure_reached.set()
             raise RuntimeError("injected callback failure")
         if not await asyncio.to_thread(release.wait, 5):
             raise TimeoutError("enqueue blocked the submitting thread")
@@ -162,8 +163,9 @@ def _callback_worker(fail, capture=False):
         torch.cuda.stream(stream),
     ):
         if capture:
+            transport._cuda_stream(stream)
             graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
+            with torch.cuda.graph(graph, stream=stream):
                 transport.write_stream(memory.to_view(), remote)
             graph.replay()
         else:
@@ -173,8 +175,8 @@ def _callback_worker(fail, capture=False):
         done = torch.cuda.Event()
         done.record()
         if fail:
-            torch.cuda.synchronize()  # Includes graph replays on the default stream.
-            raise AssertionError("failed callback returned successfully")
+            torch.cuda.synchronize()
+            return  # The parent expects the fatal handler to exit with status 1.
         if not entered.wait(5) or done.query():
             raise AssertionError("expected pending callback after enqueue returned")
         try:
@@ -205,13 +207,19 @@ class TestCudaStreamTransport(TestCase):
         self._check_callback_worker(True, 1, capture=True)
 
     def _check_callback_worker(self, fail, exitcode, capture=False):
-        process = multiprocessing.get_context("spawn").Process(
-            target=_callback_worker, args=(fail, capture)
+        ctx = multiprocessing.get_context("spawn")
+        failure_reached = ctx.Event()
+        process = ctx.Process(
+            target=_callback_worker, args=(fail, capture, failure_reached)
         )
         process.start()
         try:
             process.join(30)
             self.assertEqual(process.exitcode, exitcode)
+            if fail:
+                self.assertTrue(
+                    failure_reached.is_set(), "injected failure was not reached"
+                )
         finally:
             if process.is_alive():
                 process.kill()
