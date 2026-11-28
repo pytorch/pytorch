@@ -5545,51 +5545,43 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(vars(copied), vars(od))
         self.assertEqual(copied.tag is od.tag, copier is copy.copy)
 
-    @parametrize("copier", [copy.copy, copy.deepcopy])
+    @parametrize("copier", [copy.copy, copy.deepcopy, None])
     @parametrize("via_dict", [False, True])
     @parametrize("local", [False, True])
     def test_ordered_dict_copy_after_instance_dict_write(self, copier, via_dict, local):
         def fn(x, od):
-            view, od, copied = copy_with_state(od)
-            return x + next(iter(view)), od, copied
+            view, owner, copied = copy_with_state(od)
+            return x + next(iter(view)), view, owner, copied
 
         def copy_with_state(inp):
             od = collections.OrderedDict(a=1) if local else inp
+            view = od.values()
             if via_dict:
                 od.__dict__["tag"] = value
             else:
                 od.tag = value
-            return od.values(), od, copier(od)
+            return view, od, copier(od) if copier else od
 
         value = [42]
         x = torch.tensor(10)
         inp = collections.OrderedDict(a=1)
         if local:
-            with self.assertRaisesRegex(Unsupported, r"OrderedDict\.__reduce_ex__"):
+            suffix = r"\.__reduce_ex__" if copier else " reconstruction"
+            with self.assertRaisesRegex(Unsupported, f"OrderedDict{suffix}"):
                 torch.compile(fn, backend="eager", fullgraph=True)(x, inp)
         counter = CompileCounter()
         compiled = torch.compile(fn, backend=counter)
         for i, original in enumerate((inp, collections.OrderedDict(a=1))):
             with torch.compiler.set_stance("fail_on_recompile" if i else "default"):
-                result, od, copied = compiled(x, original)
+                result, view, od, copied = compiled(x, original)
             self.assertEqual((result, copied, copied.tag), (x + 1, od, value))
-            self.assertEqual(copied.tag is od.tag, copier is copy.copy)
+            self.assertEqual(copied.tag is od.tag, copier is not copy.deepcopy)
             self.assertIs(od.tag, value)
-            self.assertEqual((od is copied, od is original), (False, not local))
-        self.assertEqual(counter.frame_count, 1)
-
-    def test_return_ordered_dict_with_instance_state(self):
-        def fn(x):
-            value = collections.OrderedDict(a=x)
-            value.__dict__["tag"] = x
-            return value, value.tag
-
-        x = torch.ones(1)
-        with self.assertRaisesRegex(Unsupported, "OrderedDict reconstruction"):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        value, tag = torch.compile(fn, backend="eager")(x)
-        self.assertIs(value["a"], x)
-        self.assertIs(value.tag, tag)
+            self.assertEqual(od is copied, copier is None)
+            self.assertEqual(od is original, not local)
+            od["a"] = 9
+            self.assertEqual(list(view), [9])
+        self.assertEqual(counter.frame_count, int(copier is not None or not local))
 
     @parametrize("copier", [copy.copy, copy.deepcopy])
     def test_ordered_dict_copy_after_possible_instance_dict_alias_write(self, copier):
