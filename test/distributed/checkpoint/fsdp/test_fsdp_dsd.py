@@ -25,17 +25,17 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.utils._pytree import tree_all_only
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
-
 class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(4, torch.accelerator.device_count())
@@ -49,7 +49,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
         return base_model
 
     @skip_if_lt_x_gpu(2)
-    def test_1d_fsdp_get_model_state_dict(self):
+    def test_1d_fsdp_get_model_state_dict(self, device):
         self.run_subtests(
             {"mlp_dim": [2, 3, 4, 5]},
             self._test_1d_fsdp_get_model_state_dict,
@@ -76,7 +76,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
         for module in model2:
             fully_shard(module, reshard_after_forward=False)
         fully_shard(model2, reshard_after_forward=False)
-        inp = torch.randn((2, mlp_dim), device=device_type)
+        inp = torch.randn((2, mlp_dim), device=self.device_type)
         model2(inp)  # parameters are not resharded after this forward
         # Check that state dict hooks reshard
         osd_2 = model2.state_dict()
@@ -84,7 +84,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
         self.assertEqual(osd_2, dsd_2)
 
     @skip_if_lt_x_gpu(2)
-    def test_1d_fsdp_cpu_offload_full_model_state_dict(self):
+    def test_1d_fsdp_cpu_offload_full_model_state_dict(self, device):
         """
         Test full_state_dict and cpu_offload works for FSDP2 state_dict.
         """
@@ -114,7 +114,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
             self.assertEqual(dsd, {})
 
     @skip_if_lt_x_gpu(2)
-    def test_save_with_fsdp1_and_load_with_fsdp2(self):
+    def test_save_with_fsdp1_and_load_with_fsdp2(self, device):
         self.run_subtests(
             {
                 "state_dict_type": [
@@ -134,7 +134,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
 
         # Save state dict with model wrapped with FSDP1
         fsdp1_model = FSDP(
-            self._get_base_model().to(device_type),
+            self._get_base_model().to(self.device_type),
             use_orig_params=True,
             auto_wrap_policy=always_wrap_policy,
         )
@@ -198,7 +198,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
 
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    def test_save_with_fsdp1_and_load_with_fsdp2_tp(self):
+    def test_save_with_fsdp1_and_load_with_fsdp2_tp(self, device):
         """
         Test that we can save a model with FSDP1 and load it with FSDP2 + TP on 2d mesh.
         """
@@ -210,14 +210,14 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
         # init device mesh
         dp_size = 2
         global_mesh = init_device_mesh(
-            device_type,
+            self.device_type,
             (dp_size, self.world_size // dp_size),
             mesh_dim_names=("dp", "tp"),
         )
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
 
         # Save state dict with original model
-        base_model = _get_base_model().to(device_type)
+        base_model = _get_base_model().to(self.device_type)
         base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
 
         # Save state dict with model wrapped with FSDP1
@@ -323,7 +323,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
 
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    def test_save_with_tp_and_load_with_fsdp2_tp(self):
+    def test_save_with_tp_and_load_with_fsdp2_tp(self, device):
         """
         Test that we can save a model with TP and load it with FSDP2 + TP on 2d mesh.
         """
@@ -344,17 +344,17 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
         # init device mesh
         dp_size = 2
         global_mesh_1d = init_device_mesh(
-            device_type, (self.world_size,), mesh_dim_names=("tp",)
+            self.device_type, (self.world_size,), mesh_dim_names=("tp",)
         )
         global_mesh_2d = init_device_mesh(
-            device_type,
+            self.device_type,
             (dp_size, self.world_size // dp_size),
             mesh_dim_names=("dp", "tp"),
         )
         dp_mesh, tp_mesh = global_mesh_2d["dp"], global_mesh_2d["tp"]
 
         # Save state dict with original model
-        base_model = _get_base_model().to(device_type)
+        base_model = _get_base_model().to(self.device_type)
         base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
 
         # Save state dict with TP model
@@ -450,7 +450,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
             self.assertEqual(base_osd, fsdp2_tp_full_osd)
 
     @skip_if_lt_x_gpu(4)
-    def test_save_with_fsdp2_tp_and_load_with_tp(self):
+    def test_save_with_fsdp2_tp_and_load_with_tp(self, device):
         self.run_subtests(
             {"allow_implicit_replication": [True, False]},
             self._test_save_with_fsdp2_tp_and_load_with_tp,
@@ -500,10 +500,10 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
             # init device mesh
             dp_size = 2
             global_mesh_1d = init_device_mesh(
-                device_type, (self.world_size,), mesh_dim_names=("tp",)
+                self.device_type, (self.world_size,), mesh_dim_names=("tp",)
             )
             global_mesh_2d = init_device_mesh(
-                device_type,
+                self.device_type,
                 (dp_size, self.world_size // dp_size),
                 mesh_dim_names=("dp", "tp"),
             )
@@ -511,7 +511,7 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
 
             for save_full_state_dict in [True, False]:
                 # Save state dict with original model
-                base_model = _get_base_model(mlp_dim).to(device_type)
+                base_model = _get_base_model(mlp_dim).to(self.device_type)
                 base_optim = torch.optim.AdamW(base_model.parameters(), lr=0.1)
 
                 # Save state dict with FSDP2 + TP model
@@ -600,6 +600,14 @@ class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
                 self.assertEqual(base_osd, tp_full_osd)
                 self.assertEqual(fsdp2_tp_full_msd, tp_full_msd)
                 self.assertEqual(fsdp2_tp_full_osd, tp_full_osd)
+
+
+instantiate_device_type_tests(
+    TestFullyShardWithDistributedStateDict,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
