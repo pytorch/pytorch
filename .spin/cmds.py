@@ -589,7 +589,8 @@ def develop():
     Runs an editable pip install using uv when available, falling back to
     regular pip.  Build configuration comes from the environment, e.g.
     `BUILD_CONFIG spin develop`.  The build stages are documented at the top of
-    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
+    CMakeLists.txt and the supported env vars in the "Build environment variable
+    reference" section of CONTRIBUTING.md.
     """
     spin.util.run(_pip_install_cmd(editable=True))
     _native_aot_stage2()
@@ -607,7 +608,8 @@ def install():
     Runs a regular pip install using uv when available, falling back to
     regular pip.  Build configuration comes from the environment, e.g.
     `BUILD_CONFIG spin install`.  The build stages are documented at the top of
-    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
+    CMakeLists.txt and the supported env vars in the "Build environment variable
+    reference" section of CONTRIBUTING.md.
     """
     spin.util.run(_pip_install_cmd(editable=False))
     _native_aot_stage2()
