@@ -434,6 +434,22 @@ AOTI_TORCH_EXPORT AOTITorchError torch_double_to_pyobject(
     double value,
     void** ret); // returns new reference
 
+// Copy a Python str (encoded as UTF-8) or bytes (as is) into a new
+// StringHandle, which the caller frees with torch_delete_string. Embedded NUL
+// bytes are preserved.
+AOTI_TORCH_EXPORT AOTITorchError torch_string_from_pyobject(
+    void* py_obj,
+    StringHandle* ret); // returns new reference
+
+// Decode data[0, length) as strict UTF-8 into an owned Python str, preserving
+// embedded NUL bytes. data is borrowed only for the call; it may be nullptr
+// when length is 0, but must be non-null otherwise. The output is a new Python
+// reference which the caller releases or transfers; invalid UTF-8 errors.
+AOTI_TORCH_EXPORT AOTITorchError torch_string_to_pyobject(
+    const char* data,
+    size_t length,
+    void** ret); // returns new reference
+
 // Reads an integer from at::cpu::get_cpu_capabilities().
 // Key is borrowed and NUL-terminated. Outputs are caller-owned.
 // A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
