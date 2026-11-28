@@ -1,4 +1,5 @@
 import functools
+import operator
 import logging
 import math
 from collections.abc import Callable, Sequence
@@ -196,6 +197,11 @@ def propagate(amplifier_node: Node) -> None:
 
     queue: Queue[Node] = Queue()
     _enqueue(queue, amplifier_node)
+    # Promoted view amplifiers may refuse bwd into the pre-split matmul, which
+    # would otherwise yield SUCCEED_NO_CHANGE and never enqueue downstream users.
+    if fwd_filter[amplifier_node]:
+        for user in amplifier_node.users:
+            _enqueue(queue, user)
 
     while not queue.empty():
         propagate_single_node(queue, fwd_filter, bwd_filter, queue.get())
@@ -207,6 +213,36 @@ def propagate(amplifier_node: Node) -> None:
         print("All nodes with chunking metadata set:")
         for node in nodes_with_chunking_meta:
             format_node_with_chunking_meta(node)
+
+
+
+def propagate_getitem(node: Node) -> PropagateStatus:
+    """Copy chunking meta through tuple/list indexing (e.g. nll_loss outputs)."""
+    seq, _idx = node.args[0], node.args[1]
+    if not isinstance(seq, Node):
+        return PropagateStatus.FAIL
+
+    def fwd() -> PropagateStatus:
+        meta = get_chunking_meta(seq)
+        if meta is None:
+            return _bool_to_status(False)
+        return _bool_to_status(copy_chunking_meta(node, meta))
+
+    def bwd() -> PropagateStatus:
+        meta = get_chunking_meta(node)
+        if meta is None:
+            return _bool_to_status(False)
+        return _bool_to_status(copy_chunking_meta(seq, meta))
+
+    fwd_status, bwd_status = fwd(), bwd()
+    if fwd_status == PropagateStatus.FAIL or bwd_status == PropagateStatus.FAIL:
+        return PropagateStatus.FAIL
+    if (
+        fwd_status == PropagateStatus.SUCCEED_WITH_CHANGE
+        or bwd_status == PropagateStatus.SUCCEED_WITH_CHANGE
+    ):
+        return PropagateStatus.SUCCEED_WITH_CHANGE
+    return PropagateStatus.SUCCEED_NO_CHANGE
 
 
 def propagate_single_node(
@@ -224,12 +260,14 @@ def propagate_single_node(
         log.debug("Before propagation, the node has the following chunking meta:")
         format_node_with_chunking_meta(node, True)
 
-    if not isinstance(target, torch._ops.OpOverload) or target not in propagate_rules:
+    if target is operator.getitem:
+        status = propagate_getitem(node)
+    elif not isinstance(target, torch._ops.OpOverload) or target not in propagate_rules:
         raise CantChunk(
             f"Missing propagation rule for target {target}: {node.format_node()}"
         )
-
-    status = propagate_rules[target](node)
+    else:
+        status = propagate_rules[target](node)
 
     if log.isEnabledFor(logging.DEBUG):
         log.debug("After propagation, the node has the following chunking meta:")
@@ -365,10 +403,14 @@ def propagate_mm(mm_node: Node) -> _HandlerRetType:
         if has_nop_chunking_meta(lhs_node) and has_nop_chunking_meta(rhs_node):
             return _bool_to_status(False)
 
-        # only lhs is chunked
-        if not has_nop_chunking_meta(lhs_node) and has_nop_chunking_meta(rhs_node):
-            if lhs_meta is None:
-                raise AssertionError("expected lhs_meta to not be None")
+        # only lhs is chunked on its batch dim (dim 0). lhs chunk_dim==1 is the
+        # reduction-dim case handled below (need_sum); None-meta rhs looks like
+        # nop and must not steal that path.
+        if (
+            lhs_meta is not None
+            and lhs_meta.chunk_dim == 0
+            and has_nop_chunking_meta(rhs_node)
+        ):
             return _bool_to_status(
                 copy_chunking_meta(mm_node, lhs_meta) | set_chunking_meta(rhs_node)
             )
@@ -432,10 +474,13 @@ def propagate_mm(mm_node: Node) -> _HandlerRetType:
         aten.sub.Tensor,
         aten.div.Tensor,
         aten.mul.Tensor,
-        prims.fma.default,
         aten.where.self,
         aten.neg.default,
         aten.eq.Tensor,
+        aten.alias.default,
+        aten._softmax.default,
+        aten._log_softmax.default,
+        aten._log_softmax_backward_data.default,
     ]
 )
 def propagate_general_copy_metadata(
@@ -776,22 +821,59 @@ def _find_chunk_dim_after_reshape(
     """
     Find the equivalent chunk_dim position after a reshape by matching
     the prefix product (number of elements before the dimension) and
-    the dimension size. Returns None if the chunk dimension is merged
-    or split by the reshape, making it unsafe to propagate.
+    the dimension size.
 
-    Examples:
-      [M, N] -> [M, N, 1], chunk_dim=0: returns 0 (trailing dim added)
-      [M]    -> [M, 1],     chunk_dim=0: returns 0
-      [M, N] -> [M1, M2, N] where M1*M2=M, chunk_dim=0: returns None (split)
-      [M, N] -> [M*N],      chunk_dim=0: returns None (merged)
+    Besides preserving the chunk dim exactly, also allow:
+      - split: [M, N] -> [M1, M2, N] with M1*M2=M, chunk_dim=0 -> 0
+        (map to the leading factor; applier rewrites view shapes by numel)
+      - merge: [M1, M2, N] -> [M, N] with M1*M2=M, chunk_dim=0 -> 0
+        (chunk_dim must be the leading dim of the merged group)
+
+    Returns None if the chunk dimension is rearranged unsafely.
     """
     chunk_size = old_shape[chunk_dim]
-    old_offset = math.prod(old_shape[:chunk_dim])
-    new_offset = 1
-    for new_dim in range(len(new_shape)):
-        if new_offset == old_offset and new_shape[new_dim] == chunk_size:
+    old_prefix = math.prod(old_shape[:chunk_dim])
+    old_suffix = math.prod(old_shape[chunk_dim + 1 :])
+
+    # Exact preserve: same prefix and same extent.
+    new_prefix = 1
+    for new_dim, new_size in enumerate(new_shape):
+        if (
+            new_prefix == old_prefix
+            and new_size == chunk_size
+            and math.prod(new_shape[new_dim + 1 :]) == old_suffix
+        ):
             return new_dim
-        new_offset *= new_shape[new_dim]
+        new_prefix *= new_size
+
+    # Split one chunk dim into consecutive new dims; map to the leading one.
+    new_prefix = 1
+    for start in range(len(new_shape)):
+        if new_prefix == old_prefix:
+            prod = 1
+            for end in range(start, len(new_shape)):
+                prod *= new_shape[end]
+                if prod == chunk_size and math.prod(new_shape[end + 1 :]) == old_suffix:
+                    return start
+                if prod > chunk_size:
+                    break
+        new_prefix *= new_shape[start]
+
+    # Merge consecutive old dims starting at chunk_dim into one new dim.
+    new_prefix = 1
+    for new_dim, new_size in enumerate(new_shape):
+        if new_prefix == old_prefix:
+            prod = 1
+            for end in range(chunk_dim, len(old_shape)):
+                prod *= old_shape[end]
+                if prod == new_size and math.prod(old_shape[end + 1 :]) == math.prod(
+                    new_shape[new_dim + 1 :]
+                ):
+                    return new_dim
+                if prod > new_size:
+                    break
+        new_prefix *= new_size
+
     return None
 
 
@@ -908,6 +990,116 @@ def propagate_expand(expand_node: Node) -> _HandlerRetType:
         if output_meta.chunk_dim is not None and is_expand_dim(output_meta.chunk_dim):
             return PropagateStatus.FAIL
         return _bool_to_status(copy_chunking_meta(input_node, output_meta))
+
+    return fwd(), bwd()
+
+
+@register_propagate_rule(aten.nll_loss_forward.default)
+def propagate_nll_loss_forward(nll_node: Node) -> _HandlerRetType:
+    """
+    CrossEntropy/NLL with Mean/Sum reduction collapses the chunked batch dim
+    to a scalar, same as aten.sum.default.
+    """
+    input_node = nll_node.args[0]
+    reduction = nll_node.args[3] if len(nll_node.args) > 3 else 1
+    if not isinstance(input_node, Node):
+        raise AssertionError(
+            f"expected input_node to be a Node, got {type(input_node)}"
+        )
+
+    def fwd() -> PropagateStatus:
+        # Reduction: 0=None, 1=Mean, 2=Sum
+        if reduction == 0:
+            return PropagateStatus.FAIL
+        input_meta = get_chunking_meta(input_node)
+        if has_nop_chunking_meta(input_node):
+            return _bool_to_status(False)
+        if input_meta is None:
+            raise AssertionError("expected input_meta to not be None")
+        if input_meta.chunk_dim is not None:
+            changed = set_chunking_meta(nll_node, need_sum=True, chunk_dim=None)
+            # target is indexed by the same collapsed batch as input; chunk it.
+            target = nll_node.args[1] if len(nll_node.args) > 1 else None
+            if isinstance(target, Node):
+                changed = (
+                    set_chunking_meta(target, chunk_dim=input_meta.chunk_dim)
+                    or changed
+                )
+            # weight is optional / not batch-chunked.
+            weight = nll_node.args[2] if len(nll_node.args) > 2 else None
+            if isinstance(weight, Node) and get_chunking_meta(weight) is None:
+                changed = set_chunking_meta(weight) or changed
+            # nll_loss_forward returns a tuple, so fwd_filter treats it as
+            # unreachable and will not enqueue getitem users. Mark the scalar
+            # getitems here so the tuple node stays subgraph body and only the
+            # tensor getitems become need_sum accumulators.
+            for user in nll_node.users:
+                if user.target is operator.getitem:
+                    changed = (
+                        set_chunking_meta(user, need_sum=True, chunk_dim=None)
+                        or changed
+                    )
+            return _bool_to_status(changed)
+        return PropagateStatus.FAIL
+
+    def bwd() -> PropagateStatus:
+        input_meta = get_chunking_meta(input_node)
+        if has_nop_chunking_meta(nll_node):
+            return _bool_to_status(False)
+        output_meta = get_chunking_meta(nll_node)
+        if (
+            output_meta is not None
+            and output_meta.need_sum
+            and input_meta is not None
+            and input_meta.chunk_dim is not None
+        ):
+            return _bool_to_status(False)
+        return PropagateStatus.FAIL
+
+    return fwd(), bwd()
+
+
+@register_propagate_rule(aten.nll_loss_backward.default)
+def propagate_nll_loss_backward(nll_bwd_node: Node) -> _HandlerRetType:
+    """
+    grad_input has the same batch layout as the forward logits input.
+    """
+    grad_output = nll_bwd_node.args[0]
+    input_node = nll_bwd_node.args[1]
+
+    def fwd() -> PropagateStatus:
+        if not isinstance(input_node, Node):
+            return PropagateStatus.FAIL
+        input_meta = get_chunking_meta(input_node)
+        if input_meta is None:
+            return _bool_to_status(False)
+        if input_meta.chunk_dim is None:
+            return PropagateStatus.FAIL
+        changed = copy_chunking_meta(nll_bwd_node, input_meta)
+        # target shares the collapsed batch with input; weight/total_weight do not.
+        target = nll_bwd_node.args[2] if len(nll_bwd_node.args) > 2 else None
+        if isinstance(target, Node):
+            changed = (
+                set_chunking_meta(target, chunk_dim=input_meta.chunk_dim) or changed
+            )
+        for arg in nll_bwd_node.args[3:]:
+            if isinstance(arg, Node) and get_chunking_meta(arg) is None:
+                changed = set_chunking_meta(arg) or changed
+        return _bool_to_status(changed)
+
+    def bwd() -> PropagateStatus:
+        out_meta = get_chunking_meta(nll_bwd_node)
+        if out_meta is None:
+            return _bool_to_status(False)
+        changed = False
+        if isinstance(input_node, Node):
+            changed = copy_chunking_meta(input_node, out_meta) or changed
+        if isinstance(grad_output, Node) and out_meta.chunk_dim is not None:
+            changed = (
+                set_chunking_meta(grad_output, need_sum=True, chunk_dim=None)
+                or changed
+            )
+        return _bool_to_status(changed)
 
     return fwd(), bwd()
 

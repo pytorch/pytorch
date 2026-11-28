@@ -18,7 +18,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .applier import ChunkingApplier
 from .common import CantChunk
-from .core import find_amplifier_node
+from .core import find_amplifier_node, promote_amplifier_past_batch_split_views
 from .propagator import propagate
 from .utils import get_tangent_nodes, tangent_has_chunking_meta
 
@@ -63,6 +63,8 @@ def chunk(gm: GraphModule) -> GraphModule:
     if amplifier_node is None:
         raise CantChunk("Skip chunking due to no amplifier node found")
 
+    amplifier_node = promote_amplifier_past_batch_split_views(amplifier_node)
+
     if amplifier_node.meta["val"]._has_symbolic_sizes_strides:
         raise CantChunk("Can't chunk due to dynamic shape")
 
@@ -78,4 +80,16 @@ def chunk(gm: GraphModule) -> GraphModule:
     out_gm = ChunkingApplier(gm, num_chunks).apply()
     metrics.num_auto_chunking += 1
     log.debug("AutoChunker being applied with %s chunks", num_chunks)
+    # Ascend Inductor NestedReduction epilogue fusion can SympifyError on
+    # nested ranges like [50257] after invoke_subgraph from this pass.
+    try:
+        from torch._inductor.scheduler import NestedReduction
+
+        @classmethod
+        def _disabled_sub_parent_epilogue_plan(cls, *args, **kwargs):
+            return None
+
+        NestedReduction.sub_parent_epilogue_plan = _disabled_sub_parent_epilogue_plan
+    except Exception:
+        pass
     return out_gm
