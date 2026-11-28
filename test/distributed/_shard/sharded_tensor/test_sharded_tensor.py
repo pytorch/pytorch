@@ -1858,6 +1858,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             new_st_cuda.local_tensor().device, st_cuda.local_tensor().device
         )
 
+        # A same-device, same-dtype conversion without copy reuses the object.
+        self.assertIs(st_cuda, st_cuda.to(torch.device(device_type, self.rank)))
+
         gloo_pg = dist.new_group(backend="gloo")
 
         # CPU sharded tensor to GPU
