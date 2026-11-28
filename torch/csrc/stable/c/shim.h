@@ -396,6 +396,17 @@ AOTI_TORCH_EXPORT AOTITorchError torch_layout_to_pyobject(
     int32_t layout,
     void** ret); // returns new reference
 
+// Read the memory format out of a Python torch.memory_format object. The
+// returned code uses the same encoding as aoti_torch_memory_format_*().
+AOTI_TORCH_EXPORT AOTITorchError
+torch_memory_format_from_pyobject(void* py_obj, int32_t* ret_memory_format);
+
+// Wrap a memory format code (aoti_torch_memory_format_*() encoding) as a Python
+// torch.memory_format.
+AOTI_TORCH_EXPORT AOTITorchError torch_memory_format_to_pyobject(
+    int32_t memory_format,
+    void** ret); // returns new reference
+
 // Reads an integer from at::cpu::get_cpu_capabilities().
 // Key is borrowed and NUL-terminated. Outputs are caller-owned.
 // A miss sets *ret_key_exists to false and leaves *ret_value unchanged.

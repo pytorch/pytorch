@@ -9,8 +9,10 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 
 namespace torch::detail {
 
@@ -136,6 +138,30 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
         "torch_layout_to_pyobject requires the GIL to be held");
     // getTHPLayout returns a borrowed reference to the registered singleton.
     PyObject* py = reinterpret_cast<PyObject*>(torch::getTHPLayout(layout));
+    Py_INCREF(py);
+    return py;
+  }
+
+  at::MemoryFormat memory_format_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_memory_format_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        THPMemoryFormat_Check(obj),
+        "torch_memory_format_from_pyobject: expected torch.memory_format, got ",
+        Py_TYPE(obj)->tp_name);
+    return reinterpret_cast<THPMemoryFormat*>(obj)->memory_format;
+  }
+
+  PyObject* memory_format_to_pyobject(
+      at::MemoryFormat memory_format) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_memory_format_to_pyobject requires the GIL to be held");
+    // getTHPMemoryFormat returns a borrowed reference to the registered
+    // singleton.
+    PyObject* py = torch::utils::getTHPMemoryFormat(memory_format);
     Py_INCREF(py);
     return py;
   }
