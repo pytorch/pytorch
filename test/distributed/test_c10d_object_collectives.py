@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
 from functools import partial, wraps
 
 import torch
@@ -95,6 +96,23 @@ class TestObjectCollectives(DistributedTestBase):
             self.assertEqual(99, object_list[0])
         else:
             self.assertEqual(None, object_list[0])
+
+    @unittest.skipIf(device_type != "cpu", "Only gloo supports recv from any source")
+    @with_comms()
+    def test_recv_object_list_any_source(self):
+        # Every other rank sends objects of a different size to rank 0, which
+        # receives them without specifying src.
+        world_size = dist.get_world_size()
+        if self.rank == 0:
+            received = {}
+            for _ in range(world_size - 1):
+                object_list = [None, None]
+                sender = dist.recv_object_list(object_list)
+                received[sender] = object_list
+            expected = {r: [r, "x" * r] for r in range(1, world_size)}
+            self.assertEqual(expected, received)
+        else:
+            dist.send_object_list([self.rank, "x" * self.rank], 0)
 
     @parametrize("weights_only", [True, False])
     @with_comms()
