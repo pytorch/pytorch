@@ -4,7 +4,6 @@ import pickle
 import subprocess
 import sys
 import unittest
-from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
@@ -28,6 +27,7 @@ from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
     TEST_SKIPS,
+    with_comms,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -497,34 +497,10 @@ def exit_if_lt_x_accelerators(x):
             sys.exit(TEST_SKIPS[f"multi-device-{x}"].exit_code)
 
 
-def with_comms(func=None):
-    if func is None:
-        return partial(with_comms)
-
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        # The injected device can carry an index, such as "cuda:0". Use the type.
-        device = torch.device(kwargs["device"]).type
-        if (
-            self.backend(device) != dist.Backend.GLOO
-            and torch.accelerator.device_count() < self.world_size
-        ):
-            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
-
-        kwargs["device"] = device
-        self.pg = self.create_pg(device=device)
-        try:
-            return func(self, *args, **kwargs)
-        finally:
-            torch.distributed.destroy_process_group()
-
-    return wrapper
-
-
 class TestCollectivesWithDistributedBackend(DistributedTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @with_comms()
+    @with_comms(skip_gloo_device_count=True)
     def test_all_gather_into_tensor_coalesced(self, device):
         exit_if_lt_x_accelerators(self.world_size)
         tensors = [
@@ -538,7 +514,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
 
-    @with_comms()
+    @with_comms(skip_gloo_device_count=True)
     def test_all_to_all_single(self, device):
         mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
         rank = dist.get_rank()
@@ -555,7 +531,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         expected = torch.cat(expected)
         self.assertEqual(y, expected)
 
-    @with_comms()
+    @with_comms(skip_gloo_device_count=True)
     def test_all_to_all_single_1d_input(self, device):
         mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
         rank = dist.get_rank()
@@ -572,7 +548,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         expected = torch.cat(expected)
         self.assertEqual(y, expected)
 
-    @with_comms()
+    @with_comms(skip_gloo_device_count=True)
     def test_all_to_all_single_split_sizes_none(self, device):
         mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
         rank = dist.get_rank()
@@ -592,7 +568,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         "Inductor+gpu needs triton and recent GPU arch",
         device_type=("cuda", "xpu"),
     )
-    @with_comms()
+    @with_comms(skip_gloo_device_count=True)
     def test_tracing(self, device):
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
@@ -625,7 +601,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         "Inductor+gpu needs triton and recent GPU arch",
         device_type=("cuda", "xpu"),
     )
-    @with_comms()
+    @with_comms(skip_gloo_device_count=True)
     def test_tracing_with_dce_code(self, device):
         if self.world_size > 2:
             return
@@ -653,7 +629,7 @@ class TestDistributedBackendCollectivesWithWorldSize4(
     def world_size(self):
         return 4
 
-    @with_comms()
+    @with_comms(skip_gloo_device_count=True)
     def test_permute_tensor_with_sub_group(self, device):
         exit_if_lt_x_accelerators(self.world_size)
         mesh_dim_names = ["dp", "tp"]
@@ -782,7 +758,7 @@ class TestFunctionalAutograd(TestCase):
 class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @with_comms()
+    @with_comms(skip_gloo_device_count=True)
     def test_all_to_all_single(self, device) -> None:
         group = self.pg
         t = torch.ones((self.world_size, 2), requires_grad=True, device=device)
