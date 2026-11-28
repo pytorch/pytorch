@@ -7438,7 +7438,7 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {opt_dim_all_reduce}
+    {opt_dim_without_none}
     {opt_keepdim}
 
 Keyword args:
@@ -7495,7 +7495,7 @@ median of the non-``NaN`` elements. If all the elements in a reduced row are ``N
 
 Args:
     {input}
-    {opt_dim_all_reduce}
+    {opt_dim_without_none}
     {opt_keepdim}
 
 Keyword args:
@@ -9259,7 +9259,7 @@ dimension :attr:`dim`.
 
 Args:
     {input}
-    {opt_dim_all_reduce}
+    {opt_dim_without_none}
     {opt_keepdim}
 
 Keyword args:
