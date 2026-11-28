@@ -7067,7 +7067,8 @@ def _new_group_with_tag(
     global _world
 
     default_pg = _get_default_group()
-    if device_id is None:
+    inherit_device_id = device_id is None
+    if inherit_device_id:
         device_id = default_pg.bound_device_id
     elif default_pg.bound_device_id is not None:
         if device_id != default_pg.bound_device_id:
@@ -7083,6 +7084,10 @@ def _new_group_with_tag(
     if not backend:
         backend = default_backend
     backend = Backend(backend)
+
+    if inherit_device_id and device_id is not None:
+        if device_id.type not in BackendConfig(backend).get_device_backend_map():
+            device_id = None
 
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
     # which may just pass their timeout value (or None)
