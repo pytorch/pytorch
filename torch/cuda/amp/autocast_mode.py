@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-import sys
 from typing import Any
 from typing_extensions import deprecated
 
@@ -21,24 +20,28 @@ class autocast(torch.amp.autocast_mode.autocast):
     ``torch.cuda.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cuda", args...)`` instead.
     """
 
-    # TODO: remove this conditional once we stop supporting Python < 3.13
+    # TODO: remove this conditional once we stop supporting Python < 3.13,
+    # and `torch.jit.script` supports classes decorated with `deprecated`.
+    #
     # Prior to Python 3.13, inspect.signature could not retrieve the correct
     # signature information for classes decorated with @deprecated (unless
     # the __new__ static method was explicitly defined);
-    #
     # However, this issue has been fixed in Python 3.13 and later versions.
-    if sys.version_info < (3, 13):
+    #
+    # `torch.jit.script` fails, because with the decorator `__new__` is no
+    # longer a builtin (as determined by `inspect.isbuiltin`) but getting
+    # the source via `inspect`fails, as that looks up the underlying method,
+    # not the wrapper, and that is a builtin for which there is no source.
+    def __new__(
+        cls,
+        enabled: bool = True,
+        dtype: torch.dtype = torch.float16,
+        cache_enabled: bool = True,
+    ):
+        return super().__new__(cls)
 
-        def __new__(
-            cls,
-            enabled: bool = True,
-            dtype: torch.dtype = torch.float16,
-            cache_enabled: bool = True,
-        ):
-            return super().__new__(cls)
-
-        def __init_subclass__(cls):
-            pass
+    def __init_subclass__(cls):
+        pass
 
     def __init__(
         self,
