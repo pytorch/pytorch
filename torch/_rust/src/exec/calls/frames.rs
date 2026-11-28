@@ -9,7 +9,11 @@
 //   - a frame is the instruction's only POSITIVELY: its function object is,
 //     by identity, a function the instruction names, and no frame of that
 //     function was entered under the instruction before. Functions are named
-//     for five forms and for nothing else:
+//     for six forms and for nothing else:
+//       an instruction whose row of the rule table says it enters the
+//       frames it names (Enters::Named): the exact Python functions the
+//       table names for it (rules::names, by the lookup the instruction
+//       itself does: a truth test through a Python __bool__);
 //       the call of an exact Python function: that function;
 //       the call of an exact bound method of an exact Python function: it;
 //       the call of an object whose class, one written in Python, has an
@@ -35,8 +39,9 @@
 //     ends, outside its borrow of the recordings: a function that dies there
 //     may run a finalizer.
 // What it may not assume
-//   - that a row which names frames (Enters::Named) says which: none does
-//     yet, so such an instruction names no function here.
+//   - that a row which names frames names an exact Python function: what
+//     the table names is compared like any callee, and an instruction whose
+//     row names none that is one names no function here.
 
 use std::sync::OnceLock;
 
@@ -45,7 +50,7 @@ use pyo3::prelude::*;
 
 use crate::cfg::ir::Op;
 use crate::exec::ffi::{tr_bound_function, tr_frame_func, tr_type_function, tr_type_heap, tr_type_lookup, Frame, PyMethod_Type};
-use crate::exec::rules::{Enters, Row, Site};
+use crate::exec::rules::{self, Enters, Row, Site, What};
 
 #[derive(Default)]
 pub struct Frames {
@@ -75,10 +80,15 @@ unsafe fn getter(descriptor: *mut PyObject) -> Option<Py<PyAny>> {
 }
 
 impl Frames {
-    pub unsafe fn of(row: Option<&Row>, op: &Op, site: &Site, callee: Option<*mut PyObject>) -> Frames {
+    pub unsafe fn of(row: Option<&Row>, what: &What, op: &Op, site: &Site, callee: Option<*mut PyObject>) -> Frames {
         unsafe {
             if let Some(row) = row {
-                return Frames { none: Some(if row.enters == Enters::Named { UNNAMED } else { "which enters none" }), ..Frames::default() };
+                if row.enters != Enters::Named {
+                    return Frames { none: Some("which enters none"), ..Frames::default() };
+                }
+                // The functions the row names, as the table finds them.
+                let named = rules::names(row, what, site).map(|f| function(f));
+                return Frames { none: named.iter().all(Option::is_none).then_some(UNNAMED), named, ..Frames::default() };
             }
             let named = match (callee, op) {
                 (Some(f), _) if ffi::Py_TYPE(f) == &raw mut PyMethod_Type => [function(tr_bound_function(f)), None],

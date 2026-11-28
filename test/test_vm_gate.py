@@ -9665,6 +9665,7 @@ buf = torch.zeros(2, 3, 8, 8)
 PAIR = [m, m]
 RELU = functools.partial(torch.relu)
 STATE = {"double": True, "scale": 2.0, "dead": []}
+FLAGS = [True]
 SCALE = 2.0
 KEEP = []
 
@@ -10022,6 +10023,144 @@ def writes_only(x):
     x += 1.0
     return x * 2
 
+# Truth tests: what the row of each says its result is known by, and the
+# neighbour of each whose result is not known. Each is tested by a jump in a
+# frame under the body (tt_body: by the body itself, whose block hands the
+# answer on).
+SHAPE_T = SHAPE_T0 = (2, 3)
+FILLED = [1]
+
+def tt_body(x):
+    y = x * 2 + 1
+    if SCALE:
+        return y * 3 + 1
+    return y - 3
+
+def tt_body_param(x, flag):
+    y = x * 2 + 1
+    if flag:
+        return y * 3 + 1
+    return y - 3
+
+def number_helper(y):
+    if SCALE:
+        return y * 2
+    return y - 3
+
+def tt_number(x):
+    return number_helper(x + 1) + 1
+
+def not_helper(y):
+    if not SCALE:
+        return y - 3
+    return y * 2
+
+def tt_not(x):
+    return not_helper(x + 1) + 1
+
+def param_helper(y, flag):
+    if flag:
+        return y * 2
+    return y - 3
+
+def tt_param(x):
+    return param_helper(x + 1, STATE["double"]) + 1
+
+def tuple_helper(y):
+    if SHAPE_T:
+        return y * 2
+    return y - 3
+
+def tt_tuple(x):
+    return tuple_helper(x + 1) + 1
+
+def size_helper(y):
+    if y.shape:
+        return y * 2
+    return y - 3
+
+def tt_size(x):
+    return size_helper(x + 1) + 1
+
+def list_helper(y):
+    if FILLED:
+        return y * 2
+    return y - 3
+
+def tt_list(x):
+    return list_helper(x + 1) + 1
+
+def list_param_helper(y, ys):
+    if ys:
+        return y * 2
+    return y - 3
+
+def tt_list_param(x):
+    return list_param_helper(x + 1, FILLED) + 1
+
+class Gate:
+    def __init__(self, on):
+        self.on = on
+
+    def __bool__(self):
+        return self.on
+
+class GateHeld(Gate):
+    def __bool__(self):
+        held = Quiet()
+        return self.on
+
+GATE, GATE_HELD = Gate(True), GateHeld(True)
+
+def python_helper(y):
+    if GATE:
+        return y * 2
+    return y - 3
+
+def tt_python(x):
+    return python_helper(x + 1) + 1
+
+def python_held_helper(y):
+    if GATE_HELD:
+        return y * 2
+    return y - 3
+
+def tt_python_finalizer(x):
+    return python_held_helper(x + 1) + 1
+
+# A tensor's own attributes are names in its key. The body puts one on a
+# result behind the entry that made it, and on its input.
+def attr_on_result(x):
+    y = x * 2 + 1
+    y.note = 1
+    return y * 3 + 1
+
+def attr_on_input(x):
+    x.note = 1
+    return x * 2 + 1
+
+def note_helper(y):
+    y.note = 1
+    return y * 3
+
+def attr_under(x):
+    return note_helper(x * 2 + 1) + 1
+
+# Calls that draw from the default random generator.
+def draws_dropout(x):
+    return torch.dropout(x, 0.5, True) * 2
+
+def draws_like(x):
+    return x + torch.rand_like(x)
+
+def draws_in_place(x):
+    y = x * 2
+    torch.Tensor.uniform_(y)
+    return y + 1
+
+def draws_off(x):
+    return torch.dropout(x, 0.5, False) * 2
+
 # What a block hands on besides tensors, and the neighbour of each that has
 # no statement.
 def out_flag(x):
@@ -10030,9 +10169,15 @@ def out_flag(x):
         y = y * 2
     return y
 
-def out_flag_unknown(x):
+def out_flag_item(x):
     y = torch.relu(x) * 2
     if STATE["double"]:
+        y = y * 2
+    return y
+
+def out_flag_unknown(x):
+    y = torch.relu(x) * 2
+    if FLAGS[0]:
         y = y * 2
     return y
 
@@ -10042,7 +10187,7 @@ def out_input(x, k):
 
 def out_coincides(x, k):
     y = torch.relu(x) * 2
-    if STATE["double"]:
+    if FLAGS[0]:
         y = y * 2
     return y
 
@@ -10260,6 +10405,14 @@ BETWEEN = {
     "moment": lambda: BARE.__setitem__(0, None),
     "chk_two_roots_dead": lambda: DYING.clear(),
     "chk_pin_key": lambda: PIN_W.requires_grad_(True),
+    "tt_body": lambda: globals().__setitem__("SCALE", 0.0),
+    "tt_number": lambda: globals().__setitem__("SCALE", 0.0),
+    "tt_not": lambda: globals().__setitem__("SCALE", 0.0),
+    "tt_param": lambda: STATE.__setitem__("double", False),
+    "tt_list_param": lambda: FILLED.clear(),
+    "tt_tuple": lambda: globals().__setitem__("SHAPE_T", ()),
+    "tt_list": lambda: FILLED.clear(),
+    "tt_python": lambda: setattr(GATE, "on", False),
 }
 # What a program is called with besides (or in place of) the tensor, by call.
 ARGS = {"float_input": lambda i: (1.5,) if i < 4 else (2.5,)}
@@ -10272,6 +10425,9 @@ ARGS.update(chk_input_key=lambda i: (OWN_W[0] if i < 4 else OWN_W[0][:1],), chk_
 ARGS.update(chk_input_place=lambda i: (OWN_W[0], OWN_W[0] if i < 4 else OWN_W[1]))
 ARGS.update(moment=lambda i: (KEPT_ITEM, BARE[i >= 4]))
 ARGS.update(chk_closure=lambda i: (i % 2,), chk_own_cell=lambda i: (OWN_W[i],), chk_fresh_code=lambda i: (i,))
+# The programs that draw: each run begins from the same seed.
+DRAWS = ("draws_dropout", "draws_like", "draws_in_place", "draws_off")
+ARGS.update(tt_body_param=lambda i: (i < 4,))
 KWARGS = ("in_kwargs",)
 # What a program changes before its second call: a way its first call, the
 # one the optimizer judged it by, did not take.
@@ -10289,7 +10445,11 @@ def run(f):
     bn.reset_running_stats()
     STATE.update(double=True, dead=[])
     KEEP.clear()
-    globals().update(SCALE=SCALE0, SCALE_TOO=SCALE0, MODE_TOO=MODE, m=M0, NONE_FLAG=None)
+    globals().update(SCALE=SCALE0, SCALE_TOO=SCALE0, MODE_TOO=MODE, m=M0, NONE_FLAG=None, SHAPE_T=SHAPE_T0)
+    FILLED[:] = [1]
+    GATE.on = True
+    if name in DRAWS:
+        torch.manual_seed(7)
     M0.copy_(M0C)
     default_helper.__defaults__ = (3,)
     torch.set_grad_enabled(True)
@@ -10391,9 +10551,32 @@ SHADOW_PARTIAL = {
     "reads_value": ("never run again and found equal: not validated: no output of the block is a result of an entry", False),
     "none_flag_under": ("no row: call py __main__.none_helper (later: callees: python functions)", False),
     "imports_a_module": ("no row: LoadAttr (later: attributes) x module", False),
-    "flag_under": ("a jump under the body tested the result of ToBool", False),
+    "flag_under": ("no row: call py __main__.flag_helper (later: callees: python functions)", False),
     "flag_operand": ("a jump under the body tested the result of ToBool", False),
     "default_operand": ("an operand taken by value that is no constant of the code: int", False),
+}  # fmt: skip
+
+# program: (the jumps of its recording on a known value and on any other,
+# the start of a reason it must give or None). A truth test in a frame under
+# the body, of: a float, a tuple and a list loaded from globals, and the
+# negation of the float; a parameter of the frame, twice (a bool, a list);
+# the sizes of a tensor, a subclass of tuple.
+SHADOW_TRUTH = {
+    "tt_number": ([1, 0], None),
+    "tt_not": ([1, 0], None),
+    "tt_tuple": ([1, 0], None),
+    "tt_list": ([1, 0], None),
+    "tt_param": ([0, 1], "a jump under the body tested the result of ToBool of a local the run did not store a known value in"),
+    "tt_list_param": ([0, 1], "a jump under the body tested the result of ToBool of a local the run did not store a known value in"),
+    "tt_size": ([0, 1], "a read with no check, or a kind the recorder does not list: ToBool (its row reads [Class, Identity])"),
+}  # fmt: skip
+
+# program: (the call that draws as the list's text has it, the flags and the
+# assertion of its entry).
+SHADOW_DRAWS = {
+    "draws_dropout": ("r0 = torch.dropout(in0, 0.5, True) of (Tensor, float, bool)", "[draws] assert key="),
+    "draws_like": ("r0 = torch.rand_like(in0) of (Tensor)", "[draws] assert key="),
+    "draws_in_place": ("torch.Tensor.uniform_(r0) of (Tensor)", "[draws writes(0)] assert is(operand 0)"),
 }  # fmt: skip
 
 # What the recorder's validation answers for a list of one entry, a slice of
@@ -10454,6 +10637,7 @@ class TestVmCallsShadow(TestCase):
             "cell_number",
             "out_flag",
             "out_flag_unknown",
+            "out_flag_item",
             "out_input",
             "out_coincides",
             "out_tuple",
@@ -10464,6 +10648,16 @@ class TestVmCallsShadow(TestCase):
             "writes_only",
             "is_none",
             "is_true",
+            *SHADOW_TRUTH,
+            "tt_body",
+            "tt_body_param",
+            "tt_python",
+            "tt_python_finalizer",
+            *SHADOW_DRAWS,
+            "draws_off",
+            "attr_on_result",
+            "attr_on_input",
+            "attr_under",
         }  # fmt: skip
     )
 
@@ -10669,6 +10863,14 @@ class TestVmCallsShadow(TestCase):
         "chk_two_roots_dead": ("chk_two_roots_dead:", "a root the reads start from", KEEPS, None),
         "chk_two_ways": ("chk_two_ways:", "a root the reads start from", KEEPS, None),
         "chk_closure": ("make_closure.<locals>.closure_body:", "the function of the body's frame", KEEPS, None),
+        "tt_body": ("tt_body:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "tt_number": ("tt_number:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "tt_not": ("tt_not:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "tt_tuple": ("tt_tuple:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "tt_list": ("tt_list:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "tt_param": ("tt_param:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "tt_list_param": ("tt_list_param:", "a read: a namespace or a container", KEEPS + "dict", None),
+        "tt_python": ("tt_python:", "a read: a namespace or a container", KEEPS, None),
     }  # fmt: skip
     # With 1 a block that today's engine finds too small is never due:
     # nothing is recorded of these programs' places.
@@ -10884,7 +11086,10 @@ class TestVmCallsShadow(TestCase):
     OUTPUTS = {
         # The answer of a test on a global that is None: an object.
         "out_flag": (1, None, True),
-        # The answer of a test on a value nothing knows.
+        # The answer of a truth test on an item of a global dict under a
+        # constant key: known by the read of that item.
+        "out_flag_item": (1, None, True),
+        # The answer of a test on a value nothing knows: an item of a list.
         "out_flag_unknown": (
             0,
             "an output that is not stated: bool, a value that is not known",
@@ -11042,6 +11247,159 @@ class TestVmCallsShadow(TestCase):
         self.assertEqual(
             (found["validated"], found["again"]), ("not validated: an entry writes", "")
         )
+
+    DRAWN = "an entry that draws from a random generator: the list is not run a second time, so nothing validates it until its effects are entries in place"
+
+    @parametrize("name", list(SHADOW_DRAWS))
+    def test_a_call_that_draws_is_an_entry_that_says_so(self, name):
+        # The row of the call says that it draws from the default random
+        # generator (and, of an in-place one, which operand it writes and
+        # hands back): the entry states that, and the list goes on behind
+        # it. Run a second time it would draw a second time: such a list is
+        # never run again to be compared, and the program's results and
+        # the generator are eager's (every run begins from one seed).
+        for mode in ("shadow", "1"):
+            found = [
+                s
+                for s in self.program(name, mode)["shadow"]
+                if s["place"].startswith(name + ":")
+            ]
+            self.assertEqual(len(found), 1, found)
+            found = found[0]
+            self.assertEqual(found["stop"], None)
+            call, states = SHADOW_DRAWS[name]
+            lines = [line for line in found["text"].splitlines() if call in line]
+            self.assertEqual(len(lines), 1, found["text"])
+            self.assertIn(states, lines[0])
+            self.assertIn(self.DRAWN, [why for why, _ in found["reasons"]])
+            self.assertTrue(found["status"].startswith("partial: "), found)
+            self.assertEqual(
+                (found["validated"], found["again"], found["notes"]),
+                ("not validated: an entry draws", "", []),
+            )
+
+    def test_a_call_whose_row_draws_nothing_has_no_such_flag(self):
+        # Dropout that is off: the row of that form says the call hands its
+        # operand back and draws nothing.
+        found = self.reached("draws_off")
+        line = next(line for line in found["text"].splitlines() if "dropout" in line)
+        self.assertIn("torch.dropout(in0, 0.5, False)", line)
+        self.assertIn("assert is(operand 0)", line)
+        self.assertNotIn("draws", line)
+        self.assertNotIn(self.DRAWN, [why for why, _ in found["reasons"]])
+
+    @parametrize("name", list(SHADOW_TRUTH))
+    def test_a_truth_test_is_known_by_what_its_row_says(self, name):
+        # The row of a truth test says what its answer is a function of: the
+        # value of an immutable; which object an exact tuple is; the length
+        # of an exact list, which the run's reads hold. The answer is known
+        # where the operand is known that way, and the jump that tests it is
+        # then one on a known value; the read that makes it known is a check
+        # of the list (test_a_list_runs_again_only_where_its_checks_hold).
+        # A parameter of a frame under the body is not known, and a row of
+        # another shape (the sizes of a tensor: a subclass of tuple, whose
+        # row also reads the class) is in no list of kinds.
+        jumps, reason = SHADOW_TRUTH[name]
+        found = self.reached(name)
+        self.assertEqual(found["jumps"], jumps)
+        reasons = [why for why, _ in found["reasons"]]
+        tested = [w for w in reasons if "a jump under the body" in w]
+        self.assertEqual(len(tested), jumps[1], reasons)
+        unlisted = [w for w in reasons if w.startswith("a read with no check")]
+        if reason is None:
+            self.assertEqual(unlisted, [])
+        else:
+            self.assertTrue(any(w.startswith(reason) for w in reasons), reasons)
+            self.assertEqual(len(unlisted), "a read with no check" in reason, reasons)
+
+    def test_a_known_truth_at_the_end_of_a_block_is_an_output_the_list_states(self):
+        # The body tests a global float after two operators: its block hands
+        # on the answer, a bool that is known, so the list states it and, in
+        # place of the trace, is the body. The fifth call finds another
+        # float there: the arrivals from then on are misses of the list's
+        # check of the namespace, never a run of the list. The same test of
+        # an input has no statement: which bool the block hands on is not
+        # known.
+        found = [
+            s
+            for s in self.program("tt_body", "1")["shadow"]
+            if s["place"].startswith("tt_body:") and "in0 * 2" in s["text"]
+        ]
+        self.assertEqual(len(found), 1, found)
+        found = found[0]
+        self.assertEqual((found["status"], found["entries"]), ("replayable", 2))
+        self.assertEqual(found["validated"], "equal")
+        self.assertEqual(
+            found["missed"], [["a read: a namespace or a container", 2]], found
+        )
+        self.assertFalse(found["again"].startswith("DIFFERENT"), found)
+        for mode in ("shadow", "1"):
+            unknown = [
+                s
+                for s in self.program("tt_body_param", mode)["shadow"]
+                if s["place"].startswith("tt_body_param:") and "in0 * 2" in s["text"]
+            ]
+            self.assertEqual(len(unknown), 1, unknown)
+            reasons = [why for why, _ in unknown[0]["reasons"]]
+            self.assertTrue(
+                any(
+                    w.startswith(
+                        "an output that is not stated: bool, a value that is not known: the result of ToBool of"
+                    )
+                    for w in reasons
+                ),
+                reasons,
+            )
+
+    def test_a_truth_test_through_a_python_bool_enters_the_function_its_row_names(self):
+        # The class of the operand has a Python function under __bool__: the
+        # row of the test names it, its frame is the instruction's, and what
+        # it reads is recorded as it runs. What it returns is not known: the
+        # jump is one on a value of no known origin.
+        found = self.reached("tt_python")
+        self.assertEqual((found["frames"], found["jumps"]), (2, [0, 1]))
+        reasons = [why for why, _ in found["reasons"]]
+        self.assertIn(
+            "a jump under the body tested the result of ToBool through the Python __bool__ of its operand's class",
+            reasons,
+        )
+        self.assertFalse([w for w in reasons if w.startswith("a read with no check")])
+        # A second frame under the test (the finalizer of a local of that
+        # function, which runs when its frame ends) is no frame of the
+        # body's: the recording stops.
+        stopped = [s for s in self.places("tt_python_finalizer") if s["stop"]]
+        self.assertTrue(stopped)
+        for found in stopped:
+            self.assertEqual(found["stop"][0], "Quiet.__del__")
+            self.assertIn(
+                "it ran under ToBool through the Python __bool__ of its operand's class, whose callee's frame had been entered already",
+                found["stop"][1],
+            )
+
+    @parametrize("name", ["attr_on_result", "attr_on_input", "attr_under"])
+    def test_an_attribute_put_on_a_tensor_is_put_between_the_lists(self, name):
+        # The names of a tensor's own attributes are in its key. The body
+        # puts one on a result (itself, or in a function it calls) or on
+        # its input: the store is in no recorded run, a block ends in front
+        # of it. The result is asserted with the key it had where its
+        # entry made it; the tensor that carries the name where the next
+        # block begins is that block's input, with the name on every
+        # arrival. So no list is compared on a key its run does not make:
+        # the lists are equal on the later arrivals, or not armed.
+        for mode in ("shadow", "1"):
+            out = self.program(name, mode)
+            self.assertTrue(out["shadow"], mode)
+            for found in out["shadow"]:
+                self.assertEqual(found["stop"], None, found)
+                self.assertNotIn("DIFFERENT", found["validated"] + found["again"])
+                self.assertEqual(found["missed"], [], found)
+                self.assertFalse(
+                    any("StoreAttr" in why for why, _ in found["reasons"]), found
+                )
+            ran = [s for s in out["shadow"] if s["again"]]
+            self.assertTrue(ran, out["shadow"])
+            for found in ran:
+                self.assertRegex(found["again"], r"^equal on [1-9]\d* later arrival")
 
     def test_a_recording_inside_a_stopped_one_keeps_both(self):
         # The body stops at relu_ called through a builtin bound to its
@@ -21530,6 +21888,593 @@ class TestVmClassOfAContainerOfFloats(TestCase):
 
 
 instantiate_device_type_tests(TestVmClassOfAContainerOfFloats, globals())
+
+
+# For TestVmEffectsWrites: the write constructs of the Effects pass, family by
+# family (argv[1]), each with every kind of name or key it takes: a function
+# of its own per case, 12 calls on torch.vm against eager; after each call
+# the result, the state of the object written to and what the program's own
+# code logged are compared.
+EFFECTS_WRITES_PROGRAM = '''
+import collections
+import json
+import sys
+
+import torch
+from torch import vm
+
+EARLY = vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1)
+PASSES = (*EARLY, vm.passes.Effects())
+CALLS = 12
+LOG = []
+OLD = "old"
+
+
+class Name(str):
+    pass
+
+
+class Key:
+    def __init__(self, n):
+        self.n = n
+
+    def __hash__(self):
+        return hash(self.n)
+
+    def __eq__(self, other):
+        return type(other) is type(self) and other.n == self.n
+
+
+class Logged(Key):
+    def __hash__(self):
+        LOG.append("hash")
+        return hash(self.n)
+
+    def __eq__(self, other):
+        LOG.append("eq")
+        return type(other) is type(self) and other.n == self.n
+
+
+class Index:
+    def __index__(self):
+        return 1
+
+
+class Plain:
+    pass
+
+
+class PySetattr:
+    def __setattr__(self, name, value):
+        LOG.append("setattr")
+        object.__setattr__(self, name, value)
+
+    def __delattr__(self, name):
+        LOG.append("delattr")
+        object.__delattr__(self, name)
+
+
+class PySetattrDict:
+    def __setattr__(self, name, value):
+        self.__dict__[name] = value
+
+    def __delattr__(self, name):
+        del self.__dict__[name]
+
+
+class Slotted:
+    __slots__ = ("a", "d", "l", "s")
+
+
+class Module(torch.nn.Module):
+    pass
+
+
+class DictSub(dict):
+    pass
+
+
+class ListSub(list):
+    pass
+
+
+class SetSub(set):
+    pass
+
+
+class DictPy(dict):
+    def __setitem__(self, key, value):
+        LOG.append("setitem")
+        dict.__setitem__(self, key, value)
+
+
+class ListPy(list):
+    def __setitem__(self, key, value):
+        LOG.append("setitem")
+        list.__setitem__(self, key, value)
+
+    def append(self, value):
+        LOG.append("append")
+        list.append(self, value)
+
+
+def own_dict(K, y):
+    d = {}
+    d[K] = y
+    del d[K]
+    return y
+
+
+def own_set(K, y):
+    s = set()
+    s.add(K)
+    s.discard(K)
+    return y
+
+
+KEYS = {
+    "str": lambda: "a",
+    "strsub": lambda: Name("a"),
+    "int": lambda: 1,
+    "tuple": lambda: (1, "a"),
+    "obj": lambda: Key("a"),
+    "objlog": lambda: Logged("a"),
+    "plainobj": lambda: Plain(),
+    "index": lambda: Index(),
+    "neg": lambda: -1,
+    "bool": lambda: True,
+}
+ONE = ("str",)
+NAMES = ("str", "strsub", "int")
+ITEMS = ("str", "strsub", "int", "tuple", "plainobj", "obj", "objlog")
+INDEXES = ("int", "neg", "bool", "index")
+D, L, S, OD = "o.d = {}", "o.l = []", "o.s = set()", "o.d = collections.OrderedDict()"
+LIST3 = "o.l[:] = [OLD, OLD, OLD]"
+PYLIST3 = "list.clear(o.l); list.extend(o.l, [OLD, OLD, OLD])"
+HAS_K = "o.d.clear(); o.d[K] = OLD; o.d['z'] = OLD"
+# family -> construct -> (holder, kinds of K, setup once, reset before each call, the write).
+# `o`: the holder, `K`: the name or key, `y`: a tensor the call computes, `v`: a float it
+# computes from its float argument.
+FAMILIES = {
+    "attr": {
+        "plain": (Plain, ONE, "", "", "o.a = y"),
+        "module": (Module, ONE, "", "", "o.a = y"),
+        "python_setattr": (PySetattr, ONE, "", "", "o.a = y"),
+        "python_setattr_dict": (PySetattrDict, ONE, "", "", "o.a = y"),
+        "slots": (Slotted, ONE, "", "", "o.a = y"),
+        "object_setattr": (Plain, NAMES, "", "", "object.__setattr__(o, K, y)"),
+        "object_setattr_slots": (Slotted, NAMES, "", "", "object.__setattr__(o, K, y)"),
+        "object_setattr_past_python": (PySetattr, NAMES, "", "", "object.__setattr__(o, K, y)"),
+        "bound_setattr": (Plain, NAMES, "", "", "o.__setattr__(K, y)"),
+        "setattr": (Plain, NAMES, "", "", "setattr(o, K, y)"),
+        "setattr_slots": (Slotted, NAMES, "", "", "setattr(o, K, y)"),
+        "vars": (Plain, ITEMS, "", "vars(o).clear()", "vars(o)[K] = y"),
+    },
+    "dict": {
+        "item": (Plain, ITEMS, D, "o.d.clear()", "o.d[K] = y"),
+        "item_replaces": (Plain, ITEMS, D, "o.d.clear(); o.d[K] = OLD", "o.d[K] = y"),
+        "call": (Plain, ITEMS, D, "o.d.clear()", "dict.__setitem__(o.d, K, y)"),
+        "bound": (Plain, ITEMS, D, "o.d.clear()", "o.d.__setitem__(K, y)"),
+        "ordered_item": (Plain, ITEMS, OD, "o.d.clear()", "o.d[K] = y"),
+        "ordered_call": (Plain, ITEMS, OD, "o.d.clear()", "collections.OrderedDict.__setitem__(o.d, K, y)"),
+        "subclass_item": (Plain, ITEMS, "o.d = DictSub()", "o.d.clear()", "o.d[K] = y"),
+        "python_setitem": (Plain, ITEMS, "o.d = DictPy()", "o.d.clear()", "o.d[K] = y"),
+        "call_past_python": (Plain, ITEMS, "o.d = DictPy()", "o.d.clear()", "dict.__setitem__(o.d, K, y)"),
+        "holds_python_key": (Plain, ONE, D, "o.d.clear(); o.d[Logged('z')] = OLD", "o.d[K] = y"),
+    },
+    "list": {
+        "item": (Plain, INDEXES, L, LIST3, "o.l[K] = y"),
+        "call": (Plain, INDEXES, L, LIST3, "list.__setitem__(o.l, K, y)"),
+        "bound": (Plain, INDEXES, L, LIST3, "o.l.__setitem__(K, y)"),
+        "subclass_item": (Plain, INDEXES, "o.l = ListSub()", LIST3, "o.l[K] = y"),
+        "python_setitem": (Plain, INDEXES, "o.l = ListPy()", PYLIST3, "o.l[K] = y"),
+        "call_past_python": (Plain, INDEXES, "o.l = ListPy()", PYLIST3, "list.__setitem__(o.l, K, y)"),
+        "slice": (Plain, ONE, L, LIST3, "o.l[0:1] = [y]"),
+        "append": (Plain, ONE, L, "o.l[:] = [OLD]", "o.l.append(y)"),
+        "append_call": (Plain, ONE, L, "o.l[:] = [OLD]", "list.append(o.l, y)"),
+        "subclass_append": (Plain, ONE, "o.l = ListSub()", "o.l[:] = [OLD]", "o.l.append(y)"),
+        "append_past_python": (Plain, ONE, "o.l = ListPy()", "list.clear(o.l)", "list.append(o.l, y)"),
+    },
+    "set": {
+        "add": (Plain, ITEMS, S, "o.s.clear()", "o.s.add(K)"),
+        "add_call": (Plain, ITEMS, S, "o.s.clear()", "set.add(o.s, K)"),
+        "add_tensor": (Plain, ONE, S, "o.s.clear()", "o.s.add(y)"),
+        "subclass_add": (Plain, ITEMS, "o.s = SetSub()", "o.s.clear()", "o.s.add(K)"),
+        "discard": (Plain, ITEMS, S, "o.s.clear(); o.s.update((K, OLD))", "o.s.discard(K)"),
+        "discard_call": (Plain, ITEMS, S, "o.s.clear(); o.s.update((K, OLD))", "set.discard(o.s, K)"),
+        "discard_absent": (Plain, ITEMS, S, "o.s.clear(); o.s.add(OLD)", "o.s.discard(K)"),
+    },
+    "delete": {
+        "attr": (Plain, ONE, "", "o.a = OLD", "del o.a"),
+        "attr_python_delattr": (PySetattr, ONE, "", "o.a = OLD", "del o.a"),
+        "attr_python_delattr_dict": (PySetattrDict, ONE, "", "o.a = OLD", "del o.a"),
+        "attr_slots": (Slotted, ONE, "", "o.a = OLD", "del o.a"),
+        "object_delattr": (Plain, NAMES, "", "o.a = OLD", "object.__delattr__(o, K)"),
+        "delattr": (Plain, NAMES, "", "o.a = OLD", "delattr(o, K)"),
+        "dict_item": (Plain, ITEMS, D, HAS_K, "del o.d[K]"),
+        "dict_call": (Plain, ITEMS, D, HAS_K, "dict.__delitem__(o.d, K)"),
+        "ordered_item": (Plain, ITEMS, OD, HAS_K, "del o.d[K]"),
+        "list_item": (Plain, INDEXES, L, "o.l[:] = [OLD, 1, 2]", "del o.l[K]"),
+        "list_call": (Plain, INDEXES, L, "o.l[:] = [OLD, 1, 2]", "list.__delitem__(o.l, K)"),
+    },
+    "float": {
+        "attr": (Plain, ONE, "", "", "o.a = v"),
+        "attr_slots": (Slotted, ONE, "", "", "o.a = v"),
+        "object_setattr": (Plain, ONE, "", "", "object.__setattr__(o, K, v)"),
+        "dict_item": (Plain, ("str", "tuple"), D, "o.d.clear()", "o.d[K] = v"),
+        "dict_item_in_tuple": (Plain, ONE, D, "o.d.clear()", "o.d[K] = (v, y)"),
+        "dict_key": (Plain, ONE, D, "o.d.clear()", "o.d[v] = y"),
+        "list_item": (Plain, ("int",), L, LIST3, "o.l[K] = v"),
+        "append": (Plain, ONE, L, "o.l[:] = [OLD]", "o.l.append(v)"),
+        "set_add": (Plain, ONE, S, "o.s.clear()", "o.s.add(v)"),
+    },
+    # A dict and a set the call makes itself, in a function it calls.
+    "own": {
+        "dict": (Plain, ITEMS, "", "", "y = own_dict(K, y)"),
+        "set": (Plain, ITEMS, "", "", "y = own_set(K, y)"),
+    },
+    # The state before calls 8 to 11 is one in which the write raises.
+    "raises": {
+        "delete_attr": (Plain, ONE, "o.log = []", "o.a = OLD", "o.log.append(1); del o.a", "pass"),
+        "delete_dict_item": (Plain, ONE, "o.log = []; o.d = {}", "o.d[K] = OLD", "o.log.append(1); del o.d[K]", "pass"),
+        "list_item": (Plain, ("int",), "o.log = []; o.l = []", "o.l[:] = [OLD, OLD]", "o.log.append(1); o.l[K] = y", "o.l[:] = [OLD]"),
+        "delete_list_item": (Plain, ("int",), "o.log = []; o.l = []", "o.l[:] = [OLD, OLD]", "o.log.append(1); del o.l[K]", "o.l[:] = [OLD]"),
+        "attr_read_only": (None, ONE, "o.log = []", "", "o.log.append(1); o.a = y", "type(o).a = property(lambda self: 1)"),
+    },
+    # Before call 8 the class of the target is given code of its own for the store.
+    "class": {
+        "setattr": (None, ONE, "", "", "o.a = y", "type(o).__setattr__ = PySetattr.__setattr__"),
+        "delattr": (None, ONE, "", "o.a = OLD", "del o.a", "type(o).__delattr__ = PySetattr.__delattr__; o.__dict__['a'] = OLD"),
+        "property": (None, ONE, "", "", "o.a = y", "type(o).a = property(lambda self: 1, lambda self, x: LOG.append('property'))"),
+        "object_setattr_property": (None, ONE, "", "", "object.__setattr__(o, K, y)", "type(o).a = property(lambda self: 1, lambda self, x: LOG.append('property'))"),
+        "class_assigned": (None, ONE, "", "", "o.a = y", "o.__class__ = type('Other', (), {'__setattr__': PySetattr.__setattr__})"),
+        "dict_setitem": (None, ONE, "o.d = type('Sub', (dict,), {})()", "o.d.clear()", "o.d[K] = y", "type(o.d).__setitem__ = DictPy.__setitem__; dict.clear(o.d)"),
+        "dict_delitem": (None, ONE, "o.d = type('Sub', (dict,), {})()", "o.d.clear(); o.d[K] = OLD", "del o.d[K]", "type(o.d).__delitem__ = lambda self, key: (LOG.append('delitem'), dict.__delitem__(self, key))[1]; dict.__setitem__(o.d, K, OLD)"),
+    },
+}
+BODY = """
+def setup(o):
+    {setup}
+
+def reset(o, K):
+    {reset}
+
+def spoil(o, K):
+    {spoil}
+
+def fn_{name}(o, x, K, s):
+    y = (x.sin() * 2).cos().tanh().exp().sin()
+    v = s * 2.0
+    {write}
+    return y * 2
+"""
+
+
+def canon(x):
+    if isinstance(x, torch.Tensor):
+        return ("T", x.tolist())
+    if isinstance(x, dict):
+        return (type(x).__name__, [(canon(k), canon(v)) for k, v in dict.items(x)])
+    if isinstance(x, list):
+        return (type(x).__name__, [canon(v) for v in list.__iter__(x)])
+    if isinstance(x, set):
+        return (type(x).__name__, sorted(repr(canon(v)) for v in x))
+    if isinstance(x, tuple):
+        return ("tuple", [canon(v) for v in x])
+    if isinstance(x, (Key, Index)):
+        return (type(x).__name__, getattr(x, "n", None))
+    if isinstance(x, Slotted):
+        return ("Slotted", [(s, canon(getattr(x, s, "unset"))) for s in Slotted.__slots__])
+    if hasattr(x, "__dict__") and not isinstance(x, type):
+        d = {k: v for k, v in vars(x).items() if not (type(k) is str and (k[:1] == "_" or k == "training"))}
+        return (type(x).__name__, [(canon(k), canon(v)) for k, v in d.items()])
+    return (type(x).__name__, repr(x))
+
+
+def attempt(f, *args):
+    try:
+        return ("ok", canon(f(*args)))
+    except Exception as e:
+        return ("raise", type(e).__name__, str(e)[:80])
+
+
+def walk(family, construct, kind):
+    holder, _, setup, reset, write, *spoil = FAMILIES[family][construct]
+    name = f"{family}_{construct}_{kind}"
+    scope = dict(globals())
+    exec(BODY.format(setup=setup or "pass", reset=reset or "pass", write=write, spoil=(spoil or ["pass"])[0], name=name), scope)
+    fn, reset, spoil = scope["fn_" + name], scope["reset"], scope["spoil"] if spoil else None
+    # (A class of its own for each side where the case changes the class.)
+    mine, theirs = (holder or type("Box", (), {}))(), (holder or type("Box", (), {}))()
+    scope["setup"](mine)
+    scope["setup"](theirs)
+    keys = KEYS[kind](), KEYS[kind]()
+    g = vm(fn, passes=PASSES)
+    rows = lambda: [r for r in vm.regions(g) if r["kind"] != "call" and r["function"] == fn.__name__]
+    ran = lambda: sum(r["runs"] for r in rows())
+    same, raised, entered = [], [], []
+    for call in range(CALLS):
+        torch.manual_seed(call)
+        x = torch.rand(4, 8)
+        logs = []
+        for side, f, o, key in ((0, g, mine, keys[0]), (1, fn, theirs, keys[1])):
+            (spoil if spoil and call >= 8 else reset)(o, key)
+            del LOG[:]
+            before = ran()
+            logs.append((attempt(f, o, x, key, 0.5 + call), list(LOG)))
+            if side == 0:
+                entered.append(ran() - before)
+        same.append(logs[0] == logs[1] and canon(mine) == canon(theirs))
+        raised.append(logs[1][0][1] if logs[1][0][0] == "raise" else None)
+    replayed = [r for r in rows() if r["state"] == "region" and r["runs"] and r["effects"]]
+    refused = [str(r["why"]) for r in rows() if r["state"] == "refused"]
+    if all(raised):
+        outcome = "raises"
+    elif replayed:
+        outcome = "replayed"
+    elif refused:
+        outcome = refused[0]
+    else:
+        outcome = "outside" if ran() else "none"
+    return {"same": same, "raised": raised, "outcome": outcome, "entered": entered}
+
+
+def sneaky(lst):
+    lst.pop()
+
+
+def undo(o, x):
+    y = (x.sin() * 2).cos().tanh().exp().sin()
+    o.l.append(y)
+    sneaky(o.l)
+    # A store the trace refuses (the index is no int): it is given up here.
+    o.m[o.at] = y
+    return y * 2
+
+
+def undo_fails():
+    # `sneaky` is declared to only compute, and writes: what it does to the list is no
+    # recorded write, and the append in front of it cannot be taken back.
+    g = vm(undo, passes=vm.configure(PASSES, pure_calls={"pure": (sneaky,)}))
+    o = Plain()
+    o.l, o.m, o.at = [], [OLD, OLD], Index()
+    found = []
+    for call in range(8):
+        try:
+            g(o, torch.rand(4, 8))
+            found.append(["ok", canon(o.l), canon(o.m)[1][1][0]])
+        except Exception as e:
+            found.append([type(e).__name__, str(e)[:70], type(e.__cause__).__name__, str(e.__cause__)])
+    rows = [[r["state"], str(r["why"])] for r in vm.regions(g) if r["function"] == "undo"]
+    return {"calls": found, "rows": rows}
+
+
+if __name__ == "__main__":
+    if sys.argv[1] == "undo":
+        print(json.dumps(undo_fails()))
+    else:
+        family = FAMILIES[sys.argv[1]]
+        print(json.dumps({c: {k: walk(sys.argv[1], c, k) for k in family[c][1]} for c in family}))
+'''
+
+EFFECTS_REPLAYED = "replayed"
+EFFECTS_NOT_AGAIN = "which a region cannot do again"
+# By the kind of the name: an exact str, an instance of a str subclass, an int.
+EFFECTS_BY_NAME = {"str": "replayed", "strsub": "not a str", "int": "raises"}
+EFFECTS_BUILTIN = {"str": "outside", "strsub": "outside", "int": "raises"}
+# By the kind of the key: one whose hash and comparison are C code (a str,
+# an instance of a str subclass that defines neither, an int, a tuple of
+# those, an object of a class that defines neither), and one whose class
+# defines them in Python (the second logs every call of them).
+EFFECTS_PLAIN_KEYS = ("str", "strsub", "int", "tuple", "plainobj")
+EFFECTS_BY_KEY = {
+    **dict.fromkeys(EFFECTS_PLAIN_KEYS, "replayed"),
+    **dict.fromkeys(("obj", "objlog"), "whose hash or comparison is code of its class"),
+}
+EFFECTS_OUTSIDE_BY_KEY = {
+    **EFFECTS_BY_KEY,
+    **dict.fromkeys(EFFECTS_PLAIN_KEYS, "outside"),
+}
+# By the kind of the index: an int, a negative int, a bool, an object with
+# an __index__.
+EFFECTS_BY_INDEX = {
+    "int": "replayed",
+    "neg": "replayed",
+    "bool": EFFECTS_NOT_AGAIN,
+    "index": EFFECTS_NOT_AGAIN,
+}
+EFFECTS_NO_INDEX = dict.fromkeys(EFFECTS_BY_INDEX, EFFECTS_NOT_AGAIN)
+EFFECTS_ONE = {"str": "replayed"}
+# family -> construct -> kind -> "replayed" (a region ran and made writes
+# again), "outside" (regions ran and none makes the write: it is made by the
+# code between them, or it is to a container the call made itself), "raises"
+# (the write raises on every call, in eager too), or a part of the reason the
+# trace is refused for.
+EFFECTS_WRITES = {
+    "attr": {
+        "plain": EFFECTS_ONE,
+        "module": EFFECTS_ONE,
+        "python_setattr": EFFECTS_ONE,
+        "python_setattr_dict": EFFECTS_ONE,
+        "slots": EFFECTS_ONE,
+        "object_setattr": EFFECTS_BY_NAME,
+        "object_setattr_slots": EFFECTS_BY_NAME,
+        "object_setattr_past_python": EFFECTS_BY_NAME,
+        "bound_setattr": EFFECTS_BY_NAME,
+        "setattr": EFFECTS_BUILTIN,
+        "setattr_slots": EFFECTS_BUILTIN,
+        "vars": EFFECTS_OUTSIDE_BY_KEY,
+    },
+    "dict": {
+        "item": EFFECTS_BY_KEY,
+        "item_replaces": EFFECTS_BY_KEY,
+        "call": EFFECTS_BY_KEY,
+        "bound": EFFECTS_BY_KEY,
+        "ordered_item": EFFECTS_BY_KEY,
+        "ordered_call": EFFECTS_BY_KEY,
+        "subclass_item": EFFECTS_BY_KEY,
+        "python_setitem": EFFECTS_BY_KEY,
+        "call_past_python": EFFECTS_BY_KEY,
+        "holds_python_key": {"str": "that holds a key whose hash or comparison"},
+    },
+    "list": {
+        "item": EFFECTS_BY_INDEX,
+        "call": EFFECTS_BY_INDEX,
+        "bound": EFFECTS_BY_INDEX,
+        "subclass_item": EFFECTS_NO_INDEX,
+        "python_setitem": EFFECTS_NO_INDEX,
+        "call_past_python": EFFECTS_NO_INDEX,
+        "slice": {"str": "it stores into something that outlives it"},
+        "append": EFFECTS_ONE,
+        "append_call": EFFECTS_ONE,
+        "subclass_append": EFFECTS_ONE,
+        "append_past_python": EFFECTS_ONE,
+    },
+    "set": {
+        "add": EFFECTS_BY_KEY,
+        "add_call": EFFECTS_BY_KEY,
+        "add_tensor": {"str": "outside"},
+        "subclass_add": EFFECTS_BY_KEY,
+        "discard": EFFECTS_BY_KEY,
+        "discard_call": EFFECTS_BY_KEY,
+        "discard_absent": EFFECTS_BY_KEY,
+    },
+    "delete": {
+        "attr": EFFECTS_ONE,
+        "attr_python_delattr": EFFECTS_ONE,
+        "attr_python_delattr_dict": EFFECTS_ONE,
+        "attr_slots": {"str": EFFECTS_NOT_AGAIN},
+        "object_delattr": EFFECTS_BY_NAME,
+        "delattr": EFFECTS_BUILTIN,
+        "dict_item": EFFECTS_BY_KEY,
+        "dict_call": EFFECTS_BY_KEY,
+        "ordered_item": EFFECTS_BY_KEY,
+        "list_item": EFFECTS_BY_INDEX,
+        "list_call": EFFECTS_BY_INDEX,
+    },
+    # The value written is a float the call computes from a float argument:
+    # the trace computes with a stand-in of its own for it.
+    "float": {
+        "attr": EFFECTS_ONE,
+        "attr_slots": EFFECTS_ONE,
+        "object_setattr": EFFECTS_ONE,
+        "dict_item": {"str": "replayed", "tuple": "replayed"},
+        "dict_item_in_tuple": EFFECTS_ONE,
+        "dict_key": {"str": "whose hash or comparison is code of its class"},
+        "list_item": {"int": "replayed"},
+        "append": EFFECTS_ONE,
+        "set_add": {"str": "whose hash or comparison is code of its class"},
+    },
+    # A dict and a set the call makes itself, in a function it calls: such a
+    # write needs no record, so no key is asked about. (A key whose hash
+    # logs: the region makes the log's entries again.)
+    "own": {
+        "dict": {**dict.fromkeys(EFFECTS_BY_KEY, "outside"), "objlog": "replayed"},
+        "set": {**dict.fromkeys(EFFECTS_BY_KEY, "outside"), "objlog": "replayed"},
+    },
+    "raises": {
+        "delete_attr": EFFECTS_ONE,
+        "delete_dict_item": EFFECTS_ONE,
+        "list_item": {"int": "replayed"},
+        "delete_list_item": {"int": "replayed"},
+        "attr_read_only": EFFECTS_ONE,
+    },
+    "class": {
+        "setattr": EFFECTS_ONE,
+        "delattr": EFFECTS_ONE,
+        "property": EFFECTS_ONE,
+        "object_setattr_property": EFFECTS_ONE,
+        "class_assigned": EFFECTS_ONE,
+        "dict_setitem": EFFECTS_ONE,
+        "dict_delitem": EFFECTS_ONE,
+    },
+}
+# The calls on which a case differs from eager today. Each is taken off when
+# its cause is corrected.
+EFFECTS_WRITES_KNOWN = {
+    # The trace's READS of an OrderedDict hash its keys, and a key whose
+    # __hash__ logs shows it (the trace is refused for the key before any
+    # write is recorded).
+    ("delete", "ordered_item", "objlog"): [1],
+    # The OBJECT is given another class (`o.__class__ = Other`, with a
+    # __setattr__ of its own) before call 8: what a class has under the
+    # names is a read, which object is of the class is not, and the region
+    # goes on making the plain store.
+    ("class", "class_assigned", "str"): [8, 9, 10, 11],
+}
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+@instantiate_parametrized_tests
+class TestVmEffectsWrites(TestCase):
+    """With the Effects pass, a write of a region's code to an object that
+    outlives it has two outcomes and no third: the trace records it and
+    every run of the region makes it again, or the trace is refused with a
+    reason and the code runs as written. Every call leaves what eager
+    leaves, whatever the name or the key is: an exact str, an instance of a
+    str subclass, an int, a tuple, an object whose class defines its hash
+    and its comparison in Python (the recorder asks a dict or a set about a
+    key only where that runs no code of the program; a container the call
+    made itself is asked nothing). A region makes a write again only in a
+    state in which it does not raise, and only for a class that still
+    carries the store out as the trace saw it."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def walk(self, family):
+        command = [sys.executable, "-c", EFFECTS_WRITES_PROGRAM, family]
+        ran = subprocess.run(command, capture_output=True, text=True, timeout=1200)
+        self.assertEqual(ran.returncode, 0, ran.stderr[-3000:])
+        return json.loads(ran.stdout.splitlines()[-1])
+
+    @parametrize(
+        "family",
+        ["attr", "dict", "list", "set", "delete", "float", "own", "raises", "class"],
+    )
+    def test_a_write_is_made_again_or_the_trace_is_refused(self, family):
+        found = self.walk(family)
+        want = EFFECTS_WRITES[family]
+        self.assertEqual(
+            {c: sorted(kinds) for c, kinds in found.items()},
+            {c: sorted(kinds) for c, kinds in want.items()},
+        )
+        for construct, kinds in found.items():
+            for kind, got in kinds.items():
+                cell = (family, construct, kind)
+                with self.subTest(cell=cell):
+                    differs = [i for i, same in enumerate(got["same"]) if not same]
+                    self.assertEqual(differs, EFFECTS_WRITES_KNOWN.get(cell, []))
+                    outcome = want[construct][kind]
+                    if outcome in ("replayed", "outside", "raises"):
+                        self.assertEqual(got["outcome"], outcome)
+                    else:
+                        self.assertIn(outcome, got["outcome"])
+                        self.assertTrue(got["outcome"].startswith("it "))
+                    if family == "raises":
+                        # The write raises as eager's does, and no region
+                        # ran on the call: nothing was written before it.
+                        self.assertTrue(all(got["raised"][8:]), msg=str(got))
+                        self.assertEqual(got["entered"][8:], [0] * 4)
+                        self.assertGreater(sum(got["entered"][:8]), 0)
+                    if family == "class" and cell not in EFFECTS_WRITES_KNOWN:
+                        # The region of the class as it was is not entered.
+                        self.assertEqual(got["entered"][8], 0)
+                        self.assertGreater(sum(got["entered"][:8]), 0)
+
+    def test_a_write_that_cannot_be_taken_back_is_an_error(self):
+        # The traced call (the fourth) is given up behind an append that a
+        # function declared pure has taken out again: the undo of the
+        # append fails, and the code is not run again over the list.
+        found = self.walk("undo")
+        raised = [c for c in found["calls"] if c[0] != "ok"]
+        self.assertEqual(len(raised), 1, msg=str(found))
+        self.assertEqual(found["calls"].index(raised[0]), 3)
+        kind, text, cause, why = raised[0]
+        self.assertEqual((kind, cause), ("RuntimeError", "IndexError"))
+        self.assertIn("could not be", text)
+        self.assertEqual([state for state, _ in found["rows"]], ["refused"])
 
 
 if __name__ == "__main__":

@@ -44,7 +44,8 @@
 //     call that raised, an instruction the optimizer made;
 //   - an ENTRY exists only for a C callee with a row whose result is an
 //     entry or one of the call's operands (rules::license; a row that says
-//     the call writes operands states which: entries.rs Call::stated; a
+//     the call writes operands states which, and one that says it draws
+//     from a random generator states that: entries.rs Call::stated; a
 //     result that is not the operand the row names is a stop), and for an
 //     operator, a subscript or an
 //     attribute instruction on a plain tensor that a line of the license of
@@ -62,7 +63,8 @@
 //   - A RECORDING THAT REACHED ITS END IS THE BODY ONLY IF NOTHING SAYS
 //     OTHERWISE, AND EVERYTHING NOT UNDERSTOOD SAYS OTHERWISE: each of these
 //     is a reason (Shadow::reasons), and a Shadow with one is "partial":
-//     an instruction that is no entry, no kind of known::neutral and no key
+//     an instruction that is no entry, no kind of known::neutral, no
+//     truth test whose row is of a shape known.rs lists (TRUTH) and no key
 //     fact of a tensor whose key the list compares; an operand taken by
 //     value that is no constant of the code; a conditional jump under the
 //     body on a value that is not known; reads that are no check of a later
@@ -72,10 +74,10 @@
 //     a release that was not seen; an operator between the instructions;
 //     an exception raised under the body; a generator's yield; a witness
 //     that disagrees with its entry; an entry that is not pure (it writes
-//     an operand, or its callee has a row that does: run a second time the
-//     list would write a second time, so it is never run again to be
-//     compared and nothing validates it until effects are entries that
-//     are run in place);
+//     an operand, or its callee has a row that does, or it draws from a
+//     random generator: run a second time the list would write or draw a
+//     second time, so it is never run again to be compared and nothing
+//     validates it until effects are entries that are run in place);
 //   - a Python frame is the body's only if the instruction in flight in the
 //     innermost activation of the run names its function and has entered no
 //     frame yet (frames.rs). Any other frame (a finalizer, a weak-reference
@@ -111,11 +113,11 @@ use pyo3::prelude::*;
 use super::again::{self, Armed};
 use super::entries::{blank, text, Call, Maker};
 use super::frames::Frames;
-use super::known::{self, Found, Kind, Known, Reasons};
+use super::known::{self, Found, Kind, Known, Reasons, Truth};
 pub use super::known::Plain;
 use super::origins::{class_text, plain_tensor, Leaving, Origin, Origins};
 use super::shadow::{self, Shadow};
-use super::{reading, slots, witness, Assert, Callee, Entry, Tmpl, PURE};
+use super::{reading, slots, witness, Assert, Callee, Entry, Tmpl, DRAWS, PURE};
 use crate::bindings::ffi::Word;
 use crate::exec::ambient;
 use crate::exec::ffi::tr_frame_code;
@@ -338,7 +340,7 @@ impl Rec {
             };
             if let Some(made) = self.maker().built(ins, all) {
                 self.origins.built(at, made);
-                return self.push(Pending::Other { what: name, makes: false, why: None, operands: Vec::new(), frames: Frames::of(row, &ins.op, site, callee), known: Some(None), found: None }, at);
+                return self.push(Pending::Other { what: name, makes: false, why: None, operands: Vec::new(), frames: Frames::of(row, &what, &ins.op, site, callee), known: Some(None), found: None }, at);
             }
             let facts = self.shadow.facts;
             let call = match (row, callee) {
@@ -384,10 +386,18 @@ impl Rec {
             // for its operand's VALUE (None is the one object of its class);
             // `is` asks WHICH objects both operands are: two values that are
             // known by value only say nothing of that.
-            let known = match (&ins.op, &plain) {
-                (_, Some(_)) => None,
-                (Op::IsNone, _) => Some((self.origins.known.lit((depth, ins.args[0].0)) || self.keyed(all[0])).then_some(true)),
-                (Op::Bytecode { opcode: IS_OP, .. }, _) => Some(ins.args.iter().all(|x| self.origins.known.object((depth, x.0))).then_some(true)),
+            // A truth test says by its row what its result is known by
+            // (known.rs TRUTH): its operand, known at least in the kind the
+            // row asks for; a recorded read, asked behind it (found below);
+            // or nothing, where the result is what a frame returns.
+            let truth = row.and_then(|row| Truth::of(&ins.op, row));
+            let known = match (&ins.op, &plain, truth) {
+                (_, Some(_), _) => None,
+                (Op::IsNone, ..) => Some((self.origins.known.lit((depth, ins.args[0].0)) || self.keyed(all[0])).then_some(true)),
+                (Op::Bytecode { opcode: IS_OP, .. }, ..) => Some(ins.args.iter().all(|x| self.origins.known.object((depth, x.0))).then_some(true)),
+                (_, _, Some(Truth::Operand(Kind::Value))) => Some(self.origins.known.lit((depth, ins.args[0].0)).then_some(true)),
+                (_, _, Some(Truth::Operand(Kind::Object))) => Some(self.origins.known.object((depth, ins.args[0].0)).then_some(true)),
+                (_, _, Some(Truth::Length | Truth::Returned)) => Some(None),
                 _ => Some((fact && self.keyed(all[0])).then_some(false)),
             };
             if let Some(plain) = plain {
@@ -410,10 +420,14 @@ impl Rec {
                 Some(row) if known::neutral(&ins.op, row).is_some() => {}
                 Some(row) => {
                     let unread = format!("a read with no check, or a kind the recorder does not list: {name} (its row reads {:?})", row.reads);
-                    // (A kind of known.rs's list: decided behind it.)
-                    match found.as_mut() {
-                        Some(found) => found.1 = Some(unread),
-                        None => self.reasons.add(unread),
+                    match (found.as_mut(), truth) {
+                        // (A kind of known.rs's FOUND: decided behind it.)
+                        (Some(found), _) => found.1 = Some(unread),
+                        // A truth test of known.rs's TRUTH whose result is
+                        // not known says so where the result is used: at
+                        // the jump that tests it, as an operand, an output.
+                        (None, Some(_)) => {}
+                        (None, None) => self.reasons.add(unread),
                     }
                 }
             }
@@ -421,8 +435,17 @@ impl Rec {
             // an instruction that runs C code on a tensor.
             let makes = callee.map_or(row.is_none() && tensor, |f| rules::torch::name(f).is_some());
             let operands = all.iter().filter(|o| plain_tensor(**o)).map(|o| *o as usize).collect();
-            let frames = Frames::of(row, &ins.op, site, callee);
-            let what = if matches!(ins.op, Op::ToBool) { format!("{name} of {}", self.origins.known.maker((depth, ins.args[0].0))) } else { format!("{name}{later}") };
+            let frames = Frames::of(row, &what, &ins.op, site, callee);
+            let what = if truth == Some(Truth::Returned) {
+                format!("{name} through the Python __bool__ of its operand's class")
+            } else if truth.is_some() || matches!(ins.op, Op::ToBool) {
+                // (A known operand that does not make the result known: the
+                // row asks which object it is, or its length was not found.)
+                let operand = (depth, ins.args[0].0);
+                format!("{name} of {}", if self.origins.known.lit(operand) { "a known value" } else { self.origins.known.maker(operand) })
+            } else {
+                format!("{name}{later}")
+            };
             self.push(Pending::Other { what, makes, why, operands, frames, known, found }, at)
         }
     }
@@ -478,7 +501,7 @@ impl Rec {
                     self.claimed += now.saturating_sub(ops);
                     let Call { mut entry, label, ids, operands, returns, undeclared } = *call;
                     let k = self.entries.len() as u32;
-                    let notes = shadow::disagreements(&seen.unwrap_or_default(), &ids, &entry.flags.writes, &undeclared);
+                    let notes = shadow::disagreements(&seen.unwrap_or_default(), &ids, &entry.flags.writes, &undeclared, entry.flags.bits & DRAWS != 0);
                     // A list with such an entry is never run again: the row
                     // it rests on did not say what the call did.
                     self.disagreed |= !notes.is_empty();
@@ -529,7 +552,10 @@ impl Rec {
                         self.stop(&label, "the result is no operand of the call, where its row says it is one".into());
                         return;
                     }
-                    if entry.flags.bits & PURE == 0 {
+                    if entry.flags.bits & DRAWS != 0 {
+                        // Run a second time it would draw a second time.
+                        self.reasons.add("an entry that draws from a random generator: the list is not run a second time, so nothing validates it until its effects are entries in place".into());
+                    } else if entry.flags.bits & PURE == 0 {
                         // Run a second time it would write a second time:
                         // such a list is never run again to be compared.
                         self.reasons.add("an entry that writes, or whose callee has a row that writes: the list is not run a second time, so nothing validates it until its effects are entries in place".into());

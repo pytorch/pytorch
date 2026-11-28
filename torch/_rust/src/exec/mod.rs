@@ -18,6 +18,7 @@ pub mod foreign;
 pub mod graph;
 pub mod hist;
 pub mod joint;
+mod keys;
 mod kinds;
 pub mod left;
 pub mod live;

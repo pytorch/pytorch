@@ -1315,8 +1315,17 @@ impl Act<'_> {
                     && self.region_worthy(b, vi)
                 {
                     if !replaces {
-                        if self.region_trace(b, vi) {
-                            i = code.steps.len();
+                        match self.region_trace(b, vi) {
+                            Ok(true) => i = code.steps.len(),
+                            Ok(false) => {}
+                            Err(()) => match self.unwind(b, vi, 0, Exc::Error) {
+                                Unwound::Block(h) => {
+                                    b = h;
+                                    continue 'blocks;
+                                }
+                                Unwound::Outer(k, args) => return Outcome::Outer(k, args),
+                                Unwound::Propagate => return Outcome::Error,
+                            },
                         }
                     } else if let Some(held) = shadow.take() {
                         // TORCH_RUST_CALLS=1: the recorder takes the run
@@ -1721,7 +1730,7 @@ impl Act<'_> {
         let Some(leave) = leave else {
             // What the run wrote before it gave up is written again by the
             // blocks, which run from the span's entry.
-            writes::undo();
+            let undone = writes::undo();
             if debug {
                 let at = match &ended {
                     Some(Outcome::Stopped(x)) => format!("stopped at bb{}", x.0),
@@ -1748,6 +1757,17 @@ impl Act<'_> {
                 self.set(p, xincref(*o));
             }
             pyo3::ffi::PyErr_Clear();
+            // A write that could not be taken back: the blocks do not run
+            // over what is half taken back. The error is raised at the
+            // span's entry, as an instruction there would raise it.
+            if let Err(e) = undone {
+                e.restore(pyo3::Python::assume_attached());
+                return Some(match self.unwind(sp.entry, 0, 0, Exc::Error) {
+                    Unwound::Block(h) => Ok(h),
+                    Unwound::Outer(k, args) => Err(Outcome::Outer(k, args)),
+                    Unwound::Propagate => Err(Outcome::Error),
+                });
+            }
             return None;
         };
         held.into_iter().for_each(|o| ffi::Py_XDECREF(o));
@@ -1903,8 +1923,10 @@ impl Act<'_> {
 
     // Traces this run of version vi of block b into a region (see
     // region.rs), its inputs already read. True: the body ran, its values set
-    // as run_blocks' steps would leave them; false: run it as usual.
-    unsafe fn region_trace(&mut self, b: BlockId, vi: usize) -> bool {
+    // as run_blocks' steps would leave them; false: run it as usual. Err,
+    // with an exception set: the trace was given up and a write it had made
+    // could not be taken back (writes::undo); the block is not run again.
+    unsafe fn region_trace(&mut self, b: BlockId, vi: usize) -> Result<bool, ()> {
         let cfg = self.cfg;
         let blk = &cfg[b];
         let ver = &blk.versions[vi];
@@ -1983,7 +2005,7 @@ impl Act<'_> {
             }
             // What it wrote before it raised is written again by the run
             // that follows.
-            writes::undo();
+            let undone = writes::undo();
             if again {
                 self.p.region_runs[b.idx()].store(0, std::sync::atomic::Ordering::Relaxed);
             } else {
@@ -1999,7 +2021,12 @@ impl Act<'_> {
                     self.set(*x, o);
                 }
             }
-            return false;
+            if let Err(e) = undone {
+                pyo3::ffi::PyErr_Clear();
+                e.restore(pyo3::Python::assume_attached());
+                return Err(());
+            }
+            return Ok(false);
         }
         held.into_iter().for_each(|o| ffi::Py_XDECREF(o));
         if ran {
@@ -2036,7 +2063,7 @@ impl Act<'_> {
             }
         }
         self.p.region_runs[b.idx()].store(0, std::sync::atomic::Ordering::Relaxed);
-        ran
+        Ok(ran)
     }
 
     // Runs body[i] of version `vi` of block b (step) and drops `kills`.
@@ -2435,11 +2462,11 @@ impl Act<'_> {
                     // region's to check.
                     let _paused = reads::Recording::pause();
                     check(super::outside_executor(|| self.opaque_call(args, *argc as c_int, kw)))?
-                } else if self.reading && kw.is_null() && writes::writes_call(callee) {
+                } else if self.reading && writes::writes_call(callee) {
                     // C code that writes (object.__setattr__, list.append,
-                    // ...): a write the region makes again.
+                    // ...): a write the region makes again, or a refusal.
                     let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
-                    let token = writes::write_call(callee, &all[if all[0].is_null() { 2 } else { 1 }..]);
+                    let token = writes::write_call(callee, &all[if all[0].is_null() { 2 } else { 1 }..], !kw.is_null());
                     refused_write(token)?;
                     let r = tr_call(args, *argc as c_int, kw);
                     writes::done(token, !r.is_null());

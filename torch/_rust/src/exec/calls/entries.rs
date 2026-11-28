@@ -16,9 +16,12 @@
 //     (flags.writes: each place the row names, a position or a keyword,
 //     among this call's operands; Err if the call does not hand it one
 //     there), which of them no operator's schema declares (the witness
-//     cannot see those), and the operand the result is, if the row says the
-//     call hands one back. A row that writes anything else than operands
-//     is no entry: Err;
+//     cannot see those), that the call draws from the default random
+//     generators if the row says so (the flag `draws`, and never `pure`
+//     beside it: a list with such an entry is not run a second time, as one
+//     with an entry that writes is not), and the operand the result is, if
+//     the row says the call hands one back. A row that writes anything else
+//     than operands and the generators is no entry: Err;
 //   - slot(): the entry of an operator, a subscript or an attribute
 //     instruction that has a plain tensor where its line of the license
 //     wants one: Some(Ok) only if slots::license takes it on the classes of
@@ -33,7 +36,7 @@ use pyo3::ffi::{self, PyObject};
 use pyo3::prelude::*;
 
 use super::origins::{plain_tensor, Built, Made, Origins};
-use super::{check, slots, Callee, Entry, Flags, Tmpl, PURE};
+use super::{check, slots, Callee, Entry, Flags, Tmpl, DRAWS, PURE};
 use crate::bindings::ffi::op_hook::TensorIdent;
 use crate::cfg::ir::{Instr, Op};
 use crate::cfg::opcodes::*;
@@ -71,7 +74,10 @@ impl Call {
             };
             match row.writes {
                 rules::Write::None => {}
-                rules::Write::Operands(written) => {
+                rules::Write::Operands(written) | rules::Write::Draws(written) => {
+                    if matches!(row.writes, rules::Write::Draws(_)) {
+                        self.entry.flags.bits = (self.entry.flags.bits & !PURE) | DRAWS;
+                    }
                     let mut writes = Vec::new();
                     for w in written {
                         let Some(p) = place(w.at) else { return Err(format!("its row says it writes operand {}, which this call does not hand it in that place", w.at)) };

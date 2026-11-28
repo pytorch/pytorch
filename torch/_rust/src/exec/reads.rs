@@ -959,6 +959,13 @@ impl Group {
     fn empty(&self) -> bool {
         self.items.is_empty() && self.whole.is_none() && self.len.is_none() && !self.late
     }
+
+    // The length read first, or that of what was read whole, and how many
+    // writes the run had recorded then.
+    fn measured(&self) -> Option<(isize, usize)> {
+        let per = if self.kind == Holder::Dict { 2 } else { 1 };
+        self.len.map(|n| (n, self.len_after)).or_else(|| self.whole.as_ref().map(|w| ((w.items.len() / per) as isize, w.after)))
+    }
 }
 
 impl Class {
@@ -1206,10 +1213,7 @@ impl Trace {
         }
         let (n, after) = (size(holder, kind), self.wrote.len());
         let g = self.group(holder, kind);
-        // The length read first, or that of what was read whole, and when.
-        let per = if kind == Holder::Dict { 2 } else { 1 };
-        let first = g.len.map(|n| (n, g.len_after)).or_else(|| g.whole.as_ref().map(|w| ((w.items.len() / per) as isize, w.after)));
-        match first {
+        match g.measured() {
             None => {
                 g.len = Some(n);
                 g.len_after = after;
@@ -1942,6 +1946,14 @@ pub unsafe fn attr(obj: *mut PyObject, name: *mut PyObject, value: *mut PyObject
 // What obj's class has under `name` decided what ran (a guard's check).
 pub unsafe fn class_of(obj: *mut PyObject, name: *mut PyObject) {
     with(|t| t.typed(obj, name));
+}
+
+// What the class of obj has under `name` decided how a store into obj is
+// carried out (writes.rs), whichever object of the class obj is. Unlike
+// class_of this holds no reference to obj: an object the run makes and lets
+// go of dies where it died before there was this read.
+pub unsafe fn class_has(obj: *mut PyObject, name: *mut PyObject) {
+    with(|t| t.looked(ffi::Py_TYPE(obj), name));
 }
 
 // obj is of the class it has now, by identity, whatever that class is. For
@@ -3380,6 +3392,27 @@ pub unsafe fn global_found(globals: *mut PyObject, builtins: *mut PyObject, name
 pub unsafe fn pinned(value: *mut PyObject) -> bool {
     let is = |i: &Item| i.want == Want::Is && i.value.as_ref().is_some_and(|v| v.is(value));
     standing().is_ok() && !value.is_null() && TRACE.with_borrow(|t| t.as_ref().is_some_and(|t| t.entries.groups.iter().any(|g| g.items.iter().any(is))))
+}
+
+// The length of the dict, list or set `holder` was read (a truth test): how
+// many items it holds now, if an entry stands for that: the length the run
+// first read of it (or what it held when it was first read whole), with
+// what the run's own recorded writes since added, is what it holds. None:
+// no such entry (a container the run made, one measured only after the run
+// changed it, one whose length is not what the entry and the writes make).
+pub unsafe fn length_found(holder: *mut PyObject) -> Option<isize> {
+    // (What was read of a container the run made is no entry when the run
+    // is over: region_reads.)
+    if standing().is_err() || holder.is_null() || super::made::is(holder) {
+        return None;
+    }
+    TRACE.with_borrow(|t| {
+        let t = t.as_ref()?;
+        let g = &t.entries.groups[*t.group_of.get(&(holder as usize))?];
+        let (was, at) = g.measured().filter(|_| !g.late)?;
+        let now = was + t.wrote.grew(holder, at);
+        (now == size(holder, g.kind)).then_some(now)
+    })
 }
 
 // ---- The recorder's reads as the checks of its list ---------------------------

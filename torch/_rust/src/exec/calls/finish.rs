@@ -13,7 +13,8 @@
 //     run made for the exit, an object no read leads to) is a reason: the
 //     list has no recipe for it;
 //   - a list is run (validated here, armed for later arrivals) only if
-//     every entry's row says it only computes, the witness of none
+//     every entry's row says it only computes (no entry writes, none draws
+//     from a random generator), the witness of none
 //     disagreed, no operator ran outside the entries, and an output is a
 //     result. The reasons do not gate it: a partial list is validated too,
 //     and "equal" on one run never makes it the body. A list that was not
@@ -30,7 +31,7 @@ use super::origins::{class_text, plain_tensor, Origin, Origins};
 use super::outs::Out;
 use super::record::Rec;
 use super::shadow::{self, Shadow};
-use super::{witness, Callee, List, Tmpl};
+use super::{witness, Callee, List, Tmpl, DRAWS};
 use crate::exec::pin::Pin;
 use crate::exec::tensor_key::TensorKey;
 
@@ -213,7 +214,8 @@ impl Rec {
             };
             let py = Python::assume_attached();
             self.shadow.text = (0..list.entries.len()).map(|k| list.line(py, k)).collect::<Vec<_>>().join("\n");
-            let unsafe_to_run = [(!self.pure, "an entry writes"), (self.disagreed, "the witness of an entry disagrees with what the entry says"), (results == 0, "no output of the block is a result of an entry"), (outer.flags().opaque || outside > 0, "operators ran that are under no entry, or could not be seen"), (Origins::lost(), "a death was not noted")];
+            let draws = list.entries.iter().any(|e| e.flags.bits & DRAWS != 0);
+            let unsafe_to_run = [(draws, "an entry draws"), (!self.pure, "an entry writes"), (self.disagreed, "the witness of an entry disagrees with what the entry says"), (results == 0, "no output of the block is a result of an entry"), (outer.flags().opaque || outside > 0, "operators ran that are under no entry, or could not be seen"), (Origins::lost(), "a death was not noted")];
             self.shadow.validated = match unsafe_to_run.iter().find(|(so, _)| *so) {
                 Some((_, why)) => format!("not validated: {why}"),
                 None => shadow::validate(py, &list, &self.origins.inputs, &self.origins.pins, &made.iter().map(|o| o.as_ptr()).collect::<Vec<_>>()),

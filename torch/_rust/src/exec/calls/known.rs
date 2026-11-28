@@ -56,11 +56,35 @@
 //         exact str or int: the executor's hook records the item
 //         (reads::subscript); asked: item_found. (It has no row: the
 //         instruction stays a reason, its result is known.)
+//       a truth test of an exact dict, list, set or OrderedDict that is
+//         itself known as an object: its row says the result is a function
+//         of the container's length and records that length before the
+//         test runs (reads::truth); asked: length_found;
 //     NOT in the list, with why: LoadDeref (no row says its result is what
 //     the read of the cell found; a cell the body's frame made is another
 //     on every call, and reads of it make the reads no check: reading.rs);
-//     an attribute of a module or an object, a method, a truth test, a
-//     membership test (no row says what the lookup resolves to);
+//     an attribute of a module or an object, a method, a membership test
+//     (no row says what the lookup resolves to);
+//   - TRUTH, what the row of a truth test (ToBool, UNARY_NOT) says its
+//     result is known by, taken from the row's columns and from nothing
+//     else (Truth::of; a row of any other shape is a reason, as for every
+//     kind that is not listed):
+//       reads nothing, result Lit (an immutable): a function of the
+//         operand's value: known when the operand is known, in either kind;
+//       reads Identity, result Lit (an exact tuple, frozenset or range,
+//         which holds what it held when it was made): known when it is
+//         known WHICH OBJECT the operand is. (A tuple known by its value
+//         only, an input the list is specialized on, has the same length
+//         on a later arrival too; the row's word is identity, and the
+//         row's word is what is taken);
+//       reads Length, result Lit: the kind of FOUND above;
+//       reads Class, enters the frame it names, result Return (a Python
+//         __bool__): the frame is the instruction's (frames.rs asks the
+//         table which function), its own instructions are asked about one
+//         at a time, and what it returns is NOT known: no origin is carried
+//         out of a frame.
+//     The result of a truth test is a bool: one object per value, so a
+//     known one is known as an object;
 //   - NEUTRAL names every kind of instruction that a recorded run may run
 //     with nothing said in the list: the kinds that only move values inside
 //     the run's own frame or make a new exact container of their operands.
@@ -89,6 +113,37 @@ pub enum Found {
     Pinned,
     // The dict and the key.
     Item(*mut PyObject, *mut PyObject),
+    // The container a truth test measured, and whether the test is the
+    // negation (UNARY_NOT).
+    Length(*mut PyObject, bool),
+}
+
+// What the row of a truth test says its result is known by (see TRUTH at
+// the head of the file).
+#[derive(Clone, Copy, PartialEq)]
+pub enum Truth {
+    // The operand, known at least in this kind.
+    Operand(Kind),
+    // The length of the operand, as a recorded read found it.
+    Length,
+    // What the function the row names returns.
+    Returned,
+}
+
+impl Truth {
+    // None: `op` is no truth test, or its row is of no listed shape.
+    pub fn of(op: &Op, row: &Row) -> Option<Truth> {
+        if !matches!(op, Op::ToBool | Op::Bytecode { opcode: UNARY_NOT, .. }) {
+            return None;
+        }
+        match (row.reads, row.result, row.enters) {
+            ([], Res::Lit, Enters::Never) => Some(Truth::Operand(Kind::Value)),
+            ([Read::Identity], Res::Lit, Enters::Never) => Some(Truth::Operand(Kind::Object)),
+            ([Read::Length], Res::Lit, Enters::Never) => Some(Truth::Length),
+            ([Read::Class], Res::Return, Enters::Named) => Some(Truth::Returned),
+            _ => None,
+        }
+    }
 }
 
 // How a value is known (see the head of the file). Object implies Value.
@@ -121,6 +176,11 @@ impl Found {
             match (op, row) {
                 (Op::LoadGlobal(n), Some(row)) if row.result == Res::Pinned && matches!(row.reads, [Read::Global]) => Some(Found::Global(tr_frame_globals(site.frame), tr_frame_builtins(site.frame), *site.names.add(*n as usize))),
                 (_, Some(row)) if row.result == Res::Pinned && row.before.is_some() => Some(Found::Pinned),
+                // Which container it is: a length read of another says nothing.
+                (_, Some(row)) if Truth::of(op, row) == Some(Truth::Length) => {
+                    let container = *site.operands.first()?;
+                    (!container.is_null() && known.object((depth, args.first()?.0))).then_some(Found::Length(container, !matches!(op, Op::ToBool)))
+                }
                 (Op::Bytecode { opcode: BINARY_SUBSCR, .. }, None) => {
                     let (dict, key) = (*site.operands.first()?, *site.operands.get(1)?);
                     let plain = !dict.is_null() && !key.is_null() && ffi::PyDict_CheckExact(dict) != 0 && (ffi::PyUnicode_CheckExact(key) != 0 || ffi::PyLong_CheckExact(key) != 0);
@@ -141,6 +201,8 @@ impl Found {
                 Found::Global(globals, builtins, name) => reads::global_found(globals, builtins, name, result)?,
                 Found::Pinned => reads::pinned(result).then_some(true)?,
                 Found::Item(dict, key) => reads::item_found(dict, key, result)?,
+                // By value: the answer is what that length makes it.
+                Found::Length(container, not) => reads::length_found(container).filter(|n| (result == ffi::Py_True()) == ((*n != 0) != not)).map(|_| false)?,
             };
             Some(Kind::of(result, by_identity))
         }

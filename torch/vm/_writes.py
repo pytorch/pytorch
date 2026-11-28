@@ -76,17 +76,47 @@ def callbacks(tracer) -> list[Any]:
     ]
 
 
-def _stored(how: str, target, key):
-    """What the write ``how`` left in ``target`` under ``key``, read without
-    running code of the target's class."""
-    try:
-        if how == "__setattr__":
-            return object.__getattribute__(target, key)
-        if isinstance(target, dict):
-            return dict.get(target, key, _NOTHING)
-        return list.__getitem__(target, key)
-    except (AttributeError, IndexError, TypeError):
-        return _NOTHING
+def _put_plain(how, target, values, real) -> None:
+    """Gives every place of ``target`` that holds what the write ``how``
+    put there (``values``, with a stand-in of the tracer's in them) the
+    plain value (``real``). The place is found by the object it holds,
+    in a list never by the index of the write: a later write of the run
+    may have moved it (a deletion in front of it) or replaced it, and a
+    place that holds something else is left. Runs no code of the target's
+    class. A way of writing this does not know is an error: it
+    would leave a stand-in in the program's state."""
+    name = how.__name__
+    if name in ("__delattr__", "__delitem__", "discard"):
+        # Nothing was put anywhere.
+        return
+    if name == "add":
+        # The member itself: one that a later write took out is not there.
+        if set.__contains__(target, values[0]):
+            set.discard(target, values[0])
+            set.add(target, real[0])
+    elif name in ("append", "__setitem__") and isinstance(target, list):
+        value, plain = (
+            (values[0], real[0]) if name == "append" else (values[1], real[1])
+        )
+        for i in range(list.__len__(target)):
+            if list.__getitem__(target, i) is value:
+                list.__setitem__(target, i, plain)
+    elif name == "__setitem__" and isinstance(target, dict):
+        # (The recorder takes a write under a key whose lookup is C code
+        # alone: exec/keys.rs.)
+        if dict.get(target, values[0], _NOTHING) is values[1]:
+            how(target, *real)
+    elif name == "__setattr__":
+        # An instance's dict, or a slot (which reads as an AttributeError
+        # while it holds nothing).
+        try:
+            there = object.__getattribute__(target, values[0])
+        except AttributeError:
+            there = _NOTHING
+        if there is values[1]:
+            how(target, *real)
+    else:
+        raise AssertionError(f"a write by {name} of a {type(target).__name__}")
 
 
 def _built(values, old) -> set[int]:
@@ -132,20 +162,8 @@ class Written:
         self.recorded = recorded
         for how, target, values in recorded:
             real = [plain(v) for v in values]
-            if all(r is v for r, v in zip(real, values)):
-                continue
-            name = getattr(how, "__name__", "")
-            if name == "append":
-                for i, v in enumerate(target):
-                    if v is values[0]:
-                        target[i] = real[0]
-            elif name == "add":
-                if values[0] in target:
-                    target.discard(values[0])
-                    target.add(real[0])
-            elif name in ("__setattr__", "__setitem__"):
-                if _stored(name, target, values[0]) is values[1]:
-                    how(target, *real)
+            if any(r is not v for r, v in zip(real, values)):
+                _put_plain(how, target, values, real)
 
     def plan(self, outs, args, old, objects, describe, shared, made) -> None:
         """Fills ``templates``, ``text`` and ``pinned`` (appending what the
@@ -201,7 +219,7 @@ class Written:
         guarantees), or None. ``reads``: what the trace read
         (torch._rust.Reads), or None for a trace that read nothing;
         ``given``: the region's arguments, which were there before the run."""
-        for target in self.pinned if reads is not None else ():
-            if not reads.knows(target, given):
+        for target in self.pinned:
+            if reads is None or not reads.knows(target, given):
                 return f"it writes to a {type(target).__name__} that nothing it read leads to"
         return None

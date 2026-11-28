@@ -42,8 +42,23 @@
 //     in the write's place, and the trace is given up even if the body's
 //     code caught it. No write this module could not record is ever made
 //     with the tracer's stand-ins in it.
+//   - ONE answer to "is this call a write a region takes": writer(). What
+//     it names, write_call records or refuses, case by case; there is no
+//     third outcome. An answer of "none" (token 0) is given only where it
+//     is said why the call writes nothing a region has to make again: the
+//     target is the trace's own, code of the target's class runs in its
+//     place, or C code is certain to raise.
+//   - Before it records a store, a deletion or a membership change it asks
+//     the dict or the set about the key (an undo puts back what was there)
+//     only where that runs no code of the program (keys.rs); under any
+//     other key the trace is refused, but for a dict or a set the run
+//     made itself, whose write is then not recorded: it needs no undo and
+//     no region makes it again. (The read of a defaultdict, which records
+//     no write, asks as the reads do: load_item.)
 //   - undo() takes back what the trace wrote, the last write first, for the
-//     executor to run the code again as it is.
+//     executor to run the code again as it is; a write that cannot be taken
+//     back is an error raised in the program, never a run over what is
+//     half taken back.
 //   - replay() builds what every write takes before it makes the first: a
 //     region that raises before then has written nothing.
 //
@@ -72,6 +87,7 @@ use pyo3::prelude::*;
 use super::ffi::*;
 use super::reads;
 use super::covered;
+use super::keys;
 use super::made;
 use super::wrote::How;
 use super::{Prepared, types};
@@ -201,7 +217,7 @@ pub(super) fn taken_op(code: usize, ins: &Instr) -> bool {
 // __delattr__, list.append, set.add and discard, and the item stores and
 // deletions of dicts and lists.
 pub(super) fn taken_call(code: usize, origin: u32, f: &Bound<'_, PyAny>) -> bool {
-    wanted(code, origin) && unsafe { writer(f.as_ptr()) }
+    wanted(code, origin) && unsafe { writer(f.as_ptr()) }.is_some()
 }
 
 // As taken and taken_call, for the change instr v makes to a container (see
@@ -231,7 +247,7 @@ pub(super) fn view(py: Python<'_>, prep: &Prepared, code: usize, v: ValueId) -> 
         Op::Call { .. } => {
             let callees = unsafe { &*prep.callees.get() };
             let f = callees.get(&v).and_then(|c| c.get(py))?;
-            return unsafe { writer(f.as_ptr()) }.then(|| ("call", taken_call(code, ins.origin, &f)));
+            return unsafe { writer(f.as_ptr()) }.map(|_| ("call", taken_call(code, ins.origin, &f)));
         }
         _ => return None,
     };
@@ -254,6 +270,12 @@ struct Writers {
     list_insert: Py<PyAny>,
     set_add: Py<PyAny>,
     set_discard: Py<PyAny>,
+    // collections.defaultdict, and the descriptor of its default_factory.
+    defaultdict: Py<PyAny>,
+    default_factory: Py<PyAny>,
+    // The names a class is asked for to find how a store is carried out:
+    // of an attribute, of its deletion, of an item, of its deletion.
+    asked: [Py<PyAny>; 4],
 }
 
 fn writers() -> &'static Writers {
@@ -273,24 +295,75 @@ fn writers() -> &'static Writers {
             list_insert: at(c"list.__dict__['insert']"),
             set_add: at(c"set.__dict__['add']"),
             set_discard: at(c"set.__dict__['discard']"),
+            defaultdict: at(c"__import__('collections').defaultdict"),
+            default_factory: at(c"__import__('collections').defaultdict.__dict__['default_factory']"),
+            asked: [at(c"'__setattr__'"), at(c"'__delattr__'"), at(c"'__setitem__'"), at(c"'__delitem__'")],
         }
     })
 }
 
-// Whether `f` (a method of a builtin type, as its class has it) is C code
-// whose call is a write that write_call records.
-unsafe fn writer(f: *mut PyObject) -> bool {
-    let w = writers();
-    dict_slot(f) || [&w.setattr, &w.delattr, &w.list_setitem, &w.list_delitem, &w.list_append, &w.set_add, &w.set_discard].iter().any(|x| x.as_ptr() == f)
+// What a call of C code writes, for the calls this module records.
+#[derive(Clone, Copy, PartialEq)]
+enum Writer {
+    SetAttr,
+    DelAttr,
+    DictSet,
+    DictDel,
+    ListSet,
+    ListDel,
+    Append,
+    Add,
+    Discard,
 }
 
-// Whether descriptor `f` is the __setitem__ or __delitem__ of dict or of a C
-// subclass of it (an OrderedDict's).
-unsafe fn dict_slot(f: *mut PyObject) -> bool {
+impl Writer {
+    // As a refusal names the call, and how many arguments it takes with
+    // the target.
+    fn shape(self) -> (&'static str, usize) {
+        match self {
+            Writer::SetAttr => ("object.__setattr__", 3),
+            Writer::DelAttr => ("object.__delattr__", 2),
+            Writer::DictSet => ("a dict's __setitem__", 3),
+            Writer::DictDel => ("a dict's __delitem__", 2),
+            Writer::ListSet => ("list.__setitem__", 3),
+            Writer::ListDel => ("list.__delitem__", 2),
+            Writer::Append => ("list.append", 2),
+            Writer::Add => ("set.add", 2),
+            Writer::Discard => ("set.discard", 2),
+        }
+    }
+}
+
+// THE answer to "is a call of `f` (a method of a builtin type, as its class
+// has it) a write a region takes with it", for the optimizer (taken_call,
+// view), for the executor (writes_call) and for the recorder: what it names
+// here, write_call records or refuses. None: it is no write of this module.
+unsafe fn writer(f: *mut PyObject) -> Option<Writer> {
+    let w = writers();
+    let named = [
+        (&w.setattr, Writer::SetAttr),
+        (&w.delattr, Writer::DelAttr),
+        (&w.list_setitem, Writer::ListSet),
+        (&w.list_delitem, Writer::ListDel),
+        (&w.list_append, Writer::Append),
+        (&w.set_add, Writer::Add),
+        (&w.set_discard, Writer::Discard),
+    ];
+    named.iter().find(|(x, _)| x.as_ptr() == f).map(|(_, what)| *what).or_else(|| dict_slot(f))
+}
+
+// The __setitem__ or __delitem__ of dict or of a C subclass of it (an
+// OrderedDict's), if descriptor `f` is one.
+unsafe fn dict_slot(f: *mut PyObject) -> Option<Writer> {
     let tp = ffi::Py_TYPE(f);
-    (tp == &raw mut ffi::PyWrapperDescr_Type || tp == &raw mut ffi::PyMethodDescr_Type)
-        && ffi::PyType_IsSubtype((*(f as *mut ffi::PyDescrObject)).d_type, &raw mut ffi::PyDict_Type) != 0
-        && matches!(reads::text(tr_descr_name(f)).as_str(), "__setitem__" | "__delitem__")
+    if (tp != &raw mut ffi::PyWrapperDescr_Type && tp != &raw mut ffi::PyMethodDescr_Type) || ffi::PyType_IsSubtype((*(f as *mut ffi::PyDescrObject)).d_type, &raw mut ffi::PyDict_Type) == 0 {
+        return None;
+    }
+    match reads::text(tr_descr_name(f)).as_str() {
+        "__setitem__" => Some(Writer::DictSet),
+        "__delitem__" => Some(Writer::DictDel),
+        _ => None,
+    }
 }
 
 // ---- Recording, while the body is traced ---------------------------------
@@ -309,6 +382,9 @@ thread_local! {
     // The writes of the trace on this thread, in order: from begin() until
     // _region_writes takes them or undo() takes them back.
     static WRITES: RefCell<Vec<Write>> = const { RefCell::new(Vec::new()) };
+    // The first error of a write that could not be taken back, until the
+    // executor raises it (undo).
+    static NOT_UNDONE: RefCell<Option<PyErr>> = const { RefCell::new(None) };
 }
 
 // A token of a write recorded before it is made: 0 for none; REFUSED for a
@@ -321,6 +397,7 @@ pub fn begin() {
     // Looked up here, outside the executor: not a read of the body's.
     writers();
     WRITES.with_borrow_mut(|w| w.clear());
+    NOT_UNDONE.set(None);
 }
 
 fn recording() -> bool {
@@ -367,7 +444,9 @@ pub fn done(token: Token, ok: bool) {
 // stored there, else the target), `how`: as an item of it or as a slot.
 unsafe fn store(holder: *mut PyObject, how: How, target: *mut PyObject, key: *mut PyObject, value: *mut PyObject, old: *mut PyObject, set: (&Py<PyAny>, &Py<PyAny>), delete: (&Py<PyAny>, &Py<PyAny>)) -> Token {
     if value.is_null() && old.is_null() {
-        // It raises.
+        // A deletion of what is not there raises, in C: the holder was
+        // asked under a key whose lookup is C code (see askable), and the
+        // deletion makes the same lookup.
         return 0;
     }
     let token = if value.is_null() {
@@ -381,8 +460,22 @@ unsafe fn store(holder: *mut PyObject, how: How, target: *mut PyObject, key: *mu
     token
 }
 
+// Why this module does not ask `holder` (a dict or a set) what it has under
+// `key`: the lookup would run code of the program (keys.rs). None: it is C
+// code that reads the key and the holder's keys alone.
+unsafe fn unaskable(holder: *mut PyObject, key: *mut PyObject) -> Option<String> {
+    if !keys::plain(key) {
+        Some(format!("under a {}, whose hash or comparison is code of its class", reads::type_name(key)))
+    } else if !keys::holds_plain(holder) {
+        Some("that holds a key whose hash or comparison is code of its class".into())
+    } else {
+        None
+    }
+}
+
 // `obj.name = value` (value null: `del obj.name`) is about to run; `generic`:
-// as object.__setattr__ does it, whatever obj's class defines.
+// as object.__setattr__ does it, whatever obj's class defines. `name` is an
+// exact str (a code object's name, or see write_call).
 pub unsafe fn store_attr(obj: *mut PyObject, name: *mut PyObject, value: *mut PyObject, generic: bool) -> Token {
     if !recording() {
         return 0;
@@ -390,6 +483,15 @@ pub unsafe fn store_attr(obj: *mut PyObject, name: *mut PyObject, value: *mut Py
     let del = value.is_null();
     let w = writers();
     let (set, delete) = ((&w.setattr, &w.setattr), (&w.delattr, &w.delattr));
+    // How the store is carried out is decided by what obj's class has under
+    // the name, and (but for object.__setattr__ itself) under __setattr__:
+    // both are reads, so that a region makes the write again only for a
+    // class that still carries it out this way. (Reads of the class, which
+    // hold nothing of obj.)
+    if !generic {
+        reads::class_has(obj, w.asked[del as usize].as_ptr());
+    }
+    reads::class_has(obj, name);
     match tr_store_attr_kind(ffi::Py_TYPE(obj), name, generic as std::ffi::c_int, del as std::ffi::c_int) {
         // Python code of the class runs: its stores are what happens.
         0 => 0,
@@ -398,6 +500,9 @@ pub unsafe fn store_attr(obj: *mut PyObject, name: *mut PyObject, value: *mut Py
             let d = reads::instance_dict(obj);
             if d.is_null() {
                 return refused(format!("stores .{} of a {} that has no __dict__", reads::text(name), reads::type_name(obj)));
+            }
+            if let Some(why) = unaskable(d, name) {
+                return refused(format!("{} .{} of a {} whose __dict__ is one {why}", if del { "deletes" } else { "stores" }, reads::text(name), reads::type_name(obj)));
             }
             if del {
                 // A delete raises unless the name is there.
@@ -419,7 +524,8 @@ pub unsafe fn store_attr(obj: *mut PyObject, name: *mut PyObject, value: *mut Py
 }
 
 // `container[key] = value` (value null: `del container[key]`) is about to
-// run, by `how` if a C method was called for it.
+// run, by `how` if a C method was called for it (then no code of the
+// container's class runs, whatever the class defines).
 pub unsafe fn store_item(container: *mut PyObject, key: *mut PyObject, value: *mut PyObject, how: Option<*mut PyObject>) -> Token {
     if !recording() || reads::tensor(container) || reads::owned(container) {
         return 0;
@@ -427,6 +533,11 @@ pub unsafe fn store_item(container: *mut PyObject, key: *mut PyObject, value: *m
     let w = writers();
     let del = value.is_null();
     let py = Python::assume_attached();
+    // Whether code of the container's class runs for the instruction is
+    // decided by what the class has under __setitem__ (__delitem__): a read.
+    if how.is_none() {
+        reads::class_has(container, w.asked[2 + del as usize].as_ptr());
+    }
     // A C subclass of dict (an OrderedDict) stores by its own slot.
     let slot = if how.is_none() && ffi::PyDict_Check(container) != 0 && ffi::PyDict_CheckExact(container) == 0 && tr_python_setitem(ffi::Py_TYPE(container), del as std::ffi::c_int) == 0 {
         let name = pyo3::types::PyString::intern(py, if del { "__delitem__" } else { "__setitem__" });
@@ -438,6 +549,15 @@ pub unsafe fn store_item(container: *mut PyObject, key: *mut PyObject, value: *m
     let how = how.or(slot);
     let called = how.map(|f| Py::<PyAny>::from_borrowed_ptr(py, f));
     if ffi::PyDict_Check(container) != 0 && (how.is_some() || ffi::PyDict_CheckExact(container) != 0) {
+        if let Some(why) = unaskable(container, key) {
+            // A dict the run made is the run's own, as it was before there
+            // were writes to record: nothing of it is taken back, and what
+            // a region hands on of it, it builds as the run left it.
+            if made::is(container) {
+                return 0;
+            }
+            return refused(format!("{} an item of a {} {why}", if del { "deletes" } else { "stores" }, reads::type_name(container)));
+        }
         if del {
             reads::needs_key(container, key);
         }
@@ -454,7 +574,8 @@ pub unsafe fn store_item(container: *mut PyObject, key: *mut PyObject, value: *m
             i += n;
         }
         if i < 0 || i >= n {
-            // It raises.
+            // It raises, in C: the index (an exact int; one too large for
+            // a Py_ssize_t left -1 and an error) is not one of this list.
             ffi::PyErr_Clear();
             return 0;
         }
@@ -497,16 +618,26 @@ pub unsafe fn load_item(container: *mut PyObject, key: *mut PyObject) -> Token {
     if !recording() || ffi::PyDict_Check(container) == 0 || ffi::PyDict_CheckExact(container) != 0 || reads::owned(container) || made::is(container) {
         return 0;
     }
-    static DEFAULTDICT: OnceLock<usize> = OnceLock::new();
-    let py = Python::assume_attached();
-    let class = *DEFAULTDICT.get_or_init(|| py.import("collections").and_then(|m| m.getattr("defaultdict")).map_or(0, |c| c.as_ptr() as usize));
-    if class == 0 || ffi::PyObject_TypeCheck(container, class as *mut ffi::PyTypeObject) == 0 || !reads::dict_get(container, key).is_null() {
+    let w = writers();
+    let class = w.defaultdict.as_ptr() as *mut ffi::PyTypeObject;
+    if ffi::PyObject_TypeCheck(container, class) == 0 {
         return 0;
     }
-    let factory = ffi::PyObject_GetAttrString(container, c"default_factory".as_ptr());
+    // (Asked as the reads ask a dict about a key, under any key: a
+    // defaultdict keyed by tensors is read inside regions. This records no
+    // write and holds no record while it asks.)
+    if !reads::dict_get(container, key).is_null() {
+        return 0;
+    }
+    // The factory as defaultdict's own descriptor gives it (C code that
+    // reads the field), whatever a subclass has under the name.
+    let Some(get) = (*ffi::Py_TYPE(w.default_factory.as_ptr())).tp_descr_get else {
+        return refused(format!("reads a key a {} does not have, and its factory cannot be asked for", reads::type_name(container)));
+    };
+    let factory = get(w.default_factory.as_ptr(), container, class as *mut PyObject);
     if factory.is_null() {
         ffi::PyErr_Clear();
-        return 0;
+        return refused(format!("reads a key a {} does not have, and its factory cannot be asked for", reads::type_name(container)));
     }
     ffi::Py_DECREF(factory);
     if factory != ffi::Py_None() {
@@ -515,71 +646,115 @@ pub unsafe fn load_item(container: *mut PyObject, key: *mut PyObject) -> Token {
     0
 }
 
-// The builtin `callee` is about to be called with these positional
-// arguments: a write a region makes again, if it is one of writers().
-pub unsafe fn write_call(callee: *mut PyObject, args: &[*mut PyObject]) -> Token {
+// The builtin `callee`, which writer() says is a write, is about to be
+// called with these positional arguments (`keywords`: and with keyword
+// arguments): the write is recorded, or the trace is refused in its place.
+// Every case that is neither says why the call writes nothing a region has
+// to make again.
+pub unsafe fn write_call(callee: *mut PyObject, args: &[*mut PyObject], keywords: bool) -> Token {
     if !recording() {
         return 0;
     }
     let w = writers();
     let f = tr_bound_function(callee);
+    let Some(what) = writer(f) else {
+        return refused("calls C code its trace took for a write and cannot record".into());
+    };
     let me = tr_builtin_self(callee);
     let mut all = vec![];
     if !me.is_null() {
         all.push(me);
     }
     all.extend_from_slice(args);
-    let is = |x: &Py<PyAny>| x.as_ptr() == f;
-    let named = |name: &str| dict_slot(f) && reads::text(tr_descr_name(f)) == name;
-    if is(&w.setattr) && all.len() == 3 && ffi::PyUnicode_CheckExact(all[1]) != 0 {
-        store_attr(all[0], all[1], all[2], true)
-    } else if is(&w.delattr) && all.len() == 2 && ffi::PyUnicode_CheckExact(all[1]) != 0 {
-        store_attr(all[0], all[1], std::ptr::null_mut(), true)
-    } else if all.len() == 3 && ffi::PyDict_Check(all[0]) != 0 && named("__setitem__") {
-        // dict's, or that of a C subclass of it (an OrderedDict's).
-        store_item(all[0], all[1], all[2], Some(f))
-    } else if all.len() == 2 && ffi::PyDict_Check(all[0]) != 0 && named("__delitem__") {
-        store_item(all[0], all[1], std::ptr::null_mut(), Some(f))
-    } else if is(&w.list_setitem) && all.len() == 3 {
-        store_item(all[0], all[1], all[2], None)
-    } else if is(&w.list_delitem) && all.len() == 2 {
-        store_item(all[0], all[1], std::ptr::null_mut(), None)
-    } else if all.first().is_some_and(|x| reads::owned(*x)) {
-        0
-    } else if is(&w.list_append) && all.len() == 2 && ffi::PyList_Check(all[0]) != 0 {
-        changes(all[0]);
-        let token = push(&w.list_append, all[0], &[all[1]], Some((&w.list_pop, vec![])));
-        reads::wrote(all[0], token, How::Append, std::ptr::null_mut(), all[1], 1);
-        token
-    } else if (is(&w.set_add) || is(&w.set_discard)) && all.len() == 2 && ffi::PySet_Check(all[0]) != 0 {
-        let had = ffi::PySet_Contains(all[0], all[1]);
-        if had < 0 {
-            // It raises.
-            ffi::PyErr_Clear();
-            return 0;
+    let (name, takes) = what.shape();
+    // None of them takes a keyword, or another number of arguments: the
+    // call raises. It is not made under the trace.
+    if keywords || all.len() != takes {
+        return refused(format!("calls {name} with {} arguments{}", all.len(), if keywords { " and keywords" } else { "" }));
+    }
+    let of = |x: *mut PyObject| reads::type_name(x);
+    match what {
+        Writer::SetAttr | Writer::DelAttr => {
+            // A name of a subclass of str is a key of the instance's dict
+            // with a hash and a comparison of its own; any other name raises.
+            if ffi::PyUnicode_CheckExact(all[1]) == 0 {
+                return refused(format!("calls {name} with a name that is a {}, not a str", of(all[1])));
+            }
+            store_attr(all[0], all[1], if what == Writer::SetAttr { all[2] } else { std::ptr::null_mut() }, true)
         }
-        changes(all[0]);
-        let add = is(&w.set_add);
-        let undo = if add == (had == 1) { None } else if add { Some((&w.set_discard, vec![all[1]])) } else { Some((&w.set_add, vec![all[1]])) };
-        let token = push(if add { &w.set_add } else { &w.set_discard }, all[0], &[all[1]], undo);
-        let grew = if add == (had == 1) { 0 } else if add { 1 } else { -1 };
-        reads::wrote(all[0], token, if add { How::Add } else { How::Discard }, std::ptr::null_mut(), all[1], grew);
-        token
-    } else {
-        0
+        Writer::DictSet | Writer::DictDel => {
+            // dict's, or that of a C subclass of it (an OrderedDict's).
+            if ffi::PyDict_Check(all[0]) == 0 {
+                return refused(format!("calls {name} on a {}", of(all[0])));
+            }
+            store_item(all[0], all[1], if what == Writer::DictSet { all[2] } else { std::ptr::null_mut() }, Some(f))
+        }
+        Writer::ListSet | Writer::ListDel => {
+            if ffi::PyList_Check(all[0]) == 0 {
+                return refused(format!("calls {name} on a {}", of(all[0])));
+            }
+            // (By `f`: the list's own code does not run, whatever its class
+            // defines; store_item records it for an exact list alone.)
+            store_item(all[0], all[1], if what == Writer::ListSet { all[2] } else { std::ptr::null_mut() }, Some(f))
+        }
+        Writer::Append => {
+            if ffi::PyList_Check(all[0]) == 0 {
+                return refused(format!("calls {name} on a {}", of(all[0])));
+            }
+            // The trace's own record (make_fx's): no write of the body's.
+            if reads::owned(all[0]) {
+                return 0;
+            }
+            changes(all[0]);
+            let token = push(&w.list_append, all[0], &[all[1]], Some((&w.list_pop, vec![])));
+            reads::wrote(all[0], token, How::Append, std::ptr::null_mut(), all[1], 1);
+            token
+        }
+        Writer::Add | Writer::Discard => {
+            if ffi::PySet_Check(all[0]) == 0 {
+                return refused(format!("calls {name} on a {}", of(all[0])));
+            }
+            // The trace's own record (make_fx's): no write of the body's.
+            if reads::owned(all[0]) {
+                return 0;
+            }
+            if let Some(why) = unaskable(all[0], all[1]) {
+                // A set the run made is the run's own (see store_item).
+                if made::is(all[0]) {
+                    return 0;
+                }
+                return refused(format!("changes a {} {why}", of(all[0])));
+            }
+            let had = ffi::PySet_Contains(all[0], all[1]);
+            if had < 0 {
+                ffi::PyErr_Clear();
+                return refused(format!("changes a {} that cannot say whether it has the member", of(all[0])));
+            }
+            changes(all[0]);
+            let add = what == Writer::Add;
+            let undo = if add == (had == 1) { None } else if add { Some((&w.set_discard, vec![all[1]])) } else { Some((&w.set_add, vec![all[1]])) };
+            let token = push(if add { &w.set_add } else { &w.set_discard }, all[0], &[all[1]], undo);
+            let grew = if add == (had == 1) { 0 } else if add { 1 } else { -1 };
+            reads::wrote(all[0], token, if add { How::Add } else { How::Discard }, std::ptr::null_mut(), all[1], grew);
+            token
+        }
     }
 }
 
-// Whether a call of the builtin `callee` is one write_call looks at.
+// Whether a call of the builtin `callee` is a write (see writer): the
+// executor then asks write_call before it makes the call.
 pub unsafe fn writes_call(callee: *mut PyObject) -> bool {
-    writer(tr_bound_function(callee))
+    writer(tr_bound_function(callee)).is_some()
 }
 
 // ---- When the body is over -------------------------------------------------
 
-// The trace gave up and its code is run again: what it wrote is taken back,
-// the last write first.
-pub fn undo() {
+// The trace gave up: what it wrote is taken back, the last write first.
+// Each undo is C code on what the write left; it can fail only where
+// something that is no recorded write changed the target since (a callee
+// the pass list declares pure that writes, a finalizer). Every write is
+// tried, whatever one before it did; the first failure is kept for undo().
+pub(super) fn take_back() {
     let ws = WRITES.take();
     let py = unsafe { Python::assume_attached() };
     for w in ws.into_iter().rev() {
@@ -587,10 +762,30 @@ pub fn undo() {
             let mut all = vec![w.target.clone_ref(py)];
             all.extend(args);
             if let Err(err) = pyo3::types::PyTuple::new(py, all).and_then(|t| f.bind(py).call1(t)) {
-                err.write_unraisable(py, None);
+                NOT_UNDONE.with_borrow_mut(|first| {
+                    first.get_or_insert(err);
+                });
             }
         }
     }
+}
+
+// The trace gave up and the executor is about to run its code again: what
+// it wrote is taken back (take_back; the tracer may have asked for that
+// already, see _region_given_up). Err: a write could not be taken back.
+// What the trace wrote to is then neither as the call found it nor as the
+// code leaves it, and the code is not run again over it: the error is
+// raised in the program, in the place of the code.
+pub fn undo() -> PyResult<()> {
+    take_back();
+    let Some(cause) = NOT_UNDONE.take() else { return Ok(()) };
+    let py = unsafe { Python::assume_attached() };
+    let err = pyo3::exceptions::PyRuntimeError::new_err(
+        "torch.vm: a trace was given up and what it had written could not be taken back, so the objects it wrote to are not as the call found them. \
+         Something that is no store of the traced code changed one of them meanwhile (a function the pass list declares pure that writes, a finalizer).",
+    );
+    err.set_cause(py, Some(cause));
+    Err(err)
 }
 
 // The body is over and its run stands: nothing is taken back from here on,
@@ -658,8 +853,12 @@ pub fn _region_writes(py: Python<'_>) -> PyResult<Vec<(Py<PyAny>, Py<PyAny>, Py<
 // exception set if it cannot). What each write takes is built before the
 // first is made, so that a region that raises until then has written
 // nothing; the writes themselves are C code that does not raise (what each
-// needs was read by the trace, and is as it was). False with an exception
-// set if something failed.
+// needs was read by the trace, and is as it was: the class of the target and
+// how it carries the store out, that a key to delete is there, that an index
+// is one of the list, and a key is hashed and compared by C code). Should one
+// raise all the same, the writes before it stay made and those behind it are
+// not made, as the store raising in the code leaves it. False with an
+// exception set if something failed.
 pub unsafe fn replay(writes: &[RegionOut], objects: &[Py<PyAny>], make: &dyn Fn(&RegionOut) -> *mut PyObject) -> bool {
     let mut calls: Vec<(*mut PyObject, *mut PyObject)> = Vec::with_capacity(writes.len());
     let mut ok = true;
