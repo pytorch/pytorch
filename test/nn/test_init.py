@@ -508,6 +508,17 @@ class TestNNInit(TestCase):
                 tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3)
                 init.sparse_(tensor, sparsity)
 
+    def test_sparse_sparsity_out_of_range(self):
+        for sparsity in [-0.2, 1.2]:
+            with self.assertRaisesRegex(ValueError, "sparsity"):
+                init.sparse_(torch.empty(3, 5), sparsity)
+
+    def test_sparse_sparsity_boundaries(self):
+        init.sparse_(torch.empty(3, 5), 0.0)
+        tensor = torch.empty(3, 5)
+        init.sparse_(tensor, 1.0)
+        self.assertTrue(tensor.eq(0).all())
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_sparse_default_std(self):
         for use_random_std in [True, False]:
