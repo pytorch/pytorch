@@ -1572,6 +1572,10 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         return "use_training_state"
 
 
+torch.fx.has_side_effect(torch.nn.attention._enter_sdpa_kernel)
+torch.fx.has_side_effect(torch.nn.attention._exit_sdpa_kernel)
+
+
 class SDPAKernelVariable(ContextWrappingVariable):
     """represents torch.nn.attention.sdpa_kernel"""
 
@@ -1605,44 +1609,14 @@ class SDPAKernelVariable(ContextWrappingVariable):
         )
         self.set_priority = set_priority
 
-    @staticmethod
-    def _backends_to_nodes(
-        tx: "InstructionTranslatorBase",
-        backends: list[Any],
-    ) -> list[Any]:
-        # convert to/from string in order to bake the backend into FX graph
-        nodes = [
-            tx.output.create_node(
-                "call_function",
-                torch.nn.attention._backend_from_string,
-                (backend.name,),
-                {},
-            )
-            for backend in backends
-        ]
-        return nodes
-
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        prev_state = torch.nn.attention._save_sdpa_kernel(self.set_priority)
-        self.set_cleanup_hook(
-            tx, lambda: torch.nn.attention._restore_sdpa_kernel(prev_state)
-        )
-        torch.nn.attention._sdpa_kernel(
-            self.target_values, set_priority=self.set_priority
-        )
-        # SDP state is not guarded, so capture the state to restore at runtime.
+        # Constant arguments let split_module re-enter the context in each partition.
+        names = tuple(backend.name for backend in self.target_values)
+        args = (names, bool(self.set_priority))
+        ctx = torch.nn.attention._enter_sdpa_kernel(*args)
+        self.set_cleanup_hook(tx, lambda: torch.nn.attention._exit_sdpa_kernel(ctx))
         self.proxy = tx.output.create_node(
-            "call_function",
-            torch.nn.attention._save_sdpa_kernel,
-            (bool(self.set_priority),),
-            {},
-        )
-        arg = self._backends_to_nodes(tx, self.target_values)
-        tx.output.create_node(
-            "call_function",
-            torch.nn.attention._sdpa_kernel,
-            (arg, bool(self.set_priority)),
-            {},
+            "call_function", torch.nn.attention._enter_sdpa_kernel, args, {}
         )
         return variables.ConstantVariable.create(None)
 
@@ -1651,10 +1625,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
     ) -> VariableTracker:
         self.cleanup_assert()
         tx.output.create_node(
-            "call_function",
-            torch.nn.attention._restore_sdpa_kernel,
-            (self.proxy,),
-            {},
+            "call_function", torch.nn.attention._exit_sdpa_kernel, (self.proxy,), {}
         )
         return variables.ConstantVariable.create(None)
 

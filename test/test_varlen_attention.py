@@ -32,6 +32,7 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
     HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     setSdpaBackendsToDefaultFinally,
@@ -528,8 +529,13 @@ class TestVarlenAttentionDevice(NNTestCase):
                 backend = fn(torch.zeros((), device=device)).item()
                 self.assertEqual(backend, expected.value)
 
+
+@instantiate_parametrized_tests
+class TestVarlenAttentionGeneric(NNTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("deprioritized", [False, True])
-    def test_cudnn_deprioritized_env(self, device, deprioritized):
+    def test_cudnn_deprioritized_env(self, deprioritized):
         # The variable is read once per process, so check it in a fresh process.
         code = "from torch.nn.attention import varlen; print(varlen._get_sdp_priority_order()[0])"
         env = os.environ | {"TORCH_CUDNN_SDPA_DEPRIORITIZED": str(int(deprioritized))}

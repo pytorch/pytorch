@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     run_tests,
     decorateIf,
+    instantiate_parametrized_tests,
     parametrize,
     freeze_rng_state,
     TEST_WITH_CROSSREF,
@@ -409,6 +410,7 @@ def make_strided_sdpa_input(
     return tensor.detach().requires_grad_(requires_grad)
 
 
+@instantiate_parametrized_tests
 class TestTransformersGeneric(NNTestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -417,7 +419,9 @@ class TestTransformersGeneric(NNTestCase):
             self.assertEqual(pickle.loads(pickle.dumps(backend)), backend)
 
     def test_sdp_priority_order_bounds_and_reset(self):
-        self.addCleanup(torch._C._reset_sdp_priority_order)
+        state = torch.nn.attention._save_sdpa_kernel(set_priority=True)
+        self.addCleanup(torch.nn.attention._restore_sdpa_kernel, state)
+        torch._C._reset_sdp_priority_order()
         default_order = torch._C._get_sdp_priority_order()
         with self.assertRaisesRegex(RuntimeError, "expected at most"):
             torch._C._set_sdp_priority_order(list(range(len(default_order) + 1)))
@@ -426,9 +430,22 @@ class TestTransformersGeneric(NNTestCase):
         torch._C._set_sdp_priority_order(reversed_order)
         self.assertTrue(torch._C._has_user_sdp_priority_order())
         self.assertEqual(torch._C._get_sdp_priority_order(), reversed_order)
+        torch._C._set_sdp_priority_order(reversed_order[-1:])
+        expected = reversed_order[-1:] + reversed_order[:-1]
+        self.assertEqual(torch._C._get_sdp_priority_order(), expected)
         torch._C._reset_sdp_priority_order()
         self.assertFalse(torch._C._has_user_sdp_priority_order())
         self.assertEqual(torch._C._get_sdp_priority_order(), default_order)
+
+    @parametrize("backend", [SDPBackend.MATH.value, SDPBackend.ERROR.value, 2**32])
+    def test_sdp_priority_order_rejects_invalid_backend(self, backend):
+        error = "duplicate" if backend == SDPBackend.MATH.value else "out of range"
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION, set_priority=True):
+            order = torch._C._get_sdp_priority_order()
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch._C._set_sdp_priority_order([SDPBackend.MATH.value, backend])
+            self.assertTrue(torch._C._has_user_sdp_priority_order())
+            self.assertEqual(torch._C._get_sdp_priority_order(), order)
 
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
     def test_encoder_padding_and_src_mask_bool(self):
@@ -5954,36 +5971,33 @@ class TestSDPAAccelerator(NNTestCase):
         reset_order = torch._C._get_sdp_priority_order()
         self.assertEqual(default_order, reset_order, "expected SDPA context manager to reset priority order.")
 
-    @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention is not supported on this system")
     def test_fused_sdp_priority_order_first_call_not_clobbered(self, device):
-        # Verify in a fresh process that the first CUDA SDPA call inside
-        # sdpa_kernel(..., set_priority=True) is not overwritten by lazy
-        # platform-default priority initialization, and that the platform
-        # default still applies after exiting the context manager.
-        # The default order differs from the initial one only if it prefers cuDNN.
-        if not _cudnn_sdp_preferred_by_default():
-            self.skipTest("cuDNN is not the default SDPA backend on this system")
+        if torch.device(device).type == "xpu":
+            preferred, default = SDPBackend.MATH, SDPBackend.OVERRIDEABLE
+        elif (
+            PLATFORM_SUPPORTS_FLASH_ATTENTION
+            and PLATFORM_SUPPORTS_CUDNN_ATTENTION
+            and _cudnn_sdp_preferred_by_default()
+        ):
+            preferred, default = SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION
+        else:
+            self.skipTest("Requires XPU or CUDA with flash support and cuDNN priority")
 
-        import subprocess
-
-        script = """
+        # A fresh process ensures that SDPA has not initialized the platform default.
+        script = f"""
 import torch
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
-q = torch.randn(2, 4, 128, 64, dtype=torch.float16, device="cuda")
-with sdpa_kernel([SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION], set_priority=True):
+q = torch.randn(2, 4, 128, 64, dtype=torch.float16, device="{device}")
+backends = [SDPBackend.{preferred.name}, SDPBackend.{default.name}]
+with sdpa_kernel(backends, set_priority=True):
     inside = torch._fused_sdp_choice(q, q, q)
 outside = torch._fused_sdp_choice(q, q, q)
-print(f"{inside},{outside}")
+print(inside, outside)
 """
-        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
-        inside_backend, outside_backend = (
-            int(v) for v in result.stdout.strip().splitlines()[-1].split(",")
-        )
-        self.assertEqual(inside_backend, SDPBackend.FLASH_ATTENTION.value)
-        self.assertEqual(outside_backend, SDPBackend.CUDNN_ATTENTION.value)
+        stdout, stderr = self.run_process_no_exception(script)
+        expected = f"{preferred.value} {default.value}"
+        self.assertEqual(stdout.decode().strip(), expected, stderr.decode())
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)

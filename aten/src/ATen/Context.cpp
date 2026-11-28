@@ -290,14 +290,31 @@ std::array<at::SDPBackend, at::num_sdp_backends> buildSDPPriorityOrder(
     const std::array<at::SDPBackend, at::num_sdp_backends>& base) {
   TORCH_CHECK(
       order.size() <= base.size(),
-      "setSDPPriorityOrder expected at most ",
+      "Invalid SDP priority order (expected at most ",
       base.size(),
-      " backends, but got ",
+      " backends, got ",
       order.size(),
-      ".");
+      ").");
   auto result = base;
-  for (const auto i : c10::irange(order.size())) {
-    result[i] = static_cast<at::SDPBackend>(order[i]);
+  auto next = result.begin();
+  std::array<bool, at::num_sdp_backends> seen{};
+  for (const auto id : order) {
+    TORCH_CHECK(
+        id >= 0 && id < at::num_sdp_backends,
+        "SDP backend ID ",
+        id,
+        " is out of range [0, ",
+        at::num_sdp_backends,
+        ").");
+    TORCH_CHECK(
+        !seen[id], "SDP priority order has a duplicate backend ID ", id, ".");
+    seen[id] = true;
+    *next++ = static_cast<at::SDPBackend>(id);
+  }
+  for (const auto backend : base) {
+    if (!seen[static_cast<int>(backend)]) {
+      *next++ = backend;
+    }
   }
   return result;
 }

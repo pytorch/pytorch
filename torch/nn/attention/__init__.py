@@ -92,17 +92,11 @@ def _cur_sdpa_kernel_backends(with_priority: bool = False):
 
 
 def _sdpa_kernel(backends: Iterable, set_priority: bool = False) -> None:
+    if set_priority:
+        torch._C._set_sdp_priority_order([int(backend) for backend in backends])
     for name, val in _backend_names.items():
         enabled = getattr(SDPBackend, val) in backends
         getattr(torch._C, f"_set_sdp_use_{name}")(enabled)
-    if set_priority:
-        # backends should be a unique list
-        user_priority = [int(backend) for backend in backends]
-        previous_priority = torch._C._get_sdp_priority_order()
-        for backend in previous_priority:
-            if backend not in user_priority:
-                user_priority.append(int(backend))
-        torch._C._set_sdp_priority_order(user_priority)
 
 
 def _save_sdpa_kernel(
@@ -162,9 +156,8 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
             scaled_dot_product_attention(...)
 
     This context manager can be used to select which backend to use for scaled dot product attention.
-    Upon exiting the context manager, the previously enabled backends are restored. If ``set_priority=True``, the
-    priority order also reverts to the one set by an enclosing ``sdpa_kernel(..., set_priority=True)``, or to the
-    platform default if there is none.
+    On exit, the context manager restores the previously enabled backends. If ``set_priority=True``,
+    it also restores the priority order that was active on entry.
 
     .. note:: The enabled backends and the priority order are process-wide, so they also affect other threads.
     """
@@ -184,6 +177,19 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
         yield {}
     finally:
         _restore_sdpa_kernel(previous_state)
+
+
+def _enter_sdpa_kernel(
+    backend_names: tuple[str, ...], set_priority: bool
+) -> contextlib.AbstractContextManager:
+    backends = [_backend_from_string(name) for name in backend_names]
+    ctx = sdpa_kernel(backends, set_priority)
+    ctx.__enter__()
+    return ctx
+
+
+def _exit_sdpa_kernel(ctx: contextlib.AbstractContextManager) -> None:
+    ctx.__exit__(None, None, None)
 
 
 # variadic versions of sdpa_kernel for dynamo to use while reconstructing

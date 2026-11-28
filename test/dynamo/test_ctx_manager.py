@@ -2078,7 +2078,46 @@ class GraphModule(torch.nn.Module):
         opt_f = torch.compile(f, backend="eager")
         opt_f(torch.randn(2, 2))
 
+    def _save_sdpa_state(self):
+        state = torch.nn.attention._save_sdpa_kernel(set_priority=True)
+        self.addCleanup(torch.nn.attention._restore_sdpa_kernel, state)
+        return state
+
+    def test_sdpa_kernel_ctx_manager_ddp_split(self):
+        from torch._dynamo.backends.distributed import DDPOptimizer
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        initial_state = self._save_sdpa_state()
+        first, second = torch.nn.Linear(4, 4), torch.nn.Linear(4, 4)
+        backends = [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION]
+        priority = [int(b) for b in backends]
+
+        @torch._dynamo.allow_in_graph
+        def check_state(x):
+            enabled = torch.nn.attention._cur_sdpa_kernel_backends()
+            self.assertEqual(enabled, [SDPBackend.MATH])
+            self.assertTrue(torch._C._has_user_sdp_priority_order())
+            self.assertEqual(torch._C._get_sdp_priority_order()[:2], priority)
+            return x.sin()
+
+        def f(x):
+            with sdpa_kernel(backends, set_priority=True), sdpa_kernel(SDPBackend.MATH):
+                return check_state(first(x)), check_state(second(x))
+
+        # Independent buckets can be compiled in either order.
+        ddp = DDPOptimizer(
+            bucket_bytes_cap=1,
+            first_bucket_cap=1,
+            backend_compile_fn=torch._dynamo.lookup_backend("aot_eager"),
+        )
+        opt_f = torch.compile(f, backend=ddp.compile_fn, fullgraph=True)
+        x = torch.randn(2, 4)
+        self.assertEqual(opt_f(x), f(x))
+        self.assertGreater(len(ddp.buckets), 1)
+        self.assertEqual(torch.nn.attention._save_sdpa_kernel(True), initial_state)
+
     def test_sdpa_kernel_ctx_manager_set_priority_graph_break(self):
+        self._save_sdpa_state()
         backends = [
             torch.nn.attention.SDPBackend.MATH,
             torch.nn.attention.SDPBackend.FLASH_ATTENTION,
@@ -2109,6 +2148,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(torch._C._get_sdp_priority_order(), default_priority)
 
     def test_sdpa_kernel_ctx_manager_set_priority_nested_and_duplicate(self):
+        self._save_sdpa_state()
         outer = [
             torch.nn.attention.SDPBackend.FLASH_ATTENTION,
             torch.nn.attention.SDPBackend.FLASH_ATTENTION,
@@ -2153,7 +2193,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(torch._C._get_sdp_priority_order(), default_priority)
 
     def test_sdpa_kernel_ctx_manager_restores_runtime_state(self):
-        self.addCleanup(torch._C._reset_sdp_priority_order)
+        self._save_sdpa_state()
         backends = [torch.nn.attention.SDPBackend.MATH]
         outer = [torch.nn.attention.SDPBackend.FLASH_ATTENTION, *backends]
         default_backends = set(torch.nn.attention._cur_sdpa_kernel_backends())

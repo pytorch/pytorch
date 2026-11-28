@@ -292,10 +292,11 @@ class TORCH_API Context {
   // setSDPPriorityOrder sets the user order, which stays active until
   // resetSDPPriorityOrder. A backend that installs its own default must call
   // setDefaultSDPPriorityOrder, which does not change the user order.
-  // If order has fewer than num_sdp_backends entries, setSDPPriorityOrder
-  // keeps the remaining positions of the effective order, and
-  // setDefaultSDPPriorityOrder keeps those of the default order.
-  // sDPPriorityOrder returns the effective order.
+  // Both setters require distinct, valid backend IDs. They append omitted
+  // backends in their previous relative order. setSDPPriorityOrder uses the
+  // effective order and setDefaultSDPPriorityOrder uses the default order.
+  // sDPPriorityOrder returns the effective order. If hasUserSetSDPPriorityOrder
+  // was false on entry, restore that state with resetSDPPriorityOrder.
   void setSDPPriorityOrder(const std::vector<int64_t>& order);
   void setDefaultSDPPriorityOrder(const std::vector<int64_t>& order);
   void resetSDPPriorityOrder();
