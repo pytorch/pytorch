@@ -3814,8 +3814,17 @@ def _written_args(fx_node, args, kwargs, fake_kwargs):
     """The arguments that fx_node's op writes; all of them for an unknown op."""
     target = fx_node.target
     if (info := get_user_kernel_hop_info(target, "mutation")) is not None:
-        names = info.get_mutated_tensors(kwargs, fake_kwargs["kwargs"])
-        return [kwargs["kwargs"][name] for name in names]
+        kernel_args = kwargs["kwargs"]
+        fake_kernel_args = fake_kwargs["kwargs"]
+        # Eager metadata can omit scalar arguments used in mutation analysis.
+        analysis_args = {
+            name: arg
+            if fake_kernel_args[name] is None and not isinstance(arg, ir.IRNode)
+            else fake_kernel_args[name]
+            for name, arg in kernel_args.items()
+        }
+        names = info.get_mutated_tensors(kwargs, analysis_args)
+        return [kernel_args[name] for name in names]
     if isinstance(target, torch._ops.OpOverload):
         # A collective's lowering can write tensors that its schema does not mark,
         # like the irecv tensors of batch_p2p_ops (_c10d_functional_autograd too).
