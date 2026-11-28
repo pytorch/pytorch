@@ -5485,7 +5485,7 @@ class DefaultDictVariable(ConstDictVariable):
             raise AssertionError(
                 f"Expected ConstDictVariable, got {type(left)}: {left}"
             )
-        items = left.items
+        items = left.materialize_keys()
 
         new = tx.output.side_effects.track_new_user_defined_object(
             VariableTracker.build(tx, dict),
@@ -5650,7 +5650,7 @@ class UserDefinedFrozensetVariable(UserDefinedObjectVariable, FrozensetVariable)
             if init_args:
                 arg = init_args[0]
                 if isinstance(arg, (SetVariable, ConstDictVariable)):
-                    items = list(arg.items.keys())
+                    items = list(arg.materialize_keys())
                 else:
                     items = unpack_iterable(tx, arg)
             else:

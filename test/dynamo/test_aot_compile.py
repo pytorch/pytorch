@@ -1121,13 +1121,18 @@ _UNLIFTED_GLOBAL_FUNCTIONS = {
 }
 
 
+def identity_child_hook(module, args, output):
+    return output
+
+
 class ParentWithChildModule(torch.nn.Module):
-    # Calling a CHILD module routes through nn.Module.__call__, whose hook-dict
+    # Calling a child with a registered hook routes through dispatch, whose hook-dict
     # guards are rooted at Dynamo's synthetic __import_torch_dot_nn_... alias.
     # That is the shape a reloaded artifact could not resolve.
     def __init__(self):
         super().__init__()
         self.lin = torch.nn.Linear(4, 4)
+        self.lin.register_forward_hook(identity_child_hook)
 
     def forward(self, x):
         # Dynamo records a __builtins_dict___N key on every artifact; referring
@@ -1137,7 +1142,7 @@ class ParentWithChildModule(torch.nn.Module):
         # the negative test_load_seeds_exactly_the_recorded_globals pins;
         # keep_builtin_guards keeps the guard instead, which is how the seeding
         # itself gets pinned.
-        if not isinstance(x, torch.Tensor):
+        if not len(x.shape):
             raise TypeError(type(x))
         return self.lin(x)
 
@@ -6906,6 +6911,12 @@ from user code:
             options={"guard_filter_fn": keep_global_guards},
         )
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        artifacts = model.forward.compiled_results[0]._artifacts
+        state = load_guards_state(artifacts.guards_state)
+        recorded = set(state.output_graph.global_scope)
+        recorded.discard(state.output_graph.name_of_builtins_dict_key_in_fglobals)
+        self.assertTrue(recorded)
+        self.assertLessEqual(recorded, artifacts.runtime_env.import_sources.keys())
         data = model._save_aot_compiled_module()
         torch._dynamo.reset()
         self._hide_leaked_dynamo_globals()
