@@ -325,9 +325,10 @@ def _impl_graphsafe_rng(op, *args, rng_state=None, **kwargs):
     current_state = generator.graphsafe_get_state()
 
     generator.graphsafe_set_state(rng_state)
-    out = op(*args, **kwargs)
-    generator.graphsafe_set_state(current_state)
-    return out
+    try:
+        return op(*args, **kwargs)
+    finally:
+        generator.graphsafe_set_state(current_state)
 
 
 def register_graphsafe_run_with_rng_state_op():
@@ -404,8 +405,9 @@ def register_graphsafe_rng_dispatch(dispatch_key: "DispatchKey") -> None:
     graphsafe_run_with_rng_state.py_impl(dispatch_key)(_impl_graphsafe_rng)
 
 
-# Register CUDA as a graphsafe RNG device by default
+# Register CUDA and XPU as graphsafe RNG devices by default
 register_graphsafe_rng_dispatch(DispatchKey.CUDA)
+register_graphsafe_rng_dispatch(DispatchKey.XPU)
 
 
 # Late-bind CustomClassBaseMeta as Generator's metaclass. This is done here

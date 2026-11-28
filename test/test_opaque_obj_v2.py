@@ -58,7 +58,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     preserves_device_selection,
-    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
@@ -4413,7 +4412,6 @@ class TestOpaqueGeneratorDevice(TestCase):
     setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
 
     @onlyAccelerator
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5200")
     def test_make_fx_with_generator(self, device):
         """make_fx should trace through Generator inputs as opaque values."""
         from torch._prims.rng_prims import graphsafe_run_with_rng_state
@@ -4473,6 +4471,26 @@ class TestOpaqueGeneratorDevice(TestCase):
         gen3 = torch.get_device_module(device_type).default_generators[0].clone_state()
         actual = gm0(q, k, v, gen3)
         self.assertEqual(actual, expected)
+
+    @onlyAccelerator
+    def test_graphsafe_rng_restores_generator_on_error(self, device):
+        from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+        device_type = torch.device(device).type
+        x = torch.ones(16, device=device, dtype=torch.int64)
+        gen = torch.get_device_module(device_type).default_generators[0]
+        self.addCleanup(gen.graphsafe_set_state, gen.graphsafe_get_state())
+        rng_state = gen.clone_state()
+        rng_state_offset = rng_state.get_offset()
+
+        with self.assertRaisesRegex(NotImplementedError, "not implemented for 'Long'"):
+            graphsafe_run_with_rng_state(
+                torch.ops.aten.rand_like.default, x, rng_state=rng_state
+            )
+
+        # Only the default generator's own state may advance after the failed call.
+        torch.rand(16, device=device)
+        self.assertEqual(rng_state.get_offset(), rng_state_offset)
 
     @onlyAccelerator
     def test_make_fx_randn_with_generator(self, device):
