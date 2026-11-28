@@ -4,7 +4,6 @@ import contextlib
 import copy
 import functools
 import itertools
-import unittest
 from collections import defaultdict
 from collections.abc import Iterable
 
@@ -31,12 +30,12 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
     FSDPTest,
-    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     MLPStack,
@@ -45,8 +44,8 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    HardwareClassification,
     run_tests,
-    TEST_HPU,
     wrapSwapTensorsTest,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -59,20 +58,17 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional
 
-from torch.testing._internal.common_fsdp import get_devtype
-
-
-device = torch.device(get_devtype())
-
 
 class TestReplicateForwardInputs(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     @skip_if_lt_x_gpu(1)
-    def test_root_move_forward_input_to_device(self):
-        device0 = torch.device(device.type, 0)
+    def test_root_move_forward_input_to_device(self, device):
+        device0 = torch.device(torch.device(device).type, 0)
 
         class ParamlessModule(nn.Module):
             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
@@ -97,15 +93,23 @@ class TestReplicateForwardInputs(FSDPTestMultiThread):
         model(x, ys)
 
 
+instantiate_device_type_tests(
+    TestReplicateForwardInputs, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 class TestReplicateRegisteredParams(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 4
 
     @skip_if_lt_x_gpu(1)
-    def test_param_registration_after_forward(self):
+    def test_param_registration_after_forward(self, device):
         """Tests the parameter registration after forward."""
-        device0 = torch.device(device.type, 0)
+        device_type = torch.device(device).type
+        device0 = torch.device(device_type, 0)
         # Single Replicate group
         torch.manual_seed(42)
         model = MLP(3, device0)
@@ -115,7 +119,7 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
             dist.broadcast(param, src=0)
         ref_model = copy.deepcopy(model)
         replicate(model)  # root only
-        inp = torch.randn((2, 3), device=device0.type)
+        inp = torch.randn((2, 3), device=device_type)
         self._assert_dtensor_params(model.parameters())
         self._assert_same_params(model.parameters(), ref_model.parameters())
         model(inp)
@@ -152,13 +156,14 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
         self._assert_same_params(model.parameters(), ref_model.parameters())
 
     @skip_if_lt_x_gpu(1)
-    def test_param_registration_after_backward(self):
+    def test_param_registration_after_backward(self, device):
         """Tests the parameter registration after backward."""
-        device0 = torch.device(device.type, 0)
+        device_type = torch.device(device).type
+        device0 = torch.device(device_type, 0)
         # Single Replicate group
         model = MLP(8, device0)
         replicate(model)  # root only
-        inp = torch.randn((2, 8), device=device0.type)
+        inp = torch.randn((2, 8), device=device_type)
         self._assert_dtensor_params(model.parameters())
         model(inp).sum().backward()
         self._assert_dtensor_params(model.parameters())
@@ -198,20 +203,28 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
             self.assertEqual(param, ref_param)
 
 
-class TestReplicateCastAfterInit(FSDPTestMultiThread):
+instantiate_device_type_tests(
+    TestReplicateRegisteredParams, globals(), except_for="cpu", allow_xpu=True
+)
+
+
+class TestReplicateCastAfterInitPrecision(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     @skip_if_lt_x_gpu(1)
     @wrapSwapTensorsTest(True)
-    def test_to_float64_after_init(self):
+    def test_to_float64_after_init(self, device):
         """Tests that the user can cast the module to float64 after init."""
+        device_type = torch.device(device).type
         # NOTE: Test fp64 instead of a lower precision dtype like bf16 for
         # better numerics. The important part is changing the dtype.
 
         torch.manual_seed(42)
-        mlp_dim, dtype = 4, torch.float64
+        mlp_dim, device, dtype = 4, torch.device(device_type), torch.float64
         model = MLP(mlp_dim, device=device)
         for param in model.parameters():
             dist.broadcast(param, src=0)
@@ -228,7 +241,7 @@ class TestReplicateCastAfterInit(FSDPTestMultiThread):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
         check_sharded_parity(self, ref_model, model)
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((2, mlp_dim), device=device.type, dtype=dtype)
+        inp = torch.randn((2, mlp_dim), device=device_type, dtype=dtype)
         for iter_idx in range(10):
             losses: list[torch.Tensor] = []
             for _model in (ref_model, model):
@@ -254,13 +267,20 @@ class TestReplicateCastAfterInit(FSDPTestMultiThread):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
 
 
+instantiate_device_type_tests(
+    TestReplicateCastAfterInitPrecision, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 class TestReplicate1DTrainingCore(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
-        return min(8, torch.get_device_module(device).device_count())
+        return min(8, torch.accelerator.device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_train_parity_single_group(self):
+    def test_train_parity_single_group(self, device):
         """
         Tests train parity with DDP for a single FSDP group when sharding
         parameters on dim-0.
@@ -274,20 +294,24 @@ class TestReplicate1DTrainingCore(FSDPTest):
                 ],
             },
             self._test_train_parity_single_group,
+            device=device,
         )
 
-    def _test_train_parity_single_group(self, lin_shapes: list[tuple[int, int]]):
+    def _test_train_parity_single_group(
+        self, lin_shapes: list[tuple[int, int]], *, device: str
+    ):
+        device_type = torch.device(device).type
         torch.manual_seed(42)
         model = nn.Sequential(
             nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
         )
-        ref_model = copy.deepcopy(model).to(device)
+        ref_model = copy.deepcopy(model).to(torch.device(device_type))
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         replicate(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
-        inp = (torch.randn((4, lin_shapes[0][0]), device=device.type),)
+        inp = (torch.randn((4, lin_shapes[0][0]), device=device_type),)
         for iter_idx in range(10):
             losses: list[torch.Tensor] = []
             for _model in (ref_model, model):
@@ -305,17 +329,179 @@ class TestReplicate1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "Sleep kernel not supported for HPU")
+    def test_multi_forward_module(self, device):
+        """
+        Tests parity when running a module that participates multiple
+        times in forward.
+        """
+
+        self._test_multi_forward_module(device=device)
+
+    def _test_multi_forward_module(self, *, device: str):
+        device_type = torch.device(device).type
+
+        class MultiForwardModule(nn.Module):
+            def __init__(self, device: torch.device):
+                super().__init__()
+                self.inner = nn.Linear(4, 4, device=device)
+                self.outer = nn.Linear(4, 5, device=device)
+
+            def forward(self, x):
+                i = self.inner(x)
+                j = self.inner(x)
+                return self.outer(i + j)
+
+        torch.manual_seed(42)
+        model = MultiForwardModule(device=device_type)
+        ref_model = copy.deepcopy(model).to(torch.device(device_type))
+
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        replicate(model.inner)
+        replicate(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn((32, 4), device=device_type)
+        for iter_idx in range(10):
+            losses: list[torch.Tensor] = []
+            for _model in (ref_model, model):
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+
+            for param in ref_model.parameters():
+                if param.grad is not None:
+                    dist.all_reduce(param.grad)
+                    param.grad.div_(self.world_size)
+
+            for _optim in (ref_optim, optim):
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                _optim.step()
+
+            self.assertEqual(losses[0], losses[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_non_root_forward_backward(self, device):
+        """
+        Tests running forward/backward through the root and then through a
+        non-root. The non-root needs to synchronize streams/queue the callback.
+        """
+        device_type = torch.device(device).type
+        torch.manual_seed(42)
+        lin_dim = 32
+        model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
+        ref_model = copy.deepcopy(model).to(torch.device(device_type))
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        for mlp in model:
+            replicate(mlp)
+        replicate(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn((8, lin_dim), device=device_type)
+
+        ref_root_loss = ref_model(inp).sum()
+        ref_root_loss.backward()
+        for param in ref_model.parameters():
+            dist.all_reduce(param.grad)
+            param.grad.detach().div_(self.world_size)
+        ref_optim.step()
+        ref_optim.zero_grad()
+        ref_nonroot_loss = ref_model[0](inp).sum()
+        ref_nonroot_loss.backward()
+        for param in ref_model.parameters():
+            if param.grad is not None:
+                dist.all_reduce(param.grad)
+                param.grad.detach().div_(self.world_size)
+        ref_optim.step()
+
+        root_loss = model(inp).sum()
+        root_loss.backward()
+        torch.get_device_module(device_type)._sleep(
+            int(100 * get_cycles_per_ms(device_type))
+        )
+        optim.step()
+        optim.zero_grad()
+        nonroot_loss = model[0](inp).sum()
+        nonroot_loss.backward()
+        optim.step()
+
+        self.assertEqual(ref_root_loss, root_loss)
+        self.assertEqual(ref_nonroot_loss, nonroot_loss)
+        self.assertEqual(ref_model(inp).sum(), model(inp).sum())
+
+    @skip_if_lt_x_gpu(2)
+    def test_explicit_prefetching(self, device):
+        device_type = torch.device(device).type
+        torch.manual_seed(42)
+        model_args = ModelArgs(n_layers=8, dropout_p=0.0)
+        model = Transformer(model_args)
+        ref_model = copy.deepcopy(model).to(torch.device(device_type))
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+
+        for layer in itertools.chain(model.layers, [model]):
+            replicate(layer)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        num_to_forward_prefetch = num_to_backward_prefetch = 2
+        for i, layer in enumerate(model.layers):
+            if i >= len(model.layers) - num_to_forward_prefetch:
+                break
+            layers_to_prefetch = [
+                model.layers[i + j] for j in range(1, num_to_forward_prefetch + 1)
+            ]
+            layer.set_modules_to_forward_prefetch(layers_to_prefetch)
+        for i, layer in enumerate(model.layers):
+            if i < num_to_backward_prefetch:
+                continue
+            layers_to_prefetch = [
+                model.layers[i - j] for j in range(1, num_to_backward_prefetch + 1)
+            ]
+            layer.set_modules_to_backward_prefetch(layers_to_prefetch)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 8), device=device_type)
+        for _ in range(10):
+            losses: list[torch.Tensor] = []
+
+            for _model in (ref_model, model):
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+
+            for param in ref_model.parameters():
+                if param.grad is not None:
+                    dist.all_reduce(param.grad)
+                    param.grad.div_(self.world_size)
+
+            for _optim in (ref_optim, optim):
+                _optim.zero_grad()
+                _optim.step()
+
+            self.assertEqual(losses[0], losses[1])
+
+
+instantiate_device_type_tests(
+    TestReplicate1DTrainingCore, globals(), except_for="cpu", allow_xpu=True
+)
+
+
+class TestReplicate1DTrainingCoreNoHpu(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @property
+    def world_size(self) -> int:
+        return min(8, torch.accelerator.device_count())
+
+    @skip_if_lt_x_gpu(2)
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
-    def test_train_parity_multi_groups(self):
+    def test_train_parity_multi_groups(self, device):
         """
         Tests train parity against DDP when using multiple parameter groups for
         communication (for communication and computation overlap plus memory
         reduction).
         """
+        device_type = torch.device(device).type
         self.run_subtests(
             {
-                "test_device_type": [device.type],
+                "test_device_type": [device_type],
                 "offload_policy": [OffloadPolicy()],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
@@ -324,22 +510,23 @@ class TestReplicate1DTrainingCore(FSDPTest):
                 "unshard_async_op": [False],
             },
             self._test_train_parity_multi_group,
+            device=device,
         )
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "sleep kernel not supported on HPU")
-    def test_train_parity_multi_group_cpu_offload_eager(self):
+    def test_train_parity_multi_group_cpu_offload_eager(self, device):
         """
         Tests train parity when using multiple parameter groups for
         communication and CPU offloading.
         """
+        device_type = torch.device(device).type
         self.run_subtests(
             {
                 "offload_policy": [
                     CPUOffloadPolicy(pin_memory=True),
                     CPUOffloadPolicy(pin_memory=False),
                 ],
-                "test_device_type": [device.type],
+                "test_device_type": [device_type],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
@@ -347,6 +534,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
                 "unshard_async_op": [False],
             },
             self._test_train_parity_multi_group,
+            device=device,
         )
 
     def _test_train_parity_multi_group(
@@ -358,8 +546,11 @@ class TestReplicate1DTrainingCore(FSDPTest):
         delay_before_reduce_scatter: bool,
         delay_before_optim: bool,
         unshard_async_op: bool,
+        *,
+        device: str,
     ):
         # Only test individual delays or all four delays to save test time
+        device_type = torch.device(device).type
         if (
             delay_after_forward
             + delay_before_all_gather
@@ -368,8 +559,6 @@ class TestReplicate1DTrainingCore(FSDPTest):
             in (2, 3)
         ):
             return
-        if test_device_type not in ("cuda", "hpu", "xpu", "cpu"):
-            raise AssertionError(f"Unexpected device type: {test_device_type}")
         torch.manual_seed(42)
         vocab_size = 1024
         model_args = ModelArgs(
@@ -380,7 +569,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
             dropout_p=0,
         )
         model = Transformer(model_args)
-        ref_model = copy.deepcopy(model).to(device)
+        ref_model = copy.deepcopy(model).to(torch.device(device_type))
 
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         mesh = init_device_mesh(
@@ -406,14 +595,14 @@ class TestReplicate1DTrainingCore(FSDPTest):
         orig_reduce_scatter = dist.reduce_scatter_single
 
         def delayed_all_gather(*args, **kwargs):
-            torch.get_device_module(device)._sleep(
-                int(delay_in_ms * get_cycles_per_ms(device.type))
+            torch.get_device_module(device_type)._sleep(
+                int(delay_in_ms * get_cycles_per_ms(device_type))
             )
             return orig_all_gather(*args, **kwargs)
 
         def delayed_reduce_scatter(*args, **kwargs):
-            torch.get_device_module(device)._sleep(
-                int(delay_in_ms * get_cycles_per_ms(device.type))
+            torch.get_device_module(device_type)._sleep(
+                int(delay_in_ms * get_cycles_per_ms(device_type))
             )
             return orig_reduce_scatter(*args, **kwargs)
 
@@ -430,18 +619,18 @@ class TestReplicate1DTrainingCore(FSDPTest):
         )
         with patch_all_gather_ctx, patch_reduce_scatter_ctx:
             for iter_idx in range(10):
-                inp = torch.randint(0, vocab_size, (3, 64), device=device)
+                inp = torch.randint(0, vocab_size, (3, 64), device=device_type)
                 losses: list[torch.Tensor] = []
                 for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                     losses.append(_model(inp).sum())
                     if _model is model and delay_after_forward:
-                        torch.get_device_module(device)._sleep(
-                            int(delay_in_ms * get_cycles_per_ms(device.type))
+                        torch.get_device_module(device_type)._sleep(
+                            int(delay_in_ms * get_cycles_per_ms(device_type))
                         )
                     losses[-1].backward()
                     if _model is model and delay_before_optim:
-                        torch.get_device_module(device)._sleep(
-                            int(delay_in_ms * get_cycles_per_ms(device.type))
+                        torch.get_device_module(device_type)._sleep(
+                            int(delay_in_ms * get_cycles_per_ms(device_type))
                         )
 
                 for param in ref_model.parameters():
@@ -455,157 +644,12 @@ class TestReplicate1DTrainingCore(FSDPTest):
                 self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    def test_non_root_forward_backward(self):
-        """
-        Tests running forward/backward through the root and then through a
-        non-root. The non-root needs to synchronize streams/queue the callback.
-        """
-        torch.manual_seed(42)
-        lin_dim = 32
-        model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
-        ref_model = copy.deepcopy(model).to(device)
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        for mlp in model:
-            replicate(mlp)
-        replicate(model)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
-        torch.manual_seed(42 + self.rank)
-        inp = torch.randn((8, lin_dim), device=device)
-
-        ref_root_loss = ref_model(inp).sum()
-        ref_root_loss.backward()
-        for param in ref_model.parameters():
-            dist.all_reduce(param.grad)
-            param.grad.detach().div_(self.world_size)
-        ref_optim.step()
-        ref_optim.zero_grad()
-        ref_nonroot_loss = ref_model[0](inp).sum()
-        ref_nonroot_loss.backward()
-        for param in ref_model.parameters():
-            if param.grad is not None:
-                dist.all_reduce(param.grad)
-                param.grad.detach().div_(self.world_size)
-        ref_optim.step()
-
-        root_loss = model(inp).sum()
-        root_loss.backward()
-        torch.get_device_module(device)._sleep(
-            int(100 * get_cycles_per_ms(device.type))
-        )
-        optim.step()
-        optim.zero_grad()
-        nonroot_loss = model[0](inp).sum()
-        nonroot_loss.backward()
-        optim.step()
-
-        self.assertEqual(ref_root_loss, root_loss)
-        self.assertEqual(ref_nonroot_loss, nonroot_loss)
-        self.assertEqual(ref_model(inp).sum(), model(inp).sum())
-
-    @skip_if_lt_x_gpu(2)
-    def test_multi_forward_module(self):
-        """
-        Tests parity when running a module that participates multiple
-        times in forward.
-        """
-
-        self._test_multi_forward_module()
-
-    def _test_multi_forward_module(self):
-        class MultiForwardModule(nn.Module):
-            def __init__(self, device: torch.device):
-                super().__init__()
-                self.inner = nn.Linear(4, 4, device=device)
-                self.outer = nn.Linear(4, 5, device=device)
-
-            def forward(self, x):
-                i = self.inner(x)
-                j = self.inner(x)
-                return self.outer(i + j)
-
-        torch.manual_seed(42)
-        model = MultiForwardModule(device=device.type)
-        ref_model = copy.deepcopy(model).to(device)
-
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        replicate(model.inner)
-        replicate(model)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-
-        torch.manual_seed(42 + self.rank)
-        inp = torch.randn((32, 4), device=device.type)
-        for iter_idx in range(10):
-            losses: list[torch.Tensor] = []
-            for _model in (ref_model, model):
-                losses.append(_model(inp).sum())
-                losses[-1].backward()
-
-            for param in ref_model.parameters():
-                if param.grad is not None:
-                    dist.all_reduce(param.grad)
-                    param.grad.div_(self.world_size)
-
-            for _optim in (ref_optim, optim):
-                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                _optim.step()
-
-            self.assertEqual(losses[0], losses[1])
-
-    @skip_if_lt_x_gpu(2)
-    def test_explicit_prefetching(self):
-        torch.manual_seed(42)
-        model_args = ModelArgs(n_layers=8, dropout_p=0.0)
-        model = Transformer(model_args)
-        ref_model = copy.deepcopy(model).to(device)
-        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
-
-        for layer in itertools.chain(model.layers, [model]):
-            replicate(layer)
-        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
-
-        num_to_forward_prefetch = num_to_backward_prefetch = 2
-        for i, layer in enumerate(model.layers):
-            if i >= len(model.layers) - num_to_forward_prefetch:
-                break
-            layers_to_prefetch = [
-                model.layers[i + j] for j in range(1, num_to_forward_prefetch + 1)
-            ]
-            layer.set_modules_to_forward_prefetch(layers_to_prefetch)
-        for i, layer in enumerate(model.layers):
-            if i < num_to_backward_prefetch:
-                continue
-            layers_to_prefetch = [
-                model.layers[i - j] for j in range(1, num_to_backward_prefetch + 1)
-            ]
-            layer.set_modules_to_backward_prefetch(layers_to_prefetch)
-
-        torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 8), device=device.type)
-        for _ in range(10):
-            losses: list[torch.Tensor] = []
-
-            for _model in (ref_model, model):
-                losses.append(_model(inp).sum())
-                losses[-1].backward()
-
-            for param in ref_model.parameters():
-                if param.grad is not None:
-                    dist.all_reduce(param.grad)
-                    param.grad.div_(self.world_size)
-
-            for _optim in (ref_optim, optim):
-                _optim.zero_grad()
-                _optim.step()
-
-            self.assertEqual(losses[0], losses[1])
-
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
-    def test_post_optim_event(self):
+    def test_post_optim_event(self, device):
+        device_type = torch.device(device).type
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
         model = Transformer(model_args)
-        ref_model = copy.deepcopy(model).to(device.type)
+        ref_model = copy.deepcopy(model).to(torch.device(device_type))
         ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
         for layer in itertools.chain(model.layers, [model]):
             replicate(layer)
@@ -615,16 +659,14 @@ class TestReplicate1DTrainingCore(FSDPTest):
             fsdp_module: FSDPModule, opt: torch.optim.Optimizer, args, kwargs
         ) -> None:
             post_optim_event = (
-                torch.get_device_module(device).current_stream().record_event()
+                torch.get_device_module(device_type).current_stream().record_event()
             )
             fsdp_module.set_post_optim_event(post_optim_event)
 
         optim.register_step_post_hook(functools.partial(step_post_hook, model))
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 8), device=device.type)
-        # Track all losses and check for equality at the end to avoid a CPU
-        # sync point after each iteration
+        inp = torch.randint(0, model_args.vocab_size, (2, 8), device=device_type)
         ref_losses: list[torch.Tensor] = []
         losses: list[torch.Tensor] = []
         for _ in range(10):
@@ -643,36 +685,46 @@ class TestReplicate1DTrainingCore(FSDPTest):
             losses.append(model(inp).sum())
             losses[-1].backward()
             optim.step()
-            # Sleep after the optimizer step to allow CPU to run ahead into the
-            # next iteration's forward, exercising the post-optim stream sync
-            torch.get_device_module(device)._sleep(
-                int(25 * get_cycles_per_ms(device.type))
+            torch.get_device_module(device_type)._sleep(
+                int(25 * get_cycles_per_ms(device_type))
             )
         for ref_loss, loss in zip(ref_losses, losses):
             self.assertEqual(ref_loss, loss)
 
 
+instantiate_device_type_tests(
+    TestReplicate1DTrainingCoreNoHpu,
+    globals(),
+    except_for=["cpu", "hpu"],
+    allow_xpu=True,
+)
+
+
 class TestReplicateTrainingCompose(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         # Since these tests run with a larger transformer model, they may see
         # some numeric drift with >2 GPUs
-        return min(torch.get_device_module(device).device_count(), 2)
+        return min(torch.accelerator.device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
-    def test_train_parity_with_activation_checkpointing(self):
+    def test_train_parity_with_activation_checkpointing(self, device):
         """
         Tests train parity against DDP when composing with activation
         checkpointing.
         """
+        device_type = torch.device(device).type
         self.run_subtests(
             {
                 "checkpoint_impl": ["composable", "utils", "wrapper"],
                 "module_grouping": ["block", "mem_eff", "mem_eff_weight_tied"],
-                "test_device_type": [device.type],
+                "test_device_type": [device_type],
             },
             self._test_train_parity_with_activation_checkpointing,
+            device=device,
         )
 
     def _test_train_parity_with_activation_checkpointing(
@@ -680,7 +732,10 @@ class TestReplicateTrainingCompose(FSDPTest):
         checkpoint_impl: str,
         module_grouping: str,
         test_device_type: str,
+        *,
+        device: str,
     ):
+        device_type = torch.device(device).type
         if checkpoint_impl not in ("composable", "utils", "wrapper"):
             raise AssertionError(f"Unexpected checkpoint_impl: {checkpoint_impl}")
         testing_compile = (
@@ -690,7 +745,7 @@ class TestReplicateTrainingCompose(FSDPTest):
             return
         torch.manual_seed(42)
         vocab_size = 1024
-        with torch.device(device):
+        with torch.device(device_type):
             model_args = ModelArgs(
                 n_layers=3,
                 n_heads=4,
@@ -704,7 +759,7 @@ class TestReplicateTrainingCompose(FSDPTest):
                 weight_tying=module_grouping != "mem_eff",
             )
             model = Transformer(model_args)
-        ref_model = copy.deepcopy(model).to(device)
+        ref_model = copy.deepcopy(model).to(torch.device(device_type))
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         # Apply activation checkpointing
@@ -754,7 +809,7 @@ class TestReplicateTrainingCompose(FSDPTest):
         torch.manual_seed(42 + self.rank)
         # Reuse the same input across iterations to avoid loss explosion from
         # trying to learn from random inputs
-        inp = torch.randint(0, vocab_size, (3, 64), device=device.type)
+        inp = torch.randint(0, vocab_size, (3, 64), device=device_type)
         check_sharded_parity(
             self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
         )
@@ -784,28 +839,39 @@ class TestReplicateTrainingCompose(FSDPTest):
                 )
 
 
+instantiate_device_type_tests(
+    TestReplicateTrainingCompose, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 class TestReplicateSharedParams(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
-        return min(4, torch.get_device_module(device).device_count())
+        return min(4, torch.accelerator.device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_train_parity_with_shared_params(self):
+    def test_train_parity_with_shared_params(self, device):
         self.run_subtests(
             {
                 "use_activation_checkpointing": [False, True],
             },
             self._test_train_shared_params,
+            device=device,
         )
 
     def _test_train_shared_params(
         self,
         use_activation_checkpointing: bool,
+        *,
+        device: str,
     ):
+        device_type = torch.device(device).type
         torch.manual_seed(42)
         model_args = ModelArgs(n_layers=3, dropout_p=0.0, weight_tying=True)
         model = Transformer(model_args)
-        ref_model = copy.deepcopy(model).to(device)
+        ref_model = copy.deepcopy(model).to(torch.device(device_type))
 
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for module in model.modules():
@@ -818,7 +884,7 @@ class TestReplicateSharedParams(FSDPTest):
 
         torch.manual_seed(42 + self.rank + 1)
         for iter_idx in range(10):
-            inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device.type)
+            inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
             losses: list[torch.Tensor] = []
             for _model in (ref_model, model):
                 losses.append(_model(inp).sum())
@@ -836,21 +902,29 @@ class TestReplicateSharedParams(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
 
-class TestReplicateGradientAccumulation(FSDPTestContinuous):
+instantiate_device_type_tests(
+    TestReplicateSharedParams, globals(), except_for="cpu", allow_xpu=True
+)
+
+
+class TestReplicateGradientAccumulation(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
-        return min(4, torch.get_device_module(device).device_count())
+        return min(4, torch.accelerator.device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_gradient_accumulation(self):
+    def test_gradient_accumulation(self, device):
         """
         Tests gradient accumulation with/without gradient reduction and
         with/without resharding after backward.
         """
+        device_type = torch.device(device).type
 
         replicate_size = self.world_size
         meshes = init_device_mesh(
-            device.type,
+            device_type,
             (replicate_size,),
             mesh_dim_names=("replicate",),
         )
@@ -872,6 +946,7 @@ class TestReplicateGradientAccumulation(FSDPTestContinuous):
                 "reduce_scatter_only": [False, True],
             },
             self._test_gradient_accumulation,
+            device=device,
         )
 
     def _test_gradient_accumulation(
@@ -881,8 +956,11 @@ class TestReplicateGradientAccumulation(FSDPTestContinuous):
         mode: str,
         reshard_after_backward: bool,
         offload_policy: OffloadPolicy,
-        reduce_scatter_only: bool,  # for HSDP
+        reduce_scatter_only: bool,  # for HSDP,
+        *,
+        device: str,
     ):
+        device_type = torch.device(device).type
         if (
             (
                 not reshard_after_backward
@@ -905,7 +983,7 @@ class TestReplicateGradientAccumulation(FSDPTestContinuous):
         modules = [nn.Linear(lin_dim, lin_dim)]
         modules.extend(MLP(lin_dim) for _ in range(num_mlps))
         model = nn.Sequential(*modules)
-        ref_model = copy.deepcopy(model).to(device)
+        ref_model = copy.deepcopy(model).to(torch.device(device_type))
         replicate_fn = functools.partial(
             replicate,
             mesh=mesh,
@@ -947,7 +1025,7 @@ class TestReplicateGradientAccumulation(FSDPTestContinuous):
             for microbatch_idx in range(num_microbatches):
                 is_last_microbatch = microbatch_idx == num_microbatches - 1
                 set_backward_flags(model, is_last_microbatch)
-                inp = torch.randn(batch_size, lin_dim, device=device.type)
+                inp = torch.randn(batch_size, lin_dim, device=device_type)
                 losses: list[torch.Tensor] = []
                 for _model in (ref_model, model):
                     with CommDebugMode() as comm_mode:
@@ -1000,22 +1078,28 @@ class TestReplicateGradientAccumulation(FSDPTestContinuous):
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
     @skip_if_lt_x_gpu(2)
-    def test_1f1b_microbatching(self):
+    def test_1f1b_microbatching(self, device):
         self.run_subtests(
             {
                 "use_explicit_unshard": [False, True],
                 "reshard_after_backward": [False, True],
             },
             self._test_1f1b_microbatching,
+            device=device,
         )
 
     def _test_1f1b_microbatching(
-        self, use_explicit_unshard: bool, reshard_after_backward: bool
+        self,
+        use_explicit_unshard: bool,
+        reshard_after_backward: bool,
+        *,
+        device: str,
     ):
+        device_type = torch.device(device).type
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
         model = Transformer(model_args)
-        ref_model = copy.deepcopy(model).to(device)
+        ref_model = copy.deepcopy(model).to(torch.device(device_type))
         ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
         for module in model.modules():
             if isinstance(module, TransformerBlock):
@@ -1031,7 +1115,7 @@ class TestReplicateGradientAccumulation(FSDPTestContinuous):
                 0,
                 model_args.vocab_size,
                 (local_batch_size, 16),
-                device=device.type,
+                device=device_type,
             )
             for _ in range(num_microbatches)
         ]
@@ -1068,13 +1152,22 @@ class TestReplicateGradientAccumulation(FSDPTestContinuous):
         check_sharded_parity(self, ref_model, model)
 
 
+instantiate_device_type_tests(
+    TestReplicateGradientAccumulation, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 class TestReplicateCustomForwardMethod(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
-        return min(torch.get_device_module(device).device_count(), 2)
+        return min(torch.accelerator.device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
-    def test_register_fsdp_forward_method(self):
+    def test_register_fsdp_forward_method(self, device):
+        device_type = torch.device(device).type
+
         class VisionTransformer(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1098,14 +1191,14 @@ class TestReplicateCustomForwardMethod(FSDPTest):
 
         torch.manual_seed(42)
         model = Model()
-        ref_model = copy.deepcopy(model).to(device)
+        ref_model = copy.deepcopy(model).to(torch.device(device_type))
         replicate(model.vit)
         replicate(model.projector)
         replicate(model)
         register_fsdp_forward_method(model.vit, "forward_features")
 
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn(4, 3, 224, 224, device=device.type)
+        inp = torch.randn(4, 3, 224, 224, device=device_type)
         ref_loss = ref_model(inp).sum()
         loss = model(inp).sum()
         self.assertEqual(ref_loss, loss)
@@ -1116,21 +1209,29 @@ class TestReplicateCustomForwardMethod(FSDPTest):
         check_sharded_parity(self, ref_model, model)
 
 
+instantiate_device_type_tests(
+    TestReplicateCustomForwardMethod, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 class TestReplicateTPTraining(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
-        return min(4, torch.get_device_module(device).device_count())
+        return min(4, torch.accelerator.device_count())
 
-    def init_global_mesh(self) -> DeviceMesh:
+    def init_global_mesh(self, *, device: str) -> DeviceMesh:
+        device_type = torch.device(device).type
         return init_device_mesh(
-            device.type,
+            device_type,
             (2, 2),
             mesh_dim_names=("dp_replicate", "tp"),
         )
 
     @skip_if_lt_x_gpu(8)
-    def test_replicate_tp(self):
-        global_mesh = self.init_global_mesh()
+    def test_replicate_tp(self, device):
+        global_mesh = self.init_global_mesh(device=device)
         self.run_subtests(
             {
                 "use_activation_checkpointing": [False, True],
@@ -1138,6 +1239,7 @@ class TestReplicateTPTraining(FSDPTest):
                 "foreach": [False],
             },
             functools.partial(self._test_replicate_tp, global_mesh),
+            device=device,
         )
 
     def _test_replicate_tp(
@@ -1146,12 +1248,15 @@ class TestReplicateTPTraining(FSDPTest):
         use_activation_checkpointing: bool,
         mlp_dim: int,
         foreach: bool,
+        *,
+        device: str,
     ):
+        device_type = torch.device(device).type
         dp_mesh, tp_mesh = global_mesh["dp_replicate"], global_mesh["tp"]
         dp_pg = dp_mesh._flatten().get_group()  # used for `replicate()`
         torch.manual_seed(42)
         model = MLPStack(mlp_dim)
-        ref_model = copy.deepcopy(model).to(device)
+        ref_model = copy.deepcopy(model).to(torch.device(device_type))
 
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
 
@@ -1186,7 +1291,7 @@ class TestReplicateTPTraining(FSDPTest):
 
         torch.manual_seed(42 + dp_pg.rank() + 1)
         for iter_idx in range(10):
-            inp = torch.randn((8, mlp_dim), device=device)
+            inp = torch.randn((8, mlp_dim), device=device_type)
             losses: list[torch.Tensor] = []
             for _model in (ref_model, model):
                 losses.append(_model(inp).sum())
@@ -1207,6 +1312,11 @@ class TestReplicateTPTraining(FSDPTest):
             self.assertEqual(p.device_mesh.ndim, 2)
             self.assertEqual(len(p.placements), 2)
             self.assertEqual(p.device_mesh.mesh_dim_names, ("dp_replicate", "tp"))
+
+
+instantiate_device_type_tests(
+    TestReplicateTPTraining, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
