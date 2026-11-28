@@ -3285,6 +3285,12 @@ def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> tuple[TensorLikeType,
 
     dim = utils.canonicalize_dim(a.ndim, dim)
     length = a.shape[dim]
+
+    # Matches eager (at::chunk): an empty dimension is split into `chunks`
+    # empty pieces instead of dividing by a zero chunk size below.
+    if length == 0:
+        return tuple(narrow(a, dim, 0, 0) for _ in range(chunks))
+
     chunk_size = math.ceil(length / chunks)
     full_chunks = math.floor(length / chunk_size)
     tail_chunk_size = length % chunk_size
@@ -4728,9 +4734,28 @@ def tensor_split(
 
             indices = indices_or_sections.tolist()
 
-        indices = [0] + list(indices) + [a.shape[_dim]]
-        split_sizes = [indices[i + 1] - indices[i] for i in range(len(indices) - 1)]
-        return tuple(aten.split_with_sizes(a, split_sizes, dim=_dim))
+        # Matches eager (at::tensor_split), which builds every piece with
+        # at::slice: negative indices wrap around, out of bounds indices are
+        # clamped to the dimension, and an end index smaller than the start
+        # index gives an empty piece. Turning the indices into split sizes
+        # does not work here, since split_with_sizes rejects negative sizes.
+        dim_size = a.shape[_dim]
+
+        def _wrap_and_clamp(idx: int) -> int:
+            if idx < 0:
+                idx = idx + dim_size
+            return torch.sym_min(torch.sym_max(idx, 0), dim_size)
+
+        splits = []
+        start_idx = 0
+        for end_idx in indices:
+            start = _wrap_and_clamp(start_idx)
+            end = torch.sym_max(_wrap_and_clamp(end_idx), start)
+            splits.append(narrow(a, _dim, start, end - start))
+            start_idx = end_idx
+        start = _wrap_and_clamp(start_idx)
+        splits.append(narrow(a, _dim, start, dim_size - start))
+        return tuple(splits)
 
 
 # CompositeImplicitAutograd - don't register decomp

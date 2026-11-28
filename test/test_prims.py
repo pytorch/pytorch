@@ -437,6 +437,35 @@ class TestRefs(TestCase):
         expect = torch.unbind(a, 1)
         self.assertEqual(actual, expect)
 
+    def test_tensor_split_slice_semantics(self, device):
+        # Indices follow slicing semantics, like eager: negative indices wrap
+        # around, out of bounds indices are clamped and decreasing indices give
+        # empty pieces.
+        # From https://github.com/pytorch/pytorch/issues/204409
+        a = torch.arange(10, device=device)
+        for indices in ([20], [-2], [-20], [7, 2], [3, -3], [-1, 20, 5]):
+            actual = refs.tensor_split(a, indices)
+            expect = torch.tensor_split(a, indices)
+            self.assertEqual(actual, expect)
+            actual = refs.tensor_split(a, torch.tensor(indices))
+            self.assertEqual(actual, expect)
+
+        b = torch.rand([3, 6], device=device)
+        actual = refs.tensor_split(b, [5, -4, 8], dim=1)
+        expect = torch.tensor_split(b, [5, -4, 8], dim=1)
+        self.assertEqual(actual, expect)
+        for x, y in zip(actual, expect, strict=True):
+            self.assertEqual(x.stride(), y.stride())
+            self.assertEqual(x.storage_offset(), y.storage_offset())
+
+    def test_chunk_empty_dim(self, device):
+        # From https://github.com/pytorch/pytorch/issues/204406
+        for shape, chunks, dim in (((0,), 2, 0), ((3, 0), 4, 1), ((0, 5), 3, 0)):
+            a = torch.rand(shape, device=device)
+            actual = refs.chunk(a, chunks, dim)
+            expect = torch.chunk(a, chunks, dim)
+            self.assertEqual(actual, expect)
+
     def test_logspace_with_complex_input(self, device):
         actual = refs.logspace(2, 10 + 5j, steps=5, device=device)
         expect = torch.logspace(2, 10 + 5j, steps=5, device=device)
