@@ -16308,3 +16308,17 @@
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
   variants: function
+
+- func: _fused_sgd_.grad_clip(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] momentum_buffer_list, *, float weight_decay, float momentum, float lr, float dampening, bool nesterov, bool maximize, bool is_first_step, Tensor grad_clip_coef, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CUDA: _fused_sgd_grad_clip_kernel_cuda_
+  autogen: _fused_sgd.grad_clip, _fused_sgd.grad_clip_out
+
+- func: _fused_sgd_.grad_clip_tensor_lr(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] momentum_buffer_list, *, float weight_decay, float momentum, Tensor lr, float dampening, bool nesterov, bool maximize, bool is_first_step, Tensor grad_clip_coef, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CUDA: _fused_sgd_grad_clip_kernel_cuda_
+  autogen: _fused_sgd.grad_clip_tensor_lr, _fused_sgd.grad_clip_tensor_lr_out
