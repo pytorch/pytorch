@@ -662,6 +662,10 @@ class ConditionalMultiKernel(MultiKernelBase):
         # and _record_other_choices_provenance records the other choices.
         return self.kernels[0].kernel_name
 
+    def warn_mix_layout(self, kernel_name: str):
+        # Every leaf reads the same buffers, so warn once.
+        self.leaf_kernels()[0].warn_mix_layout(kernel_name)
+
     def call_kernel(self, kernel_name):
         """Codegen the launch of this kernel into the wrapper: one
         ConditionalKernelDispatchLine whose branches hold each sub-kernel's own launch.
