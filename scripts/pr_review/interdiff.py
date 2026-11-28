@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Write the changes the author made since the latest automated review.
+"""Write the changes the author made since the latest automated review, or,
+with `--since approval`, since the commit a maintainer approved.
 
 Runs in the review job before the model, from the trusted checkout, on the
 PR's working copy (`--repo`). Its inputs are commits the trusted `prepare` job resolved
@@ -18,6 +19,10 @@ no attributes from the PR (`--attr-source` is the empty tree), so its
 `.gitattributes` cannot pick merge or diff drivers. Every other failure, and a
 result over the size cap, writes a one-line note, so the review never fails for
 this file.
+
+With `--since approval`, a file that limits the review to the changes since
+also says when the base moved since the approval and which files it changed,
+so the review can block on code here that the base has broken since.
 """
 
 from __future__ import annotations
@@ -54,6 +59,91 @@ CONFLICTED = (
     "automated review, so the earlier version could not be replayed; their diff "
     "against the earlier commit includes the base's changes.\n"
 )
+
+
+REVIEW_NOTES = {
+    "none": NOTE_NO_REVIEW,
+    "unavailable": NOTE_UNAVAILABLE,
+    "same": NOTE_SAME,
+    "failed": NOTE_FAILED,
+    "base_only": NOTE_BASE_ONLY,
+    "too_large": NOTE_TOO_LARGE,
+    "header": HEADER,
+    "conflicted": CONFLICTED,
+}
+APPROVAL_NOTES = {
+    "none": "# No maintainer approval of an earlier commit to compare with.\n",
+    "unavailable": (
+        "# The commit the maintainer approved, {sha}, or its merge base is no "
+        "longer available.\n"
+    ),
+    "same": "# The maintainer approved this same commit: nothing changed since.\n",
+    "failed": "# The changes since the maintainer's approval could not be computed.\n",
+    "base_only": (
+        "# Nothing changed in this PR's files since the maintainer approved {sha} "
+        "apart from changes from the base.\n"
+    ),
+    "too_large": (
+        "# The changes since the maintainer's approval are too large to list.\n"
+    ),
+    "header": (
+        "# Changes to this PR's files since the maintainer approved {sha}, with "
+        "the approved version replayed onto the current merge base so that "
+        "changes from the base are left out.\n"
+    ),
+    "conflicted": (
+        "\n# These files changed both in the base and in this PR since the "
+        "maintainer's approval, so the approved version could not be replayed; "
+        "their diff against the approved commit includes the base's changes.\n"
+    ),
+}
+NOTES = {"review": REVIEW_NOTES, "approval": APPROVAL_NOTES}
+BASE_MOVED = (
+    "\n# The base moved since the maintainer's approval: the approved commit's "
+    "merge base was {old}, and this run's is {new}.{listing}\n"
+)
+BASE_LISTED = " The files the base changed in between:"
+BASE_UNLISTED = " The files the base changed in between are not listed."
+BASE_MAX_FILES = 200
+
+
+def narrows(text: str) -> bool:
+    """Whether an approval interdiff limits the review to the changes since."""
+    return any(
+        text.startswith(APPROVAL_NOTES[key].split("{sha}")[0])
+        for key in ("header", "base_only")
+    )
+
+
+def one_line(name: str) -> str:
+    return "".join(c if c.isprintable() else repr(c)[1:-1] for c in name)
+
+
+def base_moved(text: str, previous_base: str, base: str, max_bytes: int) -> str:
+    """An approval interdiff that narrows the review, plus a note when the base
+    moved since the approval, so the review can tell a break the base caused
+    (a removed function the PR still calls) from one present when approved.
+
+    A ghstack base branch is pushed by the PR's author, so a listed name is
+    escaped to one line. Without room for the list the note alone is added;
+    without room for that, the size note replaces the file and the review
+    blocks as usual."""
+    if previous_base == base:
+        return text
+    proc = git("diff", "--name-only", "-z", previous_base, base)
+    names = os.fsdecode(proc.stdout).split("\0") if proc.returncode == 0 else []
+    names = [n for n in names if n]
+    lines = [f"#   {one_line(n)}" for n in names[:BASE_MAX_FILES]]
+    if len(names) > BASE_MAX_FILES:
+        lines.append(f"#   ...and {len(names) - BASE_MAX_FILES} more")
+    choices = [BASE_MOVED.format(old=previous_base, new=base, listing=BASE_UNLISTED)]
+    if lines:
+        listed = BASE_MOVED.format(old=previous_base, new=base, listing=BASE_LISTED)
+        choices.insert(0, listed + "".join(f"{ln}\n" for ln in lines))
+    for note in choices:
+        if len((text + note).encode()) <= max_bytes:
+            return text + note
+    return APPROVAL_NOTES["too_large"]
 
 
 REPO = Path(".")
@@ -101,30 +191,37 @@ def diff(old: str, files: list[str]) -> str:
     return proc.stdout.decode(errors="replace")
 
 
-def interdiff(previous: str, previous_base: str, base: str, files: list[str]) -> str:
+def interdiff(
+    previous: str,
+    previous_base: str,
+    base: str,
+    files: list[str],
+    notes: dict[str, str] = REVIEW_NOTES,
+) -> str:
     if not previous:
-        return NOTE_NO_REVIEW
+        return notes["none"]
     if not files:
         return NOTE_NO_FILES
     if git("rev-parse", "HEAD").stdout.decode().strip() == previous:
-        return NOTE_SAME
+        return notes["same"]
     if not previous_base or not all(map(has_commit, (previous, previous_base, base))):
-        return NOTE_UNAVAILABLE.format(sha=previous)
+        return notes["unavailable"].format(sha=previous)
     replayed = replay(previous, previous_base, base)
     if replayed is None:
-        return NOTE_FAILED
+        return notes["failed"]
     tree, conflicted = replayed
     earlier = git("diff", "--name-only", "-z", previous_base, previous)
     if earlier.returncode != 0:
-        return NOTE_FAILED
+        return notes["failed"]
     files += [
         f for f in os.fsdecode(earlier.stdout).split("\0") if f and f not in files
     ]
     clean = diff(tree, [f for f in files if f not in conflicted])
     both = diff(previous, [f for f in files if f in conflicted])
     if not clean and not both:
-        return NOTE_BASE_ONLY.format(sha=previous)
-    return HEADER.format(sha=previous) + clean + (CONFLICTED + both if both else "")
+        return notes["base_only"].format(sha=previous)
+    header = notes["header"].format(sha=previous)
+    return header + clean + (notes["conflicted"] + both if both else "")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,8 +230,13 @@ def main(argv: list[str] | None = None) -> int:
         "--repo", type=Path, default=Path("."), help="the PR's working copy"
     )
     ap.add_argument(
-        "--previous", default="", help="commit the latest automated review saw"
+        "--since",
+        choices=sorted(NOTES),
+        default="review",
+        help="what --previous is: the commit the latest automated review saw, "
+        "or the commit a maintainer approved",
     )
+    ap.add_argument("--previous", default="", help="the earlier commit (see --since)")
     ap.add_argument("--previous-base", default="", help="that commit's merge base")
     ap.add_argument("--base", required=True, help="this run's merge base")
     ap.add_argument(
@@ -142,18 +244,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--max-bytes", required=True, type=int)
+    ap.add_argument(
+        "--output",
+        type=Path,
+        help="with --since approval: a GitHub step-output file that gets "
+        "approved_sha=<--previous> when the file limits the review to the "
+        "changes since",
+    )
     args = ap.parse_args(argv)
     global REPO
     REPO = args.repo
+    notes = NOTES[args.since]
     files = [os.fsdecode(f) for f in args.files.read_bytes().split(b"\0") if f]
     try:
-        text = interdiff(args.previous, args.previous_base, args.base, files)
+        text = interdiff(args.previous, args.previous_base, args.base, files, notes)
     except Exception as e:  # noqa: BLE001 - any failure is a note, never a failed review
         print(f"::warning::interdiff not built: {e}")
-        text = NOTE_FAILED
+        text = notes["failed"]
     if len(text.encode()) > args.max_bytes:
-        text = NOTE_TOO_LARGE
+        text = notes["too_large"]
+    if args.since == "approval" and narrows(text):
+        text = base_moved(text, args.previous_base, args.base, args.max_bytes)
     args.out.write_text(text)
+    if args.output and args.since == "approval" and narrows(text):
+        with args.output.open("a") as f:
+            f.write(f"approved_sha={args.previous}\n")
     return 0
 
 
