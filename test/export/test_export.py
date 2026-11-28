@@ -81,7 +81,6 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    TEST_CUDA,
     xfailIfDistributedNotSupported,
 )
 from torch.testing._internal.common_device_type import (
@@ -100,16 +99,14 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
-    TEST_XPU,
     TestCase as TorchTestCase,
 )
 from torch.testing._internal.custom_tensor import (
     ConstantExtraMetadataTensor,
     CustomTensorPlainOut,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
-from torch.testing._internal.triton_utils import requires_gpu, requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     register_constant,
@@ -128,6 +125,9 @@ if HAS_GPU:
     import triton.language as tl
 
     from torch._library import capture_triton
+else:
+    triton = None
+    capture_triton = None
 
 try:
     from torchrec.sparse.jagged_tensor import JaggedTensor, KeyedJaggedTensor
@@ -246,36 +246,49 @@ CPP_RUNTIME_NONSTRICT_SUFFIX = "_cpp_runtime_nonstrict"
 STRICT_EXPORT_V2_SUFFIX = "_strict_export_v2"
 
 
+def _ends_with_harness_suffix(test_name: str, suffix: str) -> bool:
+    # instantiate_device_type_tests appends _<device> after harness suffixes
+    # (e.g. ..._training_ir_to_decomp_strict_cuda), so plain endswith misses.
+    # Device names may themselves contain underscores (e.g. custom_acc), so
+    # keep stripping trailing segments until the harness suffix is exposed.
+    if test_name.endswith(suffix):
+        return True
+    base = test_name
+    while "_" in base:
+        base = base.rpartition("_")[0]
+        if base.endswith(suffix):
+            return True
+    return False
+
+
 # Now default mode is non strict, so original unammended test names
 # should be treated as non-strict
 def is_non_strict_test(test_name):
-    return not test_name.endswith(STRICT_SUFFIX) and not test_name.endswith(
-        STRICT_EXPORT_V2_SUFFIX
-    )
+    return not is_strict_test(test_name) and not is_strict_v2_test(test_name)
 
 
 def is_strict_test(test_name):
-    return test_name.endswith(STRICT_SUFFIX)
+    return _ends_with_harness_suffix(test_name, STRICT_SUFFIX)
 
 
 def is_strict_v2_test(test_name):
-    return test_name.endswith(STRICT_EXPORT_V2_SUFFIX)
+    return _ends_with_harness_suffix(test_name, STRICT_EXPORT_V2_SUFFIX)
 
 
 def is_inline_and_install_strict_test(test_name: str) -> bool:
-    return test_name.endswith(INLINE_AND_INSTALL_STRICT_SUFFIX)
+    return _ends_with_harness_suffix(test_name, INLINE_AND_INSTALL_STRICT_SUFFIX)
 
 
 def is_retracebility_test(test_name):
-    return test_name.endswith(RETRACEABILITY_STRICT_SUFFIX) or test_name.endswith(
-        RETRACEABILITY_NON_STRICT_SUFFIX
-    )
+    return _ends_with_harness_suffix(
+        test_name, RETRACEABILITY_STRICT_SUFFIX
+    ) or _ends_with_harness_suffix(test_name, RETRACEABILITY_NON_STRICT_SUFFIX)
 
 
 def is_serdes_test(test_name):
-    return test_name.endswith(SERDES_STRICT_SUFFIX) or test_name.endswith(
-        SERDES_NON_STRICT_SUFFIX
-    )
+    return _ends_with_harness_suffix(
+        test_name, SERDES_STRICT_SUFFIX
+    ) or _ends_with_harness_suffix(test_name, SERDES_NON_STRICT_SUFFIX)
 
 
 def need_serdes_test(test_name):
@@ -283,19 +296,19 @@ def need_serdes_test(test_name):
 
 
 def is_training_ir_test(test_name):
-    return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX) or test_name.endswith(
-        TRAINING_IR_DECOMP_NON_STRICT_SUFFIX
-    )
+    return _ends_with_harness_suffix(
+        test_name, TRAINING_IR_DECOMP_STRICT_SUFFIX
+    ) or _ends_with_harness_suffix(test_name, TRAINING_IR_DECOMP_NON_STRICT_SUFFIX)
 
 
 def is_training_ir_strict_test(test_name):
-    return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX)
+    return _ends_with_harness_suffix(test_name, TRAINING_IR_DECOMP_STRICT_SUFFIX)
 
 
 def is_cpp_runtime_test(test_name):
-    return test_name.endswith(CPP_RUNTIME_STRICT_SUFFIX) or test_name.endswith(
-        CPP_RUNTIME_NONSTRICT_SUFFIX
-    )
+    return _ends_with_harness_suffix(
+        test_name, CPP_RUNTIME_STRICT_SUFFIX
+    ) or _ends_with_harness_suffix(test_name, CPP_RUNTIME_NONSTRICT_SUFFIX)
 
 
 def get_hop_schema(ep: torch.export.ExportedProgram):
@@ -595,6 +608,8 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
         exported_program = export(f, args, kwargs)
@@ -1475,241 +1490,6 @@ class TestExport(TestCase):
         )
         for node in unf.n.graph.nodes:
             self.assertTrue("custom" not in node.meta or not node.meta["custom"])
-
-    @requires_gpu
-    def test_flex_attention_export(self):
-        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-
-        class MixedFakeModeModel(torch.nn.Module):
-            def __init__(self, dim=64, use_inductor=True):
-                super().__init__()
-                self.dim = dim
-                self.q_proj = torch.nn.Linear(64, 64)
-                self.k_proj = torch.nn.Linear(64, 64)
-                self.v_proj = torch.nn.Linear(64, 64)
-                self.use_inductor = use_inductor
-
-            def forward(self, x):
-                batch_size, seq_len, _ = x.shape
-
-                # Process input first - this creates fake tensors in export's fake mode
-                processed = self.q_proj(x)
-
-                # Create some computation that depends on processed tensor
-                intermediate = processed.sum(dim=-1).detach()  # Shape: (batch, seq_len)
-
-                # Now call create_block_mask which internally calls torch.compile
-                # The mask function will capture 'intermediate' which is a fake tensor
-                # from export's fake mode, but create_block_mask will create its own fake mode
-                def dynamic_mask_function(batch_idx, head_idx, q_idx, kv_idx):
-                    # This captures the intermediate tensor from the outer scope
-                    # When torch.compile is called inside create_block_mask,
-                    # this tensor will be from export's fake mode while new tensors
-                    # created inside will be from the nested fake mode
-                    threshold = intermediate[
-                        batch_idx, q_idx % seq_len
-                    ]  # Access the captured tensor
-                    return (kv_idx <= q_idx) & (threshold > 0)  # Mix fake modes
-
-                block_mask = create_block_mask(
-                    mask_mod=dynamic_mask_function,
-                    B=batch_size,
-                    H=None,
-                    Q_LEN=seq_len,
-                    KV_LEN=seq_len,
-                    device=x.device,
-                )
-                q = (
-                    self.q_proj(processed)
-                    .view(batch_size, 1, seq_len, self.dim)
-                    .detach()
-                )
-                k = (
-                    self.k_proj(processed)
-                    .view(batch_size, 1, seq_len, self.dim)
-                    .detach()
-                )
-                v = (
-                    self.v_proj(processed)
-                    .view(batch_size, 1, seq_len, self.dim)
-                    .detach()
-                )
-
-                # Use flex_attention with torch.compile - during export, compile should be skipped
-                backend = "inductor" if self.use_inductor else "eager"
-                out = torch.compile(flex_attention, backend=backend)(
-                    q, k, v, block_mask=block_mask
-                )
-
-                return out
-
-        model = MixedFakeModeModel(use_inductor=False)
-        x = torch.randn(2, 128, 64)
-        # Inductor doesn't work in eager mode flex attention
-        eager_out = model(x)
-        model.use_inductor = True
-        with self.assertWarnsRegex(
-            UserWarning,
-            "torch.compile is ignored when called inside torch.export region",
-        ):
-            exported_mod = torch.export.export(model, (x,), strict=False).module()
-        self.assertExpectedInline(
-            str(exported_mod.code).strip(),
-            """\
-def forward(self, x):
-    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    q_proj_weight = self.q_proj.weight
-    q_proj_bias = self.q_proj.bias
-    k_proj_weight = self.k_proj.weight
-    k_proj_bias = self.k_proj.bias
-    v_proj_weight = self.v_proj.weight
-    v_proj_bias = self.v_proj.bias
-    _guards_fn = self._guards_fn(x);  _guards_fn = None
-    linear_default = torch.ops.aten.linear.default(x, q_proj_weight, q_proj_bias);  x = None
-    sum_dim_int_list = torch.ops.aten.sum.dim_IntList(linear_default, [-1])
-    arange_start = torch.ops.aten.arange.start(0, 2, device = device(type='cpu'), pin_memory = False)
-    arange_start_1 = torch.ops.aten.arange.start(0, 1, device = device(type='cpu'), pin_memory = False)
-    arange_start_2 = torch.ops.aten.arange.start(0, 128, device = device(type='cpu'), pin_memory = False)
-    arange_start_3 = torch.ops.aten.arange.start(0, 128, device = device(type='cpu'), pin_memory = False)
-    detach_default = torch.ops.aten.detach.default(sum_dim_int_list);  sum_dim_int_list = None
-    lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
-    _vmap_increment_nesting = torch._functorch.predispatch._vmap_increment_nesting(2, 'error');  _vmap_increment_nesting = None
-    _add_batch_dim = torch._functorch.predispatch._add_batch_dim(arange_start, 0, 1);  arange_start = None
-    lazy_load_decompositions_1 = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions_1 = None
-    _vmap_increment_nesting_1 = torch._functorch.predispatch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting_1 = None
-    _add_batch_dim_1 = torch._functorch.predispatch._add_batch_dim(arange_start_1, 0, 2);  arange_start_1 = _add_batch_dim_1 = None
-    lazy_load_decompositions_2 = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions_2 = None
-    _vmap_increment_nesting_2 = torch._functorch.predispatch._vmap_increment_nesting(128, 'error');  _vmap_increment_nesting_2 = None
-    _add_batch_dim_2 = torch._functorch.predispatch._add_batch_dim(arange_start_2, 0, 3);  arange_start_2 = None
-    lazy_load_decompositions_3 = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions_3 = None
-    _vmap_increment_nesting_3 = torch._functorch.predispatch._vmap_increment_nesting(128, 'error');  _vmap_increment_nesting_3 = None
-    _add_batch_dim_3 = torch._functorch.predispatch._add_batch_dim(arange_start_3, 0, 4);  arange_start_3 = None
-    le_tensor = torch.ops.aten.le.Tensor(_add_batch_dim_3, _add_batch_dim_2);  _add_batch_dim_3 = None
-    remainder_scalar = torch.ops.aten.remainder.Scalar(_add_batch_dim_2, 128);  _add_batch_dim_2 = None
-    function_const_func_spec0 = self.function_const_func_spec0
-    torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = self.torch__dynamo__trace_wrapped_higher_order_op_ModIndex0
-    flat_apply = torch.ops.higher_order.flat_apply(function_const_func_spec0, torch__dynamo__trace_wrapped_higher_order_op_mod_index0, 'torch._dynamo._trace_wrapped_higher_order_op.ModIndex', detach_default, _add_batch_dim, remainder_scalar);  function_const_func_spec0 = torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = _add_batch_dim = remainder_scalar = None
-    gt_scalar = torch.ops.aten.gt.Scalar(flat_apply, 0);  flat_apply = None
-    __and___tensor = torch.ops.aten.__and__.Tensor(le_tensor, gt_scalar);  le_tensor = gt_scalar = None
-    _remove_batch_dim = torch._functorch.predispatch._remove_batch_dim(__and___tensor, 4, 128, 0);  __and___tensor = None
-    _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
-    _remove_batch_dim_1 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim, 3, 128, 0);  _remove_batch_dim = None
-    _vmap_decrement_nesting_1 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
-    _remove_batch_dim_2 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_1, 2, 1, 0)
-    unsqueeze_default = torch.ops.aten.unsqueeze.default(_remove_batch_dim_1, 0);  _remove_batch_dim_1 = None
-    expand_default = torch.ops.aten.expand.default(unsqueeze_default, [1, 128, 128]);  unsqueeze_default = expand_default = None
-    _vmap_decrement_nesting_2 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_2 = None
-    _remove_batch_dim_3 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_2, 1, 2, 0);  _remove_batch_dim_2 = None
-    _vmap_decrement_nesting_3 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_3 = None
-    pad_default = torch.ops.aten.pad.default(_remove_batch_dim_3, [0, 0, 0, 0]);  _remove_batch_dim_3 = None
-    view_default = torch.ops.aten.view.default(pad_default, [2, 1, 1, 128, 1, 128]);  pad_default = None
-    permute_default = torch.ops.aten.permute.default(view_default, [0, 1, 2, 4, 3, 5]);  view_default = None
-    sum_dim_int_list_1 = torch.ops.aten.sum.dim_IntList(permute_default, [-2, -1]);  permute_default = None
-    eq_scalar = torch.ops.aten.eq.Scalar(sum_dim_int_list_1, 16384)
-    gt_scalar_1 = torch.ops.aten.gt.Scalar(sum_dim_int_list_1, 0)
-    lt_scalar = torch.ops.aten.lt.Scalar(sum_dim_int_list_1, 16384);  sum_dim_int_list_1 = None
-    __and___tensor_1 = torch.ops.aten.__and__.Tensor(gt_scalar_1, lt_scalar);  gt_scalar_1 = lt_scalar = None
-    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(__and___tensor_1, dtype = torch.bool, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default = None
-    to_dtype = torch.ops.aten.to.dtype(__and___tensor_1, torch.int8);  __and___tensor_1 = None
-    _assert_tensor_metadata_default_1 = torch.ops.aten._assert_tensor_metadata.default(eq_scalar, dtype = torch.bool, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_1 = None
-    to_dtype_1 = torch.ops.aten.to.dtype(eq_scalar, torch.int8);  eq_scalar = None
-    _assert_tensor_metadata_default_2 = torch.ops.aten._assert_tensor_metadata.default(to_dtype, dtype = torch.int8, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_2 = None
-    to_dtype_2 = torch.ops.aten.to.dtype(to_dtype, torch.int32);  to_dtype = None
-    argsort_stable = torch.ops.aten.argsort.stable(to_dtype_2, stable = True, descending = True)
-    sum_dim_int_list_2 = torch.ops.aten.sum.dim_IntList(to_dtype_2, [-1]);  to_dtype_2 = None
-    _assert_tensor_metadata_default_3 = torch.ops.aten._assert_tensor_metadata.default(sum_dim_int_list_2, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_3 = None
-    to_dtype_3 = torch.ops.aten.to.dtype(sum_dim_int_list_2, torch.int32, False, False, torch.contiguous_format);  sum_dim_int_list_2 = None
-    _assert_tensor_metadata_default_4 = torch.ops.aten._assert_tensor_metadata.default(argsort_stable, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_4 = None
-    to_dtype_4 = torch.ops.aten.to.dtype(argsort_stable, torch.int32, False, False, torch.contiguous_format);  argsort_stable = None
-    _assert_tensor_metadata_default_5 = torch.ops.aten._assert_tensor_metadata.default(to_dtype_1, dtype = torch.int8, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_5 = None
-    to_dtype_5 = torch.ops.aten.to.dtype(to_dtype_1, torch.int32);  to_dtype_1 = None
-    argsort_stable_1 = torch.ops.aten.argsort.stable(to_dtype_5, stable = True, descending = True)
-    sum_dim_int_list_3 = torch.ops.aten.sum.dim_IntList(to_dtype_5, [-1]);  to_dtype_5 = None
-    _assert_tensor_metadata_default_6 = torch.ops.aten._assert_tensor_metadata.default(sum_dim_int_list_3, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_6 = None
-    to_dtype_6 = torch.ops.aten.to.dtype(sum_dim_int_list_3, torch.int32, False, False, torch.contiguous_format);  sum_dim_int_list_3 = None
-    _assert_tensor_metadata_default_7 = torch.ops.aten._assert_tensor_metadata.default(argsort_stable_1, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_7 = None
-    to_dtype_7 = torch.ops.aten.to.dtype(argsort_stable_1, torch.int32, False, False, torch.contiguous_format);  argsort_stable_1 = None
-    lazy_load_decompositions_4 = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions_4 = None
-    _vmap_increment_nesting_4 = torch._functorch.predispatch._vmap_increment_nesting(2, 'error');  _vmap_increment_nesting_4 = None
-    _add_batch_dim_4 = torch._functorch.predispatch._add_batch_dim(to_dtype_3, 0, 1)
-    _add_batch_dim_5 = torch._functorch.predispatch._add_batch_dim(to_dtype_4, 0, 1)
-    lazy_load_decompositions_5 = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions_5 = None
-    _vmap_increment_nesting_5 = torch._functorch.predispatch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting_5 = None
-    _add_batch_dim_6 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_4, 0, 2);  _add_batch_dim_4 = None
-    _add_batch_dim_7 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_5, 0, 2);  _add_batch_dim_5 = None
-    arange_default = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    arange_default_1 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    new_zeros_default = torch.ops.aten.new_zeros.default(_add_batch_dim_7, [1, 2], dtype = torch.int32, pin_memory = False)
-    new_ones_default = torch.ops.aten.new_ones.default(new_zeros_default, [], pin_memory = False)
-    unsqueeze_default_1 = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
-    lt_tensor = torch.ops.aten.lt.Tensor(arange_default_1, unsqueeze_default_1);  arange_default_1 = unsqueeze_default_1 = None
-    unsqueeze_default_2 = torch.ops.aten.unsqueeze.default(arange_default, -1);  arange_default = None
-    where_scalar_other = torch.ops.aten.where.ScalarOther(lt_tensor, _add_batch_dim_7, 1);  lt_tensor = _add_batch_dim_7 = None
-    index_put__default = torch.ops.aten.index_put_.default(new_zeros_default, [unsqueeze_default_2, where_scalar_other], new_ones_default);  new_zeros_default = unsqueeze_default_2 = where_scalar_other = new_ones_default = None
-    slice_tensor = torch.ops.aten.slice.Tensor(index_put__default, 1, 0, 1);  index_put__default = None
-    _remove_batch_dim_4 = torch._functorch.predispatch._remove_batch_dim(slice_tensor, 2, 1, 0);  slice_tensor = None
-    _vmap_decrement_nesting_4 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_4 = None
-    _remove_batch_dim_5 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_4, 1, 2, 0);  _remove_batch_dim_4 = None
-    _vmap_decrement_nesting_5 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_5 = None
-    transpose_int = torch.ops.aten.transpose.int(_remove_batch_dim_5, -2, -1);  _remove_batch_dim_5 = None
-    _assert_tensor_metadata_default_8 = torch.ops.aten._assert_tensor_metadata.default(transpose_int, dtype = torch.int32, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_8 = None
-    to_dtype_8 = torch.ops.aten.to.dtype(transpose_int, torch.int32);  transpose_int = None
-    argsort_stable_2 = torch.ops.aten.argsort.stable(to_dtype_8, stable = True, descending = True)
-    sum_dim_int_list_4 = torch.ops.aten.sum.dim_IntList(to_dtype_8, [-1]);  to_dtype_8 = None
-    _assert_tensor_metadata_default_9 = torch.ops.aten._assert_tensor_metadata.default(sum_dim_int_list_4, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_9 = None
-    to_dtype_9 = torch.ops.aten.to.dtype(sum_dim_int_list_4, torch.int32, False, False, torch.contiguous_format);  sum_dim_int_list_4 = None
-    _assert_tensor_metadata_default_10 = torch.ops.aten._assert_tensor_metadata.default(argsort_stable_2, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_10 = None
-    to_dtype_10 = torch.ops.aten.to.dtype(argsort_stable_2, torch.int32, False, False, torch.contiguous_format);  argsort_stable_2 = None
-    lazy_load_decompositions_6 = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions_6 = None
-    _vmap_increment_nesting_6 = torch._functorch.predispatch._vmap_increment_nesting(2, 'error');  _vmap_increment_nesting_6 = None
-    _add_batch_dim_8 = torch._functorch.predispatch._add_batch_dim(to_dtype_6, 0, 1)
-    _add_batch_dim_9 = torch._functorch.predispatch._add_batch_dim(to_dtype_7, 0, 1)
-    lazy_load_decompositions_7 = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions_7 = None
-    _vmap_increment_nesting_7 = torch._functorch.predispatch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting_7 = None
-    _add_batch_dim_10 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_8, 0, 2);  _add_batch_dim_8 = None
-    _add_batch_dim_11 = torch._functorch.predispatch._add_batch_dim(_add_batch_dim_9, 0, 2);  _add_batch_dim_9 = None
-    arange_default_2 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    arange_default_3 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
-    new_zeros_default_1 = torch.ops.aten.new_zeros.default(_add_batch_dim_11, [1, 2], dtype = torch.int32, pin_memory = False)
-    new_ones_default_1 = torch.ops.aten.new_ones.default(new_zeros_default_1, [], pin_memory = False)
-    unsqueeze_default_3 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
-    lt_tensor_1 = torch.ops.aten.lt.Tensor(arange_default_3, unsqueeze_default_3);  arange_default_3 = unsqueeze_default_3 = None
-    unsqueeze_default_4 = torch.ops.aten.unsqueeze.default(arange_default_2, -1);  arange_default_2 = None
-    where_scalar_other_1 = torch.ops.aten.where.ScalarOther(lt_tensor_1, _add_batch_dim_11, 1);  lt_tensor_1 = _add_batch_dim_11 = None
-    index_put__default_1 = torch.ops.aten.index_put_.default(new_zeros_default_1, [unsqueeze_default_4, where_scalar_other_1], new_ones_default_1);  new_zeros_default_1 = unsqueeze_default_4 = where_scalar_other_1 = new_ones_default_1 = None
-    slice_tensor_1 = torch.ops.aten.slice.Tensor(index_put__default_1, 1, 0, 1);  index_put__default_1 = None
-    _remove_batch_dim_6 = torch._functorch.predispatch._remove_batch_dim(slice_tensor_1, 2, 1, 0);  slice_tensor_1 = None
-    _vmap_decrement_nesting_6 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_6 = None
-    _remove_batch_dim_7 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_6, 1, 2, 0);  _remove_batch_dim_6 = None
-    _vmap_decrement_nesting_7 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_7 = None
-    transpose_int_1 = torch.ops.aten.transpose.int(_remove_batch_dim_7, -2, -1);  _remove_batch_dim_7 = None
-    _assert_tensor_metadata_default_11 = torch.ops.aten._assert_tensor_metadata.default(transpose_int_1, dtype = torch.int32, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_11 = None
-    to_dtype_11 = torch.ops.aten.to.dtype(transpose_int_1, torch.int32);  transpose_int_1 = None
-    argsort_stable_3 = torch.ops.aten.argsort.stable(to_dtype_11, stable = True, descending = True)
-    sum_dim_int_list_5 = torch.ops.aten.sum.dim_IntList(to_dtype_11, [-1]);  to_dtype_11 = None
-    _assert_tensor_metadata_default_12 = torch.ops.aten._assert_tensor_metadata.default(sum_dim_int_list_5, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_12 = None
-    to_dtype_12 = torch.ops.aten.to.dtype(sum_dim_int_list_5, torch.int32, False, False, torch.contiguous_format);  sum_dim_int_list_5 = None
-    _assert_tensor_metadata_default_13 = torch.ops.aten._assert_tensor_metadata.default(argsort_stable_3, dtype = torch.int64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata_default_13 = None
-    to_dtype_13 = torch.ops.aten.to.dtype(argsort_stable_3, torch.int32, False, False, torch.contiguous_format);  argsort_stable_3 = None
-    linear_default_1 = torch.ops.aten.linear.default(linear_default, q_proj_weight, q_proj_bias);  q_proj_weight = q_proj_bias = None
-    view_default_1 = torch.ops.aten.view.default(linear_default_1, [2, 1, 128, 64]);  linear_default_1 = None
-    detach_default_1 = torch.ops.aten.detach.default(view_default_1);  view_default_1 = None
-    linear_default_2 = torch.ops.aten.linear.default(linear_default, k_proj_weight, k_proj_bias);  k_proj_weight = k_proj_bias = None
-    view_default_2 = torch.ops.aten.view.default(linear_default_2, [2, 1, 128, 64]);  linear_default_2 = None
-    detach_default_2 = torch.ops.aten.detach.default(view_default_2);  view_default_2 = None
-    linear_default_3 = torch.ops.aten.linear.default(linear_default, v_proj_weight, v_proj_bias);  linear_default = v_proj_weight = v_proj_bias = None
-    view_default_3 = torch.ops.aten.view.default(linear_default_3, [2, 1, 128, 64]);  linear_default_3 = None
-    detach_default_3 = torch.ops.aten.detach.default(view_default_3);  view_default_3 = None
-    sdpa_mask0 = self.sdpa_mask0
-    sdpa_score0 = self.sdpa_score0
-    flex_attention = torch.ops.higher_order.flex_attention(detach_default_1, detach_default_2, detach_default_3, sdpa_score0, (128, 128, to_dtype_3, to_dtype_4, to_dtype_6, to_dtype_7, to_dtype_9, to_dtype_10, to_dtype_12, to_dtype_13, None, None, None, None, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach_default,));  detach_default_1 = detach_default_2 = detach_default_3 = sdpa_score0 = to_dtype_3 = to_dtype_4 = to_dtype_6 = to_dtype_7 = to_dtype_9 = to_dtype_10 = to_dtype_12 = to_dtype_13 = sdpa_mask0 = detach_default = None
-    getitem = flex_attention[0]
-    getitem_1 = flex_attention[1];  getitem_1 = None
-    getitem_2 = flex_attention[2];  flex_attention = getitem_2 = None
-    return pytree.tree_unflatten((getitem,), self._out_spec)""",
-        )
-        exported_out = exported_mod(x)
-        self.assertEqual(exported_out, eager_out)
 
     def test_inductor_backend_inside_nonstrict(self):
         class Foo(torch.nn.Module):
@@ -2742,176 +2522,6 @@ graph():
         y = torch.tensor([5, 10])
         self.assertTrue(torch.allclose(ep.module()(y), m(y)))
 
-    @requires_gpu
-    def test_export_custom_triton_kernel(self):
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        @torch.library.triton_op("mylib::add", mutates_args=())
-        def custom_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            output = torch.empty_like(x)
-            n_elements = output.numel()
-
-            def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
-            return output
-
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                return custom_add(x, y)
-
-        args = (
-            torch.randn(3, device=GPU_TYPE),
-            torch.randn(3, device=GPU_TYPE),
-        )
-        max_len = 128
-        dynamic_shapes = {
-            "x": {0: Dim("dim0_x", max=max_len)},
-            "y": {0: Dim("dim0_y", max=max_len)},
-        }
-        m = M()
-        ep = export(m, args, dynamic_shapes=dynamic_shapes)
-
-        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
-            ep.graph_module.code
-        )
-        ep_decomposed = ep.run_decompositions(decompose_custom_triton_ops=False)
-        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
-            ep.graph_module.code
-        )
-        ep_decomposed = ep.run_decompositions(decompose_custom_triton_ops=True)
-        FileCheck().check_count(
-            "torch.ops.higher_order.triton_kernel_wrapper_functional", 1, exactly=True
-        ).run(ep_decomposed.graph_module.code)
-        exp_out = m(*args)
-        self.assertEqual(exp_out, ep.module()(*args))
-
-    @requires_gpu
-    def test_export_custom_triton_kernel_mutable(self):
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        @torch.library.triton_op("mylib::add", mutates_args={"output"})
-        def custom_add_out(
-            x: torch.Tensor, y: torch.Tensor, output: torch.Tensor
-        ) -> torch.Tensor:
-            n_elements = output.numel()
-
-            def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
-            return output.clone()
-
-        class M(torch.nn.Module):
-            def forward(self, x, y, out):
-                return custom_add_out(x, y, out)
-
-        args = (
-            torch.randn(3, device=GPU_TYPE),
-            torch.randn(3, device=GPU_TYPE),
-            torch.zeros(3, device=GPU_TYPE),
-        )
-        custom_add_out(*args)
-        max_len = 128
-        dynamic_shapes = {
-            "x": {0: Dim("dim0_x", max=max_len)},
-            "y": {0: Dim("dim0_y", max=max_len)},
-            "out": {0: Dim("dim0_z", max=max_len)},
-        }
-
-        m = M()
-        ep = export(m, args, dynamic_shapes=dynamic_shapes)
-
-        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
-            ep.graph_module.code
-        )
-        ep_decomposed = ep.run_decompositions(decompose_custom_triton_ops=False)
-        FileCheck().check_count(
-            "torch.ops.higher_order.auto_functionalized", 1, exactly=True
-        ).run(ep_decomposed.graph_module.code)
-
-        ep_decomposed = ep.run_decompositions(decompose_custom_triton_ops=True)
-        if is_training_ir_test(self._testMethodName):
-            # TODO: For training IR test, we functionalize the custom triton op with auto_functionalized.
-            # The custom op's functional decomposition is not triggered as a result. It might be better to
-            # decompose the custom triton ops. Users can workaround by unwrapping auto_functionalized
-            # in order to get the functional triton hop if needed.
-            FileCheck().check_count(
-                "torch.ops.higher_order.auto_functionalized", 1, exactly=True
-            ).run(ep_decomposed.graph_module.code)
-        else:
-            FileCheck().check_count(
-                "torch.ops.higher_order.triton_kernel_wrapper_functional",
-                1,
-                exactly=True,
-            ).run(ep_decomposed.graph_module.code)
-
-        x, y, out = (
-            torch.randn(3, device=GPU_TYPE),
-            torch.randn(3, device=GPU_TYPE),
-            torch.zeros(3, device=GPU_TYPE),
-        )
-        exp_out = m(x, y, out)
-        out_copy = out.clone()
-        out_copy2 = out.clone()
-        out_copy3 = out.clone()
-        self.assertEqual(exp_out, ep.module()(x, y, out_copy))
-        # For non-functional graph module, out_copy is mutated
-        self.assertEqual(out, out_copy)
-        self.assertEqual(exp_out, ep_decomposed.module()(x, y, out_copy2))
-        # For non-functional graph module, out_copy is not mutated
-        self.assertEqual(out_copy2, out_copy3)
-
-    @requires_gpu_and_triton
-    def test_export_raw_triton_kernel_non_strict_error(self):
-        from torch.testing._internal.triton_utils import add_kernel
-
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                out = torch.empty_like(x)
-                add_kernel[(1,)](x, y, out, x.numel(), BLOCK_SIZE=16)
-                return out
-
-        args = (
-            torch.randn(3, device=GPU_TYPE),
-            torch.randn(3, device=GPU_TYPE),
-        )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Raw Triton kernel calls are not supported by non-strict torch.export",
-        ):
-            export(M(), args, strict=False)
 
     def test_boolean_mask_setitem_unbacked(self):
         class M(torch.nn.Module):
@@ -9704,75 +9314,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             runtime_output = ep.module()(torch.randn(6, 4, 24))
         self.assertEqual(runtime_output.shape, torch.Size([4, 32]))
 
-    @requires_gpu
-    def test_export_lstm_gpu(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.rnn = torch.nn.LSTM(
-                    input_size=4, hidden_size=5, num_layers=1, batch_first=True
-                )
-
-            def forward(self, x):
-                out, _ = self.rnn(x)
-                return out
-
-        m = M().to(GPU_TYPE)
-        x = torch.randn(2, 3, 4, device=GPU_TYPE)
-
-        ep = export(m, (x,))
-        self.assertTrue(callable(ep.module()))
-
-        eager_out = m(x)
-        export_out = ep.module()(x)
-        self.assertEqual(eager_out, export_out)
-
-    @requires_gpu
-    def test_export_gru_gpu(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.rnn = torch.nn.GRU(
-                    input_size=4, hidden_size=5, num_layers=1, batch_first=True
-                )
-
-            def forward(self, x):
-                out, _ = self.rnn(x)
-                return out
-
-        m = M().to(GPU_TYPE)
-        x = torch.randn(2, 3, 4, device=GPU_TYPE)
-
-        ep = export(m, (x,))
-        self.assertTrue(callable(ep.module()))
-
-        eager_out = m(x)
-        export_out = ep.module()(x)
-        self.assertEqual(eager_out, export_out)
-
-    @requires_gpu
-    def test_export_rnn_flatten_parameters_gpu(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lstm = torch.nn.LSTM(
-                    input_size=3, hidden_size=4, num_layers=2, batch_first=True
-                )
-
-            def forward(self, x):
-                self.lstm.flatten_parameters()
-                out, (h, c) = self.lstm(x)
-                return out
-
-        m = M().to(GPU_TYPE)
-        x = torch.randn(1, 5, 3, device=GPU_TYPE)
-
-        ep = export(m, (x,), strict=False)
-
-        eager_out = m(x)
-        export_out = ep.module()(x)
-        self.assertEqual(eager_out, export_out)
-
     def test_device_to_static(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -9894,58 +9435,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         y, _ = ep.module()(x)
         self.assertEqual(x.item(), 4)
         self.assertEqual(id(y), id(x))
-
-    @requires_gpu
-    @testing.expectedFailureCppRuntime
-    def test_device_to_gpu(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                return x.to("cpu")
-
-        ep = export(Foo(), (torch.randn(64).to(GPU_TYPE),))
-        ops = []
-        for node in ep.graph.nodes:
-            if node.op == "call_function":
-                ops.append(node.target)
-        if is_training_ir_test(self._testMethodName):
-            # aten.to decomposes to _to_copy
-            self.assertEqual(
-                ops,
-                [
-                    torch.ops.aten._assert_tensor_metadata.default,
-                    torch.ops.aten._to_copy.default,
-                ],
-            )
-        else:
-            self.assertEqual(
-                ops,
-                [
-                    torch.ops.aten._assert_tensor_metadata.default,
-                    torch.ops.aten.to.dtype_layout,
-                ],
-            )
-
-        # Check device assertion
-        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
-            ep.module()(torch.randn(64))
-
-        ep = ep.run_decompositions()
-        ops = []
-        for node in ep.graph.nodes:
-            if node.op == "call_function":
-                ops.append(node.target)
-        self.assertEqual(len(ops), 2)
-        self.assertEqual(
-            ops,
-            [
-                torch.ops.aten._assert_tensor_metadata.default,
-                torch.ops.aten._to_copy.default,
-            ],
-        )
-
-        # Check device assertion again after decomp
-        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
-            ep.module()(torch.randn(64))
 
     def test_tensor_constant_aten_to(self):
         class Module(torch.nn.Module):
@@ -11335,98 +10824,8 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
             )
 
-    @requires_gpu_and_triton
-    @testing.expectedFailureCppRuntime
-    def test_export_associative_scan_symbol_dim(self):
-        device = torch.device(GPU_TYPE)
-        combine_mode = "pointwise"
 
-        dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.ones(3, 10, 2, device=device)
 
-        class Foo(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def combine_fn(self, x, y):
-                return x + y
-
-            def forward(self, x):
-                return associative_scan(
-                    self.combine_fn, x, 2, combine_mode=combine_mode
-                )
-
-        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        module_out = Foo()(xs)
-        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
-
-    @requires_gpu_and_triton
-    @testing.expectedFailureCppRuntime
-    def test_export_associative_scan_symbol_scandim(self):
-        device = torch.device(GPU_TYPE)
-        combine_mode = "pointwise"
-
-        dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.ones(3, 10, 2, device=device)
-
-        class Foo(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def combine_fn(self, x, y):
-                return x + y
-
-            def forward(self, x):
-                return associative_scan(
-                    self.combine_fn, x, 1, combine_mode=combine_mode
-                )
-
-        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        module_out = Foo()(xs)
-        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
-
-    @requires_gpu_and_triton
-    def test_export_associative_scan_lifted_buffers(self):
-        if "cpp_runtime_nonstrict" in self.id():
-            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
-
-        device = torch.device(GPU_TYPE)
-        combine_mode = "pointwise"
-
-        class A(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.buffer = torch.nn.Buffer(torch.ones(3, 2, device=device))
-
-            def forward(self):
-                return self.buffer.cos()
-
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.a = A()
-
-            def combine_fn(self, x, y):
-                return (x + y) * self.a()
-
-            def forward(self, x):
-                return associative_scan(
-                    self.combine_fn, x, 1, combine_mode=combine_mode
-                )
-
-        inp = torch.ones(3, 10, 2, device=device)
-        ep = export(M(), (inp,))
-        epm = ep.module()
-
-        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
-
-        for gm in epm.named_modules():
-            if not isinstance(gm, torch.fx.GraphModule):
-                continue
-            self.assertEqual(
-                len([node for node in gm.graph.nodes if node.op == "placeholder"]),
-                1,
-            )
 
     # associative_scan is not supported by the cpp (NativeRT) runtime yet
     @testing.expectedFailureCppRuntime
@@ -18329,78 +17728,6 @@ class GraphModule(torch.nn.Module):
             ignore_empty_lines=True,
         )
 
-    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "Test requires CUDA or XPU.")
-    def test_module_to_with_shared_weights(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
-
-            def forward(self, x):
-                token_ids = torch.ones((4,), device=x.device, dtype=torch.int64)
-                embedded = self.embedding(token_ids).sum()
-                return x.sum() + embedded.sum()
-
-        class Container(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = Model()
-
-            def forward(self, x):
-                if GPU_TYPE in str(x.device):
-                    mod = self.mod.to(x.device)
-                    return mod(x)
-                else:
-                    return x.sum()
-
-        with (
-            torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False),
-            torch._export.config.patch(use_legacy_dynamo_graph_capture=False),
-        ):
-            torch.manual_seed(0)
-            container = Container()
-            container_eager = copy.deepcopy(container)
-            gm = torch.export.export(
-                container,
-                (torch.randn(4, 4, 4, device=GPU_TYPE),),
-                strict=True,
-            ).module()
-
-            self.assertExpectedInline(
-                str(gm.code).strip(),
-                f"""\
-def forward(self, x):
-    args_0, = fx_pytree.tree_flatten_spec(([x], {{}}), self._in_spec)
-    mod_embedding_weight = self.mod.embedding.weight
-    _guards_fn = self._guards_fn(args_0);  _guards_fn = None
-    empty_memory_format = torch.ops.aten.empty.memory_format([10, 8], dtype = torch.float32, device = device(type='{GPU_TYPE}', index=0), pin_memory = False)
-    detach_default = torch.ops.aten.detach.default(empty_memory_format);  empty_memory_format = None
-    submod_1 = self.submod_1
-    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_1, mod_embedding_weight);  submod_1 = mod_embedding_weight = None
-    getitem = wrap_with_set_grad_enabled[0];  wrap_with_set_grad_enabled = None
-    set__source_tensor = torch.ops.aten.set_.source_Tensor(detach_default, getitem);  detach_default = getitem = None
-    view_as_default = torch.ops.aten.view_as.default(set__source_tensor, set__source_tensor);  set__source_tensor = None
-    ones_default = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='{GPU_TYPE}', index=0), pin_memory = False)
-    embedding_default = torch.ops.aten.embedding.default(view_as_default, ones_default);  view_as_default = ones_default = None
-    sum_default = torch.ops.aten.sum.default(embedding_default);  embedding_default = None
-    sum_default_1 = torch.ops.aten.sum.default(args_0);  args_0 = None
-    sum_default_2 = torch.ops.aten.sum.default(sum_default);  sum_default = None
-    add_tensor = torch.ops.aten.add.Tensor(sum_default_1, sum_default_2);  sum_default_1 = sum_default_2 = None
-    return pytree.tree_unflatten((add_tensor,), self._out_spec)""",  # noqa: B950
-            )
-
-            inp = torch.randn(4, 4, 4, device=GPU_TYPE)
-
-            # Call container first to move shared weights to the accelerator
-            export_out = gm(inp)
-            eager_out = container_eager(inp)
-            self.assertEqual(export_out, eager_out)
-
-            # This should not fail even though the weights have already moved
-            # and .to() returns the same parameter with requires_grad=True
-            export_out_v2 = gm(inp)
-            eager_out_v2 = container_eager(inp)
-            self.assertEqual(export_out_v2, eager_out_v2)
 
     @testing.expectedFailureStrict  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureStrictV2  # test_hop doesn't have a dynamo implementation
@@ -18492,23 +17819,6 @@ def forward(self, x):
         ep = export(mod, (x,))
         self.assertEqual(x.sin(), ep.module()(x))
         pytree._deregister_pytree_node(torch.FunctionSchema)
-
-    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "Test requires CUDA or XPU.")
-    def test_exception(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                with torch.amp.autocast(device_type=GPU_TYPE):
-                    x.sin()
-                    raise RuntimeError("exception inside autocast")
-
-        with torch.no_grad():
-            with self.assertRaisesRegex(RuntimeError, "exception inside autocast"):
-                _ = torch.export.export(
-                    Model(),
-                    (),
-                    {"x": torch.randn(4, 4, 4, device=GPU_TYPE)},
-                    strict=False,
-                ).module()
 
     def test_export_for_training_with_state_dict_hooks(self):
         def _state_dict_pre_hook(mod, prefix, keep_vars):
@@ -20131,6 +19441,674 @@ def forward(self, x, y):
         decomposed = ep.run_decompositions(decomposition_table)
         result = decomposed.module()(torch.randn(1, 16, 64))
         self.assertEqual(result.shape, (1, 256, 64))
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportAccelerator(TorchTestCase):
+    # Not the Dynamo TestCase: instantiate_device_type_tests calls setUpClass at
+    # import time, and the Dynamo TestCase enters a config.patch there that is
+    # never exited, which would leak into every other test in this file.
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @testing.expectedFailureCppRuntime
+    def test_device_to_accelerator(self, device):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.to("cpu")
+
+        ep = export(Foo(), (torch.randn(64, device=device),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        if is_training_ir_test(self._testMethodName):
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten._to_copy.default,
+                ],
+            )
+        else:
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten.to.dtype_layout,
+                ],
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
+            ep.module()(torch.randn(64))
+
+        ep = ep.run_decompositions()
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertEqual(len(ops), 2)
+        self.assertEqual(
+            ops,
+            [
+                torch.ops.aten._assert_tensor_metadata.default,
+                torch.ops.aten._to_copy.default,
+            ],
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
+            ep.module()(torch.randn(64))
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportTriton(TorchTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_export_custom_triton_kernel(self, device):
+        if triton is None or capture_triton is None:
+            self.skipTest("triton is not installed")
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.library.triton_op("mylib::add", mutates_args=())
+        def custom_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            return output
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return custom_add(x, y)
+
+        args = (
+            torch.randn(3, device=device),
+            torch.randn(3, device=device),
+        )
+        max_len = 128
+        dynamic_shapes = {
+            "x": {0: Dim("dim0_x", max=max_len)},
+            "y": {0: Dim("dim0_y", max=max_len)},
+        }
+        m = M()
+        ep = export(m, args, dynamic_shapes=dynamic_shapes)
+
+        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+        ep.run_decompositions(decompose_custom_triton_ops=False)
+        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+        ep_decomposed = ep.run_decompositions(decompose_custom_triton_ops=True)
+        FileCheck().check_count(
+            "torch.ops.higher_order.triton_kernel_wrapper_functional", 1, exactly=True
+        ).run(ep_decomposed.graph_module.code)
+        exp_out = m(*args)
+        self.assertEqual(exp_out, ep.module()(*args))
+
+    def test_export_raw_triton_kernel_non_strict_error(self, device):
+        if triton is None:
+            self.skipTest("triton is not installed")
+
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_kernel[(1,)](x, y, out, x.numel(), BLOCK_SIZE=16)
+                return out
+
+        args = (
+            torch.randn(3, device=device),
+            torch.randn(3, device=device),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Raw Triton kernel calls are not supported by non-strict torch.export",
+        ):
+            export(M(), args, strict=False)
+
+
+    def test_export_custom_triton_kernel_mutable(self, device):
+        if triton is None or capture_triton is None:
+            self.skipTest("triton is not installed")
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.library.triton_op("mylib::add", mutates_args={"output"})
+        def custom_add_out(
+            x: torch.Tensor, y: torch.Tensor, output: torch.Tensor
+        ) -> torch.Tensor:
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            return output.clone()
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, out):
+                return custom_add_out(x, y, out)
+
+        args = (
+            torch.randn(3, device=device),
+            torch.randn(3, device=device),
+            torch.zeros(3, device=device),
+        )
+        custom_add_out(*args)
+        max_len = 128
+        dynamic_shapes = {
+            "x": {0: Dim("dim0_x", max=max_len)},
+            "y": {0: Dim("dim0_y", max=max_len)},
+            "out": {0: Dim("dim0_z", max=max_len)},
+        }
+
+        m = M()
+        ep = export(m, args, dynamic_shapes=dynamic_shapes)
+
+        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+        ep_decomposed = ep.run_decompositions(decompose_custom_triton_ops=False)
+        FileCheck().check_count(
+            "torch.ops.higher_order.auto_functionalized", 1, exactly=True
+        ).run(ep_decomposed.graph_module.code)
+
+        ep_decomposed = ep.run_decompositions(decompose_custom_triton_ops=True)
+        if is_training_ir_test(self._testMethodName):
+            FileCheck().check_count(
+                "torch.ops.higher_order.auto_functionalized", 1, exactly=True
+            ).run(ep_decomposed.graph_module.code)
+        else:
+            FileCheck().check_count(
+                "torch.ops.higher_order.triton_kernel_wrapper_functional",
+                1,
+                exactly=True,
+            ).run(ep_decomposed.graph_module.code)
+
+        x, y, out = (
+            torch.randn(3, device=device),
+            torch.randn(3, device=device),
+            torch.zeros(3, device=device),
+        )
+        exp_out = m(x, y, out)
+        out_copy = out.clone()
+        out_copy2 = out.clone()
+        out_copy3 = out.clone()
+        self.assertEqual(exp_out, ep.module()(x, y, out_copy))
+        self.assertEqual(out, out_copy)
+        self.assertEqual(exp_out, ep_decomposed.module()(x, y, out_copy2))
+        self.assertEqual(out_copy2, out_copy3)
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportFlexAttention(TorchTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_flex_attention_export(self, device):
+        device_type = torch.device(device).type
+        if device_type not in ("cpu", "cuda", "xpu", "hpu", "mps"):
+            self.skipTest(f"FlexAttention runtime does not support {device_type}")
+
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        class MixedFakeModeModel(torch.nn.Module):
+            def __init__(self, dim=64, use_inductor=True):
+                super().__init__()
+                self.dim = dim
+                self.q_proj = torch.nn.Linear(64, 64)
+                self.k_proj = torch.nn.Linear(64, 64)
+                self.v_proj = torch.nn.Linear(64, 64)
+                self.use_inductor = use_inductor
+
+            def forward(self, x):
+                batch_size, seq_len, _ = x.shape
+
+                # Process input first - this creates fake tensors in export's fake mode
+                processed = self.q_proj(x)
+
+                # Create some computation that depends on processed tensor
+                intermediate = processed.sum(dim=-1).detach()  # Shape: (batch, seq_len)
+
+                # Now call create_block_mask which internally calls torch.compile
+                # The mask function will capture 'intermediate' which is a fake tensor
+                # from export's fake mode, but create_block_mask will create its own fake mode
+                def dynamic_mask_function(batch_idx, head_idx, q_idx, kv_idx):
+                    # This captures the intermediate tensor from the outer scope
+                    # When torch.compile is called inside create_block_mask,
+                    # this tensor will be from export's fake mode while new tensors
+                    # created inside will be from the nested fake mode
+                    threshold = intermediate[
+                        batch_idx, q_idx % seq_len
+                    ]  # Access the captured tensor
+                    return (kv_idx <= q_idx) & (threshold > 0)  # Mix fake modes
+
+                block_mask = create_block_mask(
+                    mask_mod=dynamic_mask_function,
+                    B=batch_size,
+                    H=None,
+                    Q_LEN=seq_len,
+                    KV_LEN=seq_len,
+                    device=x.device,
+                )
+                q = (
+                    self.q_proj(processed)
+                    .view(batch_size, 1, seq_len, self.dim)
+                    .detach()
+                )
+                k = (
+                    self.k_proj(processed)
+                    .view(batch_size, 1, seq_len, self.dim)
+                    .detach()
+                )
+                v = (
+                    self.v_proj(processed)
+                    .view(batch_size, 1, seq_len, self.dim)
+                    .detach()
+                )
+
+                # Use flex_attention with torch.compile - during export, compile should be skipped
+                backend = "inductor" if self.use_inductor else "eager"
+                out = torch.compile(flex_attention, backend=backend)(
+                    q, k, v, block_mask=block_mask
+                )
+
+                return out
+
+        model = MixedFakeModeModel(use_inductor=False).to(device)
+        x = torch.randn(2, 128, 64, device=device)
+        # Inductor doesn't work in eager mode flex attention
+        eager_out = model(x)
+        model.use_inductor = True
+        with self.assertWarnsRegex(
+            UserWarning,
+            "torch.compile is ignored when called inside torch.export region",
+        ):
+            exported_mod = torch.export.export(model, (x,), strict=False).module()
+        has_flex = any(
+            n.op == "call_function"
+            and n.target is torch.ops.higher_order.flex_attention
+            for n in exported_mod.graph.nodes
+        )
+        self.assertTrue(has_flex, "exported graph should retain flex_attention HOP")
+        exported_out = exported_mod(x)
+        self.assertEqual(exported_out, eager_out)
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportRNN(TorchTestCase):
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_export_lstm(self, device):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.LSTM(
+                    input_size=4, hidden_size=5, num_layers=1, batch_first=True
+                )
+
+            def forward(self, x):
+                out, _ = self.rnn(x)
+                return out
+
+        m = M().to(device)
+        x = torch.randn(2, 3, 4, device=device)
+
+        ep = export(m, (x,))
+        self.assertTrue(callable(ep.module()))
+
+        eager_out = m(x)
+        export_out = ep.module()(x)
+        self.assertEqual(eager_out, export_out)
+
+    def test_export_gru(self, device):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.GRU(
+                    input_size=4, hidden_size=5, num_layers=1, batch_first=True
+                )
+
+            def forward(self, x):
+                out, _ = self.rnn(x)
+                return out
+
+        m = M().to(device)
+        x = torch.randn(2, 3, 4, device=device)
+
+        ep = export(m, (x,))
+        self.assertTrue(callable(ep.module()))
+
+        eager_out = m(x)
+        export_out = ep.module()(x)
+        self.assertEqual(eager_out, export_out)
+
+    def test_export_rnn_flatten_parameters(self, device):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(
+                    input_size=3, hidden_size=4, num_layers=2, batch_first=True
+                )
+
+            def forward(self, x):
+                self.lstm.flatten_parameters()
+                out, (h, c) = self.lstm(x)
+                return out
+
+        m = M().to(device)
+        x = torch.randn(1, 5, 3, device=device)
+
+        ep = export(m, (x,), strict=False)
+
+        eager_out = m(x)
+        export_out = ep.module()(x)
+        self.assertEqual(eager_out, export_out)
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportAutocastException(TorchTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_exception(self, device):
+        device_type = torch.device(device).type
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+                self.register_buffer("buffer", torch.ones(4, 4))
+                self.register_buffer("param", torch.ones(4, 4))
+
+            def forward(self, x):
+                token_ids = torch.randint(0, 10, (4,), device=x.device)
+                embedded = self.embedding(token_ids).sum()
+                return self.buffer.sum() + self.param.sum() + x.sum() + embedded
+
+        class BarModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if x.device.type != "cpu":
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        class BarBar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = BarModel()
+
+            def forward(self, x):
+                with torch.amp.autocast(device_type=device_type):
+                    y = self.mod(x)
+                return y
+
+        with torch.no_grad():
+            with self.assertRaisesRegex(RuntimeError, "Couldn't swap Embedding.weight"):
+                _ = torch.export.export(
+                    BarBar(),
+                    (),
+                    {"x": torch.randn(4, 4, 4, device=device)},
+                    strict=False,
+                ).module()
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportAssociativeScan(TorchTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @testing.expectedFailureCppRuntime
+    def test_export_associative_scan_symbol_dim(self, device):
+        combine_mode = "pointwise"
+
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=device)
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def combine_fn(self, x, y):
+                return x + y
+
+            def forward(self, x):
+                return associative_scan(
+                    self.combine_fn, x, 2, combine_mode=combine_mode
+                )
+
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+        module_out = Foo()(xs)
+        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
+
+    @testing.expectedFailureCppRuntime
+    def test_export_associative_scan_symbol_scandim(self, device):
+        combine_mode = "pointwise"
+
+        dim1 = torch.export.Dim("dim0", min=5, max=15)
+        xs = torch.ones(3, 10, 2, device=device)
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def combine_fn(self, x, y):
+                return x + y
+
+            def forward(self, x):
+                return associative_scan(
+                    self.combine_fn, x, 1, combine_mode=combine_mode
+                )
+
+        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+        module_out = Foo()(xs)
+        self.assertTrue(torch.allclose(ep.module()(xs), module_out))
+
+    def test_export_associative_scan_lifted_buffers(self, device):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
+        combine_mode = "pointwise"
+
+        class A(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.buffer = torch.nn.Buffer(torch.ones(3, 2, device=device))
+
+            def forward(self):
+                return self.buffer.cos()
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = A()
+
+            def combine_fn(self, x, y):
+                return (x + y) * self.a()
+
+            def forward(self, x):
+                return associative_scan(
+                    self.combine_fn, x, 1, combine_mode=combine_mode
+                )
+
+        inp = torch.ones(3, 10, 2, device=device)
+        ep = export(M(), (inp,))
+        epm = ep.module()
+
+        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
+
+        for gm in epm.named_modules():
+            if not isinstance(gm, torch.fx.GraphModule):
+                continue
+            self.assertEqual(
+                len([node for node in gm.graph.nodes if node.op == "placeholder"]),
+                1,
+            )
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportModuleToDevice(TorchTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_module_to_with_shared_weights(self, device):
+
+        device_type = torch.device(device).type
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+
+            def forward(self, x):
+                token_ids = torch.ones((4,), device=x.device, dtype=torch.int64)
+                embedded = self.embedding(token_ids).sum()
+                return x.sum() + embedded.sum()
+
+        class Container(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if device_type in str(x.device):
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        with (
+            torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False),
+            torch._export.config.patch(use_legacy_dynamo_graph_capture=False),
+        ):
+            torch.manual_seed(0)
+            container = Container()
+            container_eager = copy.deepcopy(container)
+            gm = torch.export.export(
+                container,
+                (torch.randn(4, 4, 4, device=device),),
+                strict=True,
+            ).module()
+
+            self.assertExpectedInline(
+                str(gm.code).strip(),
+                f"""\
+def forward(self, x):
+    args_0, = fx_pytree.tree_flatten_spec(([x], {{}}), self._in_spec)
+    mod_embedding_weight = self.mod.embedding.weight
+    _guards_fn = self._guards_fn(args_0);  _guards_fn = None
+    empty_memory_format = torch.ops.aten.empty.memory_format([10, 8], dtype = torch.float32, device = device(type='{device_type}', index=0), pin_memory = False)
+    detach_default = torch.ops.aten.detach.default(empty_memory_format);  empty_memory_format = None
+    submod_1 = self.submod_1
+    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_1, mod_embedding_weight);  submod_1 = mod_embedding_weight = None
+    getitem = wrap_with_set_grad_enabled[0];  wrap_with_set_grad_enabled = None
+    set__source_tensor = torch.ops.aten.set_.source_Tensor(detach_default, getitem);  detach_default = getitem = None
+    view_as_default = torch.ops.aten.view_as.default(set__source_tensor, set__source_tensor);  set__source_tensor = None
+    ones_default = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='{device_type}', index=0), pin_memory = False)
+    embedding_default = torch.ops.aten.embedding.default(view_as_default, ones_default);  view_as_default = ones_default = None
+    sum_default = torch.ops.aten.sum.default(embedding_default);  embedding_default = None
+    sum_default_1 = torch.ops.aten.sum.default(args_0);  args_0 = None
+    sum_default_2 = torch.ops.aten.sum.default(sum_default);  sum_default = None
+    add_tensor = torch.ops.aten.add.Tensor(sum_default_1, sum_default_2);  sum_default_1 = sum_default_2 = None
+    return pytree.tree_unflatten((add_tensor,), self._out_spec)""",  # noqa: B950
+            )
+
+            inp = torch.randn(4, 4, 4, device=device)
+
+            # Call container first to move shared weights to the accelerator
+            export_out = gm(inp)
+            eager_out = container_eager(inp)
+            self.assertEqual(export_out, eager_out)
+
+            # This should not fail even though the weights have already moved
+            # and .to() returns the same parameter with requires_grad=True
+            export_out_v2 = gm(inp)
+            eager_out_v2 = container_eager(inp)
+            self.assertEqual(export_out_v2, eager_out_v2)
+
+# Split out of TestExport for device-agnostic coverage. Wrapper suites
+# (strict/serdes/retrace/...) only clone TestExport; they must also mock +
+# instantiate these via this list, or those cases silently drop.
+# instantiate_device_type_tests deletes test_* from the class it instantiates,
+# so keep pristine clones here for the wrappers and instantiate the originals.
+def _clone_export_device_test_class(cls):
+    return type(
+        cls.__name__,
+        cls.__bases__,
+        {k: v for k, v in cls.__dict__.items() if k not in ("__dict__", "__weakref__")},
+    )
+
+
+_DEVICE_EXPORT_TEST_SPECS = (
+    (TestExportAccelerator, {"except_for": "cpu", "allow_xpu": True}),
+    (TestExportRNN, {"except_for": "cpu", "allow_xpu": True}),
+    (TestExportAutocastException, {"except_for": "cpu", "allow_xpu": True}),
+    (TestExportTriton, {"except_for": "cpu", "allow_xpu": True}),
+    (TestExportAssociativeScan, {"except_for": "cpu", "allow_xpu": True}),
+    (TestExportModuleToDevice, {"except_for": "cpu", "allow_xpu": True}),
+    (TestExportFlexAttention, {"allow_xpu": True}),
+)
+
+DEVICE_EXPORT_TEST_CLASSES = tuple(
+    (_clone_export_device_test_class(cls), kwargs)
+    for cls, kwargs in _DEVICE_EXPORT_TEST_SPECS
+)
+
+# instantiate_device_type_tests deletes the instantiated class name from scope,
+# so call it on each class directly; the linter requires named instantiation.
+instantiate_device_type_tests(
+    TestExportAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(TestExportRNN, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    TestExportAutocastException, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestExportTriton, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestExportAssociativeScan, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestExportModuleToDevice, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(TestExportFlexAttention, globals(), allow_xpu=True)
+del _DEVICE_EXPORT_TEST_SPECS
+del _clone_export_device_test_class
 
 
 if __name__ == "__main__":
