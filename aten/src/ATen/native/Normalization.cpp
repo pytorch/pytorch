@@ -738,6 +738,14 @@ Tensor instance_norm(
   const Tensor& running_mean = running_mean_opt.value_or(Tensor());
   const Tensor& running_var = running_var_opt.value_or(Tensor());
 
+  if (input.sym_numel() == 0) {
+    auto out = input.clone();
+
+    if (weight.defined()) out = out * weight[0];
+    if (bias.defined()) out = out + bias[0];
+    return std::move(out);
+  }
+
  TORCH_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
            "Expected running_mean and running_var to be defined when use_input_stats is false");
   std::vector<SymInt> shape = input.sym_sizes().vec();
