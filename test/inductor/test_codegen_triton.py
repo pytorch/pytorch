@@ -26,6 +26,7 @@ from torch._inductor.codegen.triton import (
     FixedTritonConfig,
     get_triton_reduction_function,
     IndexingOptions,
+    TensorDescriptorOptions,
     texpr,
     TMACompatibilityChecker,
     TritonCSEVariable,
@@ -62,6 +63,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
     TRITON_HAS_CPU,
 )
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilToInt,
     FloorDiv,
@@ -773,6 +775,52 @@ def helper(x):
         self.assertNotIn("uses_tma", metadata)
         self.assertNotIn("uses_device_tma", metadata)
         self.assertNotIn("tma_min_block_sizes", metadata)
+
+    @inductor_config.patch("triton.enable_host_side_tma", False)
+    def test_tensor_descriptor_reuse_scoped_to_owning_buffer(self):
+        # In-place aliases share a kernel arg, but each descriptor definition is
+        # deferred on the buffer that created it. Removing one alias must not drop
+        # a non-lifted definition that a live alias uses.
+        xnumel = sympy.Integer(16)
+        rnumel = sympy.Integer(7168)
+        with self._graph.set_current_device(torch.device("cpu")):
+            kernel = TritonKernel(
+                {"x": xnumel, "r0_": rnumel},
+                features=SIMDKernelFeatures([], xnumel, rnumel),
+                override_persistent_reduction=False,
+                override_cooperative_reduction=False,
+            )
+        block_sizes = TritonSymbols.block_sizes
+        params = BlockParameters(
+            shape=[xnumel, rnumel],
+            block_shape=[block_sizes[SymT.XBLOCK], block_sizes[SymT.R0_INDEX]],
+            strides=[rnumel, sympy.Integer(1)],
+            offsets=[sympy.Integer(0), sympy.Integer(0)],
+        )
+        options = TensorDescriptorOptions(
+            params=params,
+            constant_offset=sympy.Integer(0),
+            order=[1, 0],
+            mask_vars=OrderedSet(),
+            broadcast_shape=params.block_shape,
+            broadcasting_dims=[False, False],
+            final_shape=params.block_shape,
+            stride_sorter=BlockParameters.IdentityStrideSorter([7168, 1], [0, 1]),
+            _boundary_check=[],
+        )
+
+        with (
+            V.set_kernel_handler(kernel),
+            patch.object(self._graph, "get_dtype", return_value=torch.float32),
+        ):
+            kernel.codegen_block_ptr("buf0", "in_out_ptr0", options)
+            live, _ = kernel.codegen_block_ptr("buf1", "in_out_ptr0", options)
+            reused, _ = kernel.codegen_block_ptr("buf1", "in_out_ptr0", options)
+            kernel.inplaced_to_remove.add("buf0")
+            body = kernel.body.getvalue()
+
+        self.assertEqual(reused, live)
+        self.assertIn(f"{live} = tl.make_tensor_descriptor(in_out_ptr0", body)
 
     @parametrize(
         "split_size,fixed_config,error",
