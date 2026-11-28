@@ -141,6 +141,11 @@ class ExprPrinter(StrPrinter):
 
 
 class PythonPrinter(ExprPrinter):
+    def _print_Where(self, expr: sympy.Expr) -> str:
+        # Emit a Python ternary so ShapeEnv guards can eval Where(...) safely.
+        c, t, f = (self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args)
+        return f"({t} if {c} else {f})"
+
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError("ToFloat expects exactly one argument")
