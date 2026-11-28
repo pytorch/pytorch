@@ -229,9 +229,22 @@ AliasDb::AliasDb(
   // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   memoryDAGBuilder_ = nullptr; // to make further access a hard error
 
+  // `setWildcards` calls the callback once per wildcard and once per element,
+  // so memoize `getWildcard` (which rebuilds a `UnionType` lookup key for
+  // multi-mutable-type values) per type object. Keyed by identity: the
+  // structural `HashType` maps every `TensorType` to the same bucket, which
+  // sends this map into unbounded rehash doubling (`bad_alloc`).
+  ska::flat_hash_map<const Type*, Element*> wildcardElementCache;
   memoryDAG_->setWildcards(
       wildcards_, elementMap_, [&](const Value* v) -> Element* {
-        return getWildcard(v->type());
+        const TypePtr& type = v->type();
+        auto it = wildcardElementCache.find(type.get());
+        if (it != wildcardElementCache.end()) {
+          return it->second;
+        }
+        Element* wildcard = getWildcard(type);
+        wildcardElementCache.emplace(type.get(), wildcard);
+        return wildcard;
       });
 
   // Now we build up the various write indices based on information in the write
