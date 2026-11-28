@@ -734,6 +734,88 @@ class TestReductionsDevice(TestCase):
         test((10,))
         test((5, 5))
 
+    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.half)
+    def test_reduce_contiguous_rows_vectorized(self, device, dtype):
+        # 16-bit reductions along the contiguous dim through the vectorized input
+        # path: row widths around its 128-element threshold and around the
+        # short-row lane counts (1024 / 2048 elements), tails of many lengths,
+        # rows 259 elements apart, starts 1 and 4 elements off, the strided dim
+        # as a control, and rows with NaN (head, middle, tail), +-inf and ties.
+        # Order-independent results, including argmax/argmin (16-bit rounding
+        # makes ties common), must equal CPU; nansum, norms and variances are
+        # compared with a float64 reference (var/std keep the default config
+        # and serve as a control).
+        torch.manual_seed(0)
+        cases = []
+        for cols in (127, 128, 129, 250, 255, 256, 257, 1000, 1024, 1025, 1031, 2047, 2048, 2056, 5000):
+            x_cpu = torch.randn(64, cols, dtype=dtype)
+            if cols in (128, 257, 1031):
+                x_cpu[0, 0] = x_cpu[1, cols // 2] = x_cpu[2, cols - 1] = float("nan")
+                x_cpu[3, cols // 3] = float("inf")
+                x_cpu[4] = float("-inf")
+                x_cpu[5, ::7] = 9.0
+                x_cpu[6] = 1.5
+            cases.append((x_cpu, x_cpu.to(device)))
+            for shift in (1, 4):
+                flat = torch.cat([x_cpu.new_zeros(shift), x_cpu.flatten()]).to(device)
+                cases.append((x_cpu, flat[shift:].view(64, cols)))
+        rows_259_apart = torch.randn(4, 300, 259, dtype=dtype)
+        cases.append((rows_259_apart[..., :128], rows_259_apart.to(device)[..., :128]))
+
+        tol = dict(atol=1e-3, rtol=2 * torch.finfo(dtype).eps)
+        for x_cpu, x in cases:
+            x64 = x_cpu.double()
+            for dim in (-1, 0):
+                msg = f"{tuple(x.shape)} {x.stride()} {dim=}"
+                for op in (torch.amax, torch.amin, torch.argmax, torch.argmin):
+                    self.assertEqual(op(x, dim).cpu(), op(x_cpu, dim), atol=0, rtol=0, msg=msg)
+                for op in (torch.max, torch.min):
+                    values, indices = op(x, dim)
+                    expected_values, expected_indices = op(x_cpu, dim)
+                    self.assertEqual(values.cpu(), expected_values, atol=0, rtol=0, msg=msg)
+                    self.assertEqual(indices.cpu(), expected_indices, atol=0, rtol=0, msg=msg)
+                self.assertEqual(x.nansum(dim).cpu().double(), x64.nansum(dim), **tol, msg=msg)
+                self.assertEqual(torch.linalg.vector_norm(x, dim=dim).cpu().double(),
+                                 torch.linalg.vector_norm(x64, dim=dim), **tol, msg=msg)
+                self.assertEqual(x.var(dim).cpu().double(), x64.var(dim), **tol, msg=msg)
+
+    @onlyCUDA
+    @dtypes(torch.uint8, torch.int8, torch.bool)
+    def test_reduce_contiguous_rows_vectorized_bytes(self, device, dtype):
+        # 1-byte reductions along the contiguous dim through the vectorized input
+        # path (8-element vectors on gfx1250): row widths around the 128-element
+        # threshold and the vector width, tails, starts 1 and 4 elements off, and
+        # the strided dim as a control, against CPU. Each row holds one unique
+        # extreme (a single True / False for bool) in one of its first or last 16
+        # elements, where the unaligned head and the tail are reduced, so a
+        # dropped element changes the result.
+        torch.manual_seed(0)
+        lo, hi = (-128, 127) if dtype == torch.int8 else (0, 255)
+        for cols in (127, 128, 129, 135, 136, 137, 256, 1024, 1031, 5000):
+            if dtype == torch.bool:
+                x_cpu = torch.zeros(64, cols, dtype=dtype)
+                x_cpu[1::2] = True
+            else:
+                x_cpu = torch.randint(lo + 1, hi, (64, cols), dtype=dtype)
+            edges = list(range(16)) + list(range(cols - 16, cols))
+            for r in range(64):
+                # even rows: unique max (True); odd rows: unique min (False)
+                x_cpu[r, edges[(r // 2) % len(edges)]] = hi if r % 2 == 0 else lo
+            for shift in (0, 1, 4):
+                flat = torch.cat([x_cpu.new_zeros(shift), x_cpu.flatten()]).to(device)
+                x = flat[shift:].view(64, cols)
+                for dim in (-1, 0):
+                    msg = f"{cols=} {shift=} {dim=}"
+                    ops = [torch.amax, torch.amin]
+                    if dtype == torch.bool:
+                        ops += [torch.any, torch.all]
+                    else:
+                        # dtype=dtype keeps the 1-byte input (the default promotes to int64)
+                        ops += [torch.argmax, torch.argmin, lambda t, d: t.sum(d, dtype=dtype)]
+                    for op in ops:
+                        self.assertEqual(op(x, dim).cpu(), op(x_cpu, dim), atol=0, rtol=0, msg=msg)
+
     def test_all_any_with_dim(self, device):
         def test(x):
             r1 = x.prod(dim=0, keepdim=False).byte()
