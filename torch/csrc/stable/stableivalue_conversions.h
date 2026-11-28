@@ -17,7 +17,6 @@
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
 
-#include <memory>
 #include <optional>
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
@@ -838,24 +837,22 @@ struct ToImpl<torch::stable::Device> {
 };
 
 // Specialization for std::string
-// Returns a std::string which owns its memory; consumes the handle in val,
-// including when reading or copying the string throws.
+// Returns a std::string which owns its memory; the string in val is deleted.
 template <>
 struct ToImpl<std::string> {
   static std::string call(
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    std::unique_ptr<StringOpaque, decltype(&torch_delete_string)> handle(
-        torch::stable::detail::to<StringHandle>(val), torch_delete_string);
+    StringHandle handle = torch::stable::detail::to<StringHandle>(val);
     size_t length;
-    STABLE_TORCH_ERROR_CODE_CHECK(torch_string_length(handle.get(), &length));
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_string_length(handle, &length));
     const char* data;
-    STABLE_TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle.get(), &data));
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle, &data));
     const auto str = std::string(data, length);
 
-    // Preserve checked deletion on success; RAII handles exceptional exits.
-    STABLE_TORCH_ERROR_CODE_CHECK(torch_delete_string(handle.release()));
+    // delete the old string
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_delete_string(handle));
     return str;
   }
 };

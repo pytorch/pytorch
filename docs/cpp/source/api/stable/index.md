@@ -67,7 +67,6 @@ For more information on the stable ABI, see the
 registration
 operators
 utilities
-python-interop
 ```
 
 ## See Also
