@@ -2300,6 +2300,35 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
   assertInputTensorListSizeEqualsWorldSize(
       invalidArgument, inputs[0].size(), worldSize);
 
+  // All chunks have the same shape and dtype: run one allreduce over the
+  // concatenated input instead of one allreduce per chunk, then keep this
+  // rank's chunk. This is equivalent to the single-tensor API and issues a
+  // single collective instead of worldSize of them. Only worthwhile while
+  // the saved collective latencies outweigh the concatenation copy; the
+  // crossover measured on loopback TCP is ~4 MiB per chunk, so larger
+  // chunks keep the per-chunk allreduces.
+  constexpr int64_t kMaxFlattenChunkBytes = 4 << 20;
+  bool canFlatten = outputs[0].dim() >= 1 &&
+      outputs[0].numel() * outputs[0].element_size() <= kMaxFlattenChunkBytes;
+  for (const auto& input : inputs[0]) {
+    canFlatten = canFlatten && outputs[0].dtype() == input.dtype() &&
+        outputs[0].sizes() == input.sizes() &&
+        input.layout() == at::kStrided;
+  }
+  if (canFlatten) {
+    std::vector<at::Tensor> buffers{at::cat(inputs[0], 0)};
+    AllreduceOptions arOpts;
+    arOpts.reduceOp = opts.reduceOp;
+    arOpts.timeout = opts.timeout;
+    std::vector<at::Tensor> inp = {buffers[0]};
+    c10::intrusive_ptr<Work> work = allreduce(inp, arOpts);
+    auto fn = [rank, worldSize, buffers, outputTensors = outputs, work]() {
+      work->wait();
+      outputTensors[0].copy_(buffers[0].chunk(worldSize)[rank]);
+    };
+    return c10::make_intrusive<LambdaWork>(std::move(fn), {work});
+  }
+
   std::vector<at::Tensor> buffers;
   for (const auto i : c10::irange(worldSize)) {
     if (i == rank) {
