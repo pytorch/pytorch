@@ -351,7 +351,6 @@ void fused_adam_kernel(
     const float* grad_scale_ptr,
     const ADAM_MODE adam_mode
   ) {
-  Tensor grad_contiguous = grad.contiguous();
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, param.scalar_type(), "fused_adam_kernel", [&] {
     if(adam_mode == ADAM_MODE::ORIGINAL){
       adam_fused_step_impl<scalar_t, ADAM_MODE::ORIGINAL>(param, grad, exp_avg, exp_avg_sq, max_exp_avg_sq, state_step, lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale_ptr);

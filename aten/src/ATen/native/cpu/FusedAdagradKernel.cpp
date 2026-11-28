@@ -196,7 +196,6 @@ void fused_adagrad_kernel(
     const bool maximize,
     const float* grad_scale_ptr
   ) {
-  Tensor grad_contiguous = grad.contiguous();
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, param.scalar_type(), "fused_adagrad_kernel", [&] {
     adagrad_fused_step_impl<scalar_t>(
       param,

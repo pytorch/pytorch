@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/ForeachUtils.h>
 #include <ATen/native/FusedAdam.h>
 #include <c10/util/irange.h>
 
@@ -48,6 +49,20 @@ void _fused_adam_kernel_cpu_(
     TORCH_CHECK(max_exp_avg_sqs.empty());
   }
   TORCH_CHECK(state_steps.size() == n_tensors);
+  if (n_tensors == 0) {
+    return;
+  }
+  if (amsgrad) {
+    TORCH_CHECK(
+        at::native::check_fast_path_restrictions(
+            {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
+        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout, matching sizes and strides, and non-overlapping, dense memory");
+  } else {
+    TORCH_CHECK(
+        at::native::check_fast_path_restrictions(
+            {params, grads, exp_avgs, exp_avg_sqs}),
+        "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout, matching sizes and strides, and non-overlapping, dense memory");
+  }
   at::Tensor max_exp_avg_sq = at::Tensor();
   for (const auto i : c10::irange(n_tensors)){
     if (amsgrad) max_exp_avg_sq = max_exp_avg_sqs[i];
@@ -124,6 +139,20 @@ void _fused_adamw_kernel_cpu_(
     TORCH_CHECK(max_exp_avg_sqs.empty());
   }
   TORCH_CHECK(state_steps.size() == n_tensors);
+  if (n_tensors == 0) {
+    return;
+  }
+  if (amsgrad) {
+    TORCH_CHECK(
+        at::native::check_fast_path_restrictions(
+            {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
+        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout, matching sizes and strides, and non-overlapping, dense memory");
+  } else {
+    TORCH_CHECK(
+        at::native::check_fast_path_restrictions(
+            {params, grads, exp_avgs, exp_avg_sqs}),
+        "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout, matching sizes and strides, and non-overlapping, dense memory");
+  }
   at::Tensor max_exp_avg_sq = at::Tensor();
   for (const auto i : c10::irange(n_tensors)){
     if (amsgrad) max_exp_avg_sq = max_exp_avg_sqs[i];

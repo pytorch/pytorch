@@ -1322,6 +1322,57 @@ class TestOptimRenewed(TestCase):
             p.grad = torch.rand_like(p)
         optimizer.step()
 
+    @optims(
+        [optim for optim in optim_db if "fused" in optim.supported_impls],
+        dtypes=(torch.float32,),
+    )
+    @decorateIf(
+        unittest.skip("Optimizer does not support this device or implementation"),
+        lambda p: _get_device_type(p["device"])
+        not in p["optim_info"].supports_fused_on,
+    )
+    def test_fused_layout_mismatch_error(self, device, dtype, optim_info):
+        if _get_device_type(device) not in optim_info.supports_fused_on:
+            self.skipTest(
+                f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
+            )
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        kwargs = optim_inputs[0].kwargs if optim_inputs else {}
+
+        # 1. Grad layout differs from param layout (transposed vs contiguous)
+        p = torch.nn.Parameter(torch.zeros(2, 3, device=device, dtype=dtype))
+        p.grad = torch.randn(3, 2, device=device, dtype=dtype).t()
+        optimizer = optim_cls([p], fused=True, **kwargs)
+        with self.assertRaisesRegex(
+            RuntimeError, r"(must have same dtype, device, and layout|check_fast_path_restrictions)"
+        ):
+            optimizer.step()
+
+        # 2. Expanded parameter (non-overlapping and dense is False)
+        p_expanded = torch.nn.Parameter(
+            torch.zeros(4, device=device, dtype=dtype).expand(8, 4)
+        )
+        p_expanded.grad = torch.ones(8, 4, device=device, dtype=dtype)
+        optimizer_expanded = optim_cls([p_expanded], fused=True, **kwargs)
+        with self.assertRaisesRegex(
+            RuntimeError, r"(must have same dtype, device, and layout|check_fast_path_restrictions)"
+        ):
+            optimizer_expanded.step()
+
+        # 3. Matching non-contiguous layouts (e.g. channels-last) should succeed
+        p_cl = torch.nn.Parameter(
+            torch.zeros(2, 3, 4, 5, device=device, dtype=dtype).to(
+                memory_format=torch.channels_last
+            )
+        )
+        p_cl.grad = torch.ones(2, 3, 4, 5, device=device, dtype=dtype).to(
+            memory_format=torch.channels_last
+        )
+        optimizer_cl = optim_cls([p_cl], fused=True, **kwargs)
+        optimizer_cl.step()
+        self.assertTrue(p_cl.is_contiguous(memory_format=torch.channels_last))
+
     @largeTensorTest("64GB")
     @serialTest()
     @optims(

@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/ForeachUtils.h>
 #include <ATen/native/FusedSGD.h>
 #include <c10/util/irange.h>
 
@@ -42,6 +43,19 @@ void _fused_sgd_kernel_cpu_(
     TORCH_CHECK(momentum_buffer_list.empty());
   } else {
     TORCH_CHECK(momentum_buffer_list.size() == n_tensors);
+  }
+  if (n_tensors == 0) {
+    return;
+  }
+  if (no_momentum_buffer) {
+    TORCH_CHECK(
+        at::native::check_fast_path_restrictions({params, grads}),
+        "params and grads must have same dtype, device, and layout, matching sizes and strides, and non-overlapping, dense memory");
+  } else {
+    TORCH_CHECK(
+        at::native::check_fast_path_restrictions(
+            {params, grads, momentum_buffer_list}),
+        "params, grads, and momentum_buffers must have same dtype, device, and layout, matching sizes and strides, and non-overlapping, dense memory");
   }
   for (const auto i : c10::irange(n_tensors)){
     fused_sgd_stub(

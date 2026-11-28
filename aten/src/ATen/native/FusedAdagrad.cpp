@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/ForeachUtils.h>
 #include <ATen/native/FusedAdagrad.h>
 #include <c10/util/irange.h>
 
@@ -36,6 +37,12 @@ void _fused_adagrad_kernel_cpu_(
   TORCH_CHECK(grads.size() == n_tensors);
   TORCH_CHECK(state_sums.size() == n_tensors);
   TORCH_CHECK(state_steps.size() == n_tensors);
+  if (n_tensors == 0) {
+    return;
+  }
+  TORCH_CHECK(
+      at::native::check_fast_path_restrictions({params, grads, state_sums}),
+      "params, grads, and state_sums must have same dtype, device, and layout, matching sizes and strides, and non-overlapping, dense memory");
   for (const auto i : c10::irange(n_tensors)) {
     fused_adagrad_stub(
         kCPU,
