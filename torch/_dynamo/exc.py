@@ -836,6 +836,15 @@ def unimplemented(
     raise Unsupported(msg, gb_type, skip_frame, **options)
 
 
+def unimplemented_identity(context: str) -> NoReturn:
+    unimplemented(
+        gb_type="Operation requires stable Python identity",
+        context=context,
+        explanation="Dynamo cannot preserve the object identity required by this operation.",
+        hints=["Pass the computed result as an input to the compiled function."],
+    )
+
+
 # KeyError has special handling for its args
 # see https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L2534 for details
 class KeyErrorMsg:

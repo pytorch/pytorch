@@ -19,7 +19,7 @@ import torch
 from torch._dynamo.source import GetItemSource
 
 from .. import graph_break_hints, variables
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented, unimplemented_identity
 from ..utils import common_constant_types, np, unpack_iterable
 from .base import (
     GetSet,
@@ -720,10 +720,8 @@ class FakeIdVariable(VariableTracker):
         return hash(self.value), True
 
     def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
-        # Mirrors int.__repr__: the value is an int, so str()/repr() yield its
-        # decimal string. The distinct-but-compile-time-only identity carried by
-        # the fake id is preserved in the resulting string, matching how
-        # FakeIdVariable already resolves same-kind id()/hash() comparisons.
+        if self.kind is FakeValueKind.HASH:
+            unimplemented_identity("Conversion of compile-time-only hash value")
         return ConstantVariable.create(repr(self.value))
 
     def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:

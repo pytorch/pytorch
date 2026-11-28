@@ -12,6 +12,7 @@ It includes functionality for:
 
 import collections
 import dataclasses
+import enum
 import re
 import sys
 import types
@@ -39,16 +40,27 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .exc import unimplemented
-from .source import AttrSource, ChainedSource, DictGetItemSource, Source
-from .utils import is_safe_constant
+from .source import (
+    AttrSource,
+    ChainedSource,
+    ConstDictKeySource,
+    DictGetItemSource,
+    DictKeysSource,
+    Source,
+)
+from .utils import is_identity_singleton, is_safe_constant
 from .variables.base import ValueMutationExisting, VariableTracker
+from .variables.constant import ConstantVariable
+from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
 from .variables.lazy import ComputedLazyConstantVariable, LazyConstantVariable
+from .variables.lists import BaseListVariable, SliceVariable, TupleVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import CustomClassObjectVariable
+from .variables.sets import FrozensetVariable, SetVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -56,6 +68,7 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
+from .variables.user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -63,6 +76,15 @@ if TYPE_CHECKING:
 
     from .side_effects import SideEffects
     from .symbolic_convert import InstructionTranslatorBase
+
+
+_IMMUTABLE_AGGREGATE_TYPES = (TupleVariable, FrozensetVariable, SliceVariable)
+
+
+def _skip_container_constant_probe(value: VariableTracker) -> bool:
+    return isinstance(value, (ConstDictVariable, SetVariable)) or (
+        isinstance(value, BaseListVariable) and not isinstance(value, TupleVariable)
+    )
 
 
 # Templates for the runtime-gated pregraph profiler marker (see
@@ -140,7 +162,44 @@ class PyCodegen:
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
         self.overridden_sources: dict[Source, Source] = overridden_sources or {}
+        self._constant_reconstruction_cache: dict[VariableTracker, bool] = {}
         self.pycodes = []
+
+    def _constant_requires_reconstruction(self, value: VariableTracker) -> bool:
+        if not value.is_realized():
+            # Neither sourced leaves nor computed expressions may be specialized here.
+            return True
+        if value.source is not None:
+            # These trackers have already specialized their class/member identity.
+            if isinstance(value, UserDefinedClassVariable) or (
+                isinstance(value, UserDefinedObjectVariable)
+                and issubclass(type(value.value), enum.Enum)
+            ):
+                return False
+            return not (
+                isinstance(value, ConstantVariable)
+                and is_identity_singleton(value.value)
+            )
+        if value in self._constant_reconstruction_cache:
+            return self._constant_reconstruction_cache[value]
+        if isinstance(value, _IMMUTABLE_AGGREGATE_TYPES):
+            items = (
+                [key.vt for key in value.set_items]
+                if isinstance(value, FrozensetVariable)
+                else value.items
+            )
+        elif _skip_container_constant_probe(value):
+            # Probing container members would specialize their lazy children.
+            return True
+        else:
+            return not value.is_python_constant() or not is_safe_constant(
+                value.as_python_constant()
+            )
+        # Only aggregate data affects reconstruction, not tracker metadata. Cache
+        # immutable subtrees so reconstructing nested outputs visits each once.
+        result = any(self._constant_requires_reconstruction(item) for item in items)
+        self._constant_reconstruction_cache[value] = result
+        return result
 
     def add_pycode(self, pycode: str, *args):
         if not config.generate_pycode:
@@ -362,9 +421,21 @@ class PyCodegen:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
         elif (
+            # Keep container members out of constant probing.
+            not _skip_container_constant_probe(value)
             # is_python_constant() would realize (and value-guard) lazy constants
             # that can be reloaded or recomputed instead
-            not _contains_unrealized_lazy_constant(value, self.tx.output.side_effects)
+            and not _contains_unrealized_lazy_constant(
+                value, self.tx.output.side_effects
+            )
+            # Do not embed trace-time child objects in co_consts. Respect this
+            # codegen pass's source-reconstruction policy (export stack restoration
+            # disables it, but other export codegen paths can keep it enabled).
+            and not (
+                self.value_from_source
+                and isinstance(value, _IMMUTABLE_AGGREGATE_TYPES)
+                and self._constant_requires_reconstruction(value)
+            )
             and value.is_python_constant()
             and is_safe_constant(value.as_python_constant())
         ):
@@ -740,7 +811,9 @@ class PyCodegen:
 
         def extract_nested_sources(source: Source) -> list[Source]:
             nested_sources: list[Source] = []
-            if isinstance(source, ChainedSource):
+            if isinstance(source, ConstDictKeySource):
+                nested_sources.append(DictKeysSource(source.base))
+            elif isinstance(source, ChainedSource):
                 nested_sources.append(source.base)
             if isinstance(source, DictGetItemSource) and isinstance(
                 source.index, Source

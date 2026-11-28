@@ -97,7 +97,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
-from .object_protocol import python_constant_repr_impl
+from .object_protocol import pynumber_multiply, python_constant_repr_impl
 from .script_object import CustomClassObjectVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
@@ -981,6 +981,12 @@ class TensorVariable(VariableTracker):
                     f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"
                 )
 
+        if name == "nbytes" and self.layout is torch.strided and self.dtype is not None:
+            # Snapshot the size before a later data swap changes the source tensor.
+            return pynumber_multiply(
+                tx, self.call_method(tx, "numel", [], {}), self.method_element_size(tx)
+            )
+
         handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
 
@@ -1381,7 +1387,8 @@ class TensorVariable(VariableTracker):
 
         source = TensorPropertySource(self.source, TensorProperty.STORAGE_OFFSET)
         install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
-        return ConstantVariable.create(storage_offset, source=source)
+        # The guard pins the entry value, even if the graph later mutates the tensor.
+        return ConstantVariable.create(storage_offset)
 
     def _method_size_stride(
         self, name: str, dim: Any | None = None

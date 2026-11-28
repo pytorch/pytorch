@@ -698,20 +698,22 @@ class TpReprTests(TestCase):
         self.assertTrue(distinct)
 
     def test_repr_of_hash_of_compile_time_object(self):
-        # hash() returning id(self) on a sourceless object yields a
-        # FakeIdVariable (HASH kind); repr() must route through its
-        # tp_repr_impl and mirror int.__repr__ (a decimal string).
         class Obj:
             def __hash__(self):
                 return id(self)
 
         def fn(x):
-            s = repr(hash(Obj()))
-            return x + 1, s.isdigit()
+            obj = Obj()
+            return x + 1, obj, repr(hash(obj))
 
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        _, is_digit = compiled(torch.randn(4))
-        self.assertTrue(is_digit)
+        x = torch.ones(1)
+        _, obj, digits = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(digits, repr(hash(obj)))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "compile-time-only hash"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
 
     def test_object_repr_placeholder_address(self):
         # Sourced and compile-time objects both get the placeholder address,
