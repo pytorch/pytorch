@@ -287,6 +287,111 @@ class TestCustomOpOutLowering(InductorTestCase):
         for output in packed[0].outputs:
             self.assertIsInstance(output, IRNode)
 
+    def _register_list_arg_ops(self, lib):
+        """Ops whose out-variant call must keep int[] args and arg interleaving."""
+        lib.define("scale(Tensor x, int[] factors) -> Tensor")
+        lib.define(
+            "scale.out(Tensor x, int[] factors, *, Tensor(a!) out) -> Tensor(a!)",
+            tags=(torch.Tag.out,),
+        )
+        lib.define("mix(Tensor x, int k, Tensor y, int[] s) -> Tensor")
+        lib.define(
+            "mix.out(Tensor x, int k, Tensor y, int[] s, *, Tensor(a!) out) -> Tensor(a!)",
+            tags=(torch.Tag.out,),
+        )
+
+        def scale(x, factors):
+            return x * (factors[0] * factors[1])
+
+        def mix(x, k, y, s):
+            return x * k + y * (s[0] - s[1])
+
+        lib.impl("scale", scale, "CompositeExplicitAutograd")
+        lib.impl(
+            "scale.out",
+            lambda x, factors, *, out: out.copy_(scale(x, factors)),
+            "CompositeExplicitAutograd",
+        )
+        lib.impl("mix", mix, "CompositeExplicitAutograd")
+        lib.impl(
+            "mix.out",
+            lambda x, k, y, s, *, out: out.copy_(mix(x, k, y, s)),
+            "CompositeExplicitAutograd",
+        )
+        torch.library.register_fake("mylib::scale", lib=lib)(
+            lambda x, factors: torch.empty_like(x)
+        )
+        torch.library.register_fake("mylib::mix", lib=lib)(
+            lambda x, k, y, s: torch.empty_like(x)
+        )
+
+    _LIST_ARG_FNS = {
+        "int_list": lambda x, y: torch.ops.mylib.scale(x.sin(), [2, 3]).cos(),
+        "interleaved": lambda x, y: torch.ops.mylib.mix(
+            x.sin(), 4, y.cos(), [5, 2]
+        ).relu(),
+        "keyword": lambda x, y: torch.ops.mylib.mix(
+            x.sin(), 4, y=y.cos(), s=[5, 2]
+        ).relu(),
+    }
+
+    @parametrize("wrapper", ["python", "fx"])
+    @parametrize("case", ["int_list", "interleaved", "keyword"])
+    def test_out_variant_keeps_arg_structure(self, wrapper, case):
+        from unittest import mock
+
+        from torch._inductor.ir import ExternKernelOut, FallbackKernel
+
+        # FX wrapper codegen only supports Triton kernels
+        if wrapper == "fx" and not HAS_GPU:
+            self.skipTest("FX wrapper needs a GPU")
+        device = GPU_TYPE if wrapper == "fx" else "cpu"
+        lowered = []
+        create = FallbackKernel.create.__func__
+
+        def spy(cls, kernel, *args, **kwargs):
+            out = create(cls, kernel, *args, **kwargs)
+            lowered.append(out)
+            return out
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            self._register_list_arg_ops(lib)
+            f = self._LIST_ARG_FNS[case]
+            x, y = torch.randn(8, device=device), torch.randn(8, device=device)
+            with (
+                config.patch(fx_wrapper=wrapper == "fx"),
+                mock.patch.object(FallbackKernel, "create", classmethod(spy)),
+            ):
+                compiled_out, code = run_and_get_code(
+                    torch.compile(f, backend="inductor", fullgraph=True), x, y
+                )
+            self.assertEqual(compiled_out, f(x, y))
+            out_op = (
+                torch.ops.mylib.scale if case == "int_list" else torch.ops.mylib.mix
+            ).out
+            self.assertTrue(
+                any(
+                    isinstance(node, ExternKernelOut) and node.op_overload is out_op
+                    for node in lowered
+                )
+            )
+            if wrapper == "python" and case == "int_list":
+                FileCheck().check(".out(").check("[2, 3]").run("\n".join(code))
+
+    def test_cpp_wrapper_skips_single_output_out_variant(self):
+        # No C shim exists for a custom op's out overload, so under cpp_wrapper
+        # the functional op is looked up and dispatched at runtime instead.
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            self._register_list_arg_ops(lib)
+            f = self._LIST_ARG_FNS["interleaved"]
+            x, y = torch.randn(8), torch.randn(8)
+            with config.patch(cpp_wrapper=True):
+                compiled_out, code = run_and_get_code(
+                    torch.compile(f, backend="inductor", fullgraph=True), x, y
+                )
+            self.assertEqual(compiled_out, f(x, y))
+            FileCheck().check('findSchemaOrThrow("mylib::mix"').run("\n".join(code))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

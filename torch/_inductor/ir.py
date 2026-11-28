@@ -8869,6 +8869,7 @@ class ExternKernelOut(ExternKernel):
         cpp_kernel_name: str | None = None,
         ordered_kwargs_for_cpp_kernel: Sequence[Any] = (),
         op_overload: _OpOverloads | None = None,
+        unflatten_args: Callable[..., Any] | None = None,
     ) -> None:
         unwrapped_inputs = self.unwrap_storage(inputs)
         if not isinstance(unwrapped_inputs, Sequence):
@@ -8885,11 +8886,46 @@ class ExternKernelOut(ExternKernel):
             ordered_kwargs_for_cpp_kernel,
             op_overload,
         )
+        # Set when inputs/constant_args are pytree leaves (custom-op out variants).
+        self.unflatten_args = unflatten_args
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
+    def codegen_args(self) -> list[str]:
+        if self.unflatten_args is None:
+            return super().codegen_args()
+        return _codegen_unflattened_args(self, self.unflatten_args)
+
     def should_allocate(self) -> bool:
         return True
+
+
+@dataclasses.dataclass
+class _CodegenRef:
+    ref: str
+
+    def __repr__(self) -> str:
+        return self.ref
+
+
+def _codegen_unflattened_args(
+    node: ExternKernel, unflatten_args: Callable[..., Any]
+) -> list[str]:
+    if not is_node_sequence(node.inputs):
+        raise AssertionError("Expected is_node_sequence(node.inputs)")
+    tensor_args = [_CodegenRef(x.codegen_reference()) for x in node.inputs]
+    args, kwargs = unflatten_args(tensor_args, node.constant_args)
+    if V.graph.cpp_wrapper and isinstance(node.op_overload, torch._ops.OpOverload):
+        args = node.fill_non_provided_args(args, kwargs)
+        args = [
+            V.graph.wrapper_code.val_to_arg_str(x, param.real_type)
+            for param, x in zip(node.op_overload._schema.arguments, args)
+        ]
+    else:
+        args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
+    # let codegen_kwargs handle kwargs
+    node.kwargs.update(kwargs)
+    return args
 
 
 class RandomSeeds(ExternKernelOut):
@@ -10287,29 +10323,7 @@ class FallbackKernel(ExternKernelAlloc):
             return OrderedSet()
 
     def codegen_args(self) -> list[str]:
-        @dataclasses.dataclass
-        class Shim:
-            ref: Any
-
-            def __repr__(self) -> str:
-                return self.ref
-
-        if not is_node_sequence(self.inputs):
-            raise AssertionError("Expected is_node_sequence(self.inputs)")
-        tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
-        args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
-        if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
-            args = self.fill_non_provided_args(args, kwargs)
-            args = [
-                V.graph.wrapper_code.val_to_arg_str(x, param.real_type)
-                for param, x in zip(self.op_overload._schema.arguments, args)
-            ]
-        else:
-            args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
-
-        # let self.codegen_kwargs handle kwargs
-        self.kwargs.update(kwargs)
-        return args
+        return _codegen_unflattened_args(self, self.unflatten_args)
 
     @staticmethod
     def find_device(
@@ -10903,9 +10917,12 @@ class FallbackKernel(ExternKernelAlloc):
             cls._maybe_realize_symm_mem_args(kernel, *args, **kwargs)
 
         # Try to lower single output functional custom ops to their out-variant.
+        # Not under cpp_wrapper (as for the multi-output case below): there is no
+        # C shim for a custom op's out overload, the runtime lookup handles it.
         if (
             isinstance(kernel, torch._ops.OpOverload)
             and not torch._library.utils.is_builtin(kernel)
+            and not V.graph.cpp_wrapper
             and isinstance(example_output, torch.Tensor)
         ):
             from torch._library._out_variant import (
@@ -10930,6 +10947,7 @@ class FallbackKernel(ExternKernelAlloc):
                     kwargs=kwargs,
                     python_kernel_name=_make_out_variant_kernel_name(out_op),
                     op_overload=out_op,
+                    unflatten_args=unflatten_args,
                 )
 
         # We need this extra check for input alignment since the example
