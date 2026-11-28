@@ -56,7 +56,12 @@ from torch.utils._triton import has_triton
 
 from . import comms, config, config_comms, dependencies, ir, metrics
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
-from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
+from .codegen.common import (
+    BackendFeature,
+    DEFAULT_MAX_INLINE_CONSTANT_NUMEL,
+    get_scheduling_for_device,
+    Kernel,
+)
 from .comm_analysis import (
     estimate_nccl_collective_runtime,
     estimate_nccl_collective_runtime_nccl_estimator,
@@ -13624,6 +13629,14 @@ class BaseScheduling:  # noqa: docstring_linter
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         """Return a set of .codegen.common.BackendFeature()"""
         return OrderedSet()
+
+    def max_inline_constant_numel(self, device: torch.device) -> int:
+        """Largest 1-D constant lowered to literals; larger ones stay tensor constants.
+
+        Literals become a select over the index for each element, so backends where
+        that costs more than a load can lower the limit. 0-d scalars always inline.
+        """
+        return DEFAULT_MAX_INLINE_CONSTANT_NUMEL
 
     def has_sub_parent_epilogue(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
         """Whether ``nodes`` codegen through the sub-parent staged emitter.

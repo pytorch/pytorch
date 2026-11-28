@@ -4664,7 +4664,11 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
         def inner_fn(index):
             return ops.constant(data, dtype)
 
-    elif len(data) == 0 or isinstance(data[0], (float, int)) and len(data) <= 8:
+    elif (
+        len(data) == 0
+        or isinstance(data[0], (float, int))
+        and len(data) <= get_max_inline_constant_numel(decode_device(device))
+    ):
         # inline small tensors
         ranges.append(sympy.Integer(len(data)))
 
@@ -9370,7 +9374,11 @@ register_lowering(
 register_lowering(prims.nextafter, broadcast=True, type_promotion_kind=None)(nextafter)
 
 
-from .codegen.common import BackendFeature, pointwise_overrides_data
+from .codegen.common import (
+    BackendFeature,
+    get_max_inline_constant_numel,
+    pointwise_overrides_data,
+)
 
 
 def _get_pointwise_overrides(ns, name):

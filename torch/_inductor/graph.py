@@ -73,6 +73,7 @@ from .codegen.common import (
     FileBackedGraphModule,
     get_backend_features,
     get_device_op_overrides,
+    get_max_inline_constant_numel,
     get_wrapper_codegen_for_device,
     init_backend_registration,
     WorkspaceArg,
@@ -1658,7 +1659,9 @@ class GraphLowering(torch.fx.Interpreter):
         """
         True if this is a small constant attr that will be inlined.
         """
-        return len(t.shape) == 1 and t.shape[0] <= 8
+        return len(t.shape) == 1 and t.shape[0] <= get_max_inline_constant_numel(
+            t.device
+        )
 
     # pyrefly: ignore [bad-override]
     def get_attr(

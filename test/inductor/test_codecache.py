@@ -59,6 +59,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
 from torch._inductor.cpp_builder import normalize_path_separator
@@ -4321,6 +4322,49 @@ class TestFxGraphCacheHashing(TestCase):
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
         data = pickler.dumps(large)
         self.assertIsInstance(pickle.loads(data), TensorMetadata)
+
+    def test_backend_inline_constant_limit(self):
+        """
+        A backend's 1-D inline limit decides both the cache key and the lowering.
+        """
+        param = torch.nn.Parameter(torch.rand(4))
+        param._is_frozen_param = True
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        gm._has_frozen_params = True
+        gm._frozen_param0 = param
+
+        def fn(x):
+            return x * torch.tensor([0.5, 1.0, 1.5, 2.0])
+
+        x = torch.rand(3, 4)
+        add_tensor_constant = GraphLowering.add_tensor_constant
+        for limit, inlined in ((None, True), (0, False)):
+            override = (
+                mock.patch.object(
+                    CppScheduling, "max_inline_constant_numel", return_value=limit
+                )
+                if limit is not None
+                else nullcontext()
+            )
+            with (
+                self.subTest(limit=limit),
+                override,
+                mock.patch.object(
+                    GraphLowering,
+                    "add_tensor_constant",
+                    autospec=True,
+                    side_effect=add_tensor_constant,
+                ) as add,
+                fresh_cache(),
+            ):
+                self.assertEqual(GraphLowering.can_inline_constant(param), inlined)
+                key = pickle.loads(FxGraphCachePickler(gm).dumps(param))
+                self.assertIsInstance(
+                    key, TensorMetadataAndValues if inlined else TensorMetadata
+                )
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn)(x), fn(x))
+                self.assertEqual(add.called, not inlined)
 
     def test_hash_fake_tensors(self):
         """

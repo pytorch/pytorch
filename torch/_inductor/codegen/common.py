@@ -527,6 +527,9 @@ def register_backend_for_device(
     custom_backend_codegen_configs[device] = device_custom_config
 
 
+DEFAULT_MAX_INLINE_CONSTANT_NUMEL = 8
+
+
 class BackendFeature(Enum):
     FOREACH = auto()
     BUCKETIZE = auto()
@@ -568,6 +571,15 @@ def has_backend_feature(
     if not isinstance(feature, BackendFeature):
         raise AssertionError(f"expected BackendFeature, got {type(feature)}")
     return feature in get_backend_features(device)
+
+
+def get_max_inline_constant_numel(device: torch.device) -> int:
+    """Size limit for lowering a 1-D constant on ``device`` to literals."""
+    init_backend_registration()
+    scheduling_ctor = get_scheduling_for_device(device.type)
+    if scheduling_ctor is None:
+        return DEFAULT_MAX_INLINE_CONSTANT_NUMEL
+    return scheduling_ctor(None).max_inline_constant_numel(device)
 
 
 def get_scheduling_for_device(device: str) -> SchedulingConstructor | None:
