@@ -618,6 +618,138 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             ),
         )
 
+    @make_dynamo_test
+    def test_isalnum(self):
+        self.assertTrue(self.type2test(b"abc123").isalnum())
+        self.assertFalse(self.type2test(b"abc 123").isalnum())
+        self.assertFalse(self.type2test(b"").isalnum())
+        # Classification is ASCII-only
+        self.assertFalse(self.type2test(b"abc\xe9").isalnum())
+        with self.assertRaisesRegex(
+            TypeError, r"isalnum\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"a").isalnum(1)
+        with self.assertRaisesRegex(TypeError, "takes no keyword arguments"):
+            self.type2test(b"a").isalnum(x=1)
+
+    @make_dynamo_test
+    def test_isalpha(self):
+        self.assertTrue(self.type2test(b"abcXYZ").isalpha())
+        self.assertFalse(self.type2test(b"abc1").isalpha())
+        self.assertFalse(self.type2test(b"").isalpha())
+        self.assertFalse(self.type2test(b"\xe9").isalpha())
+        with self.assertRaisesRegex(
+            TypeError, r"isalpha\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"a").isalpha(1)
+
+    @make_dynamo_test
+    def test_isascii(self):
+        self.assertTrue(self.type2test(b"abc \x00\x7f").isascii())
+        self.assertFalse(self.type2test(b"abc\x80").isascii())
+        # Unlike the other predicates, an empty bytearray is ASCII
+        self.assertTrue(self.type2test(b"").isascii())
+        with self.assertRaisesRegex(
+            TypeError, r"isascii\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"a").isascii(1)
+
+    @make_dynamo_test
+    def test_isdigit(self):
+        self.assertTrue(self.type2test(b"0123456789").isdigit())
+        self.assertFalse(self.type2test(b"12a").isdigit())
+        self.assertFalse(self.type2test(b"").isdigit())
+        self.assertFalse(self.type2test(b"\xb2").isdigit())
+        with self.assertRaisesRegex(
+            TypeError, r"isdigit\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"1").isdigit(1)
+
+    @make_dynamo_test
+    def test_islower(self):
+        self.assertTrue(self.type2test(b"abc 1!").islower())
+        self.assertFalse(self.type2test(b"aBc").islower())
+        # Needs at least one cased character
+        self.assertFalse(self.type2test(b"123").islower())
+        self.assertFalse(self.type2test(b"").islower())
+        with self.assertRaisesRegex(
+            TypeError, r"islower\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"a").islower(1)
+
+    @make_dynamo_test
+    def test_isspace(self):
+        self.assertTrue(self.type2test(b" \t\n\r\x0b\x0c").isspace())
+        self.assertFalse(self.type2test(b" a ").isspace())
+        self.assertFalse(self.type2test(b"").isspace())
+        self.assertFalse(self.type2test(b"\xa0").isspace())
+        with self.assertRaisesRegex(
+            TypeError, r"isspace\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b" ").isspace(1)
+
+    @make_dynamo_test
+    def test_istitle(self):
+        self.assertTrue(self.type2test(b"Hello World").istitle())
+        self.assertTrue(self.type2test(b"A1 B2").istitle())
+        self.assertFalse(self.type2test(b"Hello world").istitle())
+        self.assertFalse(self.type2test(b"HEllo").istitle())
+        self.assertFalse(self.type2test(b"").istitle())
+        with self.assertRaisesRegex(
+            TypeError, r"istitle\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"A").istitle(1)
+
+    @make_dynamo_test
+    def test_isupper(self):
+        self.assertTrue(self.type2test(b"ABC 1!").isupper())
+        self.assertFalse(self.type2test(b"AbC").isupper())
+        self.assertFalse(self.type2test(b"123").isupper())
+        self.assertFalse(self.type2test(b"").isupper())
+        with self.assertRaisesRegex(
+            TypeError, r"isupper\(\) takes no arguments \(1 given\)"
+        ):
+            self.type2test(b"A").isupper(1)
+
+    def test_input_bytearray_is_methods(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return (
+                ba.isalnum(),
+                ba.isalpha(),
+                ba.isascii(),
+                ba.isdigit(),
+                ba.islower(),
+                ba.isspace(),
+                ba.istitle(),
+                ba.isupper(),
+            )
+
+        for data in (b"Hello", b"abc123", b"   ", b"", b"\xff"):
+            ba = bytearray(data)
+            expected = (
+                ba.isalnum(),
+                ba.isalpha(),
+                ba.isascii(),
+                ba.isdigit(),
+                ba.islower(),
+                ba.isspace(),
+                ba.istitle(),
+                ba.isupper(),
+            )
+            self.assertEqual(fn(ba), expected)
+            self.assertEqual(ba, bytearray(data))
+
+    def test_bytearray_is_methods_after_mutation(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            ba = bytearray(b"abc")
+            before = ba.isdigit()
+            ba[:] = b"123"
+            return before, ba.isdigit()
+
+        self.assertEqual(fn(), (False, True))
+
     def test_find(self):
         b = self.type2test(b"mississippi")
         self.assertEqual(b.find(b"i"), 1)
@@ -1117,6 +1249,89 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         ):
             b.replace(b"a", b"b", b"0")
 
+    @make_dynamo_test
+    def test_removeprefix(self):
+        b = self.type2test(b"spamspamspam")
+        self.assertEqual(b.removeprefix(b"spam"), b"spamspam")
+        self.assertEqual(b.removeprefix(b"spamspamspam"), b"")
+        self.assertEqual(b.removeprefix(b"python"), b"spamspamspam")
+        self.assertEqual(b.removeprefix(b"spider"), b"spamspamspam")
+        self.assertEqual(b.removeprefix(b""), b"spamspamspam")
+        self.assertEqual(b.removeprefix(bytearray(b"spam")), b"spamspam")
+        self.assertEqual(self.type2test(b"").removeprefix(b"a"), b"")
+        # Non-ASCII bytes are matched byte for byte
+        self.assertEqual(self.type2test(b"\xffabc").removeprefix(b"\xff"), b"abc")
+        self.assertEqual(b, b"spamspamspam")
+
+    @make_dynamo_test
+    def test_removesuffix(self):
+        b = self.type2test(b"spamspamspam")
+        self.assertEqual(b.removesuffix(b"spam"), b"spamspam")
+        self.assertEqual(b.removesuffix(b"spamspamspam"), b"")
+        self.assertEqual(b.removesuffix(b"python"), b"spamspamspam")
+        self.assertEqual(b.removesuffix(b"blam"), b"spamspamspam")
+        self.assertEqual(b.removesuffix(b""), b"spamspamspam")
+        self.assertEqual(b.removesuffix(bytearray(b"spam")), b"spamspam")
+        self.assertEqual(self.type2test(b"").removesuffix(b"a"), b"")
+        self.assertEqual(self.type2test(b"abc\xff").removesuffix(b"\xff"), b"abc")
+        self.assertEqual(b, b"spamspamspam")
+
+    @make_dynamo_test
+    def test_removeprefix_removesuffix_new_object(self):
+        # Even when nothing is removed, the result is a new bytearray
+        b = self.type2test(b"abc")
+        for result in (b.removeprefix(b"x"), b.removesuffix(b"x")):
+            self.assertIsInstance(result, self.type2test)
+            self.assertIsNot(result, b)
+            self.assertEqual(result, b"abc")
+
+    @make_dynamo_test
+    def test_removeprefix_removesuffix_errors(self):
+        b = self.type2test(b"hello")
+        for name in ("removeprefix", "removesuffix"):
+            method = getattr(b, name)
+            with self.assertRaisesRegex(
+                TypeError, r"takes exactly one argument \(0 given\)"
+            ):
+                method()
+            with self.assertRaisesRegex(
+                TypeError, r"takes exactly one argument \(2 given\)"
+            ):
+                method(b"he", b"l")
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method("he")
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method(42)
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method((b"he", b"l"))
+
+    def test_input_bytearray_removeprefix_removesuffix(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.removeprefix(b"he"), ba.removesuffix(b"llo")
+
+        ba = bytearray(b"hello")
+        prefix_result, suffix_result = fn(ba)
+        self.assertIs(type(prefix_result), bytearray)
+        self.assertIs(type(suffix_result), bytearray)
+        self.assertEqual(prefix_result, bytearray(b"llo"))
+        self.assertEqual(suffix_result, bytearray(b"he"))
+        self.assertEqual(ba, bytearray(b"hello"))
+
+    @parametrize("name", ["removeprefix", "removesuffix"])
+    def test_input_bytearray_removeprefix_removesuffix_mutate_result(self, name):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            out = getattr(ba, name)(b"x")
+            out[0] = ord("j")
+            return out
+
+        ba = bytearray(b"hello")
+        out = fn(ba)
+        self.assertIs(type(out), bytearray)
+        self.assertEqual(out, bytearray(b"jello"))
+        self.assertEqual(ba, bytearray(b"hello"))
+
     @parametrize("buffer_type", [bytes, bytearray])
     def test_maketrans(self, buffer_type):
         def f(x, source, target):
@@ -1322,6 +1537,109 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             b.expandtabs(4.0)
         with self.assertRaises(OverflowError):
             b.zfill(2**63)
+
+    @make_dynamo_test
+    def test_strip_whitespace(self):
+        b = self.type2test(b"   hello   ")
+        self.assertEqual(b.strip(), b"hello")
+        self.assertEqual(b.lstrip(), b"hello   ")
+        self.assertEqual(b.rstrip(), b"   hello")
+        self.assertEqual(b, b"   hello   ")
+        # All six ASCII whitespace bytes are stripped
+        ws = self.type2test(b" \t\n\r\x0b\x0cabc \t\n\r\x0b\x0c")
+        self.assertEqual(ws.strip(), b"abc")
+        self.assertEqual(ws.lstrip(), b"abc \t\n\r\x0b\x0c")
+        self.assertEqual(ws.rstrip(), b" \t\n\r\x0b\x0cabc")
+        # None means whitespace, same as no argument
+        self.assertEqual(b.strip(None), b"hello")
+        self.assertEqual(b.lstrip(None), b"hello   ")
+        self.assertEqual(b.rstrip(None), b"   hello")
+        # Non-ASCII bytes such as \xa0 are not whitespace
+        self.assertEqual(self.type2test(b"\xa0a\xa0").strip(), b"\xa0a\xa0")
+        self.assertEqual(self.type2test(b"").strip(), b"")
+
+    @make_dynamo_test
+    def test_strip_chars(self):
+        b = self.type2test(b"xyzzyhelloxyzzy")
+        self.assertEqual(b.strip(b"xyz"), b"hello")
+        self.assertEqual(b.lstrip(b"xyz"), b"helloxyzzy")
+        self.assertEqual(b.rstrip(b"xyz"), b"xyzzyhello")
+        self.assertEqual(b.strip(bytearray(b"xyz")), b"hello")
+        self.assertEqual(self.type2test(b"hello").strip(b"xyz"), b"hello")
+        self.assertEqual(self.type2test(b"mississippi").strip(b"mississippi"), b"")
+        # Only the ends are trimmed, not interior bytes
+        self.assertEqual(self.type2test(b"mississippi").strip(b"i"), b"mississipp")
+        # An empty argument strips nothing
+        self.assertEqual(self.type2test(b" a ").strip(b""), b" a ")
+        self.assertEqual(self.type2test(b"\xffa\xff").strip(b"\xff"), b"a")
+
+    @make_dynamo_test
+    def test_strip_returns_new_bytearray(self):
+        b = self.type2test(b"abc")
+        for result in (b.strip(), b.lstrip(b"x"), b.rstrip(b"x")):
+            self.assertIsInstance(result, self.type2test)
+            self.assertIsNot(result, b)
+            self.assertEqual(result, b"abc")
+
+    @make_dynamo_test
+    def test_strip_errors(self):
+        b = self.type2test(b" abc ")
+        for name in ("strip", "lstrip", "rstrip"):
+            method = getattr(b, name)
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method("ac")
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method(32)
+            with self.assertRaisesRegex(
+                TypeError, "expected at most 1 argument, got 2"
+            ):
+                method(b"a", b"b")
+            with self.assertRaisesRegex(TypeError, "takes no keyword arguments"):
+                method(bytes=b"a")
+
+    def test_input_bytearray_strip(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.strip(), ba.lstrip(b" a"), ba.rstrip(None)
+
+        ba = bytearray(b" abc ")
+        results = fn(ba)
+        for result in results:
+            self.assertIs(type(result), bytearray)
+        self.assertEqual(
+            results, (bytearray(b"abc"), bytearray(b"bc "), bytearray(b" abc"))
+        )
+        self.assertEqual(ba, bytearray(b" abc "))
+
+    @parametrize("name", ["strip", "lstrip", "rstrip"])
+    def test_input_bytearray_strip_mutate_result(self, name):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            out = getattr(ba, name)()
+            out[0] = ord("j")
+            return out
+
+        ba = bytearray(b"hello")
+        out = fn(ba)
+        self.assertIs(type(out), bytearray)
+        self.assertEqual(out, bytearray(b"jello"))
+        self.assertEqual(ba, bytearray(b"hello"))
+
+    @parametrize("method", ["strip", "lstrip", "rstrip"])
+    def test_strip_nonconstant_chars_graph_break(self, method):
+        class BytesSubclass(bytes):
+            pass
+
+        def fn(ba, chars):
+            return getattr(ba, method)(chars)
+
+        args = bytearray(b"-abc-"), BytesSubclass(b"-")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            f"Dynamo does not know how to trace method `{method}` of class `bytearray`",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertEqual(torch.compile(fn, backend="eager")(*args), fn(*args))
 
     def test_zfill_expandtabs_returns_new_bytearrays(self):
         def f(ba, x):

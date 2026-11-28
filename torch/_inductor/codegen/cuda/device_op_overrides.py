@@ -251,8 +251,12 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         # https://github.com/triton-lang/triton/blob/6af4f88591c85de079d8a36a4d7dba67918e2b39/third_party/nvidia/backend/driver.c#L283
         # New APIs (fillTMADescriptor):
         # https://github.com/triton-lang/triton/blob/main/third_party/nvidia/backend/driver.c#L283
+        # Guarded: the constant-folding graph's code is spliced into the main
+        # graph's file, and each graph's wrapper emits these once.
         return """
-            #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+            #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000 \\
+                && !defined(AOTI_TORCH_TMA_DESCRIPTOR_HELPERS)
+            #define AOTI_TORCH_TMA_DESCRIPTOR_HELPERS
             [[maybe_unused]] static void init1DTMADescriptor(
                     CUtensorMap* m,
                     void* globalAddress,

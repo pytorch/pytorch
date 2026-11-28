@@ -1010,7 +1010,7 @@ class TestReplicationStager(DTensorContinuousTestBase):
     world_size = NUM_DEVICES
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         if device_type == "cpu":
             return "gloo"
         curr_backend = dist.get_default_backend_for_device(device_type)

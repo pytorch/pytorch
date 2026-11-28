@@ -193,6 +193,7 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Pooling.h>
 
 namespace at::native {
 
@@ -211,7 +212,7 @@ static Tensor _mkldnn_pooling(
   const auto padding_vec = expand_param_if_needed(padding, "padding", dims);
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
 
-  const ideep::tensor& x = itensor_from_mkldnn(input);
+  const mkldnn::MkldnnMemory& x = itensor_from_mkldnn(input);
   std::vector<int64_t> output_sizes;
 
   auto padding_vec_r = padding_vec;
@@ -268,8 +269,8 @@ static Tensor _mkldnn_pooling(
     aprop_kind = dnnl::prop_kind::forward_inference;
   }
 
-  ideep::tensor y;
-  ideep::pooling_forward::compute(
+  mkldnn::MkldnnMemory y;
+  mkldnn::pooling_forward(
       x,
       {output_sizes.cbegin(), output_sizes.cend()},
       y,
@@ -337,11 +338,11 @@ static Tensor _mkldnn_pooling_backward(
     }
   }
 
-  const ideep::tensor& grady = itensor_from_mkldnn(grad_output);
-  const ideep::tensor& y = itensor_from_mkldnn(output);
-  const ideep::tensor& x = itensor_from_mkldnn(input);
-  ideep::tensor gradx;
-  ideep::pooling_backward::compute(
+  const mkldnn::MkldnnMemory& grady = itensor_from_mkldnn(grad_output);
+  const mkldnn::MkldnnMemory& y = itensor_from_mkldnn(output);
+  const mkldnn::MkldnnMemory& x = itensor_from_mkldnn(input);
+  mkldnn::MkldnnMemory gradx;
+  mkldnn::pooling_backward(
       grady,
       y,
       x,
