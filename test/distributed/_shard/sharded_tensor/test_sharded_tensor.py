@@ -1990,7 +1990,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_uneven_shards(self, device):
         device_type = torch.device(device).type
-        self.init_pg(backend=self.backend)
+        self.init_pg(backend=self.backend(device_type))
 
         spec = EnumerableShardingSpec(
             [
