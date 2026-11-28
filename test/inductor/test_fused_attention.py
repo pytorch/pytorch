@@ -45,19 +45,11 @@ def checkpoint_wrapper(fn):
 
 
 def _requires_accelerator_runtime(fn):
-    """Runtime gate shared by the accelerator variants of the rewriter tests.
+    """Skip when triton or a fused SDPA backend is missing; CPU is exempt.
 
-    The old collection guard was a disjunction: HAS_{CUDA,XPU}_AND_TRITON combined
-    with PLATFORM_SUPPORTS_FUSED_ATTENTION (flash or cuDNN or memory-efficient
-    attention), so it cannot be expressed with requires_capabilities (which is a
-    conjunction). Read the registered capabilities directly instead: MEM_EFF is
-    always True on CUDA/XPU and on ROCm the flash and memory-efficient flags share
-    the AOTriton arch list, so this reproduces the old admission set. A backend
-    that declares no attention capability (out-of-tree device test bases) is not
-    filtered here.
-
-    CPU variants bind the same template methods but need neither triton nor a
-    fused SDPA backend, so they are exempt.
+    The old collection guard was a disjunction, which requires_capabilities (a
+    conjunction) cannot express, so read the registered attention capabilities.
+    A device that declares none is not filtered.
     """
 
     @functools.wraps(fn)
@@ -2273,8 +2265,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         and value in SDPA (PMA pattern), the constraint cache should deduplicate
         the buffer copy, producing fewer copy operations than when disabled."""
 
-        # kv has two SDPA users, so it is realized with a FlexibleLayout before the
-        # first SDPA is lowered, and its reads favor a layout with stride(-1) != 1.
+        # Two SDPA users force a FlexibleLayout whose reads favor stride(-1) != 1.
         def pma_attention(query, kv):
             return torch.nn.functional.scaled_dot_product_attention(query, kv, kv)
 
