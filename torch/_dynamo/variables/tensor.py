@@ -878,6 +878,9 @@ class TensorVariable(VariableTracker):
     def method_attr_grad(
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker | None:
+        if self.source is None:
+            # The grad may come from an input alias or an intermediate with no grad.
+            tx.output.current_tracer.has_sourceless_grad = True
         if tx.output.side_effects.has_pending_mutation_of_attr(self, "grad"):
             return tx.output.side_effects.load_attr(self, "grad")
         alias = self._sourced_alias(tx)
@@ -1387,6 +1390,8 @@ class TensorVariable(VariableTracker):
 
         source = TensorPropertySource(self.source, TensorProperty.STORAGE_OFFSET)
         install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
+        # ConstantVariable bypasses VariableBuilder's traced-source registration.
+        tx.output.current_tracer.traced_sources.add(source)
         # The guard pins the entry value, even if the graph later mutates the tensor.
         return ConstantVariable.create(storage_offset)
 
