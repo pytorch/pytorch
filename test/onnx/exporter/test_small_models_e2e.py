@@ -1326,6 +1326,26 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         onnx_testing.assert_onnx_program(onnx_program)
 
+    def test_rms_norm_float64_uses_float64_default_eps(self):
+        """Test that the default epsilon for float64 inputs is the float64 epsilon."""
+
+        class RMSNormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [8])
+
+        # Small values make the result sensitive to epsilon.
+        x = torch.randn(2, 8, dtype=torch.float64) * 1e-3
+
+        onnx_program = self.export(RMSNormModel(), (x,), opset_version=23)
+
+        (node,) = [
+            n for n in onnx_program.model.graph if n.op_type == "RMSNormalization"
+        ]
+        self.assertEqual(
+            node.attributes["epsilon"].as_float(), torch.finfo(torch.float64).eps
+        )
+        onnx_testing.assert_onnx_program(onnx_program)
+
     def test_enable_gqa_in_attention_23_with_dropout(self):
         class Model(torch.nn.Module):
             def forward(self, q, k, v):
