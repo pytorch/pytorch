@@ -2203,3 +2203,15 @@ class MultiProcContinuousTest(TestCase):
                 raise ValueError(
                     f"no such test method in {self.__class__}: {methodName}"
                 ) from e
+
+
+class MultiProcContinuousForInstantiateTest(MultiProcContinuousTest):
+    @classmethod
+    def backend_str(cls, device) -> str:
+        return c10d.get_default_backend_for_device(torch.device(device).type)
+
+    @property
+    def current_device(self) -> torch.device:
+        if self.rank < 0 or self.device_type == "cpu":
+            return torch.device(self.device_type)
+        return torch.device(self.device_type, self.rank)
