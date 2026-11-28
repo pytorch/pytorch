@@ -277,9 +277,7 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
     TORCH_CHECK(
         str.size() <= static_cast<size_t>(PY_SSIZE_T_MAX),
         "torch_string_to_pyobject: string is too long");
-    // Same as THPUtils_packString(const std::string&), without the copy.
-    PyObject* py = PyUnicode_FromStringAndSize(
-        str.data(), static_cast<Py_ssize_t>(str.size()));
+    PyObject* py = THPUtils_packString(str);
     TORCH_CHECK_PYTHON(py != nullptr);
     return py;
   }
