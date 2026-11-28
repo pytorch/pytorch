@@ -187,14 +187,18 @@ struct FusedAdamMathFunctor {
       const double& eps,
       const bool& maximize,
       const float* grad_scale_ptr,
-      const float* found_inf_ptr) {
+      const float* found_inf_ptr,
+      const float* beta1_ptr,
+      const float* beta2_ptr) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
 
     const auto lr_opmath =
         lr_ptr ? static_cast<opmath_t>(*lr_ptr) : static_cast<opmath_t>(lr);
-    const auto beta1_opmath = static_cast<opmath_t>(beta1);
-    const auto beta2_opmath = static_cast<opmath_t>(beta2);
+    const auto beta1_opmath = beta1_ptr ? static_cast<opmath_t>(*beta1_ptr)
+                                        : static_cast<opmath_t>(beta1);
+    const auto beta2_opmath = beta2_ptr ? static_cast<opmath_t>(*beta2_ptr)
+                                        : static_cast<opmath_t>(beta2);
     const auto weight_decay_opmath = static_cast<opmath_t>(weight_decay);
     const auto eps_opmath = static_cast<opmath_t>(eps);
 
@@ -303,10 +307,14 @@ struct FusedAdamMathFunctorMP {
       const double& eps,
       const bool& maximize,
       const float* grad_scale_ptr,
-      const float* found_inf_ptr) {
+      const float* found_inf_ptr,
+      const float* beta1_ptr,
+      const float* beta2_ptr) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
     const double lr_double = lr_ptr ? *lr_ptr : lr;
+    const double beta1_double = beta1_ptr ? *beta1_ptr : beta1;
+    const double beta2_double = beta2_ptr ? *beta2_ptr : beta2;
 
     if (found_inf_ptr && *found_inf_ptr == 1) {
       return;
@@ -315,8 +323,10 @@ struct FusedAdamMathFunctorMP {
         [&]() -> std::pair<double, double> {
       auto* step_count =
           reinterpret_cast<const float*>(tl.state_steps_addresses[tensor_loc]);
-      const auto bias_correction1 = 1 - at::native::pow_(beta1, *step_count);
-      const auto bias_correction2 = 1 - at::native::pow_(beta2, *step_count);
+      const auto bias_correction1 =
+          1 - at::native::pow_(beta1_double, *step_count);
+      const auto bias_correction2 =
+          1 - at::native::pow_(beta2_double, *step_count);
       const auto bias_correction2_sqrt = std::sqrt(bias_correction2);
       return {bias_correction1, bias_correction2_sqrt};
     }();
@@ -421,8 +431,8 @@ struct FusedAdamMathFunctorMP {
         adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
             r_args,
             lr_double,
-            beta1,
-            beta2,
+            beta1_double,
+            beta2_double,
             weight_decay,
             eps,
             maximize,
@@ -523,8 +533,8 @@ struct FusedAdamMathFunctorMP {
         adam_math<scalar_type, opmath_t, depth, adam_mode, amsgrad>(
             r_args,
             lr_double,
-            beta1,
-            beta2,
+            beta1_double,
+            beta2_double,
             weight_decay,
             eps,
             maximize,
@@ -571,7 +581,9 @@ void _fused_adam_cuda_impl_common(
     const double eps,
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
-    const std::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& found_inf,
+    const float* beta1_ptr = nullptr,
+    const float* beta2_ptr = nullptr) {
   constexpr int depth = amsgrad ? 5 : 4;
   constexpr bool is_adamw = (mode == ADAM_MODE::ADAMW);
   constexpr const char* validate_msg =
@@ -634,7 +646,9 @@ void _fused_adam_cuda_impl_common(
               eps,
               maximize,
               grad_scale_ptr,
-              found_inf_ptr);
+              found_inf_ptr,
+              beta1_ptr,
+              beta2_ptr);
         }),
         kBFloat16);
   } else {
@@ -652,9 +666,49 @@ void _fused_adam_cuda_impl_common(
               eps,
               maximize,
               grad_scale_ptr,
-              found_inf_ptr);
+              found_inf_ptr,
+              beta1_ptr,
+              beta2_ptr);
         });
   }
+}
+
+// Each of lr, beta1 and beta2 is read on the host if it is a CPU scalar and by
+// the kernel otherwise.
+template <ADAM_MODE mode, bool amsgrad>
+void _fused_adam_cuda_impl_common(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList exp_avgs,
+    at::TensorList exp_avg_sqs,
+    at::TensorList max_exp_avg_sqs,
+    at::TensorList state_steps,
+    const at::Tensor& lr,
+    const at::Tensor& beta1,
+    const at::Tensor& beta2,
+    const double weight_decay,
+    const double eps,
+    const bool maximize,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
+  _fused_adam_cuda_impl_common<mode, amsgrad>(
+      params,
+      grads,
+      exp_avgs,
+      exp_avg_sqs,
+      max_exp_avg_sqs,
+      state_steps,
+      lr.is_cpu() ? nullptr : lr.const_data_ptr<float>(),
+      lr.is_cpu() ? lr.item<double>() : 1.0,
+      beta1.is_cpu() ? beta1.item<double>() : 1.0,
+      beta2.is_cpu() ? beta2.item<double>() : 1.0,
+      weight_decay,
+      eps,
+      maximize,
+      grad_scale,
+      found_inf,
+      beta1.is_cpu() ? nullptr : beta1.const_data_ptr<float>(),
+      beta2.is_cpu() ? nullptr : beta2.const_data_ptr<float>());
 }
 
 } // namespace

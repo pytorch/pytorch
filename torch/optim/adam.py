@@ -876,6 +876,22 @@ def _fused_adam(
             lr = lr_dict[device]
         torch._foreach_add_(device_state_steps, 1)
         func = torch._fused_adam_ if not decoupled_weight_decay else torch._fused_adamw_
+        device_lr, device_beta1, device_beta2 = lr, beta1, beta2
+        if isinstance(beta1, Tensor) and isinstance(beta2, Tensor):
+            # The CUDA and MPS kernels of the tensor_lr_betas overload read float32
+            # betas that are on the param device, which avoids syncing to turn them
+            # into floats. Any other betas are converted here: left as Tensors they
+            # would select that overload whenever lr is a Tensor too, and not every
+            # backend has a kernel for it.
+            param_device = device_params[0].device
+            if param_device.type in ("cuda", "mps") and all(
+                b.device == param_device and b.dtype == torch.float32
+                for b in (beta1, beta2)
+            ):
+                if not isinstance(lr, Tensor):
+                    device_lr = torch.tensor(lr, dtype=torch.float64)
+            else:
+                device_beta1, device_beta2 = beta1.item(), beta2.item()
         # pyrefly: ignore [no-matching-overload]
         func(
             device_params,
@@ -885,9 +901,9 @@ def _fused_adam(
             device_max_exp_avg_sqs,  # type: ignore[arg-type]
             device_state_steps,
             amsgrad=amsgrad,
-            lr=lr,  # type: ignore[arg-type]
-            beta1=beta1,
-            beta2=beta2,
+            lr=device_lr,  # type: ignore[arg-type]
+            beta1=device_beta1,
+            beta2=device_beta2,
             weight_decay=weight_decay,
             eps=eps,
             maximize=maximize,

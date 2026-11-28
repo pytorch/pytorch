@@ -138,4 +138,66 @@ void _fused_adam_kernel_mps_(TensorList params,
                           found_inf);
   }
 }
+
+// The following overload has a Tensor lr, beta1 and beta2
+void _fused_adam_kernel_mps_(TensorList params,
+                             TensorList grads,
+                             TensorList exp_avgs,
+                             TensorList exp_avg_sqs,
+                             TensorList max_exp_avg_sqs,
+                             TensorList state_steps,
+                             const Tensor& lr,
+                             const Tensor& beta1,
+                             const Tensor& beta2,
+                             const double weight_decay,
+                             const double eps,
+                             const bool amsgrad,
+                             const bool maximize,
+                             const std::optional<Tensor>& grad_scale,
+                             const std::optional<Tensor>& found_inf) {
+  // Manually check devices since we specify no device check in
+  // native_functions.yaml. A CPU scalar is bound by value, a device scalar as a buffer.
+  Device param_device = params[0].device();
+  for (const Tensor& scalar : {lr, beta1, beta2}) {
+    TORCH_CHECK(scalar.is_cpu() || scalar.device() == param_device,
+                "lr, beta1 and beta2 must be on CPU or on the same GPU device as the params");
+    TORCH_CHECK(scalar.scalar_type() == kFloat || (scalar.is_cpu() && scalar.scalar_type() == kDouble),
+                "lr, beta1 and beta2 must be float32, or float64 on CPU");
+  }
+
+  if (amsgrad) {
+    TORCH_CHECK(native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
+                "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
+    _fused_adam_amsgrad_mps_impl_(params,
+                                  grads,
+                                  exp_avgs,
+                                  exp_avg_sqs,
+                                  max_exp_avg_sqs,
+                                  state_steps,
+                                  lr,
+                                  beta1,
+                                  beta2,
+                                  weight_decay,
+                                  eps,
+                                  maximize,
+                                  grad_scale,
+                                  found_inf);
+  } else {
+    TORCH_CHECK(native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs}),
+                "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout");
+    _fused_adam_mps_impl_(params,
+                          grads,
+                          exp_avgs,
+                          exp_avg_sqs,
+                          state_steps,
+                          lr,
+                          beta1,
+                          beta2,
+                          weight_decay,
+                          eps,
+                          maximize,
+                          grad_scale,
+                          found_inf);
+  }
+}
 } // namespace at::native
