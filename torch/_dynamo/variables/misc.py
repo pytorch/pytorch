@@ -66,6 +66,7 @@ from ..source import (
 from ..utils import (
     check_positional,
     check_unspec_or_constant_args,
+    is_wrapper_or_member_descriptor,
     istype,
     no_keywords,
     proxy_args_kwargs,
@@ -73,6 +74,7 @@ from ..utils import (
     unpack_iterable,
 )
 from .base import (
+    _flags_from_ml_flags,
     AsPythonConstantNotImplementedError,
     AttributeMutationExisting,
     GetSet,
@@ -80,6 +82,7 @@ from .base import (
     load_pending_mutation,
     Member,
     Method,
+    MethodFlags,
     NO_SUCH_SUBOBJ,
     readonly_setter,
     VariableTracker,
@@ -121,6 +124,8 @@ class SuperVariable(VariableTracker):
         self,
         typevar: VariableTracker,
         objvar: VariableTracker | None = None,
+        *,
+        direct_method: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -133,6 +138,7 @@ class SuperVariable(VariableTracker):
         # to the current function where super() is called from (self for regular method,
         # cls for a classmethod)
         self.objvar = objvar
+        self.direct_method = direct_method
 
     @staticmethod
     def create(typevar: VariableTracker, objvar: VariableTracker) -> "SuperVariable":
@@ -273,6 +279,33 @@ class SuperVariable(VariableTracker):
         inner_fn, source = self._resolved_getattr_and_source(tx, name)
         if self.objvar is None:
             raise AssertionError("super() requires objvar to be set for method calls")
+        if is_wrapper_or_member_descriptor(inner_fn) and inner_fn.__objclass__ is dict:
+            if isinstance(obj := self.objvar, variables.OrderedDictVariable):
+                if isinstance(inner_fn, types.MethodDescriptorType):
+                    if self.direct_method:
+                        flags = _flags_from_ml_flags(dict, name)
+                        if (
+                            (args and flags & MethodFlags.NOARGS)
+                            or (flags & MethodFlags.O and len(args) != 1)
+                            or (kwargs and not flags & MethodFlags.KEYWORDS)
+                        ):
+                            unimplemented(
+                                gb_type="Specialization-dependent super method error",
+                                context=f"dict.{name}",
+                                explanation="The arguments to this direct super() call are invalid. CPython specialization can change the receiver named in its TypeError.",
+                                hints=["To catch TypeError, bind the method first."],
+                                skip_frame=True,
+                                apply_to_code=False,
+                            )
+                    result = obj.call_method_descriptor(
+                        tx, inner_fn, args, kwargs, bound=True
+                    )
+                    if result is not None:
+                        return result
+                else:
+                    obj.check_base_dict_mutation(
+                        tx, inner_fn.__name__, args, kwargs, bound=True
+                    )
         # This essentially simulates CPython's `super_getattro`:
         # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L11138-L11168
         # where `inner_fn` is the VT for `res = _super_lookup_descr(...)`.
