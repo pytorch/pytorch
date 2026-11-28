@@ -1079,8 +1079,15 @@ print(torch.xpu.is_initialized())
         if self.expandable_segments:
             self.skipTest("Skipping OOM test for expandable segments allocator.")
         torch.xpu.memory.empty_cache()
+        torch.xpu.reset_accumulated_memory_stats()
         with self.assertRaises(torch.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device="xpu")
+        self.assertEqual(torch.xpu.memory_stats()["num_ooms"], 1)
+        self.assertEqual(torch.accelerator.memory_stats()["num_ooms"], 1)
+        torch.xpu.reset_peak_memory_stats()
+        self.assertEqual(torch.xpu.memory_stats()["num_ooms"], 1)
+        torch.xpu.reset_accumulated_memory_stats()
+        self.assertEqual(torch.xpu.memory_stats()["num_ooms"], 0)
 
     @serialTest()
     def test_1mb_allocation_uses_small_block(self):
@@ -1128,8 +1135,13 @@ print(torch.xpu.is_initialized())
         self.assertEqual(fraction, torch.xpu.get_per_process_memory_fraction())
 
         application_memory = int(total_memory * 0.51)
+        torch.xpu.reset_accumulated_memory_stats()
         with self.assertRaises(torch.OutOfMemoryError):
             _ = torch.empty(application_memory, dtype=torch.int8, device="xpu")
+        self.assertEqual(torch.xpu.memory_stats()["num_ooms"], 1)
+        self.assertEqual(torch.accelerator.memory_stats()["num_ooms"], 1)
+        torch.xpu.reset_accumulated_memory_stats()
+        self.assertEqual(torch.xpu.memory_stats()["num_ooms"], 0)
 
         torch.xpu.set_per_process_memory_fraction(orig_fraction)
 

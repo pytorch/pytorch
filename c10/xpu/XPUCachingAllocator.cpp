@@ -1824,6 +1824,7 @@ class DeviceCachingAllocator {
           params.device(),
           params.pool->owner_MempoolId(),
           std::move(context));
+      stats.num_ooms += 1;
 
       c10::reportOutOfMemoryToProfiler(
           static_cast<int64_t>(size),
@@ -1941,6 +1942,7 @@ class DeviceCachingAllocator {
       stats.requested_bytes[statType].reset_accumulated();
     }
     stats.num_alloc_retries = 0;
+    stats.num_ooms = 0;
   }
 
   void resetPeakStats() {
