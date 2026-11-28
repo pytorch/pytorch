@@ -386,6 +386,47 @@ class TestInvokeSubgraphCompile(TestCase):
         res = torch.compile(fn, backend="inductor", fullgraph=True)(x)
         self.assertEqual(fn(x), res)
 
+    def _check_layout_opt_conv_after_region(self, gn):
+        conv = torch.nn.Conv2d(2, 2, 1)
+
+        def fn(x):
+            return conv(gn(gn(x)).reshape(1, 2, 4, 4))
+
+        x = torch.randn(1, 4, 8, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+        ref = fn(x)
+        ref.sum().backward()
+        with inductor_config.patch(force_layout_optimization=True):
+            res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone)
+            res.sum().backward()
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
+    def test_layout_opt_view_in_backward(self):
+        # https://github.com/pytorch/pytorch/issues/205692
+        # Layout optimization makes the saved activations channels-last, so the
+        # view in the backward subgraph has to become a reshape.
+        @nested_compile_region
+        def gn(x):
+            q = x.reshape(1, 4, 2, 4).transpose(1, 2)
+            y = torch.nn.functional.scaled_dot_product_attention(q, q, q)
+            y = y.transpose(1, 2).flatten(-2)
+            return (y * y).reshape_as(x)
+
+        self._check_layout_opt_conv_after_region(gn)
+
+    def test_saved_input_not_reused(self):
+        # The forward subgraph returns its input as a saved activation. Its
+        # storage must not be reused for the channels-last conv input.
+        @nested_compile_region
+        def gn(x):
+            q = x.reshape(1, 4, 2, 4).transpose(1, 2)
+            y = q.sin() * q
+            y = y.transpose(1, 2).flatten(-2)
+            return (y * y).reshape_as(x)
+
+        self._check_layout_opt_conv_after_region(gn)
+
     def test_module_forward(self):
         class Mod(torch.nn.Module):
             def __init__(self):
