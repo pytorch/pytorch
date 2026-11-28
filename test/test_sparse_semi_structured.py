@@ -1938,7 +1938,7 @@ if "cusparselt" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
     instantiate_device_type_tests(
         TestSparseSemiStructuredCUSPARSELT, globals(), only_for="cuda"
     )
-instantiate_device_type_tests(TestComputeCompressedSwizzledBitmaskDevice, globals())
+instantiate_device_type_tests(TestComputeCompressedSwizzledBitmaskDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
