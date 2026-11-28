@@ -86,10 +86,10 @@ class DistOpDispatchOverHead(DTensorTestBase):
         # warm up
         with TimeCaptureMode() as tcm:
             for _ in range(100):
-                propagator.propagate_op_sharding.cache.cache_clear()
+                propagator.propagate_op_sharding.cache_clear()
                 _ = a + a
             # record number
-            propagator.propagate_op_sharding.cache.cache_clear()
+            propagator.propagate_op_sharding.cache_clear()
             _ = a + a
             add_dispatch_cache_miss, add_dispatch_cache_hit = tcm.op_to_time[
                 "add.Tensor"

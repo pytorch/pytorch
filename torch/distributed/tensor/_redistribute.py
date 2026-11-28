@@ -8,7 +8,6 @@ import math
 import weakref
 from collections import defaultdict
 from collections.abc import Sequence
-from functools import cache
 from typing import Any, cast, TypedDict
 
 import torch
@@ -663,11 +662,12 @@ def get_redistribute_planner(
         return DTensorRedistributePlanner(device_mesh, dtensor_meta)
 
     cache_key = (weakref.ref(device_mesh), dtensor_meta)
-    if cache_key not in _planner_cache:
-        planner = DTensorRedistributePlanner(device_mesh, dtensor_meta)
-        _planner_cache[cache_key] = planner
+    cached = _planner_cache.get(cache_key)
+    if cached is None or cached._device_mesh_ref() is None:
+        cached = DTensorRedistributePlanner(device_mesh, dtensor_meta)
+        _planner_cache[cache_key] = cached
 
-    return _planner_cache[cache_key]
+    return cached
 
 
 def clear_redistribute_planner_cache() -> None:
@@ -843,7 +843,9 @@ class DTensorRedistributePlanner:
             device_mesh: The device mesh for this planner
             dtensor_meta: TensorMeta of the DTensor to redistribute
         """
-        self.device_mesh = device_mesh
+        self._device_mesh_ref: weakref.ReferenceType[DeviceMesh] = weakref.ref(
+            device_mesh
+        )
         if not device_mesh._is_current_rank_part_of_mesh():
             raise AssertionError
         if dtensor_meta is None:
@@ -853,6 +855,16 @@ class DTensorRedistributePlanner:
         self.strided_shard_placements_in_target: set[_StridedShard] = set()
         self.partial_reduce_ops_in_target: set[str] = set()
         self.setup_cost_callbacks()
+
+    @property
+    def device_mesh(self) -> DeviceMesh:
+        mesh = self._device_mesh_ref()
+        if mesh is None:
+            raise RuntimeError(
+                "DTensorRedistributePlanner outlived its DeviceMesh. The planner"
+                "cache should have rebuilt this entry against the live mesh."
+            )
+        return mesh
 
     def setup_cost_callbacks(
         self,
@@ -1570,17 +1582,36 @@ def _gen_transform_infos_non_cached(
     return transform_infos
 
 
-@cache
+_transform_infos_cache: dict[tuple[Any, ...], list[_TransformInfo]] = {}
+
+
 def _gen_transform_infos(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
     use_graph_based_transform: bool | None = None,
 ) -> list[_TransformInfo]:
-    return _gen_transform_infos_non_cached(
-        src_spec,
-        dst_spec,
+    if _are_we_tracing():
+        return _gen_transform_infos_non_cached(
+            src_spec, dst_spec, use_graph_based_transform
+        )
+    key = (
+        src_spec.mesh._cache_key,
+        src_spec._hash_key_no_mesh,
+        dst_spec._hash_key_no_mesh,
         use_graph_based_transform,
     )
+    infos = _transform_infos_cache.get(key)
+    if infos is None:
+        infos = _gen_transform_infos_non_cached(
+            src_spec, dst_spec, use_graph_based_transform
+        )
+        _transform_infos_cache[key] = infos
+    return infos
+
+
+def clear_transform_infos_cache() -> None:
+    """Clear the cache of generated transform infos."""
+    _transform_infos_cache.clear()
 
 
 def redistribute_local_tensor(

@@ -34,10 +34,10 @@ from torch.distributed.tensor._dtensor_spec import (
 )
 from torch.distributed.tensor._redistribute import (
     _FlattenedTransformInfo,
-    _gen_transform_infos,
     _optimize_transform_infos,
     _redistribute_cost_sort_key,
     _TransformInfo,
+    clear_transform_infos_cache,
     disable_redistribute_transform_optimization,
     redistribute_local_tensor,
     use_min_cost_redistribution_plan,
@@ -1431,7 +1431,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
 
             # Clear the transformation cache between iterations. Without this,
             # the second iteration would use cached paths from the first
-            _gen_transform_infos.cache_clear()
+            clear_transform_infos_cache()
 
     def test_generate_shard_orders(self):
         """Check if `generate_shard_orders` generates unique sharding combinations"""

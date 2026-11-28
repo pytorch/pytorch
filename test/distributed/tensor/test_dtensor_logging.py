@@ -66,7 +66,7 @@ class TestDTensorLogging(TestCase):
             log_string(),
             f"""\
 sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), '{self.device_type}', stride=(1,))) -> Spec(f32[4, 4](S(0)))
-sharding_prop HIT (C++ fast path): aten::add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0))), 4822678189205111) -> Spec(f32[4, 4](S(0)))
+sharding_prop HIT (C++ fast path): aten::add.Tensor(0, (Shard(dim=0),), 0, (Shard(dim=0),), 4822678189205111) -> Spec(f32[4, 4](S(0)))
 sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](R)), Spec(f32[4, 4](R))) on DeviceMesh((2,), '{self.device_type}', stride=(1,))) -> Spec(f32[4, 4](R))
 sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(f32[8, 4](S(0)))) on DeviceMesh((2,), '{self.device_type}', stride=(1,))) -> Spec(f32[8, 4](S(0)))""",
         )
