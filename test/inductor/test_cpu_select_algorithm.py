@@ -15,6 +15,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import test_operators
 from torch._inductor.cpu_vec_isa import VecAMX
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -1794,6 +1795,55 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         if batch_size * mid_dim >= 16:
             vec_amx = VecAMX()
             self._check_amx_counter(vec_amx)
+
+    @unittest.skipIf(IS_WINDOWS or IS_MACOS or IS_ARM64, "requires Linux x86 AVX2")
+    @inductor_config.patch(
+        freezing=True,
+        max_autotune=True,
+        max_autotune_gemm_backends="CPP",
+        **{"cpp.simdlen": 256, "cpp.weight_prepack": True},
+    )
+    def test_int8_woq_avx2_prefetch_address(self):
+        if not torch.cpu._is_avx2_supported():
+            self.skipTest("requires AVX2")
+        if not isinstance(
+            torch._inductor.cpu_vec_isa.pick_vec_isa(),
+            torch._inductor.cpu_vec_isa.VecAVX2,
+        ):
+            self.skipTest("requires usable AVX2 code generation")
+
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                rng = torch.Generator().manual_seed(2026)
+                self.register_buffer(
+                    "weight",
+                    torch.randint(
+                        -127, 128, (3072, 1024), dtype=torch.int8, generator=rng
+                    ),
+                )
+                self.register_buffer("scale", torch.full((3072,), 0.015625).bfloat16())
+
+            def forward(self, x):
+                return torch.mm(x, self.weight.t().to(x.dtype)) * self.scale
+
+        model = Linear().eval()
+        x = torch.randn(8, 1024, generator=torch.Generator().manual_seed(2027))
+        x = x.bfloat16()
+        counters.clear()
+        with torch.inference_mode():
+            expected = x.double() @ model.weight.double().t() * model.scale.double()
+            actual, code = run_and_get_code(torch.compile(model, fullgraph=True), x)
+
+        source = "\n".join(code)
+        self.assertGreater(counters["inductor"]["cpp_templated_kernel_counter"], 0)
+        self.assertEqual(counters["inductor"]["cpp_micro_gemm_amx_counter"], 0)
+        self.assertRegex(
+            source, r"_mm_prefetch\s*\(\s*reinterpret_cast<const char\s*\*>\s*\(\s*B\b"
+        )
+        self.assertRegex(source, r"convert_to_int32\s*<\s*int8_t\s*>")
+        self.assertNotIn("extern_kernels._weight_int8pack_mm", source)
+        self.assertEqual(actual, expected.bfloat16(), atol=0.025, rtol=0.016)
 
     @inductor_config.patch({"freezing": True, "cpp.enable_concat_linear": True})
     @patches

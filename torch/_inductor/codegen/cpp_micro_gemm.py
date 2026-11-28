@@ -652,7 +652,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
             // Convert VLEN int8 elements to int32, and then fp32
             auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
             if constexpr (prefetch) {
-              _mm_prefetch(B + (k + {{block_k}}) * ldb + col * VLEN, _MM_HINT_T0);
+              _mm_prefetch(reinterpret_cast<const char*>(B + (k + {{block_k}}) * ldb + col * VLEN), _MM_HINT_T0);
             }
             vb[col] = at::vec::convert<float>(b32);
         {%- else %}
