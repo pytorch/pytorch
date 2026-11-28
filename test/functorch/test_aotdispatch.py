@@ -10707,6 +10707,7 @@ class TestPartitioningDevice(AOTTestCase):
         this. Note the default partitioner config is the one that fails;
         aggressive_recomputation=True happens to route around it.
         """
+        device = torch.device(device).type
         from functorch.compile import min_cut_rematerialization_partition
         from torch._dynamo.backends.common import aot_autograd
 
@@ -10742,6 +10743,7 @@ class TestPartitioningDevice(AOTTestCase):
         test_min_cut_partitions_device_valued_node). A MUST_SAVE node is banned from
         recompute, and a device cannot be saved, so no finite cut existed.
         """
+        device = torch.device(device).type
         from functorch.compile import min_cut_rematerialization_partition
         from torch._dynamo.backends.common import aot_autograd
         from torch.utils.checkpoint import (
@@ -13833,9 +13835,11 @@ instantiate_device_type_tests(
 )
 
 instantiate_parametrized_tests(TestPartitioning)
+
 instantiate_device_type_tests(TestPartitioningDevice, globals(), allow_xpu=True)
 
 instantiate_parametrized_tests(TestAOTModuleSimplified)
+
 instantiate_device_type_tests(
     TestAOTModuleSimplifiedDevice,
     globals(),
