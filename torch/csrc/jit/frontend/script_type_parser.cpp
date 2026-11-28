@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 
 #include <ATen/core/type_factory.h>
+#include <c10/util/FbcodeMaps.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/custom_class.h>
@@ -320,6 +321,39 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
 TypePtr ScriptTypeParser::parseType(const std::string& str) {
   Parser p(std::make_shared<Source>(str));
   return parseTypeFromExpr(p.parseExp());
+}
+
+// NOTE [ Cached type string parsing ]
+// Parsing a type string runs the full TorchScript lexer and parser. The
+// Unpickler uses this on every type-tagged container, and jit::unpickle builds
+// a fresh Unpickler per message, so its instance-level cache cannot amortize
+// parsing across messages. With no resolver the result depends only on the
+// string and the custom-class registry. Newly built container types are never
+// mutated after construction, and builtin singletons and registered custom
+// classes were already shared, so handing out the same TypePtr is safe.
+//
+// The cache is per thread so hits take no lock. Strings come from untrusted
+// payloads: entries and key length are bounded, and at capacity new strings
+// are parsed but not retained. A null result (a custom class that is not
+// registered yet) is not cached so a later registration is observed.
+TypePtr ScriptTypeParser::parseTypeCached(const std::string& str) {
+#ifdef ENABLE_RECORD_KERNEL_FUNCTION_DTYPE
+  // Model tracing records every custom-class lookup; a cache hit would hide it.
+  return ScriptTypeParser().parseType(str);
+#else
+  static constexpr size_t kMaxCachedTypes = 1024;
+  static constexpr size_t kMaxCachedTypeStringBytes = 4096;
+  thread_local c10::FastMap<std::string, TypePtr> cache;
+  if (auto it = cache.find(str); it != cache.end()) {
+    return it->second;
+  }
+  auto type = ScriptTypeParser().parseType(str);
+  if (type && str.size() <= kMaxCachedTypeStringBytes &&
+      cache.size() < kMaxCachedTypes) {
+    cache.emplace(str, type);
+  }
+  return type;
+#endif
 }
 
 std::vector<IValue> ScriptTypeParser::evaluateDefaults(
