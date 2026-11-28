@@ -2826,9 +2826,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({}, {}, {}, {}, buf).dump({"cell": empty[0]})
         self.assertTrue(_cell_is_empty(load_guards_state(buf.getvalue())["cell"]))
 
-    def test_reduce_dict_keys_type(self):
+    @parametrize("reported_type", [list, getattr(builtins, "frozendict", dict)])
+    def test_reduce_dict_keys_type(self, reported_type):
         self.assertEqual(list(GuardsStatePickler._unpickle_dict_keys(["a"])), ["a"])
-        d = type("Mapping", (dict,), {"__class__": list})()
+        d = type("Mapping", (dict,), {"__class__": reported_type})()
         self.assertIs(gc.get_referents(GuardsStatePickler._unpickle_dict_keys(d))[0], d)
         dict_keys = type({}.keys())
         buf = io.BytesIO()
@@ -6963,6 +6964,27 @@ class TestGuardSerialization(TestGuardSerializationBase):
             valid["owner"].move_to_end("b")
             valid["owner"]["c"] = valid["owner"].pop("b")
             check(valid, False)
+
+    @unittest.skipIf(not torch._has_frozendict, "requires builtins.frozendict")
+    def test_frozen_input_keys_view(self):
+        def fn(x, view):
+            return x + sum(view)
+
+        def inputs(mapping):
+            return {"x": torch.ones(1), "view": mapping.keys()}
+
+        first = inputs(builtins.frozendict({1: 2, 3: 4}))
+        check = self._roundtrip_checks(
+            ("TYPE_MATCH", "EQUALS_MATCH", "SEQUENCE_LENGTH", "TENSOR_MATCH"), fn, first
+        )
+        check(inputs(builtins.frozendict({1: 20, 3: 40})), True)
+        check(inputs(builtins.frozendict({1: 2, 5: 4})), False)
+        check(inputs({1: 2, 3: 4}), False)
+
+        view = self._saved_scope["view"]
+        self.assertIs(type(view), type(first["view"]))
+        self.assertIs(type(gc.get_referents(view)[0]), builtins.frozendict)
+        self.assertEqual(list(view), [1, 3])
 
     def test_dict_keys_serialization(self):
         d = {1: 2, 3: 4}

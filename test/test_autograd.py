@@ -1,6 +1,7 @@
 # Owner(s): ["module: autograd"]
 # ruff: noqa: F841
 
+import builtins
 import collections
 import contextlib
 import contextvars
@@ -2800,6 +2801,7 @@ class TestAutograd(TestCase):
             OrderedDict,
             partial(defaultdict, None),
             MappingProxyType,
+            getattr(builtins, "frozendict", dict),
         ],
     )
     def test_grad_dict_inputs(self, mapping_cls):
@@ -2891,6 +2893,7 @@ class TestAutograd(TestCase):
             OrderedDict,
             partial(defaultdict, None),
             MappingProxyType,
+            getattr(builtins, "frozendict", dict),
         ],
     )
     def test_grad_dict_inputs_empty(self, mapping_cls):
@@ -2910,6 +2913,7 @@ class TestAutograd(TestCase):
             OrderedDict,
             partial(defaultdict, None),
             MappingProxyType,
+            getattr(builtins, "frozendict", dict),
         ],
     )
     def test_backward_dict_inputs(self, mapping_cls):
@@ -2930,6 +2934,7 @@ class TestAutograd(TestCase):
             OrderedDict,
             partial(defaultdict, None),
             MappingProxyType,
+            getattr(builtins, "frozendict", dict),
         ],
     )
     def test_backward_dict_inputs_tensor_backward(self, mapping_cls):
@@ -2949,6 +2954,7 @@ class TestAutograd(TestCase):
             OrderedDict,
             partial(defaultdict, None),
             MappingProxyType,
+            getattr(builtins, "frozendict", dict),
         ],
     )
     def test_backward_dict_inputs_empty(self, mapping_cls):
