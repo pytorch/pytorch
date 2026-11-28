@@ -8,8 +8,9 @@ This file contains utilities related to functionalization in AOTAutograd:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from typing import Any, TypeGuard
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 import torch
 from torch import Tensor
@@ -25,6 +26,10 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
@@ -312,6 +317,40 @@ def has_metadata_mutation(
         return has_metadata_mutation_
 
 
+def _as_strided_with_dtype(
+    base: Tensor,
+    dtype: torch.dtype,
+    size: Sequence[int | torch.SymInt],
+    stride: Sequence[int | torch.SymInt],
+    storage_offset: int | torch.SymInt,
+) -> Tensor:
+    # Like base.as_strided(size, stride, storage_offset), for a view whose dtype has
+    # another itemsize than base's; size, stride and storage_offset are in elements
+    # of dtype.
+    ratio, remainder = divmod(dtype.itemsize, base.dtype.itemsize)
+    if remainder == 0:
+        # Address each dtype element as `ratio` base elements in a trailing dim, then
+        # reinterpret. This keeps as_strided() as the first view off the base, which
+        # functionalization needs to support mutations of the result.
+        return (
+            base.as_strided(
+                (*size, ratio),
+                (*(s * ratio for s in stride), 1),
+                storage_offset * ratio,
+            )
+            .view(dtype)
+            .squeeze(-1)
+        )
+    # dtype is narrower than base's dtype: reinterpret the whole storage first.
+    unit = math.lcm(base.dtype.itemsize, dtype.itemsize)
+    numel = base.untyped_storage().nbytes() // unit * unit // base.dtype.itemsize
+    return (
+        base.as_strided((numel,), (1,), 0)
+        .view(dtype)
+        .as_strided(size, stride, storage_offset)
+    )
+
+
 def gen_alias_from_base(
     aliased_base_tensor: Tensor,
     target_meta_tensor: Tensor,
@@ -355,7 +394,12 @@ def gen_alias_from_base(
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
-    if target_meta_tensor._base is not None:
+    # The view func expects a base with the dtype of the view's own ._base; a base that
+    # reinterprets the storage with another dtype goes through as_strided() below.
+    if (
+        target_meta_tensor._base is not None
+        and aliased_base_tensor.dtype == target_meta_tensor._base.dtype
+    ):
         # The base that we want to replay our view off of might have a different shape than the view's original base.
         b = target_meta_tensor._base
         abt = aliased_base_tensor
@@ -395,11 +439,17 @@ def gen_alias_from_base(
     # Compare storages via ``_cdata`` (raw c10::Storage handle) rather than
     # ``.data_ptr()`` so this is safe on fake/meta storages that would raise
     # from ``.data_ptr()`` during AOT tracing.
+    base_itemsize = aliased_base_tensor.dtype.itemsize
+    target_itemsize = target_meta_tensor.dtype.itemsize
     if (
         aliased_base_tensor.untyped_storage()._cdata
         != target_meta_tensor.untyped_storage()._cdata
     ):
-        storage_offset = aliased_base_tensor.storage_offset() + storage_offset
+        # The base's offset is in its own elements; convert it to the target's.
+        storage_offset = (
+            aliased_base_tensor.storage_offset() * base_itemsize // target_itemsize
+            + storage_offset
+        )
     if aliased_base_tensor.is_complex() and not target_meta_tensor.is_complex():
         aliased_out = torch.view_as_real(aliased_base_tensor).as_strided(
             size, stride, storage_offset
@@ -407,6 +457,14 @@ def gen_alias_from_base(
     elif not aliased_base_tensor.is_complex() and target_meta_tensor.is_complex():
         aliased_out = torch.view_as_complex(aliased_base_tensor).as_strided(
             size, stride, storage_offset
+        )
+    elif base_itemsize != target_itemsize:
+        aliased_out = _as_strided_with_dtype(
+            aliased_base_tensor,
+            target_meta_tensor.dtype,
+            size,
+            stride,
+            storage_offset,
         )
     else:
         aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
