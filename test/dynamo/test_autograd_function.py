@@ -1150,6 +1150,43 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
 
+    def test_mark_dirty_no_grad_no_graph_break(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/206947
+        # ctx.mark_dirty() must not graph-break on the no-grad inference path.
+        class InplaceDouble(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.mark_dirty(x)
+                x.mul_(2)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+        fn = torch.compile(
+            lambda t: InplaceDouble.apply(t), backend="eager", fullgraph=True
+        )
+
+        # requires_grad=False (no-grad inference path)
+        x = torch.ones(4)
+        result = fn(x)
+        self.assertEqual(result, torch.ones(4) * 2)
+
+        torch._dynamo.reset()
+        # explicit torch.no_grad()
+        x = torch.ones(4)
+        with torch.no_grad():
+            result = fn(x)
+        self.assertEqual(result, torch.ones(4) * 2)
+
+        torch._dynamo.reset()
+        # torch.inference_mode()
+        x = torch.ones(4)
+        with torch.inference_mode():
+            result = fn(x)
+        self.assertEqual(result, torch.ones(4) * 2)
+
     def test_multi_output(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()

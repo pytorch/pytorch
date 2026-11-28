@@ -1381,14 +1381,15 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         no_keywords(tx, "mark_dirty", kwargs)
-        if getattr(self, "proxy", None) is None:
-            unimplemented(
-                gb_type="Unsupported autograd.Function context `mark_dirty`",
-                context=f"call_method {self} mark_dirty",
-                explanation="Dynamo only supports tracing ctx.mark_dirty "
-                "inside autograd.Function.apply.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+        if not self.inference:
+            if getattr(self, "proxy", None) is None:
+                unimplemented(
+                    gb_type="Unsupported autograd.Function context `mark_dirty`",
+                    context=f"call_method {self} mark_dirty",
+                    explanation="Dynamo only supports tracing ctx.mark_dirty "
+                    "inside autograd.Function.apply.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         self.dirty_tensors = args
         return variables.ConstantVariable.create(None)
 
