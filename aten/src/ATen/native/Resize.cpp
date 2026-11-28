@@ -291,6 +291,18 @@ void resize_bytes_nocuda(const Storage& storage, const c10::SymInt& newsize) {
         size_bytes_i,
         ") cannot be represented as a int64_t");
     const auto size_bytes = static_cast<int64_t>(size_bytes_i);
+    // Freeing a storage (resize to 0 bytes) must not dispatch any ops. The
+    // tensor-based path below would allocate a 0-byte tensor and copy_ into it
+    // because resize_ keeps the data_ptr when shrinking. On XPU, dropping the
+    // DataPtr is safe for the same reason as on CUDA: the caching allocator only
+    // hands the block out again to work on the same stream, which is ordered
+    // after the work already queued on it. HPU and MTIA keep the old path; HPU
+    // eager relies on the queued ops to keep the buffer alive.
+    if (device_type == at::kXPU && size_bytes == 0) {
+      storage.set_data_ptr_noswap(at::DataPtr(nullptr, storage.device()));
+      storage.set_nbytes(0);
+      return;
+    }
     void* original_data_ptr = storage.data_ptr().get();
 
     auto src_option =
