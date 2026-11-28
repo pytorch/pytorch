@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNotRocm,
     skipMeta,
     skipMPS,
-    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -332,7 +331,6 @@ class TestTorchDlPackDevice(TestCase):
 
     @onlyAccelerator
     @skipMPS
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
         stream_a = torch.Stream()
@@ -350,7 +348,6 @@ class TestTorchDlPackDevice(TestCase):
 
     @onlyAccelerator
     @skipMPS
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     @dtypes(
         torch.float8_e5m2,
         torch.float8_e5m2fnuz,

@@ -229,19 +229,18 @@ def from_dlpack(
                     "without copying. Set copy=None or copy=True."
                 )
 
-        # ext_device is either CUDA or ROCm, we need to pass the current
-        # stream
-        if ext_device[0] in (DLDeviceType.kDLCUDA, DLDeviceType.kDLROCM):
-            stream = torch.cuda.current_stream(f'cuda:{ext_device[1]}')
-            # cuda_stream is the pointer to the stream and it is a public
-            # attribute, but it is not documented
-            # The array API specify that the default legacy stream must be passed
-            # with a value of 1 for CUDA
-            # https://data-apis.org/array-api/latest/API_specification/array_object.html?dlpack-self-stream-none#dlpack-self-stream-none
-            is_cuda = ext_device[0] == DLDeviceType.kDLCUDA
-            # Since pytorch is not using PTDS by default, lets directly pass
-            # the legacy stream
-            stream_ptr = 1 if is_cuda and stream.cuda_stream == 0 else stream.cuda_stream
+        # If the producer's backend has a stream, pass the consumer's current
+        # stream so the producer can synchronize against it.
+        if ext_device[0] in (DLDeviceType.kDLCUDA, DLDeviceType.kDLROCM, DLDeviceType.kDLOneAPI):
+            stream_ptr = torch.accelerator.current_stream(ext_device[1]).native_handle
+            if ext_device[0] == DLDeviceType.kDLCUDA:
+                # The array API specifies that the default legacy stream must
+                # be passed with a value of 1 for CUDA (this convention is
+                # CUDA-specific and does not apply to ROCm).
+                # https://data-apis.org/array-api/latest/API_specification/array_object.html?dlpack-self-stream-none#dlpack-self-stream-none
+                # Since pytorch is not using PTDS by default, lets directly
+                # pass the legacy stream
+                stream_ptr = 1 if stream_ptr == 0 else stream_ptr
             kwargs["stream"] = stream_ptr
 
         # Try different parameter combinations until one works
