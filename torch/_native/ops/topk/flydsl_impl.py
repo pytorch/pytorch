@@ -142,12 +142,9 @@ def _min_rows_for_full_wave(device_idx: int) -> int:
 
 
 def _eligible(self: torch.Tensor, k: int, dim: int, sorted_: bool) -> bool:
+    # Cheap rejects first: dtype/flags, then (K, N) and row count, arch last.
+    # Arch is memoized, but most declines miss the kernel or row gate.
     if not self.is_cuda or self.dtype not in _SUPPORTED_DTYPES:
-        return False
-    device_index = self.device.index
-    if device_index is None or not fu._is_supported_arch(
-        device_index, _SUPPORTED_ARCHES
-    ):
         return False
     if not sorted_:
         return False
@@ -156,12 +153,15 @@ def _eligible(self: torch.Tensor, k: int, dim: int, sorted_: bool) -> bool:
     if self.numel() == 0:
         return False
     N = self.shape[-1] if self.ndim >= 1 else 0
-    M = self.numel() // N if N else 0
-    if not _fits_topk_buffer_span(M, N, k, self.element_size()):
+    if N <= 0:
         return False
     kernel = _kernel_for(k, N, self.dtype)
     if kernel is None:
         return False
+    M = self.numel() // N
+    if not _fits_topk_buffer_span(M, N, k, self.element_size()):
+        return False
+    device_index = self.get_device()
     # Amortize launch and per-row selection work across enough CU-waves.
     min_rows = _min_rows_for_full_wave(device_index)
     min_cu_waves = (
@@ -169,7 +169,7 @@ def _eligible(self: torch.Tensor, k: int, dim: int, sorted_: bool) -> bool:
     )
     if M < min_rows * min_cu_waves:
         return False
-    return True
+    return fu._is_supported_arch(device_index, _SUPPORTED_ARCHES)
 
 
 def _cond(
@@ -217,20 +217,16 @@ def _run(
     self_2d = flatten_last_dim(self)
     kernel = _kernel_for(k, self_2d.shape[-1], self.dtype)
 
-    def _launch() -> tuple[torch.Tensor, torch.Tensor]:
-        if kernel == "register":
-            return topk_register(self_2d, k, largest=largest)
-        deterministic = torch.are_deterministic_algorithms_enabled()
-        return topk_radix(self_2d, k, deterministic=deterministic, largest=largest)
-
-    # Python-native dispatch does not install a CUDA device guard before
-    # launching (unlike generated ATen); see cutedsl_impl.py / #187983.
-    device = self.get_device()
-    if device == torch.cuda.current_device():
-        values_2d, indices_2d = _launch()
+    # The launchers enter the device guard themselves when the tensor is not on
+    # the current device (python-native dispatch installs none; see
+    # cutedsl_impl.py / #187983).
+    if kernel == "register":
+        values_2d, indices_2d = topk_register(self_2d, k, largest=largest)
     else:
-        with torch.cuda.device(device):
-            values_2d, indices_2d = _launch()
+        deterministic = torch.are_deterministic_algorithms_enabled()
+        values_2d, indices_2d = topk_radix(
+            self_2d, k, deterministic=deterministic, largest=largest
+        )
     return unflatten_last_dim(values_2d, indices_2d, self, k)
 
 
@@ -249,41 +245,34 @@ def _run_out(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     from .flydsl_kernels import topk_radix_out, topk_register_out
 
-    def _launch_out() -> tuple[torch.Tensor, torch.Tensor]:
-        if (
-            not values.is_contiguous()
-            or not indices.is_contiguous()
-            or torch._C._overlaps(self, values)
-            or torch._C._overlaps(self, indices)
-        ):
-            v, i = _run(self, k, largest)
-            values.copy_(v)
-            indices.copy_(i)
-            return values, indices
-
-        self_2d = flatten_last_dim(self)
-        values_2d = _flatten_topk_out(values, k)
-        indices_2d = _flatten_topk_out(indices, k)
-        kernel = _kernel_for(k, self_2d.shape[-1], self.dtype)
-        if kernel == "register":
-            topk_register_out(self_2d, k, values_2d, indices_2d, largest=largest)
-        else:
-            deterministic = torch.are_deterministic_algorithms_enabled()
-            topk_radix_out(
-                self_2d,
-                k,
-                values_2d,
-                indices_2d,
-                deterministic=deterministic,
-                largest=largest,
-            )
+    if (
+        not values.is_contiguous()
+        or not indices.is_contiguous()
+        or torch._C._overlaps(self, values)
+        or torch._C._overlaps(self, indices)
+    ):
+        v, i = _run(self, k, largest)
+        values.copy_(v)
+        indices.copy_(i)
         return values, indices
 
-    device = self.get_device()
-    if device == torch.cuda.current_device():
-        return _launch_out()
-    with torch.cuda.device(device):
-        return _launch_out()
+    self_2d = flatten_last_dim(self)
+    values_2d = _flatten_topk_out(values, k)
+    indices_2d = _flatten_topk_out(indices, k)
+    kernel = _kernel_for(k, self_2d.shape[-1], self.dtype)
+    if kernel == "register":
+        topk_register_out(self_2d, k, values_2d, indices_2d, largest=largest)
+    else:
+        deterministic = torch.are_deterministic_algorithms_enabled()
+        topk_radix_out(
+            self_2d,
+            k,
+            values_2d,
+            indices_2d,
+            deterministic=deterministic,
+            largest=largest,
+        )
+    return values, indices
 
 
 def _impl(

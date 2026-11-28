@@ -42,6 +42,9 @@ KERNEL_PATH_NS = (
 # (N, minimum rows M) for each band _fused_rms_norm_fwd_perf_wins admits.
 BAND_MINIMUMS = ((4096, 8192), (8192, 4096), (16384, 2048))
 UPPER_BOUND_N = 114688
+# Cycles torch.cuda._sleep keeps a side stream busy, so a launch that lands on
+# another stream runs before the work queued behind the sleep.
+SLEEP_CYCLES = 100_000_000
 
 
 def _unsupported_environment_reason() -> str | None:
@@ -111,6 +114,23 @@ class TestFlyDSLRMSNormHelpers(TestCase):
         with self.assertRaisesRegex(RuntimeError, "requires an explicit weight"):
             _fused_rms_norm_impl(x, [128], None, EPS)
 
+    def test_cond_declines_degenerate_shapes_without_raising(self):
+        # The eager router does not swallow predicate exceptions, so the size
+        # check must not divide by a zero normalized size.
+        from torch._native.ops.norm import flydsl_rmsnorm_impl as impl
+
+        for x, normalized_shape in (
+            (torch.zeros(0, 0), [0]),
+            (torch.zeros(4, 0), [0]),
+            (torch.zeros(()), [1]),
+            (torch.zeros(8, 128), [-1]),
+        ):
+            with self.subTest(shape=tuple(x.shape), normalized_shape=normalized_shape):
+                self.assertFalse(
+                    impl._fused_rms_norm_cond(x, normalized_shape, None, EPS)
+                )
+
+
 
 @unittest.skipIf(_UNSUPPORTED_REASON is not None, str(_UNSUPPORTED_REASON))
 class TestFlyDSLRMSNorm(TestCase):
@@ -141,6 +161,48 @@ class TestFlyDSLRMSNorm(TestCase):
         self.assertEqual(torch.isinf(actual), torch.isinf(expected))
         finite = torch.isfinite(expected)
         self.assertEqual(actual[finite], expected[finite])
+
+    @parametrize(
+        "m,n,dtype,contiguous,expected",
+        (
+            # Each band's boundary, one row either side.
+            (8191, 4096, torch.float16, True, False),
+            (8192, 4096, torch.float16, True, True),
+            (4095, 8192, torch.float16, True, False),
+            (4096, 8192, torch.float16, True, True),
+            (2047, 16384, torch.bfloat16, True, False),
+            (2048, 16384, torch.bfloat16, True, True),
+            # The upper N bound is inclusive.
+            (2048, UPPER_BOUND_N, torch.float16, True, True),
+            (2047, UPPER_BOUND_N, torch.float16, True, False),
+            (2048, UPPER_BOUND_N + 1, torch.float16, True, False),
+            # Below the smallest band, and empty inputs.
+            (8, 128, torch.float16, True, False),
+            (1, 512, torch.float16, True, False),
+            (0, 4096, torch.float16, True, False),
+            # Inside a band, but declined for dtype or layout.
+            (8192, 4096, torch.float32, True, True),
+            (8192, 4096, torch.float64, True, False),
+            (8192, 4096, torch.float16, False, False),
+        ),
+    )
+    def test_cond_decisions(self, m, n, dtype, contiguous, expected):
+        # Storage is uninitialized: the predicate reads metadata only.
+        from torch._native.ops.norm import flydsl_rmsnorm_impl as impl
+
+        if contiguous:
+            x = torch.empty((m, n), device="cuda", dtype=dtype)
+        else:
+            x = torch.empty((n, m), device="cuda", dtype=dtype).t()
+            self.assertFalse(x.is_contiguous())
+        weight = torch.empty((n,), device="cuda", dtype=dtype)
+        self.assertEqual(impl._fused_rms_norm_cond(x, [n], weight, EPS), expected)
+
+    def test_cond_declines_missing_weight(self):
+        from torch._native.ops.norm import flydsl_rmsnorm_impl as impl
+
+        x = torch.empty((DISPATCH_M, DISPATCH_N), device="cuda", dtype=DISPATCH_DTYPE)
+        self.assertFalse(impl._fused_rms_norm_cond(x, [DISPATCH_N], None, EPS))
 
     def test_override_is_registered(self):
         self.assertIn("_fused_rms_norm", pn.get_dsl_operations("flydsl"))
@@ -282,14 +344,26 @@ class TestFlyDSLRMSNorm(TestCase):
         )
 
         x, weight = self._make_inputs(16, 128, torch.float16)
+        new_x, _ = self._make_inputs(16, 128, torch.float16)
         with pn.flydsl.disabled():
-            ref_out, ref_rstd = torch.ops.aten._fused_rms_norm(x, [128], weight, EPS)
+            ref_out, ref_rstd = torch.ops.aten._fused_rms_norm(
+                new_x, [128], weight, EPS
+            )
 
-        rmsnorm_fwd(x, [128], weight, EPS)
+        rmsnorm_fwd(x, [128], weight, EPS)  # compile on the default stream
+        torch.cuda.synchronize()
+
+        # The input is overwritten on the side stream, behind a sleep. A launch
+        # that went to any other stream would run first and read the old input.
         stream = torch.cuda.Stream(device=x.device)
+        stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(stream):
+            torch.cuda._sleep(SLEEP_CYCLES)
+            x.copy_(new_x)
             out, rstd = rmsnorm_fwd(x, [128], weight, EPS)
-        stream.synchronize()
+            done = torch.cuda.Event()
+            done.record(stream)
+        done.synchronize()
 
         self.assertEqual(out, ref_out)
         self.assertEqual(rstd, ref_rstd)
@@ -357,6 +431,31 @@ class TestFlyDSLRMSNorm(TestCase):
 
         self.assertEqual(got, ref)
         self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+
+    def test_warm_cuda_graph_capture_reuses_specialization(self):
+        # Cold capture exercises the compile miss path. A warm capture must
+        # reuse the same specialization on the raw-stream hit path.
+        from torch._native.ops.norm.flydsl_rmsnorm_fwd import rmsnorm_cache_info
+
+        x, weight = self._make_dispatch_inputs()
+        torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+        self.assertEqual(rmsnorm_cache_info()["fwd"].misses, 1)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            got = torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+
+        x.neg_()
+        with pn.flydsl.disabled():
+            ref = torch.rms_norm(x, (DISPATCH_N,), weight, EPS)
+        got.zero_()
+        graph.replay()
+        torch.cuda.synchronize()
+
+        self.assertEqual(got, ref)
+        info = rmsnorm_cache_info()["fwd"]
+        self.assertEqual(info.misses, 1)
+        self.assertGreaterEqual(info.hits, 1)
 
     @parametrize("n,min_rows", BAND_MINIMUMS)
     def test_band_minimum_dispatches(self, n, min_rows):
