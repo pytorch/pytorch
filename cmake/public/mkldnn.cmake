@@ -20,9 +20,10 @@ set_property(
 # oneDNN compiles the static dnnl library with -fopenmp but, for the non-SYCL
 # OMP runtime, adds no OpenMP link dependency to the target, expecting consumers
 # to provide it. PyTorch only propagates Intel's iomp5 via MKL_OPENMP_LIBRARY,
-# so a non-MKL OpenMP build leaves nothing linking libomp and binaries that pull
-# dnnl objects (e.g. the C++ test executables) fail to resolve omp_*/__kmpc_*
-# symbols. Carry the detected OpenMP runtime on the interface to cover that case.
+# so with a non-MKL OpenMP, a target that links caffe2::mkldnn and pulls dnnl
+# objects fails to resolve omp_*/__kmpc_* symbols. Nothing in this tree links
+# caffe2::mkldnn; carry the detected OpenMP runtime on the interface for
+# downstream consumers that do.
 if(MKLDNN_FOUND AND TARGET caffe2::openmp)
   set_property(
     TARGET caffe2::mkldnn APPEND PROPERTY INTERFACE_LINK_LIBRARIES
