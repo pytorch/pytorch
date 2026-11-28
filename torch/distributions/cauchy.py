@@ -90,10 +90,18 @@ class Cauchy(Distribution):
     def cdf(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        return torch.atan((value - self.loc) / self.scale) / math.pi + 0.5
+        # atan2(scale, loc - value) == pi / 2 + atan((value - loc) / scale),
+        # without the cancellation in the lower tail
+        return torch.atan2(self.scale, self.loc - value) / math.pi
 
     def icdf(self, value):
-        return torch.tan(math.pi * (value - 0.5)) * self.scale + self.loc
+        # value - 0.5 is exact only for value in [0.25, 1], and near 1 the tangent
+        # is evaluated next to its pole, so each tail is computed from its endpoint
+        lower = -torch.tan(math.pi * value).reciprocal()
+        middle = torch.tan(math.pi * (value - 0.5))
+        upper = torch.tan(math.pi * (1 - value)).reciprocal()
+        z = torch.where(value < 0.25, lower, torch.where(value > 0.75, upper, middle))
+        return z * self.scale + self.loc
 
     def entropy(self):
         return math.log(4 * math.pi) + self.scale.log()
