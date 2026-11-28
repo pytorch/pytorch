@@ -32,17 +32,12 @@ def _current_device_source(device_type: str) -> CallFunctionNoArgsSource:
 def _get_device_index_for(device_type: str, device: Any) -> int:
     if device_type == "cuda":
         return torch.cuda._utils._get_device_index(device)
-    if device_type == "xpu":
-        return torch.xpu._get_device_index(device)
     raise RuntimeError(f"mempool ops do not support device type {device_type}")
 
 
 def pool_device_type(value: Any) -> str:
     """Map a MemPool instance to the device type of its registered interface."""
-    from torch._dynamo.device_interface import (
-        DeviceInterface,
-        get_registered_device_interfaces,
-    )
+    from torch._dynamo.device_interface import get_registered_device_interfaces
 
     for device_type, candidate in get_registered_device_interfaces():
         # Skip interfaces without the mempool contract.
@@ -70,8 +65,7 @@ def _get_mempool_and_iface(
     mempool = get_external_object_by_index(mempool_index)
     if not isinstance(mempool, iface.get_mempool_type()):
         raise RuntimeError(
-            f"use_mem_pool expected a "
-            f"{iface.get_mempool_type().__qualname__} object at "
+            f"use_mem_pool expected a torch.{device_type}.MemPool object at "
             f"index {mempool_index}, got {type(mempool).__qualname__}"
         )
     return iface, mempool
@@ -163,7 +157,7 @@ class MemPoolVariable(VariableTracker):
 
 
 class MemPoolContextVariable(ContextWrappingVariable):
-    """Represents a torch.cuda.use_mem_pool / torch.xpu.use_mem_pool context manager."""
+    """Represents a torch.cuda.use_mem_pool context manager."""
 
     def __init__(
         self,

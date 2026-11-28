@@ -763,8 +763,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 return ctx.call_function(tx, args, kwargs)
             else:
                 return GradModeVariable.create(tx, False)
-        elif self.value in (torch.cuda.use_mem_pool, torch.xpu.use_mem_pool):
-            device_type = "cuda" if self.value is torch.cuda.use_mem_pool else "xpu"
+        elif self.value is torch.cuda.use_mem_pool:
+            device_type = "cuda"
             unexpected_kwargs = [k for k in kwargs if k not in ("pool", "device")]
             if unexpected_kwargs:
                 raise_type_error(

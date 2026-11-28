@@ -2491,6 +2491,17 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(pool), pool.id)
 
+    @unittest.skipIf(not torch.xpu.is_available(), "requires xpu")
+    def test_xpu_mem_pool_id(self):
+        # Exercise the XPU arm of builder's MemPool wrapping; runs in the
+        # ciflow/xpu jobs.
+        def fn(pool):
+            return pool.id
+
+        pool = torch.xpu.MemPool()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(pool), pool.id)
+
     # NOTE: torch.xpu.use_mem_pool is not yet traceable under torch.compile
     # (inductor support deferred to a follow-up PR); its compile-path tests
     # land together with that support.
@@ -2794,58 +2805,6 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(pool)
 
-    def _mempool_device_types(self) -> list[str]:
-        return [
-            device_type
-            for device_type in ("cuda", "xpu")
-            if getattr(torch, device_type).is_available()
-        ]
-
-    @unittest.skipIf(
-        not (torch.cuda.is_available() or torch.xpu.is_available()),
-        "requires cuda or xpu",
-    )
-    def test_mempool_begin_end_through_device_interface(self):
-        # Drive mempool::begin/mempool::end directly, without Dynamo's
-        # use_mem_pool wrapper.
-        from torch._dynamo.graph_bytecode_inputs import (
-            index_to_external_object_weakref,
-            keep_alive,
-            reset_user_object_tracking,
-            set_external_object_by_index,
-        )
-
-        for device_type in self._mempool_device_types():
-            device_module = getattr(torch, device_type)
-            with self.subTest(device_type=device_type):
-                device_module.empty_cache()
-                pool = device_module.MemPool()
-                # The sidetable is reset on every compile and
-                # set_external_object_by_index only appends at the next free
-                # slot, so the index must be len(...).
-                mempool_index = len(index_to_external_object_weakref)
-                self.addCleanup(reset_user_object_tracking)
-                self.addCleanup(keep_alive.clear)
-                set_external_object_by_index(mempool_index, pool)
-                # begin before the try: never release a reference that begin
-                # did not take, and don't mask a begin failure.
-                torch.ops.mempool.begin(
-                    device_module.current_device(), mempool_index, device_type
-                )
-                try:
-                    x = torch.ones(16, device=device_type)
-                    device_module.synchronize()
-                    self.assertEqual(x.sum(), 16.0)
-                    # begin routed the allocation into the user pool.
-                    self.assertGreater(
-                        len(device_module.memory.memory_snapshot(pool.id)), 0
-                    )
-                finally:
-                    torch.ops.mempool.end(
-                        device_module.current_device(), mempool_index, device_type
-                    )
-                    device_module.synchronize()
-
     def test_mempool_begin_type_mismatch_raises(self):
         # A non-MemPool sidetable entry must be rejected before device dispatch.
         # The sidetable is reset on every compile and only supports appending at
@@ -2853,37 +2812,31 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         # before any device call, so this test also passes on CPU-only machines.
         from torch._dynamo.graph_bytecode_inputs import (
             index_to_external_object_weakref,
-            keep_alive,
             reset_user_object_tracking,
             set_external_object_by_index,
         )
 
         mempool_index = len(index_to_external_object_weakref)
         self.addCleanup(reset_user_object_tracking)
-        self.addCleanup(keep_alive.clear)
         set_external_object_by_index(mempool_index, torch.zeros(1))
         with self.assertRaisesRegex(
             RuntimeError,
-            r"use_mem_pool expected a MemPool object at index \d+, got Tensor",
+            r"use_mem_pool expected a torch.cuda.MemPool object at index \d+, got Tensor",
         ):
             torch.ops.mempool.begin(0, mempool_index, "cuda")
 
-    @unittest.skipIf(torch.cuda.is_available(), "exercises the CPU-build fallback")
     def test_use_mem_pool_non_pool_arg_rejected(self):
-        # Document the misuse behavior on CPU-only machines: tracing
-        # use_mem_pool with a non-MemPool argument graph-breaks and falls back
-        # to the real CUDA context manager, which asserts CUDA is compiled.
-        # (A clean per-device type error is only observable with the real
-        # backend present; the mismatch and cross-backend tests cover those
-        # paths.) The important property: the misuse fails LOUDLY, it does not
-        # silently route allocations.
+        # Tracing use_mem_pool with a non-MemPool argument is a trace-time type
+        # error, raised before any device call: the misuse fails loudly instead
+        # of silently routing allocations.
         def fn(t):
             with torch.cuda.use_mem_pool(t):
                 return t + 1
 
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(
-            AssertionError, "Torch not compiled with CUDA enabled"
+            torch._dynamo.exc.Unsupported,
+            r"torch.cuda.use_mem_pool\(\) expected a torch.cuda.MemPool argument",
         ):
             opt_fn(torch.zeros(4))
 
@@ -4207,6 +4160,44 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertTrue(res[0].dtype == torch.float16)
         self.assertTrue(res[1].dtype == torch.float16)
+
+    def test_mempool_begin_end_through_device_interface(self, device):
+        # Drive mempool::begin/mempool::end directly, without Dynamo's
+        # use_mem_pool wrapper.
+        from torch._dynamo.graph_bytecode_inputs import (
+            index_to_external_object_weakref,
+            reset_user_object_tracking,
+            set_external_object_by_index,
+        )
+
+        device_type = torch.device(device).type
+        device_module = torch.get_device_module(device_type)
+        device_module.empty_cache()
+        pool = device_module.MemPool()
+        # The sidetable is reset on every compile and
+        # set_external_object_by_index only appends at the next free
+        # slot, so the index must be len(...).
+        mempool_index = len(index_to_external_object_weakref)
+        self.addCleanup(reset_user_object_tracking)
+        set_external_object_by_index(mempool_index, pool)
+        # begin before the try: never release a reference that begin
+        # did not take, and don't mask a begin failure.
+        torch.ops.mempool.begin(
+            device_module.current_device(), mempool_index, device_type
+        )
+        try:
+            x = torch.ones(16, device=device_type)
+            device_module.synchronize()
+            self.assertEqual(x.sum(), 16.0)
+            # begin routed the allocation into the user pool.
+            self.assertGreater(len(device_module.memory.memory_snapshot(pool.id)), 0)
+        finally:
+            torch.ops.mempool.end(
+                device_module.current_device(), mempool_index, device_type
+            )
+            device_module.synchronize()
+        # end must release the reference begin took (use_count back to 1).
+        self.assertEqual(pool.use_count(), 1)
 
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):

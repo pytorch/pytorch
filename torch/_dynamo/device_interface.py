@@ -204,16 +204,32 @@ class DeviceInterface:
 
     @classmethod
     def supports_mempool(cls) -> bool:
-        """Whether this backend implements the mempool routing contract."""
-        return False
+        """
+        True when a subclass implements the mempool routing contract: the
+        ``get_mempool_type`` slot plus the begin/end/release ops.
+
+        Derived from the overrides (as with exposes_streams) instead of a
+        hand-set flag, so a backend missing one of the ops fails the gate
+        before ``begin`` takes a pool reference it could never release.
+        """
+        return all(
+            getattr(cls, name) is not getattr(DeviceInterface, name)
+            for name in (
+                "get_mempool_type",
+                "begin_allocate_current_thread_to_pool",
+                "end_allocate_current_thread_to_pool",
+                "release_pool",
+            )
+        )
 
     @staticmethod
     def check_mem_pool_device(mempool: Any, device_index: int) -> None:
         """Validate that ``mempool`` belongs to ``device_index`` before routing.
 
         Default: no-op, because most backends have device-local pools that need
-        no cross-device check. Backends sharing allocation paths across devices
-        (e.g. CUDA) should override this.
+        no cross-device check. Backends whose pools can carry a custom allocator
+        pinned to another device (e.g. CUDA) should override this to reject the
+        mismatch, as torch.cuda.memory._check_mem_pool_device does.
         """
         return None
 
@@ -567,10 +583,6 @@ class CudaInterface(DeviceInterface):
     def get_mempool_type() -> type:
         return torch.cuda.MemPool
 
-    @classmethod
-    def supports_mempool(cls) -> bool:
-        return True
-
     @staticmethod
     def check_mem_pool_device(mempool: Any, device_index: int) -> None:
         torch.cuda.memory._check_mem_pool_device(mempool, device_index)
@@ -817,10 +829,6 @@ class XpuInterface(DeviceInterface):
     @staticmethod
     def get_mempool_type() -> type:
         return torch.xpu.MemPool
-
-    @classmethod
-    def supports_mempool(cls) -> bool:
-        return True
 
     @staticmethod
     def begin_allocate_current_thread_to_pool(
