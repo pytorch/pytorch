@@ -109,7 +109,7 @@ class TestOpInfo(TestCase):
                 op.op(*args, **kwargs)
 
 
-instantiate_device_type_tests(TestOpInfo, globals())
+instantiate_device_type_tests(TestOpInfo, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
