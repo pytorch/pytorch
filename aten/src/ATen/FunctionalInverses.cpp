@@ -410,10 +410,11 @@ Tensor FunctionalInverses::unfold_inverse(const Tensor& base, const Tensor& muta
       return mutated_view.as_strided_symint(
           base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
     } else {
-      // I think autograd and the functionalization pass want the exact same thing here, but need to test to confirm.
-      // unfold_backward() is safe to use here because it is NOT a view op.
-      // (note: technically, we'll have an extra memory copy.
-      // We'd need to add an aliasing version of unfold_backward to fix that though).
+      // unfold_backward() is not a view op, so it is safe to use here (at the cost of an extra copy).
+      // On its own it matches the autograd formula: elements of base that no window covers come out
+      // as 0, and elements covered by several windows are summed. NeverView mode sums the overlaps;
+      // ViewOrScatterInverse mode rejects them below. The gapped case further down restores the
+      // uncovered elements.
       TORCH_CHECK(
         !(inverse_return_mode == InverseReturnMode::ViewOrScatterInverse && size > step),
         "While executing unfold, functionalization encountered a tensor being mutated that has internal overlap. \
@@ -421,7 +422,24 @@ When using torch.compile (or running functionalization directly), this is banned
 as the behavior is not well defined. Consider cloning the tensor before mutating it, \
 or removing the mutation from your model."
           );
-      return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
+      if (base.dim() > 0 && size <= step) {
+        // The windows are disjoint. If they leave gaps, keep the elements of base that no window covers.
+        const auto dim = at::maybe_wrap_dim(dimension, base.dim());
+        const auto num_windows = mutated_view.sym_size(dim);
+        const auto dim_size = base.sym_size(dim);
+        if (TORCH_GUARD_OR_TRUE((num_windows * size).sym_ne(dim_size))) {
+          // Index i along dim is covered iff it falls in the first `size` slots of one of the windows.
+          const auto idx = at::arange(dim_size, base.options().dtype(at::kLong));
+          const auto covered = at::logical_and(idx.remainder(step).lt(size), idx.lt(num_windows * step));
+          std::vector<c10::SymInt> mask_shape(base.dim(), 1);
+          mask_shape[dim] = dim_size;
+          return at::where(
+              covered.view_symint(mask_shape),
+              at::unfold_backward_symint(mutated_view, base.sym_sizes(), dimension, size, step),
+              base);
+        }
+      }
+      return at::unfold_backward_symint(mutated_view, base.sym_sizes(), dimension, size, step);
     }
 }
 
