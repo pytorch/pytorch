@@ -13,6 +13,7 @@ import builtins
 import collections
 import concurrent.futures
 import contextlib
+import copy
 import dis
 import enum
 import faulthandler
@@ -372,6 +373,7 @@ KEY_FIELDS = {
     "conjugate_bit": lambda t: t.is_conj(),
     "negative_bit": lambda t: t.is_neg(),
     "inference": lambda t: t.is_inference(),
+    "own_attributes": lambda t: sorted(t.__dict__),
 }
 
 
@@ -397,6 +399,11 @@ def key_other_device(x):
     return x.to("meta" if x.device.type == "cpu" else "cpu")
 
 
+def key_with_an_attribute(x):
+    x.note = 1
+    return x
+
+
 def key_escaped_from_vmap(x):
     kept = []
     torch.func.vmap(lambda row: kept.append(row) or row)(x.expand(2, *x.shape))
@@ -415,6 +422,7 @@ KEY_SWEEP = {
     "conjugate_bit": (key_complex, lambda x: key_complex(x).conj()),
     "negative_bit": (key_plain, torch._neg_view),
     "inference": (key_plain, key_made_in_inference_mode),
+    "own_attributes": (key_plain, key_with_an_attribute),
 }
 
 # What the sweep cannot construct, and why.
@@ -497,6 +505,8 @@ def key_become(held, other):
     held.__class__ = type(other)
     if held.requires_grad != other.requires_grad:
         held.requires_grad_(other.requires_grad)
+    held.__dict__.clear()
+    held.__dict__.update(other.__dict__)
     return True
 
 
@@ -504,9 +514,9 @@ def key_become(held, other):
 class TestVmTensorKey(TestCase):
     """Every tensor that enters a region is compared on one key: its exact
     class (Tensor or Parameter), dtype, device, sizes, strides,
-    requires_grad, the conjugate and the negative bit and whether it is an
-    inference tensor; a tensor that is not plain, dense and strided has no
-    key and enters none. So a call that differs from the traced one in one
+    requires_grad, the conjugate and the negative bit, whether it is an
+    inference tensor and the names of its own attributes; a tensor that is
+    not plain, dense and strided has no key and enters none. So a call that differs from the traced one in one
     field is a miss, whichever way the tensor comes in, and computes what
     eager computes."""
 
@@ -21151,6 +21161,375 @@ class TestVmRulesTruth(TestCase):
         self.assertEqual([why for why in refusals if "ToBool" in why], [])
         runs = sum(r["runs"] for r in vm.regions(compiled) if r["state"] == "region")
         self.assertGreater(runs, 0)
+
+
+# What a name gives on a tensor: the attributes the program put on that
+# object come first.
+
+
+class OwnHolder(torch.nn.Module):
+    pass
+
+
+OWN_IDS = itertools.count()
+
+
+def own_ninety_nine():
+    return 99
+
+
+def own_state(names=(), touched=False):
+    """Makes of a fresh tensor one with the attributes ``names`` of its own
+    (``touched``: with a ``__dict__``, which holds nothing)."""
+
+    def make(t):
+        if touched:
+            t.__dict__
+        for name, value in names:
+            setattr(t, name, value)
+        return t
+
+    make.names = sorted(name for name, _ in names)
+    return make
+
+
+# What a tensor has of its own. `note` is no name of the class, `dim` is a
+# method of it.
+OWN_STATES = {
+    "nothing": own_state(),
+    "an empty __dict__": own_state(touched=True),
+    "note": own_state([("note", 4)]),
+    "another note": own_state([("note", 3)]),
+    "other": own_state([("other", 1)]),
+    "other and note": own_state([("other", 1), ("note", 4)]),
+    "dim": own_state([("dim", own_ninety_nine)]),
+}
+
+# The tensor of the traced call, then the other one.
+OWN_PAIRS = {
+    "nothing_then_note": ("nothing", "note"),
+    "nothing_then_other": ("nothing", "other"),
+    "nothing_then_dim": ("nothing", "dim"),
+    "nothing_then_an_empty_dict": ("nothing", "an empty __dict__"),
+    "an_empty_dict_then_note": ("an empty __dict__", "note"),
+    "an_empty_dict_then_nothing": ("an empty __dict__", "nothing"),
+    "note_then_nothing": ("note", "nothing"),
+    "note_then_another_note": ("note", "another note"),
+    "other_then_other_and_note": ("other", "other and note"),
+    "other_then_nothing": ("other", "nothing"),
+    "dim_then_nothing": ("dim", "nothing"),
+    "dim_then_other": ("dim", "other"),
+}
+
+OWN_KINDS = {
+    "a Tensor": key_plain,
+    "a Parameter": lambda t: torch.nn.Parameter(t, requires_grad=False),
+}
+
+OWN_HEAD = "    y = x.sin() * 2 + t\n    out = (y * 3 + 1).cos().tanh().exp()\n"
+
+# The forms that look a name up on the tensor ``t``, each the end of a
+# function that begins as OWN_WAYS says; the name; and whether a tensor that
+# does not have the name of its own gets a region with it (a load that
+# raises ends the trace, and object.__getattribute__ is no call a region is
+# made of).
+OWN_ASKS = {
+    "getattr with a default": (
+        "    return out, getattr(t, 'note', None)\n",
+        "note",
+        True,
+    ),
+    "hasattr": ("    return out, hasattr(t, 'note')\n", "note", True),
+    "a method call": ("    return out, t.dim()\n", "dim", True),
+    "a method taken and called": ("    m = t.dim\n    return out, m()\n", "dim", True),
+    "getattr of a method": ("    return out, getattr(t, 'dim')()\n", "dim", True),
+    "a load under a handler": (
+        "    try:\n        v = t.note\n    except AttributeError:\n"
+        "        v = 'absent'\n    return out, v\n",
+        "note",
+        False,
+    ),
+    "object.__getattribute__ under a handler": (
+        "    try:\n        v = object.__getattribute__(t, 'note')\n"
+        "    except AttributeError:\n        v = 'absent'\n    return out, v\n",
+        "note",
+        False,
+    ),
+}
+
+
+def own_held(space, x, t):
+    space["OWN_HELD"].t = t
+    return (x,)
+
+
+def own_listed(space, x, t):
+    space["OWN_LIST"][0] = t
+    return (x,)
+
+
+# The ways a tensor comes to the function: how the function begins, and how
+# a call hands it the tensor (``space``: the function's globals).
+OWN_WAYS = {
+    "an argument": ("def NAME(x, t):\n", lambda space, x, t: (x, t)),
+    "a leaf of a tuple argument": (
+        "def NAME(x, c):\n    t = c[0]\n",
+        lambda space, x, t: (x, (t, 1)),
+    ),
+    "a value of a dict argument": (
+        "def NAME(x, c):\n    t = c['t']\n",
+        lambda space, x, t: (x, {"t": t}),
+    ),
+    "a module attribute": ("def NAME(x):\n    t = OWN_HELD.t\n", own_held),
+    "an item of a global list": ("def NAME(x):\n    t = OWN_LIST[0]\n", own_listed),
+}
+OWN_FROM_STATE = ("a module attribute", "an item of a global list")
+
+
+def own_function(way, ask):
+    """A function of its own code object and globals: ``ask`` of a tensor
+    that comes to it by ``way``."""
+    name = f"own_function_{next(OWN_IDS)}"
+    space = {"OWN_HELD": OwnHolder(), "OWN_LIST": [None]}
+    exec((OWN_WAYS[way][0] + OWN_HEAD + OWN_ASKS[ask][0]).replace("NAME", name), space)
+    return space[name]
+
+
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmTensorOwnAttributes(TestCase):
+    """A name looked up on a tensor is looked for among the attributes the
+    program put on that object before the class is asked (unless the class
+    has a data descriptor under the name): `getattr(t, "note", None)` and
+    `hasattr(t, "note")`, and a method as well, `t.dim()` after `t.dim = f`.
+    A region is entered by every tensor that has the key of the traced one,
+    so the names of a tensor's own attributes are in the key: a region
+    whose trace looked up a name the tensor did not have of its own does
+    not run for a tensor that has it, whichever way the tensor comes to it
+    and whichever form asks; and a trace that looks up a name the tensor
+    has of its own is refused, because what it holds is in no key."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def same(self, got, want, msg):
+        if isinstance(want, Exception):
+            self.assertIs(type(got), type(want), msg=f"{msg}: {got!r}")
+            self.assertEqual(str(got), str(want), msg=msg)
+            return
+        self.assertIs(type(got), tuple, msg=msg)
+        self.assertEqual(got[0], want[0], atol=0, rtol=0, msg=msg)
+        self.assertEqual(
+            [(type(v), v) for v in got[1:]], [(type(v), v) for v in want[1:]], msg=msg
+        )
+
+    def sweep(self, device, way, ask, kind, first, other, kept=False):
+        """Ten calls: a tensor as ``first`` says on calls 0 to 5 and 8 and
+        9, one as ``other`` says on calls 6 and 7; ``kept``: the one object
+        on every call, its attributes changed between the calls. The
+        function's region runs by call, and its rows."""
+        fn = own_function(way, ask)
+        compiled = vm(fn, passes=CHECKS_EARLY)
+        held = OWN_KINDS[kind](torch.ones(4, 8, device=device))
+        runs = []
+        for call in range(10):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            t = held if kept else OWN_KINDS[kind](torch.randn(4, 8, device=device))
+            t.__dict__.clear() if kept else None
+            t = OWN_STATES[other if call in (6, 7) else first](t)
+            args = OWN_WAYS[way][1](fn.__globals__, x, t)
+            before = checks_region_runs(compiled, fn)
+            got = checks_outcome(compiled, *args)
+            runs.append(checks_region_runs(compiled, fn) - before)
+            self.same(got, checks_outcome(fn, *args), f"call {call}")
+        return runs, [r for r in vm.regions(compiled) if r["function"] == fn.__name__]
+
+    def holds(self, device, way, ask, kind, first, other, kept=False):
+        runs, rows = self.sweep(device, way, ask, kind, first, other, kept)
+        msg = f"{runs} {rows}"
+        _, name, region = OWN_ASKS[ask]
+        names, others = OWN_STATES[first].names, OWN_STATES[other].names
+        if name in names:
+            # No region for a tensor that has the name of its own, and the
+            # trace says why (where the form is one a trace gets as far
+            # as).
+            self.assertEqual(runs[:6] + runs[8:], [0] * 8, msg=msg)
+            whys = [r["why"] for r in rows if r["state"] == "refused"]
+            told = any(f"it reads a tensor's .{name}" in why for why in whys)
+            self.assertTrue(told or not region, msg=msg)
+        elif region:
+            # The region ran behind its trace, runs for the other tensor
+            # only if that has the same names of its own (a `__dict__`
+            # that holds nothing is none), and runs again for the first.
+            self.assertEqual(runs[5], 1, msg=msg)
+            self.assertEqual(runs[6], int(names == others), msg=msg)
+            self.assertEqual(runs[8:], [1, 1], msg=msg)
+
+    @parametrize("pair", list(OWN_PAIRS))
+    @checks_isolated
+    def test_a_tensor_with_attributes_of_its_own_is_another_tensor(self, device, pair):
+        for way, ask, kind in itertools.product(OWN_WAYS, OWN_ASKS, OWN_KINDS):
+            with self.subTest(way=way, ask=ask, kind=kind):
+                self.holds(device, way, ask, kind, *OWN_PAIRS[pair])
+
+    @parametrize("pair", list(OWN_PAIRS))
+    @checks_isolated
+    def test_an_attribute_put_on_a_held_tensor_between_calls(self, device, pair):
+        for way, ask, kind in itertools.product(OWN_FROM_STATE, OWN_ASKS, OWN_KINDS):
+            with self.subTest(way=way, ask=ask, kind=kind):
+                self.holds(device, way, ask, kind, *OWN_PAIRS[pair], kept=True)
+
+    def test_the_pairs_differ_as_they_say(self, device):
+        for pair, (first, other) in OWN_PAIRS.items():
+            a, b = (
+                torch._rust.TensorKey.of(OWN_STATES[s](torch.ones(2, device=device)))
+                for s in (first, other)
+            )
+            same = OWN_STATES[first].names == OWN_STATES[other].names
+            self.assertEqual(a == b, same, msg=pair)
+
+    def test_a_name_that_is_no_str_gives_no_key(self, device):
+        t = torch.ones(2, device=device)
+        key = torch._rust.TensorKey.of(t)
+        t.__dict__[1] = 2
+        self.assertIsNone(torch._rust.TensorKey.of(t))
+        self.assertFalse(key.holds(t))
+
+    def has_a_dict(self, t):
+        # (Without asking for it, which would make one.)
+        return any(type(held) is dict for held in gc.get_referents(t))
+
+    def test_a_key_makes_no_dict(self, device):
+        t = torch.ones(2, device=device)
+        key = torch._rust.TensorKey.of(t)
+        self.assertTrue(key.holds(t))
+        self.assertFalse(self.has_a_dict(t))
+        t.__dict__
+        self.assertTrue(self.has_a_dict(t))
+        self.assertTrue(key.holds(t))
+        t.note = 1
+        self.assertFalse(key.holds(t))
+        self.assertIn("attributes note", repr(torch._rust.TensorKey.of(t)))
+        del t.note
+        self.assertTrue(key.holds(t))
+
+    @checks_isolated
+    def test_a_trace_makes_no_dict_on_a_tensor_it_asks(self, device):
+        for way, ask in itertools.product(OWN_WAYS, OWN_ASKS):
+            with self.subTest(way=way, ask=ask):
+                fn = own_function(way, ask)
+                compiled = vm(fn, passes=CHECKS_EARLY)
+                for call in range(6):
+                    t = torch.ones(4, 8, device=device)
+                    x = torch.randn(4, 8, device=device)
+                    compiled(*OWN_WAYS[way][1](fn.__globals__, x, t))
+                    self.assertFalse(self.has_a_dict(t), msg=f"call {call}")
+
+
+instantiate_device_type_tests(TestVmTensorOwnAttributes, globals())
+
+
+# The class of a container that holds a float.
+
+HOLDS_FLOAT_IDS = itertools.count()
+HOLDS_FLOAT_HEAD = "    y = x.sin() * 2 + 1\n    out = (y * 3 + 1).cos().tanh().exp()\n"
+
+# What is asked of the container ``v``.
+HOLDS_FLOAT_ASKS = {
+    "type": "type(v)",
+    "type and repr": "(type(v), repr(v))",
+    "the class attribute": "v.__class__",
+    "whether its type is float": "type(v) is float",
+}
+
+# The container of the traced call, then another one.
+HOLDS_FLOAT_VALUES = {
+    "a tuple": ((1, 2.0), (1, 3.0)),
+    "a list": ([1, 2.0], [1, 3.0]),
+    "a nested tuple": ((1, (2, 0.0)), (1, (2, -0.0))),
+    "a dict": ({"k": 2.0}, {"k": 3.0}),
+    "a tuple of ints, then one with a float": ((1, 2), (1, 2.0)),
+}
+
+# The ways the container comes to the function: the function (ASK: what it
+# asks), and how a call hands it the container.
+HOLDS_FLOAT_WAYS = {
+    "an_argument": (
+        "def NAME(x, v):\n" + HOLDS_FLOAT_HEAD + "    return out, ASK\n",
+        lambda x, v: (x, v),
+    ),
+    "an_argument_of_a_span": (
+        "def NAME(x, v):\n    y = x\n    for _ in range(3):\n"
+        "        y = (y * x + 1).cos().tanh()\n        asked = ASK\n"
+        "    return y.exp(), asked\n",
+        lambda x, v: (x, v),
+    ),
+    "an_item_of_a_list_argument": (
+        "def NAME(x, c):\n    v = c[1]\n    y = x.sin() * 2 + c[0]\n"
+        "    return (y * 3 + 1).cos().tanh().exp(), ASK\n",
+        lambda x, v: (x, [torch.ones_like(x), v]),
+    ),
+    "nested_in_a_tuple_argument": (
+        "def NAME(x, c):\n    v = c[1][1]\n    y = x.sin() * 2 + c[0]\n"
+        "    return (y * 3 + 1).cos().tanh().exp(), ASK\n",
+        lambda x, v: (x, (torch.ones_like(x), (1, v))),
+    ),
+    "a_value_of_a_dict_argument": (
+        "def NAME(x, c):\n    v = c['v']\n    y = x.sin() * 2 + c['t']\n"
+        "    return (y * 3 + 1).cos().tanh().exp(), ASK\n",
+        lambda x, v: (x, {"t": torch.ones_like(x), "v": v}),
+    ),
+}
+
+
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmClassOfAContainerOfFloats(TestCase):
+    """A float in a tuple, a list or a dict that a function is handed is an
+    input of the function's region, and while the region is traced an
+    object stands in for it whose class the program is told is `float`.
+    The class of the container that holds it is the container's:
+    `type((1, 2.0))` is `tuple` on every call, whichever way the container
+    comes to the function."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def sweep(self, device, way, ask, first, other):
+        """Ten calls, the other container on calls 6 and 7: how many of
+        them ran a region."""
+        source, hand = HOLDS_FLOAT_WAYS[way]
+        name = f"holds_float_function_{next(HOLDS_FLOAT_IDS)}"
+        space = {}
+        exec(source.replace("NAME", name).replace("ASK", HOLDS_FLOAT_ASKS[ask]), space)
+        fn = space[name]
+        compiled = vm(fn, passes=CHECKS_EARLY)
+        ran = 0
+        for call in range(10):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            args = hand(x, copy.deepcopy(other if call in (6, 7) else first))
+            before = checks_region_runs(compiled, fn)
+            got, want = checks_outcome(compiled, *args), checks_outcome(fn, *args)
+            ran += checks_region_runs(compiled, fn) - before
+            msg = f"call {call}: {got!r} {want!r}"
+            self.assertIs(type(got), tuple, msg=msg)
+            self.assertEqual(got[0], want[0], atol=0, rtol=0, msg=msg)
+            self.assertEqual(repr(got[1:]), repr(want[1:]), msg=msg)
+        return ran
+
+    @parametrize("way", list(HOLDS_FLOAT_WAYS))
+    @checks_isolated
+    def test_the_class_of_the_container_is_the_container_s(self, device, way):
+        ran = {}
+        for ask, value in itertools.product(HOLDS_FLOAT_ASKS, HOLDS_FLOAT_VALUES):
+            with self.subTest(ask=ask, value=value):
+                ran[ask, value] = self.sweep(
+                    device, way, ask, *HOLDS_FLOAT_VALUES[value]
+                )
+        # The sweep is of regions that ran with a float in the container.
+        for ask in HOLDS_FLOAT_ASKS:
+            self.assertGreater(ran.get((ask, "a tuple"), 0), 0, msg=f"{ask}: {ran}")
+
+
+instantiate_device_type_tests(TestVmClassOfAContainerOfFloats, globals())
 
 
 if __name__ == "__main__":

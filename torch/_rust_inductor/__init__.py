@@ -539,8 +539,10 @@ def _c_call(callee, args, keywords: int, result):
     if not live or _scalar_state is None:
         return result
     if callee is type and len(args) == 1:
-        # What the program would be told of the float it passed.
-        return float
+        # What the program would be told of the float it passed. Of a
+        # container that holds one it is told the container's class, which
+        # reads nothing of the float.
+        return float if type(args[0]) is _Scalar else result
     numbers = all(type(a) in (float, int, _Scalar) for a in args)
     if id(callee) in _FLOAT_MATH and numbers and not keywords and type(result) is float:
         deps = frozenset().union(*(x.deps for x in live))

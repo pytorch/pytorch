@@ -127,9 +127,9 @@ use super::wrote::{self, How, Since};
 // computes, so that a trace that asks is refused: what autograd keeps on it,
 // which memory and which object it is, how often it was written, and the
 // marks a region does not look at (conjugate, negative, zero, names,
-// coalesced). A region finds a tensor argument by its class, dtype, device,
-// sizes, strides and requires_grad alone, and makes the tensors of its block
-// anew. The one list of these: exec/shown.rs takes the methods among them
+// coalesced). A region finds a tensor argument by its key alone (its class,
+// dtype, device, sizes, strides, requires_grad and the names of its own
+// attributes: exec/tensor_key.rs), and makes the tensors of its block anew. The one list of these: exec/shown.rs takes the methods among them
 // out of torch's functions that only compute.
 pub(super) const UNCHECKED_OF_A_TENSOR: &[&str] = &[
     "grad",
@@ -1666,19 +1666,42 @@ impl Trace {
             // What a tensor's key names (exec/tensor_key.rs) is the guard's
             // to compare for an argument and the key's of a tensor the run
             // read from state (see Keyed); its values are the graph's.
-            // Nothing else it can be asked is: an attribute the program put
-            // on the object, or one of UNCHECKED_OF_A_TENSOR.
+            // Nothing else it can be asked is: one of UNCHECKED_OF_A_TENSOR,
+            // or an attribute the program put on the object (what it holds
+            // is in no key). A name the tensor does not have of its own is
+            // the class's to answer, present there or not: the key names
+            // the tensor's own attributes, so no tensor that has the name
+            // enters the region.
             self.keyed(obj);
             let n = text(name);
             let mut dict = std::ptr::null_mut();
-            let own_attr = tr_attr_home(obj, name, &mut dict, 1) == 2;
+            // (Asked of a tensor that has a __dict__ only: none is made.
+            // 1: the class's, and not among the object's own; 3: a data
+            // descriptor of the class, which the object's own cannot hide.)
+            let home = if tr_instance_dict(obj).is_null() { 1 } else { tr_attr_home(obj, name, &mut dict, 1) };
             ffi::Py_XDECREF(dict);
-            if own_attr || UNCHECKED_OF_A_TENSOR.contains(&n.as_str()) {
+            if home == 2 || UNCHECKED_OF_A_TENSOR.contains(&n.as_str()) {
                 self.refused = Some(format!("it reads a tensor's .{n}"));
+            } else if home != 1 && home != 3 {
+                self.refused = Some(format!("it reads .{n} of a tensor, which it cannot check"));
             } else {
                 // What the class has under the name (a method the program
-                // put on torch.Tensor); which class it is, its key says.
-                self.looked(ffi::Py_TYPE(obj), name);
+                // put on torch.Tensor), and what answers in its place: a
+                // __getattribute__ of the class instead of the lookup, a
+                // __getattr__ for a name that is not there. Which class it
+                // is, its key says.
+                let tp = ffi::Py_TYPE(obj);
+                self.looked(tp, name);
+                for special in [c"__getattribute__", c"__getattr__"] {
+                    let special = ffi::PyUnicode_InternFromString(special.as_ptr());
+                    if special.is_null() {
+                        ffi::PyErr_Clear();
+                        self.refused = Some("a name could not be made".into());
+                    } else {
+                        self.looked(tp, special);
+                        ffi::Py_DECREF(special);
+                    }
+                }
             }
             return;
         }
@@ -3208,7 +3231,7 @@ fn region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(Optio
                 return Ok((None, Some(format!("it asks about a {} it read from state that has no key (no plain dense tensor of exactly torch.Tensor or nn.Parameter), which it cannot check", type_name(o)))));
             };
             if a.changed {
-                return stale(&format!("the class, dtype, device, shape or requires_grad of a {}, which is another when the traced run ends", type_name(o)));
+                return stale(&format!("the class, dtype, device, shape or requires_grad of a {}, or the names of its own attributes, which is another when the traced run ends", type_name(o)));
             }
             e.keyed.push(Keyed { obj: counted(o), key, ours: a.ours });
         }
