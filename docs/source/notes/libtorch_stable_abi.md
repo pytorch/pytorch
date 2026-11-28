@@ -90,9 +90,9 @@ conversions above, for any `T` they support, and compose them:
 object as `T`. A null `PyObject*` is an error, not `None`.
 
 The helpers above that translate through the stable enum mappings
-(e.g., dtype, device and layout), can only cover the subset of types that
-have stable encodings. E.g., converting a valid `torch.dtype` or
-`torch.device` outside that subset would raise an error.
+can only cover the subset of types that have stable encodings. E.g.,
+converting a valid `torch.dtype` or `torch.device` outside that subset
+would raise an error, while all `torch.layout` types are supported.
 
 Like the rest of the stable ABI, an extension using them can just link
 `libtorch`.

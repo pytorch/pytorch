@@ -7,7 +7,7 @@ import math
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any, cast, TypeVar
+from typing import Any, cast, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -36,11 +36,17 @@ from torch._prims_common import (
     is_integer_dtype,
     make_contiguous_strides_for,
 )
-from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.experimental.symbolic_shapes import (
+    _iterate_exprs,
+    free_symbols,
+    statically_known_true,
+    sym_eq,
+)
 from torch.fx.passes.graph_transform_observer import (
     GraphTransformObserver as GraphTransformObserverBase,
 )
 from torch.fx.passes.reinplace import _is_view_op
+from torch.fx.passes.runtime_assert import _get_sym_val
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, inductor_prims, ir, pattern_matcher  # noqa: F401
@@ -98,6 +104,10 @@ from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
 from .slice_scatter_chunking import slice_scatter_chunking_pass
 from .split_cat import POST_GRAD_PATTERNS
+
+
+if TYPE_CHECKING:
+    import sympy
 
 
 _T = TypeVar("_T")
@@ -765,6 +775,40 @@ def prepare_softmax_extra_check(match):
     )
 
 
+def _unbound_shape_symbol_bindings(graph: fx.Graph, node: fx.Node) -> list[fx.Node]:
+    """
+    Return nodes of graph that compute the shape symbols the while_loop replacing node needs but
+    none of node's inputs provides. An input provides a symbol if it is that SymInt or has it as a
+    size or stride.
+
+    The while_loop carries the whole xs and ys, not per-step slices, so the outer graph has to
+    allocate ys and cond_fn/body_fn have to bind every symbol in these shapes. Dynamo only lifts
+    the symbols the combine_fn sees on a slice: for xs of shape (s0//64, 64, 64) the inputs give
+    s0//64 but not s0. A symbol that is only known as a tensor's size gets a new sym_size node.
+    """
+    vals = [n.meta["val"] for n in node.all_input_nodes if "val" in n.meta]
+    dims = [(v.size(), v.stride()) if isinstance(v, torch.Tensor) else v for v in vals]
+    provided = OrderedSet(e for e in _iterate_exprs(dims) if e.is_Symbol)
+    missing = free_symbols([*vals, node.meta["val"]]) - provided
+
+    defs: dict[sympy.Symbol, fx.Node] = {}
+    size_defs: dict[sympy.Symbol, tuple[fx.Node, int]] = {}
+    for n in graph.nodes:
+        if n is node:
+            break
+        if (sym := _get_sym_val(n)) in missing:
+            defs.setdefault(sym, n)
+        elif isinstance(v := n.meta.get("val"), torch.Tensor):
+            for dim, size in enumerate(v.size()):
+                if isinstance(size, torch.SymInt) and size.node.expr in missing:
+                    size_defs.setdefault(size.node.expr, (n, dim))
+    with graph.inserting_before(node):
+        for sym, (n, dim) in size_defs.items():
+            if sym not in defs:
+                defs[sym] = graph.create_size_node(n, dim)
+    return [defs[s] for s in sorted(defs, key=lambda s: s.name)]
+
+
 def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
     """This is similar to decompose_scan_to_while_loop."""
     graph_pass = PatternMatcherPass()
@@ -787,7 +831,9 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
         def lower_to_while_loop(*args, **kwargs):
             if len(kwargs) != 0:
                 raise AssertionError(f"expected no kwargs, got {kwargs}")
-            xs, additional_inputs = pytree.tree_unflatten(args, tree_spec)
+            xs, additional_inputs, shape_symbols = pytree.tree_unflatten(
+                args, tree_spec
+            )
             if not (
                 isinstance(xs, (tuple, list))
                 and isinstance(additional_inputs, (tuple, list))
@@ -818,20 +864,20 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
             while_loop_flat_operands, operands_spec = pytree.tree_flatten(
                 while_loop_operands
             )
-            while_loop_additional_inputs = additional_inputs
+            while_loop_additional_inputs = (*additional_inputs, *shape_symbols)
             _, operands_and_additional_inputs_spec = pytree.tree_flatten(
-                (*while_loop_operands, additional_inputs)
+                (*while_loop_operands, additional_inputs, shape_symbols)
             )
 
             def cond_fn(*flat_args):
-                loop_idx, _, _, _ = pytree.tree_unflatten(
+                loop_idx, _, _, _, _ = pytree.tree_unflatten(
                     flat_args,
                     operands_and_additional_inputs_spec,
                 )
                 return loop_idx < map_length
 
             def body_fn(*flat_args):
-                loop_idx, out_bufs, xs, additional_inputs = pytree.tree_unflatten(
+                loop_idx, out_bufs, xs, additional_inputs, _ = pytree.tree_unflatten(
                     flat_args,
                     operands_and_additional_inputs_spec,
                 )
@@ -858,8 +904,9 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
             )
             return (final_out,)
 
+        fx_shape_symbols = _unbound_shape_symbol_bindings(gm.graph, cur_node)
         lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
-            (fx_xs, fx_additional_inputs)
+            (fx_xs, fx_additional_inputs, fx_shape_symbols)
         )
         match.replace_by_example(
             lower_to_while_loop, lower_to_while_loop_args, run_functional_passes=False
@@ -999,6 +1046,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 init,
                 xs,
                 additional_inputs,
+                shape_symbols,
             ) = pytree.tree_unflatten(args, tree_spec)
             scan_length = xs[0].size(0)
             if scan_length == 0:
@@ -1042,20 +1090,22 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
             while_loop_operands = (loop_idx, ys_outs, init, xs)
             flat_operands, operands_spec = pytree.tree_flatten(while_loop_operands)
             _, operands_and_additional_inputs_spec = pytree.tree_flatten(
-                (*while_loop_operands, additional_inputs)
+                (*while_loop_operands, additional_inputs, shape_symbols)
             )
 
             # Step 2: create the cond_fn and body_fn for while_loop
             def cond_fn(*flat_args):
-                loop_idx, _, _, _, _ = pytree.tree_unflatten(
+                loop_idx, _, _, _, _, _ = pytree.tree_unflatten(
                     flat_args, operands_and_additional_inputs_spec
                 )  # type: ignore[has-type]
                 return loop_idx < scan_length  # type: ignore[has-type]
 
             def body_fn(*flat_args):
-                loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
-                    flat_args,
-                    operands_and_additional_inputs_spec,  # type: ignore[has-type]
+                loop_idx, ys_outs, carry, xs, additional_inputs, _ = (
+                    pytree.tree_unflatten(
+                        flat_args,
+                        operands_and_additional_inputs_spec,  # type: ignore[has-type]
+                    )
                 )
 
                 idx_int = loop_idx.item()
@@ -1077,7 +1127,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                     cond_fn,
                     body_fn,
                     tuple(flat_operands),
-                    tuple(additional_inputs),
+                    (*additional_inputs, *shape_symbols),
                 ),
                 operands_spec,
             )
@@ -1088,6 +1138,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 fx_init,
                 fx_xs,
                 fx_additional_inputs,
+                _unbound_shape_symbol_bindings(gm.graph, cur_node),
             )
         )
         match.replace_by_example(

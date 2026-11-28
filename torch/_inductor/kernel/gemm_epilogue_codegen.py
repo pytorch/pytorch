@@ -8,6 +8,8 @@ import operator
 from collections.abc import Callable
 from typing import Any, cast
 
+import sympy
+
 import torch
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLArg,
@@ -446,6 +448,10 @@ class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
                 f"CuTeDSL GEMM epilogue cannot emit symbolic index_expr {expr}"
             )
         return CuteDSLOpOverrides.index_expr(expr, dtype)
+
+    @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> CuteDSLArg:
+        return GemmEpilogueCuteDSLOpOverrides.index_expr(expr, dtype)
 
     @staticmethod
     def add(a: Any, b: Any, *, alpha: Any = 1) -> Any:
