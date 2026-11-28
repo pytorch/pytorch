@@ -1449,6 +1449,8 @@ def device_memory_used(device: Device = None) -> int:
 
 # import here to avoid circular import
 from .memory import (
+    caching_allocator_alloc,
+    caching_allocator_delete,
     change_current_allocator,
     empty_cache,
     get_per_process_memory_fraction,
@@ -1488,6 +1490,8 @@ __all__ = [
     "StreamContext",
     "XPUPluggableAllocator",
     "XPUGraph",
+    "caching_allocator_alloc",
+    "caching_allocator_delete",
     "can_device_access_peer",
     "change_current_allocator",
     "clock_rate",

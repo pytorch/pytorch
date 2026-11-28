@@ -36,6 +36,56 @@ def empty_cache() -> None:
         torch._C._xpu_emptyCache()
 
 
+def caching_allocator_alloc(
+    size: int, device: Device = None, stream: "torch.xpu.Stream | int | None" = None
+) -> int:
+    r"""Perform a memory allocation using the XPU memory allocator.
+
+    Memory is allocated for a given device and a stream, this
+    function is intended to be used for interoperability with other
+    frameworks. Allocated memory is released through
+    :func:`~torch.xpu.caching_allocator_delete`.
+
+    Args:
+        size (int): number of bytes to be allocated.
+        device (torch.device or int or str, optional): selected device. If it is
+            ``None`` the default XPU device is used.
+        stream (torch.xpu.Stream or int, optional): selected stream, or an
+            ``int`` pointer to an existing SYCL queue. If it is ``None`` then
+            the current stream for the selected device is used.
+    """
+    if device is None:
+        device = torch.xpu.current_device()
+    device = _get_device_index(device)
+    if stream is None:
+        stream = torch.xpu.current_stream(device)
+    elif isinstance(stream, int):
+        stream = torch.xpu.get_stream_from_external(stream, device)
+    if not isinstance(stream, torch.xpu.Stream):
+        raise TypeError(
+            "Invalid type for stream argument, must be "
+            "`torch.xpu.Stream` or `int` representing a pointer "
+            "to an existing SYCL queue"
+        )
+    with torch.xpu.device(device):
+        return torch._C._xpu_xpuCachingAllocator_raw_alloc(
+            size, stream.stream_id, stream.device_index, stream.device_type
+        )
+
+
+def caching_allocator_delete(mem_ptr: int) -> None:
+    r"""Delete memory allocated using the XPU memory allocator.
+
+    Memory allocated with :func:`~torch.xpu.caching_allocator_alloc`
+    is freed here. The associated device and stream are tracked inside
+    the allocator.
+
+    Args:
+        mem_ptr (int): memory address to be freed by the allocator.
+    """
+    torch._C._xpu_xpuCachingAllocator_raw_delete(mem_ptr)
+
+
 def reset_peak_memory_stats(device: Device = None) -> None:
     r"""Reset the "peak" stats tracked by the XPU memory allocator.
 
@@ -678,6 +728,8 @@ def list_gpu_processes(device: "Device" = None) -> str:
 __all__ = [
     "MemPool",
     "XPUPluggableAllocator",
+    "caching_allocator_alloc",
+    "caching_allocator_delete",
     "change_current_allocator",
     "empty_cache",
     "get_per_process_memory_fraction",

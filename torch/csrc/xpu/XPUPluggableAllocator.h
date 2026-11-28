@@ -34,6 +34,8 @@ struct TORCH_XPU_API XPUPluggableAllocator
   c10::DeleterFnPtr raw_deleter() const override;
 
   void* raw_alloc(size_t nbytes) override;
+  void* raw_alloc_with_stream(size_t nbytes, c10::xpu::XPUStream stream)
+      override;
   void raw_delete(void* ptr) override;
   void init(c10::DeviceIndex device_count) override;
   bool initialized() override;

@@ -16,6 +16,7 @@ class XPUAllocator : public DeviceAllocator {
  public:
   virtual void init(c10::DeviceIndex device_count) = 0;
   virtual void* raw_alloc(size_t size) = 0;
+  virtual void* raw_alloc_with_stream(size_t size, XPUStream stream) = 0;
   virtual void raw_delete(void* ptr) = 0;
   std::pair<size_t, size_t> getMemoryInfo(
       c10::DeviceIndex device_index) override {
@@ -117,6 +118,10 @@ inline c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
 
 inline void* raw_alloc(size_t size) {
   return get()->raw_alloc(size);
+}
+
+inline void* raw_alloc_with_stream(size_t size, XPUStream stream) {
+  return get()->raw_alloc_with_stream(size, stream);
 }
 
 inline void raw_delete(void* ptr) {

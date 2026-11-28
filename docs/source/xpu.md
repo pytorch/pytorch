@@ -96,6 +96,8 @@
     :nosignatures:
 
      XPUPluggableAllocator
+     caching_allocator_alloc
+     caching_allocator_delete
      change_current_allocator
      empty_cache
      get_per_process_memory_fraction

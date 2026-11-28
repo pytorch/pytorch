@@ -31,6 +31,14 @@ void* XPUPluggableAllocator::raw_alloc(size_t nbytes) {
   return malloc(nbytes, device, &queue);
 }
 
+void* XPUPluggableAllocator::raw_alloc_with_stream(
+    size_t nbytes,
+    c10::xpu::XPUStream stream) {
+  auto device = c10::xpu::current_device();
+  sycl::queue& queue = stream.queue();
+  return malloc(nbytes, device, &queue);
+}
+
 c10::DeleterFnPtr XPUPluggableAllocator::raw_deleter() const {
   return &custom_raw_deleter;
 }
