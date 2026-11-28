@@ -136,7 +136,7 @@ from torch._subclasses.fake_tensor import (
     maybe_get_fake_dispatch_keys,
     maybe_get_fake_pytype,
 )
-from torch._subclasses.meta_utils import safe_grad
+from torch._subclasses.meta_utils import safe_grad, safe_is_leaf
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import (
@@ -4949,6 +4949,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         pytype: type,
         dispatch_keys_raw: int,
         grad: torch.Tensor,
+        grad_dtype_override: tuple[torch.dtype | None, ...] = (),
     ) -> torch.Tensor:
         fake_mode = torch._subclasses.FakeTensorMode()
         ret = fake_mode.fake_tensor_converter.from_meta_and_device(
@@ -4964,6 +4965,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         # the way in (only a training capture has one to prune at all); it was
         # not guarded on, so the rebuilt tensor does not need it, but assigning
         # the sentinel raises.
+        if grad_dtype_override:
+            ret.grad_dtype = grad_dtype_override[0]
         ret.grad = grad if isinstance(grad, torch.Tensor) else None
         return ret
 
@@ -4976,6 +4979,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         dispatch_keys_raw: int,
         ctx: Any,
         inner_data: list[tuple[str, Any]],
+        grad_dtype_override: tuple[torch.dtype | None, ...] = (),
     ) -> torch.Tensor:
         inner_tensors = dict(inner_data)
 
@@ -4990,6 +4994,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         )
         out.pytype = pytype
         out.dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw)
+        if grad_dtype_override:
+            out.grad_dtype = grad_dtype_override[0]
         return out
 
     @classmethod
@@ -5421,6 +5427,14 @@ class GuardsStatePickler(FunctionPicklerBase):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("tensor guard tree",)
 
+            # TENSOR_MATCH rebuilt on load checks grad_dtype. A 1-tuple because
+            # None is itself a grad_dtype (any dtype).
+            grad_dtype_override = (
+                (obj.grad_dtype,)
+                if safe_is_leaf(obj) and obj._has_grad_dtype_override
+                else ()
+            )
+
             if is_traceable_wrapper_subclass(obj):
                 # inner_data is a list of tuples of:
                 #   (inner attr name, unpickle func, tuple of func inputs)
@@ -5441,6 +5455,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                     torch._C._dispatch_keys(obj).raw_repr(),
                     ctx,
                     inner_data,
+                    grad_dtype_override,
                 )
 
             # _dispatch_keys() on a fake reports the fake's own keys: besides
@@ -5490,6 +5505,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                     # permits one as a param) or a fake mirroring one has a real
                     # tensor.
                     safe_grad(obj),
+                    grad_dtype_override,
                 ),
                 # The state slot, not a constructor argument: pickle memoizes the
                 # tensor before saving state, so an attribute referring back to
