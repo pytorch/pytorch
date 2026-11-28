@@ -734,6 +734,23 @@ def find_engaged_maintainers(
     return engaged_maintainers
 
 
+def non_author_codepath_owners(
+    *, ownership: OwnershipResult, author_login: str
+) -> tuple[str, ...]:
+    """Return the codepath owners other than the author, whom GitHub requests.
+
+    The author cannot review their own PR, so a codepath match on the author
+    alone gives the PR no owner.
+    """
+
+    author_handle = f"@{author_login}".casefold()
+    return tuple(
+        owner
+        for owner in ownership.codepath_owners
+        if owner.casefold() != author_handle
+    )
+
+
 def existing_reviewers(snapshot: ReviewerSnapshot) -> ReviewerState | None:
     """Return who already has a pending request or a submitted review, if read."""
 
@@ -842,7 +859,10 @@ def gather_planner_input(
     requested = submitted = None
     rosters: dict[str, tuple[str, ...]] | None = None
     admitted = facts.passes_intake or bool(ownership.bypass_intake_matches)
-    owners = ownership.codepath_owners or ownership.additional_owners
+    codepath = non_author_codepath_owners(
+        ownership=ownership, author_login=intake.author_login
+    )
+    owners = codepath or ownership.additional_owners
     if admitted and (owners or engagement_candidates(intake)):
         try:
             state = fetch_reviewer_state(
@@ -959,7 +979,9 @@ def resolve_team_owner_reviewers(planner_input: PlannerInput) -> TeamOwnerReview
     otherwise a roster member is picked at random, seeded by the PR (see
     pick_roster_member). GitHub requests codepath owners through CODEOWNERS, so
     every reviewer picked here is optional: a failure skips it and records an
-    incomplete reason instead of raising.
+    incomplete reason instead of raising. Unreadable reviewer state is such a
+    failure even without additional owners, because planning then cannot
+    confirm that anyone is assigned.
     """
 
     intake = planner_input.intake
@@ -967,14 +989,14 @@ def resolve_team_owner_reviewers(planner_input: PlannerInput) -> TeamOwnerReview
     ownership = planner_input.ownership
     snapshot = planner_input.reviewers
     team_owner_ids = ownership.additional_owners
-    if not team_owner_ids:
-        return TeamOwnerReviewers((), {}, ())
     # Without the reviewer state, coverage is unknown, so nothing is picked.
     existing = existing_reviewers(snapshot)
     if existing is None:
         error = snapshot.errors.get("reviewers", "reviewer state was not read")
-        reason = f"Reviewer state was unavailable ({error}), so additional owners were skipped."
+        reason = f"Reviewer state was unavailable ({error}), so no reviewer could be confirmed or picked."
         return TeamOwnerReviewers(team_owner_ids, {}, (reason,))
+    if not team_owner_ids:
+        return TeamOwnerReviewers((), {}, ())
     try:
         choices = select_team_owner_reviewers(
             identity=intake.identity,
@@ -1013,7 +1035,6 @@ def explain_plan(
     intake = planner_input.intake
 
     ownership = planner_input.ownership
-    author_handle = f"@{intake.author_login}".casefold()
     concerns = {c.owner_id: c for c in ownership.additional_owner_concerns}
     requested = {handle.casefold() for handle in planned_handles(requests)}
 
@@ -1031,10 +1052,10 @@ def explain_plan(
     # Codepath owners other than the author, whom GitHub requests through
     # CODEOWNERS; reviewer state shows whether that request is visible.
     existing = existing_reviewers(planner_input.reviewers)
-    for owner in ownership.codepath_owners:
+    for owner in non_author_codepath_owners(
+        ownership=ownership, author_login=intake.author_login
+    ):
         key = owner.casefold()
-        if key == author_handle:
-            continue
         if existing is None:
             state = "codeowners_unconfirmed"
         elif key in existing.submitted_reviewers:
@@ -1079,20 +1100,25 @@ def build_action_plan(
     2. A PR that is not admitted (fails intake, no bypass match):
        plan_unadmitted decides; it is the only code that can mark a PR as
        missing an actionable issue.
-    3. An admitted PR with no codepath owners and no additional owners: nobody
-       is requested for ownership, so it is triaged only if a handoff reviewer
-       is engaged, whatever its concerns.
-    4. An admitted PR with owners: request a reviewer for each additional owner
-       (from resolve_team_owner_reviewers) and the supporters and actionable
+    3. An admitted PR with no codepath owner other than the author and no
+       additional owners: nobody is requested for ownership, so it is triaged
+       only if a handoff reviewer is engaged, whatever its concerns.
+    4. An admitted PR with a codepath owner other than the author or with
+       additional owners: request a reviewer for each additional owner (from
+       resolve_team_owner_reviewers) and the supporters and actionable
        labelers; GitHub requests the codepath owners through CODEOWNERS.
-       The decision is then the first that applies:
+       The decision is the first that applies:
        - incomplete, if any routing fell short;
-       - routed_untriaged, if a concern has no owner and there is no handoff
-         reviewer;
-       - otherwise triage.
+       - triage, if an owner or engaged maintainer other than the author is
+         assigned (requested now, already pending, or already reviewed), even
+         when some concerns have no owner: the assigned reviewers pull in
+         others for them, and the run's step summary lists them;
+       - otherwise kept_open, since GitHub can fail to send a CODEOWNERS
+         request.
     Between exits 2 and 3, setup gathers what both admitted cases share: the
-    supporter and actionable-labeler candidates and whether there is a handoff
-    reviewer. In both, every candidate is filtered for anyone already reviewing.
+    engaged maintainers (supporters, actionable labelers, and reviewers a
+    maintainer requested). In both, every candidate is filtered for anyone
+    already reviewing.
 
     incomplete_reasons is built once, right after admission, and any entry
     makes the plan incomplete. The explanation is log-only (None when there is
@@ -1126,13 +1152,20 @@ def build_action_plan(
             ),
         )
 
-    # The PR is admitted from here on. Additional owners get their reviewers
-    # from resolve_team_owner_reviewers, whose failures add incomplete reasons
-    # rather than raising. Any incomplete reason makes the plan incomplete:
-    # whatever routing was safe still happens, but the PR gets bot-triage-error
-    # instead of triaged. This is the complete list.
+    # The PR is admitted from here on. A codepath match on the author alone
+    # requests nobody, so such a PR is decided as one without owners.
+    author_handle = f"@{intake.author_login}".casefold()
+    codepath = non_author_codepath_owners(
+        ownership=ownership, author_login=intake.author_login
+    )
+
+    # Additional owners get their reviewers from resolve_team_owner_reviewers,
+    # whose failures add incomplete reasons rather than raising. Any incomplete
+    # reason makes the plan incomplete: whatever routing was safe still
+    # happens, but the PR gets bot-triage-error instead of triaged. This is the
+    # complete list.
     team_owners = None
-    if ownership.codepath_owners or ownership.additional_owners:
+    if codepath or ownership.additional_owners:
         team_owners = resolve_team_owner_reviewers(planner_input)
     routing_reasons = team_owners.incomplete_reasons if team_owners else ()
     incomplete_reasons = [*llm_reasons, *routing_reasons]
@@ -1142,22 +1175,16 @@ def build_action_plan(
     # later drops every candidate who already reviews, whatever their reason.
     engaged_maintainers = find_engaged_maintainers(intake=intake, snapshot=snapshot)
     existing = existing_reviewers(snapshot) or ReviewerState(frozenset(), frozenset())
-    author_handle = f"@{intake.author_login}".casefold()
-    # A handoff reviewer is trusted to pull in reviewers for uncovered concerns.
-    # A team that opted in through bypass intake is trusted like a supporter,
-    # so its chosen reviewer also counts.
-    chosen = team_owners.choices if team_owners else {}
-    has_handoff = bool(
-        facts.supporters
-        or facts.actionable_labelers
-        or facts.maintainer_requested_reviewers
-        or any(owner in chosen for owner in ownership.bypass_intake_matches)
-    )
 
-    # Exit 3: no codepath owners and no additional semantic owners, so nobody
-    # is requested for ownership, though supporters and actionable labelers
-    # still can be. The PR stays untriaged, unless there is a handoff reviewer.
+    # Exit 3: no codepath owner other than the author and no additional
+    # semantic owners, so nobody is requested for ownership, though supporters
+    # and actionable labelers still can be. The PR stays untriaged, unless
+    # there is a handoff reviewer.
     if team_owners is None:
+        # A handoff reviewer is trusted to pull in the reviewers the PR needs.
+        # Engaged maintainers exclude the author, who cannot hand off to
+        # themselves.
+        has_handoff = bool(engaged_maintainers)
         if incomplete_reasons:
             decision, labels = "incomplete", (BOT_TRIAGE_ERROR_LABEL,)
         elif has_handoff:
@@ -1183,8 +1210,9 @@ def build_action_plan(
             requests=requests,
         )
 
-    # Exit 4: owners exist. Request each additional owner's chosen reviewer,
-    # through the same filter for anyone already reviewing.
+    # Exit 4: a codepath owner other than the author or an additional owner
+    # exists. Request each additional owner's chosen reviewer, through the same
+    # filter for anyone already reviewing.
     requests = new_reviewer_requests(
         engaged_maintainers=engaged_maintainers,
         roster_users=team_owners.roster_users,
@@ -1196,12 +1224,24 @@ def build_action_plan(
     )
     if owner_targets > MAX_REVIEW_REQUESTS:
         raise ValueError("review request exceeds Auto PR Triage's 15-target limit")
+    # Owners alone do not triage: GitHub can fail to send a CODEOWNERS request,
+    # and a PR marked triaged with nobody assigned is never looked at again.
+    # Only an owner's or engaged maintainer's request or review counts, not
+    # unrelated review activity such as a bot's review. Unreadable reviewer
+    # state is already an incomplete reason.
+    owner_handles = {owner.casefold() for owner in codepath} | {
+        choice.reviewer.casefold() for choice in team_owners.choices.values()
+    }
+    engaged_handles = {f"@{login}".casefold() for login, _ in engaged_maintainers}
+    assigned = bool(
+        requests or (owner_handles | engaged_handles) & existing.current_reviewers
+    )
     if incomplete_reasons:
         decision, status_labels = "incomplete", (BOT_TRIAGE_ERROR_LABEL,)
-    elif ownership.has_uncovered_concerns and not has_handoff:
-        decision, status_labels = "routed_untriaged", ()
-    else:
+    elif assigned:
         decision, status_labels = "triage", (TRIAGED_LABEL, BOT_TRIAGED_LABEL)
+    else:
+        decision, status_labels = "kept_open", ()
     for label_name in status_labels:
         require_label(snapshot=snapshot, label_name=label_name)
     plan = make_plan(

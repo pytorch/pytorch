@@ -272,10 +272,6 @@ class ApplyMainTest(unittest.TestCase):
                 "Labeled pytorch/ciforge#123 as missing an actionable issue",
             ),
             (ApplyOutcome("kept_open"), "did not qualify for an apply action"),
-            (
-                ApplyOutcome("routed_untriaged", 2),
-                "Applied partial Auto PR Triage",
-            ),
         )
         for outcome, message in cases:
             with self.subTest(status=outcome.status):

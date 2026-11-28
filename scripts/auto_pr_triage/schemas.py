@@ -899,7 +899,6 @@ TRIAGE_DECISIONS = frozenset(
         "missing_actionable_issue",
         "triage",
         "incomplete",
-        "routed_untriaged",
     }
 )
 

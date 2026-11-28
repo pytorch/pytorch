@@ -583,10 +583,6 @@ class ActionPlanTest(unittest.TestCase):
                 },
                 "routes a PR that was not admitted",
             ),
-            (
-                {"decision": "routed_untriaged", "labels": ()},
-                "routes a PR that was not admitted",
-            ),
         )
         for overrides, message in rejected:
             with (

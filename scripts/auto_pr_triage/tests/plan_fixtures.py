@@ -310,7 +310,11 @@ class FakeGitHub:
             "body": "fixture body",
             "labels": [{"name": label} for label in labels or []],
         }
-        self.requested_users = set(requested_users or [])
+        # By default GitHub has requested the default codepath owner through
+        # CODEOWNERS, as it does for a real PR.
+        if requested_users is None:
+            requested_users = ["codepath-owner"]
+        self.requested_users = set(requested_users)
         self.requested_teams = set(requested_teams or [])
         self.submitted_users = set(submitted_users or [])
         self.unattributed_submitted_review = unattributed_submitted_review

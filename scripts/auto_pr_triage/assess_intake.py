@@ -575,7 +575,7 @@ def assess_intake(
     actionable_labelers: list[str] = []
     maintainer_requested_reviewers: list[str] = []
     if admitted:
-        # Handoff reviewers let planning triage a PR with uncovered concerns.
+        # Handoff reviewers let planning triage a PR without owners.
         actionable_labelers = fetch_actionable_labelers(
             github=pr.github,
             repo=pr.repo,
