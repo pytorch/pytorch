@@ -9257,8 +9257,30 @@ logical_xor = register_pointwise(
 )
 maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
-register_lowering(aten.clamp_min)(maximum)
-register_lowering(aten.clamp_max)(minimum)
+
+
+def _is_noop_int_bound(x, bound, is_min):
+    # An int bound at or beyond x's integer dtype range is a no-op in eager (one
+    # on the other side is rejected while tracing). As a constant of that dtype it
+    # would wrap instead (255 -> -1 for int8). Callers return clone(x), not x, so
+    # the output doesn't alias the input.
+    dtype = x.get_dtype()
+    if not (isinstance(bound, int) and is_integer_dtype(dtype)):
+        return False
+    info = torch.iinfo(dtype)
+    return bound <= info.min if is_min else bound >= info.max
+
+
+@register_lowering(aten.clamp_min, type_promotion_kind=None)
+def clamp_min(x, min):
+    return clone(x) if _is_noop_int_bound(x, min, is_min=True) else maximum(x, min)
+
+
+@register_lowering(aten.clamp_max, type_promotion_kind=None)
+def clamp_max(x, max):
+    return clone(x) if _is_noop_int_bound(x, max, is_min=False) else minimum(x, max)
+
+
 register_op_dtype_propagation_rules(
     "fmaximum",
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -9435,13 +9457,13 @@ foreach_div_scalar = register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
 register_foreach_pointwise(aten._foreach_rsqrt, rsqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
-register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
+register_foreach_pointwise(aten._foreach_maximum.Scalar, clamp_min)
 register_foreach_pointwise(aten._foreach_minimum.List, minimum)
-register_foreach_pointwise(aten._foreach_minimum.Scalar, minimum)
+register_foreach_pointwise(aten._foreach_minimum.Scalar, clamp_max)
 register_foreach_pointwise(aten._foreach_clamp_min.List, maximum)
-register_foreach_pointwise(aten._foreach_clamp_min.Scalar, maximum)
+register_foreach_pointwise(aten._foreach_clamp_min.Scalar, clamp_min)
 register_foreach_pointwise(aten._foreach_clamp_max.List, minimum)
-register_foreach_pointwise(aten._foreach_clamp_max.Scalar, minimum)
+register_foreach_pointwise(aten._foreach_clamp_max.Scalar, clamp_max)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
 register_foreach_pointwise(aten._foreach_clone, clone)

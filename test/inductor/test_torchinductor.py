@@ -3717,6 +3717,31 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(4, (4,)),))
 
+    def test_clamp_int_bound_out_of_range(self):
+        # https://github.com/pytorch/pytorch/issues/198071
+        # An int bound outside an integer dtype's range is a no-op in eager.
+        # It must not wrap when it becomes a constant of the tensor's dtype.
+        def fn(a, b):
+            return (
+                a.clamp(0, 255),
+                a.clamp(-1000, 1000),
+                torch.clamp_max(a, 200),
+                torch.clamp_min(a, -300),
+                b.clamp(-5, 300),
+                (a >> 1).clamp(max=300) + 1,
+                *torch._foreach_clamp_max([a, b], 300),
+                *torch._foreach_maximum([a, b], -300),
+            )
+
+        a = torch.tensor([-128, -5, 0, 3, 100, 127], dtype=torch.int8)
+        b = torch.tensor([0, 10, 200, 255], dtype=torch.uint8)
+        self.common(fn, (a, b))
+
+        # Like eager, a no-op bound returns a new tensor, not the input.
+        a = a.to(self.device)
+        out = torch.compile(lambda a: a.clamp_min(-300))(a)
+        self.assertNotEqual(out.data_ptr(), a.data_ptr())
+
     @skip_if_device(
         lambda device: device == "mps",
         "MPS codegen doesn't upcast bf16 constants to float32",
