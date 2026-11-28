@@ -11,10 +11,11 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCUDA,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_S390X,
     parametrize,
     run_tests,
@@ -70,6 +71,8 @@ def check_offset_overflow(test, gen, device, dtype):
 
 
 class TestStatelessRNGKey(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_basic_shape_and_dtype(self, device):
         key = random.key(42, device=device)
         self.assertEqual(key.shape, (2,))
@@ -94,6 +97,8 @@ class TestStatelessRNGKey(TestCase):
 
 
 class TestStatelessRNGKeySplit(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_basic_shape_and_dtype(self, device):
         key = random.key(42, device=device)
         splits = random.split(key, 4)
@@ -218,6 +223,8 @@ class TestStatelessRNGKeySplit(TestCase):
 
 
 class TestStatelessRNGKeyFoldIn(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_basic_shape_and_dtype(self, device):
         key = random.key(42, device=device)
         result = random.fold_in(key, 7)
@@ -359,28 +366,29 @@ class TestStatelessRNGKeyFoldIn(TestCase):
         self.assertEqual(random.fold_in(key, scalar), expected)
         self.assertEqual(random.fold_in(key, one_d), expected)
 
-    @onlyCUDA
-    def test_tensor_data_cuda_graph(self, device):
+    @onlyAccelerator
+    def test_tensor_data_graph(self, device):
         # A tensor data is not baked into the graph: mutating it and replaying
         # produces the result for the new value.
         key = random.key(42, device=device)
         data = torch.zeros((), dtype=torch.uint64, device=device)
 
-        s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(s):
+        s = torch.Stream(device=device)
+        s.wait_stream(torch.accelerator.current_stream(device))
+        with s:
             for _ in range(3):
                 random.fold_in(key, data)
-        torch.cuda.current_stream().wait_stream(s)
+        torch.accelerator.current_stream(device).wait_stream(s)
 
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
+        g = torch.accelerator.Graph()
+        with s, g:
             out = random.fold_in(key, data)
+        torch.accelerator.current_stream(device).wait_stream(s)
 
         for value in (5, 99):
             data.fill_(value)
             g.replay()
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize(device)
             self.assertEqual(out, random.fold_in(key, value))
 
     @parametrize("batched", [False, True])
@@ -406,6 +414,8 @@ class TestStatelessRNGKeyFoldIn(TestCase):
 
 
 class TestStatelessRNGDistribution(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _gen(self, gen_fn_name, *args, **kwargs):
         return getattr(random, gen_fn_name)(*args, **kwargs)
 
@@ -623,6 +633,7 @@ class TestStatelessRNGDistribution(TestCase):
 
     @parametrize("inplace", [False, True])
     @dtypes(*all_floating_dtypes)
+    @skipXPUIf(True, "_philox_uniform_.Tensor is not implemented on XPU yet")
     def test_uniform_tensor_bounds_match_scalar(self, device, dtype, inplace):
         # Tensor bounds must reproduce scalar bounds bit for bit.
         key = random.key(42, device=device)
@@ -642,6 +653,7 @@ class TestStatelessRNGDistribution(TestCase):
     @parametrize("keys", ["single", "batched"])
     @parametrize("cols", [subtest(36, name="aligned"), subtest(37, name="unaligned")])
     @dtypes(*all_floating_dtypes)
+    @skipXPUIf(True, "_philox_uniform_.Tensor is not implemented on XPU yet")
     def test_uniform_tensor_bounds_rows_vary(self, device, dtype, keys, cols):
         low_vals, high_vals = [-1000.0, -3.0, 2.5], [0.001, 5.5, 2.5000001]
         shape = (3, cols)
@@ -657,6 +669,7 @@ class TestStatelessRNGDistribution(TestCase):
 
     @parametrize("keys", ["single", "batched"])
     @dtypes(*all_floating_dtypes)
+    @skipXPUIf(True, "_philox_uniform_.Tensor is not implemented on XPU yet")
     def test_uniform_tensor_bounds_cols_vary(self, device, dtype, keys):
         low_vals, high_vals = [-1000.0, -3.0, 2.5], [0.001, 5.5, 2.5000001]
         shape = (37, 3)
@@ -671,6 +684,7 @@ class TestStatelessRNGDistribution(TestCase):
             self.assertEqual(actual[:, i], expected[:, i], atol=0, rtol=0)
 
     @dtypes(*all_floating_dtypes)
+    @skipXPUIf(True, "_philox_uniform_.Tensor is not implemented on XPU yet")
     def test_uniform_tensor_bounds_noncontig(self, device, dtype):
         # Results must not depend on the memory layout of the bounds or output.
         shape = (3, 37)
@@ -693,12 +707,14 @@ class TestStatelessRNGDistribution(TestCase):
             actual = random.uniform_(key, out, low=low, high=high)
             self.assertEqual(actual, expected, atol=0, rtol=0)
 
+    @skipXPUIf(True, "_philox_uniform_.Tensor is not implemented on XPU yet")
     def test_uniform_tensor_bounds_empty(self, device):
         key = random.key(42, device=device)
         for shape in ((0, 3), (3, 0)):
             low = torch.zeros(shape, device=device)
             self.assertEqual(random.uniform(key, shape, low=low).shape, shape)
 
+    @skipXPUIf(True, "_philox_uniform_.Tensor is not implemented on XPU yet")
     def test_uniform_tensor_bounds_grad(self, device):
         key = random.key(42, device=device)
         low = torch.zeros(8, 1, device=device, requires_grad=True)
@@ -718,6 +734,7 @@ class TestStatelessRNGDistribution(TestCase):
         self.assertTrue(gradgradcheck(f, bounds))
 
     @dtypes(*all_floating_dtypes)
+    @skipXPUIf(True, "_philox_uniform_.Tensor is not implemented on XPU yet")
     def test_uniform_tensor_bounds_dtype(self, device, dtype):
         key = random.key(42, device=device)
         low = torch.zeros(4, 1, dtype=dtype, device=device)
@@ -726,6 +743,7 @@ class TestStatelessRNGDistribution(TestCase):
         self.assertEqual(actual.dtype, torch.float32)
         self.assertEqual(actual, random.uniform(key, (4, 3)), atol=0, rtol=0)
 
+    @skipXPUIf(True, "_philox_uniform_.Tensor is not implemented on XPU yet")
     def test_uniform_tensor_bounds_errors(self, device):
         for mode in (contextlib.nullcontext(), FakeTensorMode()):
             with mode:
@@ -739,7 +757,7 @@ class TestStatelessRNGDistribution(TestCase):
                 int_out = torch.empty(4, 3, dtype=torch.int64, device=device)
                 with self.assertRaises(RuntimeError):
                     random.uniform_(key, int_out, low=low)
-                if torch.device(device).type == "cuda":
+                if torch.device(device).type != "cpu":
                     with self.assertRaisesRegex(RuntimeError, "on the same device"):
                         random.uniform(key, (4, 3), low=torch.zeros(4, 1))
         out = torch.zeros(4, 3, device=device)
@@ -811,6 +829,8 @@ class TestStatelessRNGDistribution(TestCase):
 
 
 class TestStatelessRNGCompile(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_split_fullgraph(self, device):
         key = random.key(42, device=device)
 
@@ -917,10 +937,12 @@ class TestStatelessRNGCompile(TestCase):
         # Out-of-place generation fully overwrites its output; ensure generation
         # in torch.compile doesn't allocate an extra full-size buffer (i.e.
         # ensure peak ~= output size).
-        if torch.device(device).type == "cuda" and not HAS_TRITON:
-            self.skipTest("CUDA inductor codegen requires triton")
+        if torch.device(device).type != "cpu" and not HAS_TRITON:
+            self.skipTest("Accelerator inductor codegen requires triton")
         if tensor_bounds and op not in ("uniform",):
             self.skipTest(f"{op} doesn't support tensor bounds yet")
+        if tensor_bounds and torch.device(device).type == "xpu":
+            self.skipTest("_philox_uniform_.Tensor is not implemented on XPU yet")
         shape = (2048, 2048)  # 16 MiB fp32; an extra clone would ~double peak
         gen_fn = getattr(random, op)
         bounds = {
@@ -960,8 +982,8 @@ class TestStatelessRNGCompile(TestCase):
     @onlyAccelerator
     def test_generation_no_corruption_from_buffer_reuse(self, device):
         # Regression test for Inductor buffer reuse corrupting generation.
-        if torch.device(device).type == "cuda" and not HAS_TRITON:
-            self.skipTest("CUDA inductor codegen requires triton")
+        if torch.device(device).type != "cpu" and not HAS_TRITON:
+            self.skipTest("Accelerator inductor codegen requires triton")
 
         # Keep all generations live until the final sum, exercising whether
         # Inductor reuses an in-place generation's buffer while it is still live.
@@ -980,8 +1002,8 @@ class TestStatelessRNGCompile(TestCase):
     def test_generation_returned_directly_with_cudagraphs(self, device, op):
         # Regression test: returning a reinplaced (Tensor(a!)) result used to
         # reference a name bound only inside the graph partition.
-        if torch.device(device).type == "cuda" and not HAS_TRITON:
-            self.skipTest("CUDA inductor codegen requires triton")
+        if torch.device(device).type != "cpu" and not HAS_TRITON:
+            self.skipTest("Accelerator inductor codegen requires triton")
 
         gen_fn = getattr(random, op)
 
@@ -1000,7 +1022,7 @@ class TestStatelessRNGCompile(TestCase):
         # Regression test: after warmup, cudagraphs copies inputs with
         # _foreach_copy_, which didn't support the uint64 key.
         if not HAS_TRITON:
-            self.skipTest("CUDA inductor codegen requires triton")
+            self.skipTest("Accelerator inductor codegen requires triton")
 
         def f(key):
             return random.uniform(key, (2, 3))
@@ -1010,9 +1032,10 @@ class TestStatelessRNGCompile(TestCase):
             key = random.key(seed, device=device)
             self.assertEqual(compiled(key), f(key))
 
+    @skipXPUIf(True, "_philox_uniform_.Tensor is not implemented on XPU yet")
     def test_uniform_tensor_bounds_backward(self, device):
-        if torch.device(device).type == "cuda" and not HAS_TRITON:
-            self.skipTest("CUDA inductor codegen requires triton")
+        if torch.device(device).type != "cpu" and not HAS_TRITON:
+            self.skipTest("Accelerator inductor codegen requires triton")
 
         def f(key, low, high):
             return random.uniform(key, (8, 33), low=low, high=high)
@@ -1029,9 +1052,10 @@ class TestStatelessRNGCompile(TestCase):
         self.assertEqual(results[1], results[0])
 
     @dtypes(*all_floating_dtypes)
+    @skipXPUIf(True, "_philox_uniform_.Tensor is not implemented on XPU yet")
     def test_uniform_tensor_bounds_match_scalar(self, device, dtype):
-        if torch.device(device).type == "cuda" and not HAS_TRITON:
-            self.skipTest("CUDA inductor codegen requires triton")
+        if torch.device(device).type != "cpu" and not HAS_TRITON:
+            self.skipTest("Accelerator inductor codegen requires triton")
 
         def f(key, low, high):
             return random.uniform(key, (8, 33), low=low, high=high, dtype=dtype)
@@ -1044,6 +1068,8 @@ class TestStatelessRNGCompile(TestCase):
 
 
 class TestStatelessRNGInteger(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize("dtype", all_int_dtypes)
     def test_basic_shape_and_dtype(self, device, dtype):
         key = random.key(42, device=device)
@@ -1376,33 +1402,37 @@ class TestStatelessRNGInteger(TestCase):
         with self.assertRaisesRegex(RuntimeError, "key must have dtype uint64"):
             random.randint_(key, result, high=10)
 
+    @parametrize("dtype", all_int_dtypes)
+    @parametrize("full_range", [False, True])
+    @parametrize("batched", [False, True])
     @onlyAccelerator
-    def test_cross_device_consistency(self, device):
-        key_cpu = random.key(42)
-        key_dev = random.key(42, device=device)
+    def test_cross_device_consistency(self, device, dtype, full_range, batched):
+        if batched:
+            # 7 is not a multiple of elems_per_call (2 or 4), covering the tail path.
+            key_cpu = random.split(random.key(42), 3).unsqueeze(-2)
+            key_dev = random.split(random.key(42, device=device), 3).unsqueeze(-2)
+            shape = (3, 7)
+        else:
+            key_cpu = random.key(42)
+            key_dev = random.key(42, device=device)
+            shape = (1000,)
+        if full_range:
+            bounds = {"low": None, "high": None}
+        else:
+            bounds = {"low": -5 if dtype.is_signed else 5, "high": 100}
         # Integer reduction is deterministic, so results are bitwise identical.
         self.assertEqual(
-            random.randint(key_cpu, (1000,), low=-5, high=100),
-            random.randint(key_dev, (1000,), low=-5, high=100).cpu(),
+            random.randint(key_cpu, shape, dtype=dtype, **bounds),
+            random.randint(key_dev, shape, dtype=dtype, **bounds).cpu(),
         )
 
 
-instantiate_device_type_tests(TestStatelessRNGKey, globals(), only_for=("cpu", "cuda"))
-instantiate_device_type_tests(
-    TestStatelessRNGKeySplit, globals(), only_for=("cpu", "cuda")
-)
-instantiate_device_type_tests(
-    TestStatelessRNGKeyFoldIn, globals(), only_for=("cpu", "cuda")
-)
-instantiate_device_type_tests(
-    TestStatelessRNGDistribution, globals(), only_for=("cpu", "cuda")
-)
-instantiate_device_type_tests(
-    TestStatelessRNGCompile, globals(), only_for=("cpu", "cuda")
-)
-instantiate_device_type_tests(
-    TestStatelessRNGInteger, globals(), only_for=("cpu", "cuda")
-)
+instantiate_device_type_tests(TestStatelessRNGKey, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestStatelessRNGKeySplit, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestStatelessRNGKeyFoldIn, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestStatelessRNGDistribution, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestStatelessRNGCompile, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestStatelessRNGInteger, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":

@@ -356,7 +356,6 @@ XPU_BLOCKLIST = [
     "test_functionalization_of_rng_ops",
     "test_jiterator",
     "test_sparse_semi_structured",
-    "test_stateless_rng",
 ]
 
 XPU_TEST = [
