@@ -2332,15 +2332,9 @@ def quantized_decomposed_quantize_per_tensor_tensor(
         raise AssertionError(
             f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
         )
-    if not (
-        len(scale.get_size()) == 0
-        or (len(scale.get_size()) == 1 and scale.get_size()[0] == 1)
-    ):
+    if any(s != 1 for s in scale.get_size()):
         raise AssertionError("expect scale as scalar tensor")
-    if not (
-        len(zero_point.get_size()) == 0
-        or (len(zero_point.get_size()) == 1 and zero_point.get_size()[0] == 1)
-    ):
+    if any(s != 1 for s in zero_point.get_size()):
         raise AssertionError("expect zero_point as scalar tensor")
 
     input_loader = input.make_loader()
@@ -2348,11 +2342,13 @@ def quantized_decomposed_quantize_per_tensor_tensor(
     zero_point_loader = zero_point.make_loader()
 
     device = input.get_device()
+    scale_idx = (0,) * len(scale.get_size())
+    zero_point_idx = (0,) * len(zero_point.get_size())
 
     def inner_fn(idx):
         input = input_loader(idx)
-        _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
-        _zero_point = zero_point_loader((0,) if len(scale.get_size()) == 1 else ())
+        _scale = scale_loader(scale_idx)
+        _zero_point = zero_point_loader(zero_point_idx)
         if scale.dtype != torch.float32:
             _scale = ops.to_dtype(_scale, torch.float32)
         if zero_point.dtype != torch.float32:
@@ -2386,15 +2382,9 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     *,
     out_dtype: torch.dtype | None = None,
 ) -> TensorBox:
-    if not (
-        len(scale.get_size()) == 0
-        or (len(scale.get_size()) == 1 and scale.get_size()[0] == 1)
-    ):
+    if any(s != 1 for s in scale.get_size()):
         raise AssertionError("expect scale as scalar tensor")
-    if not (
-        len(zero_point.get_size()) == 0
-        or (len(zero_point.get_size()) == 1 and zero_point.get_size()[0] == 1)
-    ):
+    if any(s != 1 for s in zero_point.get_size()):
         raise AssertionError("expect zero_point as scalar tensor")
     if input.get_dtype() != dtype:
         raise AssertionError(
@@ -2407,11 +2397,13 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     input_loader = input.make_loader()
     scale_loader = scale.make_loader()
     zero_point_loader = zero_point.make_loader()
+    scale_idx = (0,) * len(scale.get_size())
+    zero_point_idx = (0,) * len(zero_point.get_size())
 
     def inner_fn(idx):
         input = input_loader(idx)
-        _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
-        _zero_point = zero_point_loader((0,) if len(scale.get_size()) == 1 else ())
+        _scale = scale_loader(scale_idx)
+        _zero_point = zero_point_loader(zero_point_idx)
         if scale.dtype != torch.float32:
             _scale = ops.to_dtype(_scale, torch.float32)
         if zero_point.dtype != torch.float32:
