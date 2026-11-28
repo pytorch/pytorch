@@ -791,9 +791,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if issubclass(self.python_type(), collections.OrderedDict):
             if name in ("clear", "pop", "popitem", "setdefault", "update"):
                 owner = self.python_type() if bound else dict
-                qualname = type.__dict__["__qualname__"].__get__(owner)
                 flags = _flags_from_ml_flags(dict, name)
-                _check_method_arity(tx, f"{qualname}.{name}", flags, args, kwargs)
+                _check_method_arity(self, tx, name, flags, args, kwargs, owner=owner)
                 if name == "update":
                     check_positional(tx, name, len(args), 0, 1)
                 elif name in ("pop", "setdefault"):
@@ -986,8 +985,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         _check_descriptor_obj_type(tx, descriptor, self)
         flags = _flags_from_ml_flags(owner, name)
         receiver = self.python_type() if bound else owner
-        qualname = type.__dict__["__qualname__"].__get__(receiver)
-        _check_method_arity(tx, f"{qualname}.{name}", flags, args, kwargs)
+        _check_method_arity(self, tx, name, flags, args, kwargs, owner=receiver)
         return cls.tp_methods[name].handler(self, tx, args, kwargs)
 
     def dict_items(
@@ -1202,59 +1200,46 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if args or kwargs:
             tx.output.side_effects.mutation(self)
         if args:
-            self.dict_update_arg(
-                tx,
-                args[0],
-                fast_merge_verified=fast_merge_verified,
-                container_name=container_name,
-            )
+            other = args[0]
+            if fast_merge_verified and isinstance(other, ConstDictVariable):
+                other.install_dict_order_guard(tx)
+                self._update_items(other.materialize_keys())
+            elif not fast_merge_verified and (
+                pyanydict_checkexact(other)
+                or pyodict_checkexact(other)
+                or (
+                    not istype(
+                        other.realize(),
+                        (variables.ListVariable, variables.TupleVariable),
+                    )
+                    and generic_hasattr_str(tx, other, "keys")
+                )
+            ):
+                self.dict_merge(tx, other, container_name=container_name)
+            else:
+                # Mutable iterables must retain live iteration across key hashes.
+                pairs = lazily_unpack(
+                    tx,
+                    other,
+                    allow_fast_path=fast_merge_verified or self._can_fast_merge(other),
+                )
+                for idx, item in enumerate(pairs):
+                    pair = _unpack_dict_update_pair(tx, item, idx)
+                    if len(pair) != 2:
+                        raise_observed_exception(
+                            ValueError,
+                            tx,
+                            args=[
+                                "dictionary update sequence element "
+                                f"#{idx} has length {len(pair)}; 2 is required"
+                            ],
+                        )
+                    key = self._lookup_key(tx, pair[0], container_name=container_name)
+                    self._store_item(key, pair[1])
         if kwargs:
             items = {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
             self.dict_merge(tx, ConstDictVariable(items))
         return ConstantVariable.create(None)
-
-    def dict_update_arg(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        *,
-        fast_merge_verified: bool = False,
-        container_name: str | None = None,
-    ) -> None:
-        if fast_merge_verified and isinstance(other, ConstDictVariable):
-            other.install_dict_order_guard(tx)
-            self._update_items(other.materialize_keys())
-            return
-        sequences = (variables.ListVariable, variables.TupleVariable)
-        if not fast_merge_verified and (
-            pyanydict_checkexact(other)
-            or pyodict_checkexact(other)
-            or (
-                not istype(other.realize(), sequences)
-                and generic_hasattr_str(tx, other, "keys")
-            )
-        ):
-            self.dict_merge(tx, other, container_name=container_name)
-        else:
-            # Mutable iterables must retain live iteration across key hashes.
-            pairs = lazily_unpack(
-                tx,
-                other,
-                allow_fast_path=fast_merge_verified or self._can_fast_merge(other),
-            )
-            for idx, item in enumerate(pairs):
-                pair = _unpack_dict_update_pair(tx, item, idx)
-                if len(pair) != 2:
-                    raise_observed_exception(
-                        ValueError,
-                        tx,
-                        args=[
-                            "dictionary update sequence element "
-                            f"#{idx} has length {len(pair)}; 2 is required"
-                        ],
-                    )
-                key = self._lookup_key(tx, pair[0], container_name=container_name)
-                self._store_item(key, pair[1])
 
     def _can_fast_update(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
@@ -1315,25 +1300,32 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                     explanation="Dynamo cannot merge a dictionary after changing its type's __iter__.",
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
+            obj_type = other.python_type()
+            owner, iterator = next(
+                (
+                    (cls, ns["__iter__"])
+                    for cls, ns in iter_mro_static_dicts(obj_type)
+                    if "__iter__" in ns
+                ),
+                (None, NO_SUCH_SUBOBJ),
+            )
             if (
                 isinstance(other, variables.UserDefinedObjectVariable)
                 and other.cls_source
             ):
-                source = mro_attr_source(
-                    tx, other.python_type(), other.cls_source, "__iter__"
-                )
-                owner = next(
-                    owner
-                    for owner, namespace in iter_mro_static_dicts(other.python_type())
-                    if "__iter__" in namespace
-                )
-                if source is not None and not type_is_immutable(owner):
+                source = mro_attr_source(tx, obj_type, other.cls_source, "__iter__")
+                if (
+                    source is not None
+                    and owner is not None
+                    and not type_is_immutable(owner)
+                ):
                     install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # Incompatible descriptor owners install a generic iteration slot.
-            iter_fn = mro_lookup(other.python_type(), "__iter__")
             if (
-                (pydict_check(other) and iter_fn is dict.__iter__)
-                or (pyfrozendict_check(other) and iter_fn is torch._frozendict.__iter__)
+                (pydict_check(other) and iterator is dict.__iter__)
+                or (
+                    pyfrozendict_check(other) and iterator is torch._frozendict.__iter__
+                )
                 or self._can_fast_update(tx, other)
             ):
                 if isinstance(other, ConstDictVariable):
