@@ -10546,6 +10546,17 @@ class TestCachingHostAllocatorConfig(TestCase):
         super().setUp()
         gc.collect()
         torch._C._host_emptyCache()
+        # Earlier graph captures in this process can leave pinned blocks that
+        # _host_emptyCache() never frees, so count relative to them.
+        self._baseline_allocations = torch.cuda.host_memory_stats()[
+            "allocations.current"
+        ]
+
+    def _allocations_since_setup(self):
+        return (
+            torch.cuda.host_memory_stats()["allocations.current"]
+            - self._baseline_allocations
+        )
 
     def tearDown(self):
         torch._C._host_emptyCache()
@@ -10573,8 +10584,7 @@ class TestCachingHostAllocatorConfig(TestCase):
             del t
             gc.collect()
 
-            stats = torch.cuda.host_memory_stats()
-            self.assertEqual(stats["allocations.current"], 0)
+            self.assertEqual(self._allocations_since_setup(), 0)
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182087"
@@ -10590,8 +10600,7 @@ class TestCachingHostAllocatorConfig(TestCase):
             del t
             gc.collect()
 
-            stats = torch.cuda.host_memory_stats()
-            self.assertEqual(stats["allocations.current"], 1)
+            self.assertEqual(self._allocations_since_setup(), 1)
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182261"
@@ -10615,8 +10624,7 @@ class TestCachingHostAllocatorConfig(TestCase):
             gc.collect()
 
             # Block should have been freed, not cached.
-            stats = torch.cuda.host_memory_stats()
-            self.assertEqual(stats["allocations.current"], 0)
+            self.assertEqual(self._allocations_since_setup(), 0)
 
     def test_unrounded_bucket_no_undersized_reuse(self):
         # Unrounded requests (above round_threshold) that are still cached
