@@ -96,6 +96,7 @@ from torch.fx.node import Target
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.weak import WeakIdKeyDictionary
 
 from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -724,6 +725,10 @@ def is_noop_graph(gm: torch.fx.GraphModule) -> bool:
 
 def noop_graph_call(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
     return ()
+
+
+class _OptimizerTensorLifetime:
+    """Kept alive until all optimizers sharing a tensor group are destroyed."""
 
 
 class OutputGraph(OutputGraphCommon):
@@ -3340,17 +3345,20 @@ class OutputGraph(OutputGraphCommon):
                     maybe_set_fake_device(example_inputs[idx], snapshot_device)
 
             gm.graph.lint()
-            if is_noop_graph(gm):
-                # The graph can still be empty here even though the early check
-                # in this function passed: we decided to compile because there
-                # were outputs, and pruning then established that every one of
-                # them is an input or a constant that codegen emits directly.
-                # Handing that to the backend costs a metadata pass, a joint
-                # trace and a cache miss for a function with nothing in it.
-                compiled_fn = noop_graph_call
-            else:
-                with self.restore_global_state():
-                    compiled_fn = self.call_user_compiler(gm, example_inputs)
+            try:
+                if is_noop_graph(gm):
+                    # The graph can still be empty here even though the early check
+                    # in this function passed: we decided to compile because there
+                    # were outputs, and pruning then established that every one of
+                    # them is an input or a constant that codegen emits directly.
+                    # Handing that to the backend costs a metadata pass, a joint
+                    # trace and a cache miss for a function with nothing in it.
+                    compiled_fn = noop_graph_call
+                else:
+                    with self.restore_global_state():
+                        compiled_fn = self.call_user_compiler(gm, example_inputs)
+            finally:
+                self.register_optimizer_finalizers(gm)
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
@@ -3977,6 +3985,104 @@ class OutputGraph(OutputGraphCommon):
         self.unspec_variable_map.clear()
         self.backward_state.clear()
         self._pending_event_record_violations.clear()
+
+    def register_optimizer_finalizers(self, gm: fx.GraphModule) -> None:
+        """Release captured tensors after their last registered optimizer owner dies.
+
+        Run after the backend, including on failure, because AOTAutograd populates
+        the TracingContext parameter lists during compilation. Clear owned slots
+        in place to preserve the positions of tensors belonging to other owners.
+        """
+        from .variables.optimizer import _optimizer_tensor_owners
+
+        if not _optimizer_tensor_owners:
+            return
+
+        tc = self.tracing_context
+        groups: dict[
+            tuple[int, ...],
+            tuple[list[torch.optim.Optimizer], set[str], WeakIdKeyDictionary],
+        ] = {}
+        for name, tensor in itertools.chain(
+            gm._parameters.items(),
+            gm._buffers.items(),
+            ((None, tensor) for tensor in tc.params_flat or ()),
+        ):
+            if tensor is None:
+                continue
+            owners = list(_optimizer_tensor_owners.get(tensor, ()))
+            if not owners:
+                continue
+            key = tuple(id(owner) for owner in owners)
+            if key not in groups:
+                groups[key] = (owners, set(), WeakIdKeyDictionary())
+            _, names, tensors = groups[key]
+            if name is not None:
+                names.add(name)
+            tensors[tensor] = None
+
+        if not groups:
+            return
+        if self.root_tx is None:
+            raise AssertionError("root_tx must not be None")
+
+        def get_params_ref(
+            params: list[Any] | None,
+        ) -> Callable[[], list[Any] | None]:
+            try:
+                return weakref.ref(params)
+            except TypeError:
+                # Custom backends can still provide ordinary, non-weakrefable lists.
+                return lambda: params
+
+        gm_ref = weakref.ref(gm)
+        params_flat_ref = get_params_ref(tc.params_flat)
+        unwrapped_params_ref = get_params_ref(tc.params_flat_unwrap_subclasses)
+        original_indices = tc.params_unwrapped_to_flat_index
+        for owners, names, tensors in groups.values():
+            flat_indices = {
+                index
+                for index, tensor in enumerate(tc.params_flat or ())
+                if tensor in tensors
+            }
+            unwrapped_indices = {
+                index
+                for index, tensor in enumerate(tc.params_flat_unwrap_subclasses or ())
+                if tensor in tensors
+                or (
+                    original_indices is not None
+                    and original_indices[index] in flat_indices
+                )
+            }
+            lifetime: torch.optim.Optimizer | _OptimizerTensorLifetime
+            if len(owners) == 1:
+                lifetime = owners[0]
+                prefix = f"__optimizer_{id(lifetime)}"
+            else:
+                lifetime = _OptimizerTensorLifetime()
+                prefix = "__optimizer_tensor_lifetime"
+                # Each owner retains the shared lifetime until it is destroyed.
+                for owner in owners:
+                    weakref.finalize(owner, [lifetime].clear)
+            self.root_tx.store_global_weakref_by_id(prefix, lifetime)
+
+            def clear_static_tensor_refs(
+                names: set[str] = names,
+                flat_indices: set[int] = flat_indices,
+                unwrapped_indices: set[int] = unwrapped_indices,
+            ) -> None:
+                if (graph := gm_ref()) is not None:
+                    for name in names:
+                        graph._buffers.pop(name, None)
+                        graph._parameters.pop(name, None)
+                if (params_flat := params_flat_ref()) is not None:
+                    for index in flat_indices:
+                        params_flat[index] = None
+                if (unwrapped_params := unwrapped_params_ref()) is not None:
+                    for index in unwrapped_indices:
+                        unwrapped_params[index] = None
+
+            weakref.finalize(lifetime, clear_static_tensor_refs)
 
     def add_graph_finalizer(
         self, register_finalizer: Callable[[fx.GraphModule], None]
