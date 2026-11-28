@@ -12953,7 +12953,8 @@ tensor's dtype is inferred from :attr:`fill_value`.
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
-    fill_value (Scalar): the value to fill the output tensor with.
+    fill_value (Scalar): a Python number or a zero-dimensional tensor with
+        ``requires_grad=False`` used to fill the output tensor.
 
 Keyword args:
     {out}
@@ -12982,7 +12983,8 @@ Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_val
 
 Args:
     {input}
-    fill_value: the number to fill the output tensor with.
+    fill_value (Scalar): a Python number or a zero-dimensional tensor with
+        ``requires_grad=False`` used to fill the output tensor.
 
 Keyword args:
     {dtype}
