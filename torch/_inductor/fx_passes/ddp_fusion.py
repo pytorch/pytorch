@@ -188,7 +188,7 @@ def _fuse_allreduce_by_concat(
                 )
             input_node = input_node.args[0]
             cat_inputs.append(
-                call_function(graph, aten.flatten.using_ints, (input_node,))
+                call_function(graph, aten.reshape.default, (input_node, [-1]))
             )
 
     # Concat all the flattened nodes.
