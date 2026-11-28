@@ -9458,6 +9458,7 @@ for dtype in (torch.int32, torch.int64):
                 out, matmul_with_op(inps[0], inps[1], fn), atol=atol, rtol=rtol
             )
 
+    @torch._inductor.config.patch("joint_graph_constant_folding", True)
     def test_remove_no_ops_preserves_output_storage(self):
         x = torch.randn(4, 8, device=self.device)
         for fn in (lambda x: x + 0.0, lambda x: (x + 0.0).view(-1) * 1.0):

@@ -103,25 +103,30 @@ def remove_no_ops(
     ones: OrderedSet[torch.fx.Node],
 ):
     """
-    Removes operations that are essentially no-ops e.g. (+ 0, - 0, * 1, / 1)
+    Removes operations that are essentially no-ops e.g. (+ 0, - 0, * 1, / 1).
+
+    Skips a fold that would make a graph output share storage with a graph input
+    or another output, since callers rely on those boundary identities.
+    See fx_passes/README.md.
     """
     with torch.utils._python_dispatch._disable_current_modes():
         graph = gm.graph
 
-        # Folds overwrite replacement metadata. Keep the original storage of each
-        # operand and track where it moves, including views of earlier folds.
-        original_storage = functools.cache(get_node_storage)
+        # replace_no_op copies a folded node's meta onto its replacement, so a
+        # node's live storage can change mid-pass. Snapshot every node's original
+        # storage up front, then track where a storage moves as folds merge them.
+        original_storage = {n: get_node_storage(n) for n in graph.nodes}
         storage_parent: dict[int, int] = {}
         boundary_storages = OrderedSet(
             storage
             for n in itertools.chain(
                 graph.find_nodes(op="placeholder"), graph.output_node().all_input_nodes
             )
-            if (storage := original_storage(n)) is not None
+            if (storage := original_storage.get(n)) is not None
         )
 
         def current_storage(node: torch.fx.Node) -> int | None:
-            storage = original_storage(node)
+            storage = original_storage.get(node)
             while storage is not None and storage in storage_parent:
                 parent = storage_parent[storage]
                 storage_parent[storage] = storage_parent.get(parent, parent)
@@ -182,9 +187,14 @@ def remove_no_ops(
                 operand_storage = current_storage(replacement)
                 result_storage = current_storage(node)
                 if operand_storage is None or result_storage is None:
+                    # No trackable storage (e.g. sparse/mkldnn): can't prove the
+                    # fold is boundary-safe, so skip it. Skipping only forgoes an
+                    # optimization; a wrong fold is the #202514 bug class.
                     return
                 if operand_storage != result_storage:
-                    # Preserve storage identities visible at the graph boundary.
+                    # Don't fold if it would alias an output with an input or
+                    # another output; see fx_passes/README.md and the same rule
+                    # in post_grad.remove_noop_ops.
                     if (
                         operand_storage in boundary_storages
                         and result_storage in boundary_storages
@@ -209,7 +219,16 @@ def remove_no_ops(
                 if old in boundary_storages:
                     boundary_storages.remove(old)
                     boundary_storages.add(new)
-            replacement.meta.update(node.meta)
+            if replacement.op == "placeholder":
+                # Keep a placeholder's own meta["val"]: later passes (e.g.
+                # post_grad.remove_noop_ops in cond/while branches, where
+                # FakeTensorProp doesn't recurse) read it for input-storage
+                # identity, and the folded val can hide a needed copy (#202514).
+                saved_val = replacement.meta.get("val")
+                replacement.meta.update(node.meta)
+                replacement.meta["val"] = saved_val
+            else:
+                replacement.meta.update(node.meta)
             graph.erase_node(node)
 
         for node in graph.find_nodes(op="call_function", target=aten.add.Tensor):
