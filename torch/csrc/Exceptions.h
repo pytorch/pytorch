@@ -215,19 +215,18 @@ struct python_error : public std::exception {
       // Reference count should not be zero.
       TORCH_INTERNAL_ASSERT(Py_REFCNT(value) > 0);
 
-      PyObject* pyStr = PyObject_Str(value);
-      if (pyStr != nullptr) {
-        PyObject* encodedString =
-            PyUnicode_AsEncodedString(pyStr, "utf-8", "strict");
-        if (encodedString != nullptr) {
-          char* bytes = PyBytes_AS_STRING(encodedString);
+      auto pyStr =
+          pybind11::reinterpret_steal<pybind11::object>(PyObject_Str(value));
+      if (pyStr) {
+        auto encodedString = pybind11::reinterpret_steal<pybind11::object>(
+            PyUnicode_AsEncodedString(pyStr.ptr(), "utf-8", "strict"));
+        if (encodedString) {
+          char* bytes = PyBytes_AS_STRING(encodedString.ptr());
           if (bytes != nullptr) {
             // Set the message.
             message = std::string(bytes);
           }
-          Py_XDECREF(encodedString);
         }
-        Py_XDECREF(pyStr);
       }
     }
 

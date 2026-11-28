@@ -102,6 +102,7 @@ from .base import (
     NO_SUCH_SUBOBJ,
     readonly_setter,
     store_attr_mutation,
+    unmodeled_get,
     unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
@@ -890,6 +891,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
+        # func_memberlist marks these READONLY; reads keep the existing path.
+        "__globals__": Member(unmodeled_get, readonly_setter),
+        "__builtins__": Member(unmodeled_get, readonly_setter),
     }
 
     tp_getset = {
@@ -928,14 +932,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors func_descr_get which calls PyMethod_New to bind
         # the function to an instance, and returns the function itself when
         # there is no instance.
         # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1119
-        if obj.is_constant_none():
+        if obj is None:
             return self
         source = obj.source and AttrSource(obj.source, self.fn.__name__)
         return UserMethodVariable(self, obj, source=source)
@@ -2070,6 +2074,13 @@ class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
             return SourcelessBuilder.create_internal_torch_ctx_manager(
                 func
             ).call_function(tx, [self.im_self, *args], kwargs)
+        elif func is torch.cuda.use_mem_pool._recreate_cm:
+            # A function decorated with use_mem_pool: rebuild the context from
+            # the decorator's arguments, as for the `with` form.
+            args_var = self.im_self.tp_getattro_impl(tx, "_args")
+            use_mem_pool = torch.cuda.use_mem_pool
+            ctx = SourcelessBuilder.create_internal_torch_ctx_manager(use_mem_pool)
+            return ctx.call_function(tx, args_var.unpack_var_sequence(tx), {})
         if self.is_constant:
             fn = getattr(self.im_self.value, func.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
@@ -2112,7 +2123,7 @@ class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # method_descr_get: a bound method does not re-bind. Only reached where
@@ -2451,6 +2462,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
+        # func_memberlist marks these READONLY; reads keep the existing path.
+        "__globals__": Member(unmodeled_get, readonly_setter),
+        "__builtins__": Member(unmodeled_get, readonly_setter),
     }
 
     tp_getset = {
