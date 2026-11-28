@@ -11,7 +11,6 @@ from types import SimpleNamespace
 from unittest import mock
 
 import sympy
-
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
@@ -27,6 +26,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch._logging import trace_structured
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     MI350_ARCH,
     parametrize,
@@ -71,6 +71,8 @@ _PRIOR_FP32_MATMUL_PRECISION: str | None = None
 
 class TestOrigamiFlexAttentionConfigSelection(TestCase):
     """Mocked coverage for the gating and projected gfx950 candidate pool."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
@@ -594,6 +596,8 @@ def tearDownModule():
     "Set TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_ORIGAMI=1 to run.",
 )
 class TestOrigami(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _make_fn_and_inputs(
         self, op_name: str, size: int
     ) -> tuple[Callable[..., torch.Tensor], tuple[torch.Tensor, ...]]:
@@ -1499,6 +1503,8 @@ class TestOrigamiSkippedOnNonROCm(TestCase):
     4. origami gracefully no-ops on unsupported hardware
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_origami_skipped_on_non_rocm(self):
         """Verify that origami is properly skipped on non-ROCm devices.
 
@@ -1607,6 +1613,8 @@ class TestOrigamiSkippedOnNonROCm(TestCase):
 class TestOrigamiPackageVersionGate(TestCase):
     """_origami_package_supported() decides whether the installed rocm-origami
     works with the ROCm the build targets. No GPU or origami package needed."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_package_version_gate(self):
         from torch._inductor.heuristics.template.triton import (
