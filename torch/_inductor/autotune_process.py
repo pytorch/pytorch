@@ -90,6 +90,20 @@ def get_visible_devices_env_var(gpu_type: str | None = None) -> str:
     return _visible_device_env_var_maps[gpu_type]
 
 
+def _visible_devices_env_vars(gpu_type: str) -> tuple[str, ...]:
+    """
+    The env vars that select the devices a process sees, in the order they are read.
+    On ROCm, HIP reads CUDA_VISIBLE_DEVICES only when HIP_VISIBLE_DEVICES is unset,
+    and torch's device count ignores CUDA_VISIBLE_DEVICES when ROCR_VISIBLE_DEVICES
+    is set, so a subprocess pinned through CUDA_VISIBLE_DEVICES alone can still see
+    every device. Both index the devices ROCR_VISIBLE_DEVICES leaves.
+    """
+    env_var = get_visible_devices_env_var(gpu_type)
+    if gpu_type == "cuda" and torch.version.hip:
+        return ("HIP_VISIBLE_DEVICES", env_var)
+    return (env_var,)
+
+
 autotuning_log = getArtifactLogger(__name__, "autotuning")
 
 
@@ -219,7 +233,8 @@ class TuningProcess:
             else "0",
         }
         if self.device is not None:
-            env[get_visible_devices_env_var()] = str(self.device)
+            for env_var in _visible_devices_env_vars(get_gpu_type()):
+                env[env_var] = str(self.device)
         self.process = subprocess.Popen(
             cmd,
             env=env,
@@ -350,11 +365,21 @@ class TuningPoolBase:
         gpu_type = get_gpu_type()
         device_interface = get_interface_for_device(gpu_type)
         count = device_interface.device_count()
-        visible_devices_env_var = get_visible_devices_env_var(gpu_type)
 
         # If the user specified the visible devices in the env, use those.
-        if visible_devices_env_var in os.environ:
-            devices = [int(d) for d in os.environ[visible_devices_env_var].split(",")]
+        for visible_devices_env_var in _visible_devices_env_vars(gpu_type):
+            if visible_devices_env_var not in os.environ:
+                continue
+            value = os.environ[visible_devices_env_var]
+            try:
+                devices = [int(d) for d in value.split(",")]
+            except ValueError:
+                # e.g. GPU UUIDs rather than indices
+                warnings.warn(
+                    f"{visible_devices_env_var}={value} does not list device indices; "
+                    "autotuning on one device"
+                )
+                return [None]
             if not len(devices) <= count:
                 raise AssertionError(
                     f"{visible_devices_env_var} specifies {len(devices)} devices, "
@@ -472,6 +497,17 @@ class TuningThreadPool(TuningPoolBase):
     - No pipe communication
     - Thread-safe device locking instead of process isolation
     """
+
+    @staticmethod
+    def get_device_list() -> Sequence[int | None]:
+        """
+        set_device in this process takes an ordinal among the visible devices, not
+        the id a visible-devices variable names, which only a subprocess can use.
+        """
+        devices = TuningPoolBase.get_device_list()
+        if devices == [None]:
+            return devices
+        return list(range(len(devices)))
 
     def __init__(self) -> None:
         """
