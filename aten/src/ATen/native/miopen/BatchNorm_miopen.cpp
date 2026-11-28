@@ -42,6 +42,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
 #include <ATen/miopen/Utils.h>
 
 #include <ATen/TensorUtils.h>
+#include <c10/hip/HIPGraphsC10Utils.h>
 
 namespace at { namespace native {
 
@@ -105,6 +106,8 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
   auto output_t = at::empty_like(input_t, input_t.options(), input_t.suggest_memory_format());
   TensorArg output{ output_t, "output", 0 };
 
+  // See Note [MIOpen calls during HIP graph capture]
+  c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{hipStreamCaptureModeRelaxed};
   auto handle = getMiopenHandle();
   auto dataType = getMiopenDataType(*input);
   TensorDescriptor idesc{ *input, 4 };  // input descriptor
@@ -213,6 +216,8 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
   auto grad_weight_t = at::empty(weight->sizes(), weight->options());
   auto grad_bias_t   = at::empty(weight->sizes(), weight->options());
 
+  // See Note [MIOpen calls during HIP graph capture]
+  c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{hipStreamCaptureModeRelaxed};
   auto handle = getMiopenHandle();
   auto dataType = getMiopenDataType(*input);
 
