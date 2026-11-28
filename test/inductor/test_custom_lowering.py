@@ -21,7 +21,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import ops
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -29,6 +29,21 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
 )
 from torch.utils._ordered_set import OrderedSet
+
+
+# Intel GPU Triton takes vISA inline asm. vISA has no tanh, so use
+# tanh(x) = 1 - 2 / (2^(2 * log2(e) * x) + 1). The SIMD width (32) must match
+# the Triton threads_per_warp.
+if GPU_TYPE == "xpu":
+    TANH_APPROX_ASM = (
+        "mul (M1_NM, 32) $0(0,0)<1> $1(0,0)<1;1,0> 0x4038AA3B:f\n"
+        "exp (M1_NM, 32) $0(0,0)<1> $0(0,0)<1;1,0>\n"
+        "add (M1_NM, 32) $0(0,0)<1> $0(0,0)<1;1,0> 0x3F800000:f\n"
+        "inv (M1_NM, 32) $0(0,0)<1> $0(0,0)<1;1,0>\n"
+        "mad (M1_NM, 32) $0(0,0)<1> $0(0,0)<1;1,0> 0xC0000000:f 0x3F800000:f"
+    )
+else:
+    TANH_APPROX_ASM = "tanh.approx.f32 $0, $1;"
 
 
 def _has_aten_fallback_call(code: list[str], op_name: str) -> bool:
@@ -140,7 +155,11 @@ class TestCustomLowering(InductorTestCase):
         cls.impl_meta.impl("tanh_approx", tanh_approx_meta)
 
         def tanh_approx_lowering(inp):
-            fn = partial(ops.inline_asm_elementwise, asm="tanh.approx.f32 $0, $1;")
+            fn = partial(
+                ops.inline_asm_elementwise,
+                asm=TANH_APPROX_ASM,
+                constraints="=rw,rw" if GPU_TYPE == "xpu" else None,
+            )
             return make_pointwise(fn)(inp)
 
         register_lowering(
@@ -161,6 +180,12 @@ class TestCustomLowering(InductorTestCase):
                     ops.inline_asm_elementwise,
                     asm="v_add_f32 $0, $1, $2",
                     constraints="=v, v, v",
+                )
+            elif GPU_TYPE == "xpu":
+                fn = partial(
+                    ops.inline_asm_elementwise,
+                    asm="add (M1_NM, 32) $0(0,0)<1> $1(0,0)<1;1,0> $2(0,0)<1;1,0>",
+                    constraints="=rw,rw,rw",
                 )
             else:
                 fn = partial(ops.inline_asm_elementwise, asm="add.f32 $0, $1, $2;")
@@ -240,7 +265,6 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
-    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_tanh_approx(self):
         def fn(inp):
@@ -255,7 +279,6 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
-    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_reused_inline_asm_realized(self):
         def fn(inp):
@@ -267,10 +290,9 @@ class TestCustomLowering(InductorTestCase):
         actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), inp)
 
         self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
-        self.assertEqual("\n".join(code).count("tanh.approx.f32"), 1)
+        self.assertEqual("\n".join(code).count(TANH_APPROX_ASM.split("\n")[0]), 1)
 
     @requires_gpu()
-    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_multi_inp_asm(self):
         def fn(a, b):
