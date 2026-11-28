@@ -28,6 +28,7 @@ from torch.testing._internal.common_distributed import (
     with_dist_debug_levels,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_XPU,
@@ -573,8 +574,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 # an unexpected NameError if not.
 
 
-@requires_gloo()
-class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
+class ProcessGroupGlooWrapperTestBase(AbstractProcessGroupWrapperTest):
     def opts(self, threads=2, timeout=10.0):
         opts = c10d.ProcessGroupGloo._Options()
         opts._timeout = timeout
@@ -603,6 +603,11 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
             )
         return pg
 
+
+@requires_gloo()
+class ProcessGroupGlooWrapperTest(ProcessGroupGlooWrapperTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_collective_hang(self):
         pg = self._create_wrapper_pg(timeout=2.0)
         self._test_collective_hang(pg)
@@ -629,33 +634,6 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
     def test_collective_shape_mismatch_debug_mode_off(self):
         pg = self._create_wrapper_pg(with_new_group=False)
         self._test_collective_shape_mismatch(pg)
-
-    @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
-    @with_dist_debug_levels(levels=["DETAIL"])
-    def test_collectives_op_mismatch_cuda_debug_mode(self):
-        pg = self._create_wrapper_pg(with_new_group=True)
-        self._test_collectives_op_mismatch(pg, use_accel=True)
-
-    @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
-    @with_dist_debug_levels(levels=["OFF"])
-    def test_collectives_op_mismatch_cuda(self):
-        pg = self._create_wrapper_pg(with_new_group=False)
-        self._test_collectives_op_mismatch(pg, use_accel=True)
-
-    @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
-    @with_dist_debug_levels(levels=["DETAIL"])
-    def test_collective_shape_mismatch_cuda_debug_mode(self):
-        pg = self._create_wrapper_pg(with_new_group=True)
-        self._test_collective_shape_mismatch(pg, use_accel=True)
-
-    @skip_if_lt_x_gpu(4)
-    @with_dist_debug_levels(levels=["OFF"])
-    def test_collective_shape_mismatch_cuda(self):
-        pg = self._create_wrapper_pg(with_new_group=False)
-        self._test_collective_shape_mismatch(pg, use_accel=True)
 
     @with_dist_debug_levels(levels=["DETAIL"])
     def test_reduce_scatter_tensor_coalesced_debug_mode(self):
@@ -747,6 +725,38 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
         """
         pg = self._create_wrapper_pg(with_new_group=True)
         self._test_allgather_into_tensor_coalesced_op_mismatch(pg)
+
+
+@requires_gloo()
+class ProcessGroupGlooWrapperTestCUDA(ProcessGroupGlooWrapperTestBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collectives_op_mismatch_cuda_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_collectives_op_mismatch(pg, use_accel=True)
+
+    @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_collectives_op_mismatch_cuda(self):
+        pg = self._create_wrapper_pg(with_new_group=False)
+        self._test_collectives_op_mismatch(pg, use_accel=True)
+
+    @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_collective_shape_mismatch_cuda_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_collective_shape_mismatch(pg, use_accel=True)
+
+    @skip_if_lt_x_gpu(4)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_collective_shape_mismatch_cuda(self):
+        pg = self._create_wrapper_pg(with_new_group=False)
+        self._test_collective_shape_mismatch(pg, use_accel=True)
 
 
 if __name__ == "__main__":
