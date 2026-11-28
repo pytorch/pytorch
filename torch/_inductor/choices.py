@@ -9,7 +9,7 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 import torch
-from torch._inductor.runtime.runtime_utils import next_power_of_2
+from torch._inductor.runtime.runtime_utils import ceildiv, next_power_of_2
 from torch._inductor.scheduler import MixOrderReduction
 from torch.utils._sympy.value_ranges import bound_sympy
 
@@ -780,6 +780,7 @@ class InductorChoices:
             rvals_per_thread = 4  # comes from heuristics, refactor to not leak here
             xvals_per_block = 128
             xblocks = (numel_hint + xvals_per_block - 1) // xvals_per_block
+            divisors = None
             if reduction_numel_hint * numel_hint < min_elements_per_device:
                 split_size = min_elements_per_thread
             elif reduction_numel_hint * numel_hint < max_elements_per_device:
@@ -803,9 +804,22 @@ class InductorChoices:
                 else:
                     split_size = max_elements_per_thread
 
-            return (reduction_numel_hint + rvals_per_thread * split_size - 1) // (
-                rvals_per_thread * split_size
-            )
+            split_factor = ceildiv(reduction_numel_hint, rvals_per_thread * split_size)
+            # On sm_107, a split factor that does not divide the reduction
+            # size makes the first-phase kernel mask every row, which is much
+            # slower than the unmasked kernel. Move to the nearest divisor
+            # within 2x of the heuristic's choice, and never below 2.
+            is_sm107 = props.type == "cuda" and props.cc == 107
+            if is_sm107 and split_factor > 1 and reduction_numel_hint % split_factor:
+                if divisors is None:
+                    divisors = sympy.divisors(reduction_numel_hint)
+                low = max(2, ceildiv(split_factor, 2))
+                candidates = [d for d in divisors if low <= d <= 2 * split_factor]
+                if candidates:
+                    split_factor = min(
+                        candidates, key=lambda d: (abs(d - split_factor), d)
+                    )
+            return split_factor
 
     @staticmethod
     def can_fuse(
