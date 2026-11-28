@@ -144,6 +144,34 @@ _FLATTENED_READ_VAR = sympy.Dummy("flattened_read", integer=True, nonnegative=Tr
 _REINDEXING_FUSION_LAUNCH_OVERHEAD_NS = 1_000
 
 
+@functools.cache
+def _last_level_cache_bytes(device: torch.device | None) -> int | None:
+    if device is None or device.type == "cpu":
+        return None
+    try:
+        from torch._dynamo.device_interface import get_interface_for_device
+
+        device_interface = get_interface_for_device(device.type)
+        index = device.index
+        if index is None:
+            index = device_interface.current_device()
+        props = device_interface.get_device_properties(index)
+    except Exception:
+        return None
+    for attr in ("L2_cache_size", "last_level_cache_size"):
+        size = getattr(props, attr, None)
+        if isinstance(size, int) and size > 0:
+            return size
+    return None
+
+
+def _reindexing_memory_cost(memory: MemoryCoalescing, cache_bytes: int | None) -> int:
+    total = memory.coalesced + memory.uncoalesced
+    if cache_bytes is not None and 2 * total <= cache_bytes:
+        return memory.weighted_cost(uncoalesced_weight=1)
+    return memory.weighted_cost()
+
+
 @dataclasses.dataclass
 class FusionResult:
     should_fuse: bool | None = None
@@ -10428,27 +10456,31 @@ class Scheduler:
         if fused_memory is None:
             return False
 
-        # The fused analysis omits removable intermediates, so saved
-        # materialization traffic offsets coalescing regressions here.
-        unfused_cost = sum(memory.weighted_cost() for memory in unfused_memory)
-        fused_cost = fused_memory.weighted_cost()
         try:
             dram_gbps = get_gpu_dram_gbps()
             valid_dram_gbps = math.isfinite(dram_gbps) and dram_gbps > 0
         except Exception:
             dram_gbps = 0
             valid_dram_gbps = False
-        if valid_dram_gbps:
+
+        def regresses(unfused_cost: int, fused_cost: int) -> bool:
+            if not valid_dram_gbps:
+                return fused_cost > unfused_cost
             # GB/s is numerically bytes/ns, so division converts the
             # byte-equivalent costs to estimated time in nanoseconds.
             unfused_time_ns = (
                 unfused_cost / dram_gbps + _REINDEXING_FUSION_LAUNCH_OVERHEAD_NS
             )
-            fused_time_ns = fused_cost / dram_gbps
-            regresses = fused_time_ns > unfused_time_ns
-        else:
-            regresses = fused_cost > unfused_cost
-        if regresses:
+            return fused_cost / dram_gbps > unfused_time_ns
+
+        # The fused analysis omits removable intermediates, so saved
+        # materialization traffic offsets coalescing regressions here.
+        cache_bytes = _last_level_cache_bytes(node1.get_device())
+        unfused_cost = sum(
+            _reindexing_memory_cost(memory, cache_bytes) for memory in unfused_memory
+        )
+        fused_cost = _reindexing_memory_cost(fused_memory, cache_bytes)
+        if regresses(unfused_cost, fused_cost):
             loop_ordering_log.debug(
                 "rejecting reindex of %s and %s: unfused memory %s (cost=%d), "
                 "fused memory %s (cost=%d)",
@@ -10460,6 +10492,23 @@ class Scheduler:
                 fused_cost,
             )
             return True
+        if (
+            cache_bytes is not None
+            and loop_ordering_log.isEnabledFor(logging.DEBUG)
+            and regresses(
+                sum(memory.weighted_cost() for memory in unfused_memory),
+                fused_memory.weighted_cost(),
+            )
+        ):
+            loop_ordering_log.debug(
+                "accepting cache-resident reindex of %s and %s: unfused memory "
+                "%s, fused memory %s, last-level cache %d bytes",
+                node1.get_name(),
+                node2.get_name(),
+                unfused_memory,
+                fused_memory,
+                cache_bytes,
+            )
         return False
 
     def _try_reindex_pointwise_for_reduction(

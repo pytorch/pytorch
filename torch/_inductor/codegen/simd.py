@@ -6874,9 +6874,11 @@ class MemoryCoalescing:
     coalesced: int
     uncoalesced: int
 
-    def weighted_cost(self) -> int:
+    def weighted_cost(self, uncoalesced_weight: int | None = None) -> int:
         """Total cost, weighting uncoalesced traffic as more expensive."""
-        return self.coalesced + _UNCOALESCED_MEMORY_COST_WEIGHT * self.uncoalesced
+        if uncoalesced_weight is None:
+            uncoalesced_weight = _UNCOALESCED_MEMORY_COST_WEIGHT
+        return self.coalesced + uncoalesced_weight * self.uncoalesced
 
 
 @dataclasses.dataclass(frozen=True)
