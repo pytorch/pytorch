@@ -658,12 +658,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 recompile_hint=recompile_hint,
             )
 
-    def install_dict_order_guard(
-        self,
-        tx: "InstructionTranslatorBase",
-        *,
-        view: "DictViewVariable | None" = None,
-    ) -> None:
+    def install_dict_order_guard(self, tx: "InstructionTranslatorBase") -> None:
         if self.source and not is_constant_source(self.source):
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
@@ -1315,19 +1310,13 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         value = namespace.dict_get(tx, [ConstantVariable.create(name), missing], {})
         return None if value is missing else value
 
-    def install_dict_order_guard(
-        self,
-        tx: "InstructionTranslatorBase",
-        *,
-        view: "DictViewVariable | None" = None,
-    ) -> None:
-        super().install_dict_order_guard(tx, view=view)
+    def install_dict_order_guard(self, tx: "InstructionTranslatorBase") -> None:
+        super().install_dict_order_guard(tx)
         # Even empty inputs need a guard: raw dict writes can leave orphaned links.
         if (
             self.source
             and not is_constant_source(self.source)
             and issubclass(self.python_type(), collections.OrderedDict)
-            and (view is None or view.is_ordered)
         ):
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
@@ -2007,7 +1996,10 @@ class DictViewVariable(VariableTracker):
         return getattr(self.dv_dict.items, self.kv)()
 
     def install_order_guard(self, tx: "InstructionTranslatorBase") -> None:
-        self.dv_dict.install_dict_order_guard(tx, view=self)
+        if self.is_ordered:
+            self.dv_dict.install_dict_order_guard(tx)
+        else:
+            ConstDictVariable.install_dict_order_guard(self.dv_dict, tx)
 
     def is_hashable(self) -> bool:
         return False
@@ -2034,10 +2026,8 @@ class DictViewVariable(VariableTracker):
             raise AssertionError("kv must not be None for reconstruct")
 
         def load_method() -> None:
-            if self.is_ordered:
-                codegen.load_import_from("collections", "OrderedDict")
-            else:
-                codegen.load_import_from("builtins", "dict")
+            owner = collections.OrderedDict if self.is_ordered else dict
+            codegen.load_import_from(owner.__module__, owner.__name__)
             codegen.append_output(codegen.create_load_attr(self.kv))
 
         codegen.add_push_null(load_method)
