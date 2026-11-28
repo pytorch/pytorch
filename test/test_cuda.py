@@ -11311,6 +11311,107 @@ print(start <= default.data_ptr() < start + size, start <= in_pool.data_ptr() < 
         g.replay()
         self.assertEqual(x.item(), 1)
 
+    def _host_alloc_pool(self, alloc_calls, free_calls):
+        from cuda.bindings import runtime
+
+        def alloc(size, device, stream):
+            err, ptr = runtime.cudaHostAlloc(size, runtime.cudaHostAllocDefault)
+            if err != runtime.cudaError_t.cudaSuccess:
+                return None
+            alloc_calls.append((int(ptr), size))
+            return int(ptr)
+
+        def free(ptr, size, device, stream):
+            free_calls.append((ptr, size))
+            (err,) = runtime.cudaFreeHost(ptr)
+            self.assertEqual(err, runtime.cudaError_t.cudaSuccess)
+
+        return torch.cuda.HostMemPool.from_py_allocator(alloc, free)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "memory snapshot not supported")
+    @requires_cuda_python_bindings
+    def test_allocator(self):
+        alloc_calls, free_calls = [], []
+        hp = self._host_alloc_pool(alloc_calls, free_calls)
+        self.assertEqual(alloc_calls, [])
+        with self._record_host_segments():
+            with torch.cuda.use_mem_pool(hp):
+                t = torch.empty(1000, pin_memory=True)
+                # Reuses the cached block.
+                del t
+                t = torch.empty(1000, pin_memory=True)
+            self.assertEqual(self._pool_of(t), hp.id)
+        outside = torch.empty(1000, pin_memory=True)
+        self.assertTrue(t.is_pinned())
+        self.assertEqual(len(alloc_calls), 1)
+        ptr, size = alloc_calls[0]
+        self.assertEqual(t.data_ptr(), ptr)
+        self.assertGreaterEqual(size, t.nbytes)
+        self.assertNotEqual(outside.data_ptr(), ptr)
+
+        gpu = torch.arange(1000, dtype=torch.float, device="cuda")
+        t.copy_(gpu, non_blocking=True)
+        torch.cuda.synchronize()
+        self.assertEqual(t, gpu.cpu())
+
+        del t
+        torch.cuda.synchronize()
+        self.assertEqual(free_calls, [])
+        del hp
+        self.assertEqual(free_calls, [(ptr, size)])
+
+    @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @requires_cuda_python_bindings
+    def test_allocator_during_capture(self):
+        # The callbacks run in relaxed mode, so they do not break the
+        # global-mode capture of this same thread.
+        alloc_calls, free_calls = [], []
+        hp = self._host_alloc_pool(alloc_calls, free_calls)
+        x = torch.zeros(1, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            x.add_(1)
+            with torch.cuda.use_mem_pool(hp):
+                t = torch.empty(1000, pin_memory=True)
+        self.assertEqual([p for p, _ in alloc_calls], [t.data_ptr()])
+        del t, hp
+        self.assertEqual(free_calls, [])  # g keeps the pool
+        g.replay()
+        self.assertEqual(x.item(), 1)
+        g.reset()
+        self.assertEqual(free_calls, alloc_calls)
+
+    @parametrize("device", ["cpu", "cuda"])
+    def test_allocator_must_return_pinned_memory(self, device):
+        # Pageable host memory and device memory are given back and rejected.
+        live = {}
+
+        def alloc(size, _device, _stream):
+            buf = torch.empty(size, dtype=torch.uint8, device=device)
+            live[buf.data_ptr()] = buf
+            return buf.data_ptr()
+
+        def free(ptr, size, _device, _stream):
+            del live[ptr]
+
+        hp = torch.cuda.HostMemPool.from_py_allocator(alloc, free)
+        with torch.cuda.use_mem_pool(hp):
+            with self.assertRaisesRegex(RuntimeError, "not pinned host memory"):
+                torch.empty(1000, pin_memory=True)
+        self.assertEqual(live, {})
+
+    def test_allocator_failure(self):
+        hp = torch.cuda.HostMemPool.from_py_allocator(
+            lambda size, device, stream: None, lambda *args: None
+        )
+        with torch.cuda.use_mem_pool(hp):
+            with self.assertRaisesRegex(RuntimeError, "failed to allocate"):
+                torch.empty(1000, pin_memory=True)
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):

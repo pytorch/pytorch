@@ -1105,6 +1105,61 @@ The allocator knows nothing about NUMA, so placement depends on the setup:
   `MPOL_PREFERRED`: with CPU affinity alone, or on earlier ROCm, HIP takes the pages from the
   node nearest a GPU. With `pinned_use_cuda_host_register`, the thread that touches the pages
   places them, as on CUDA.
+* None of this applies to a pool that {meth}`~torch.cuda.HostMemPool.from_py_allocator` created,
+  whose memory goes wherever its callbacks put it.
+
+(cuda-host-mem-pool-allocators)=
+### Pools with their own allocator
+
+{meth}`torch.cuda.HostMemPool.from_py_allocator` creates a pool whose blocks Python callbacks
+allocate and free. The callbacks then decide where the memory goes, whichever thread allocates.
+For example, one pool per NUMA node, with libnuma and `cuda.bindings`:
+
+```python
+import ctypes
+
+from cuda.bindings import runtime
+
+import torch
+
+libnuma = ctypes.CDLL("libnuma.so.1")
+libnuma.numa_alloc_onnode.restype = ctypes.c_void_p
+libnuma.numa_alloc_onnode.argtypes = [ctypes.c_size_t, ctypes.c_int]
+libnuma.numa_free.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+
+
+def node_pool(node: int) -> torch.cuda.HostMemPool:
+    def alloc(size: int, _device: int, _stream: int) -> int | None:
+        ptr = libnuma.numa_alloc_onnode(size, node)
+        if not ptr:
+            return None
+        (err,) = runtime.cudaHostRegister(ptr, size, runtime.cudaHostRegisterDefault)
+        if err != runtime.cudaError_t.cudaSuccess:
+            libnuma.numa_free(ptr, size)
+            return None
+        return ptr
+
+    def free(ptr: int, size: int, _device: int, _stream: int) -> None:
+        runtime.cudaHostUnregister(ptr)
+        libnuma.numa_free(ptr, size)
+
+    return torch.cuda.HostMemPool.from_py_allocator(alloc, free)
+
+
+pools = [node_pool(k) for k in range(2)]
+with torch.cuda.use_mem_pool(pools[1]):
+    buf = torch.empty(1024, pin_memory=True)  # on node 1, from any thread
+```
+
+The callbacks have the signatures of those of {meth}`torch.cuda.MemPool.from_py_allocator` (see
+{ref}`cuda-memory-python-allocators`); `device` and `stream` can be ignored, and the free
+callback receives the size that the allocation callback got. The allocation callback must
+return pinned host memory, from `cudaHostAlloc` or registered with `cudaHostRegister`; memory of
+any other kind is given back to the free callback, and the allocation raises an error, as it
+does when the callback returns `None` or zero. The pool's blocks never come from the
+`pinned_reserve_segment_size_mb` segment, and `pinned_use_cuda_host_register` does not apply to
+them. As for a device MemPool, the allocation callback runs in relaxed capture mode during a
+CUDA graph capture.
 
 (cuda-memory-python-allocators)=
 ## Python-defined CUDA allocators

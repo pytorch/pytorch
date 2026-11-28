@@ -761,6 +761,19 @@ namespace {
 thread_local bool tl_capturing = false;
 thread_local int tl_stream_queries = 0;
 
+// The allocator of a host mem pool. PoolMockAllocator counts its allocations
+// and frees in it.
+struct CountingAllocator : c10::Allocator {
+  int allocs{0};
+  int frees{0};
+
+  c10::DataPtr allocate(size_t) override {
+    return {};
+  }
+
+  void copy_data(void*, const void*, std::size_t) const override {}
+};
+
 // Counts host allocations and frees and, per thread, stream queries.
 // tl_capturing is both the stream's capture state and the capture filter.
 struct PoolMockAllocator : MockAllocator {
@@ -772,8 +785,20 @@ struct PoolMockAllocator : MockAllocator {
     MockAllocator::allocate_host_memory(size, ptr);
   }
 
+  void allocate_host_memory_with_allocator(
+      c10::Allocator& allocator,
+      size_t size,
+      void** ptr) override {
+    ++static_cast<CountingAllocator&>(allocator).allocs;
+    MockAllocator::allocate_host_memory(size, ptr);
+  }
+
   void free_block(at::HostBlock<TestStream>* block) override {
-    ++host_frees;
+    if (block->allocator_) {
+      ++static_cast<CountingAllocator*>(block->allocator_.get())->frees;
+    } else {
+      ++host_frees;
+    }
     MockAllocator::free_block(block);
   }
 
@@ -816,6 +841,103 @@ TEST(HostMemPoolTest, not_a_capture_pool) {
   EXPECT_FALSE(a.is_host_mem_pool(P));
   a.empty_cache();
   EXPECT_EQ(a.host_allocs, a.host_frees);
+}
+
+// A pool's own allocator provides the memory of its blocks, and frees them. A
+// block still in use when the pool loses its owner is freed through the
+// allocator after the pool is erased.
+TEST(HostMemPoolTest, pool_allocator) {
+  PoolMockAllocator a;
+  auto allocator = std::make_shared<CountingAllocator>();
+  const c10::MempoolId_t P{0, 1};
+  a.create_pool(P, allocator);
+  a.begin_allocate_current_thread_to_pool(P);
+  auto cached = a.allocate(N);
+  auto in_use = a.allocate(2 * N);
+  a.end_allocate_current_thread_to_pool(P);
+  auto outside = a.allocate(N);
+  EXPECT_EQ(owner(cached), P);
+  EXPECT_EQ(owner(in_use), P);
+  EXPECT_EQ(owner(outside), kDefaultPool);
+  EXPECT_EQ(allocator->allocs, 2);
+  EXPECT_EQ(a.host_allocs, 1);
+
+  a.free(cached.second);
+  a.release_pool(P);
+  EXPECT_EQ(allocator->frees, 1);
+  EXPECT_TRUE(a.is_host_mem_pool(P));
+  a.free(in_use.second);
+  a.free(outside.second);
+  a.empty_cache();
+  EXPECT_EQ(allocator->frees, 2);
+  EXPECT_EQ(a.host_frees, 1);
+  EXPECT_FALSE(a.is_host_mem_pool(P));
+  EXPECT_EQ(allocator.use_count(), 1);
+}
+
+// A free through a pool's own allocator can block on a lock that an allocating
+// thread holds (the GIL, for Python callbacks). A failed allocation does not
+// wait for it, and other frees of the same batch run before it.
+TEST(HostMemPoolTest, failed_allocation_does_not_wait_for_pool_allocator_frees) {
+  struct BlockingPoolAllocator : PoolMockAllocator {
+    std::atomic<bool> fail_next{false};
+    std::mutex m;
+    std::condition_variable cv;
+    bool freeing{false};
+    bool unblocked{false};
+
+    void allocate_host_memory(size_t size, void** ptr) override {
+      TORCH_CHECK(!fail_next.exchange(false), "out of pinned memory");
+      PoolMockAllocator::allocate_host_memory(size, ptr);
+    }
+
+    void free_block(at::HostBlock<TestStream>* block) override {
+      if (block->allocator_) {
+        std::unique_lock<std::mutex> g(m);
+        freeing = true;
+        cv.notify_all();
+        cv.wait(g, [&] { return unblocked; });
+      }
+      PoolMockAllocator::free_block(block);
+    }
+  } a;
+  constexpr auto kTimeout = std::chrono::seconds(10);
+  auto allocator = std::make_shared<CountingAllocator>();
+  const c10::MempoolId_t P{0, 1}, Q{0, 2};
+  a.create_pool(P, allocator);
+  a.create_pool(Q);
+  std::vector<std::pair<void*, void*>> allocs;
+  for (auto id : {P, Q}) {
+    a.begin_allocate_current_thread_to_pool(id);
+    allocs.push_back(a.allocate(N));
+    a.end_allocate_current_thread_to_pool(id);
+    a.release_pool(id);
+  }
+  // Both blocks are cached in released pools, so one empty_cache() frees both.
+  for (auto& alloc : allocs) {
+    a.free(alloc.second);
+  }
+  auto emptying = std::async(std::launch::async, [&] { a.empty_cache(); });
+  {
+    std::unique_lock<std::mutex> g(a.m);
+    ASSERT_TRUE(a.cv.wait_for(g, kTimeout, [&] { return a.freeing; }));
+  }
+  EXPECT_EQ(a.host_frees, 1);
+  a.fail_next = true;
+  auto failing = std::async(std::launch::async, [&] {
+    EXPECT_THROW(a.allocate(N), c10::Error);
+  });
+  EXPECT_EQ(failing.wait_for(kTimeout), std::future_status::ready);
+  {
+    std::lock_guard<std::mutex> g(a.m);
+    a.unblocked = true;
+    a.cv.notify_all();
+  }
+  emptying.get();
+  failing.get();
+  EXPECT_EQ(allocator->frees, 1);
+  EXPECT_FALSE(a.is_host_mem_pool(P));
+  EXPECT_FALSE(a.is_host_mem_pool(Q));
 }
 
 // Threads with no route never query the current stream, while other threads

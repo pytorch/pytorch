@@ -1,8 +1,10 @@
 #include <ATen/cuda/CachingHostAllocator.h>
 
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/thread_pool.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/util/Gauge.h>
 
@@ -65,6 +67,63 @@ struct CUDACachingHostAllocatorImpl
 #endif
   }
 
+  void allocate_host_memory_with_allocator(
+      c10::Allocator& allocator,
+      size_t size,
+      void** ptr) override {
+    auto* cuda_allocator =
+        dynamic_cast<c10::cuda::CUDACachingAllocator::CUDAAllocator*>(
+            &allocator);
+    TORCH_CHECK(
+        cuda_allocator != nullptr,
+        "The allocator of a CUDA host mem pool must be a CUDAAllocator");
+    // See allocate_host_memory_slowpath. The allocator receives this device.
+    at::OptionalDeviceGuard device_guard;
+    auto primary_ctx_device_index =
+        c10::cuda::getDeviceIndexWithPrimaryContext();
+    if (primary_ctx_device_index.has_value()) {
+      device_guard.reset_device(
+          at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+    }
+
+    auto start = std::chrono::steady_clock::now();
+    {
+      // Relaxed while a capture is registered, as in
+      // allocate_host_memory_slowpath, so that the allocator may call
+      // cudaHostAlloc or cudaHostRegister.
+      std::optional<at::cuda::CUDAStreamCaptureModeGuard> capture_mode;
+      if (C10_UNLIKELY(any_capture_underway())) {
+        capture_mode.emplace(cudaStreamCaptureModeRelaxed);
+      }
+      *ptr = cuda_allocator->raw_alloc(size);
+      TORCH_CHECK(
+          *ptr != nullptr,
+          "The allocator of a host mem pool failed to allocate ",
+          size,
+          " bytes");
+      // A device allocator, or one that does not pin, would hand out memory
+      // that pinned tensors cannot use.
+      if (!at::detail::getCUDAHooks().isPinnedPtr(*ptr)) {
+        void* p = *ptr;
+        *ptr = nullptr;
+        cuda_allocator->raw_delete(p);
+        TORCH_CHECK(
+            false,
+            "The allocator of a host mem pool returned ",
+            p,
+            ", which is not pinned host memory. It must return memory from "
+            "cudaHostAlloc, or memory registered with cudaHostRegister.");
+      }
+    }
+    auto end = std::chrono::steady_clock::now();
+    auto duration =
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    {
+      std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      stats_.host_alloc_time.increase(duration.count());
+    }
+  }
+
   void allocate_host_memory_slowpath(
       size_t size,
       void** ptr,
@@ -115,6 +174,10 @@ struct CUDACachingHostAllocatorImpl
   }
 
   void free_block(Block* block) override {
+    if (block->allocator_) {
+      free_block_with_allocator(block);
+      return;
+    }
     // We never free blocks from the reserve segment
     if (get_reserve_segment().initialized()) {
       // Check if the block is from the reserve segment
@@ -124,6 +187,25 @@ struct CUDACachingHostAllocatorImpl
     }
 
     free_block_slowpath(block);
+  }
+
+  void free_block_with_allocator(Block* block) {
+    // allocate_host_memory_with_allocator checked the type.
+    auto* cuda_allocator =
+        static_cast<c10::cuda::CUDACachingAllocator::CUDAAllocator*>(
+            block->allocator_.get());
+    auto start = std::chrono::steady_clock::now();
+    {
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+      cuda_allocator->raw_delete(block->ptr_);
+    }
+    auto end = std::chrono::steady_clock::now();
+    auto duration =
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    {
+      std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      stats_.host_free_time.increase(duration.count());
+    }
   }
 
   void free_block_slowpath(Block* block) {

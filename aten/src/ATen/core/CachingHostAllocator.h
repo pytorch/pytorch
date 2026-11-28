@@ -12,6 +12,7 @@
 #include <iostream>
 #include <optional>
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -55,6 +56,11 @@ struct HostBlock {
   // The HostBlockPool of owning_pool_, also fixed at construction. A pool is
   // erased only once it has no blocks, so it outlives the block.
   void* owning_block_pool_{nullptr};
+  // The allocator of owning_pool_ (HostBlockPool::allocator_), if it has one.
+  // free_block frees the block through it. Kept in the block because
+  // free_block runs once the block is detached (PendingHostFrees), when its
+  // pool may already be erased.
+  std::shared_ptr<c10::Allocator> allocator_;
   // Pool of the capture during which this block was allocated, or (0, 0). If a
   // stream used the block, it is not reused until that pool loses its last
   // reference (reclaim_capture_blocks_under_lock).
@@ -266,10 +272,11 @@ using c10::CachingDeviceAllocator::HostSegmentInfo;
  * allocations of its streams to a pool (begin_allocate_to_pool). A thread
  * routes its own allocations to a host mem pool, one that create_pool made
  * (begin_allocate_current_thread_to_pool); a host mem pool is never a
- * capture's pool. When a capture and a route both match, the newest wins, as
- * in the device allocator. A block allocated on a capturing stream and then
- * used by any stream is not reused until the capture's pool loses its last
- * reference (reclaim_capture_blocks_under_lock).
+ * capture's pool. A host mem pool may have its own allocator (create_pool),
+ * which then provides the memory of all its blocks. When a capture and a route
+ * both match, the newest wins, as in the device allocator. A block allocated on
+ * a capturing stream and then used by any stream is not reused until the
+ * capture's pool loses its last reference (reclaim_capture_blocks_under_lock).
  * Once a pool has no owner left (release_pool) and no thread is routed to it,
  * it becomes freeable: empty_cache() frees its cached blocks, and erases it
  * once it has no blocks. A host mem pool has its cached blocks freed and is
@@ -314,6 +321,10 @@ struct HostBlockPool {
   // Events pending for blocks in this pool.
   alignas(hardware_destructive_interference_size) std::mutex events_mutex_;
   std::deque<std::pair<E_, B_*>> events_;
+
+  // If set, allocates the memory of this pool's blocks in place of the
+  // backend's default (create_pool). Set at creation, never changes.
+  std::shared_ptr<c10::Allocator> allocator_;
 };
 
 // The HostBlockPool owned by one HostPrivatePool cannot share blocks
@@ -331,7 +342,8 @@ struct HostPrivatePool {
   // the HostMemPool that made it routable.
   int use_count{1};
   // Made by create_pool: threads route to it, and it is never a capture's
-  // pool. Its new blocks come from allocate_host_mem_pool_memory.
+  // pool. Its new blocks come from blocks.allocator_ if set, otherwise from
+  // allocate_host_mem_pool_memory.
   bool is_host_mem_pool{false};
   // Open thread routes to this pool, over all threads.
   int route_count{0};
@@ -372,12 +384,15 @@ struct CachingHostAllocatorImpl {
 
     void add(B* block) {
       blocks_.push_back(block);
-      allocator_->frees_started_++;
+      if (counted(block)) {
+        allocator_->frees_started_++;
+      }
     }
 
     void add(const std::deque<B*>& blocks) {
       blocks_.insert(blocks_.end(), blocks.begin(), blocks.end());
-      allocator_->frees_started_ += blocks.size();
+      allocator_->frees_started_ +=
+          static_cast<size_t>(std::count_if(blocks.begin(), blocks.end(), counted));
     }
 
     // Frees every block, then rethrows the first error.
@@ -388,12 +403,22 @@ struct CachingHostAllocatorImpl {
     }
 
    private:
+    // Whether the free of block counts in frees_started_ and frees_finished_.
+    // A pool's own allocator can block in free_block on a lock that a thread
+    // waiting for those frees holds (the GIL, for Python callbacks), so its
+    // frees are not counted and run after the counted ones of the same batch.
+    static bool counted(B* block) {
+      return !block->allocator_;
+    }
+
     std::exception_ptr free_blocks() {
       if (blocks_.empty()) {
         return nullptr;
       }
+      auto blocks = std::exchange(blocks_, {});
+      auto counted_end = std::partition(blocks.begin(), blocks.end(), counted);
       std::exception_ptr error;
-      for (auto* block : std::exchange(blocks_, {})) {
+      auto free_one = [&](B* block) {
         // Separate tries: a failed trace must not skip the free.
         try {
           // Before free_block(), after which the address can be allocated again.
@@ -417,12 +442,18 @@ struct CachingHostAllocatorImpl {
           }
         }
         delete block;
+      };
+      std::for_each(blocks.begin(), counted_end, [&](B* block) {
+        free_one(block);
         allocator_->frees_finished_++;
+      });
+      {
+        // Under the mutex, so that an allocation between checking
+        // frees_finished_ and waiting does not miss it.
+        std::lock_guard<std::mutex> g(allocator_->frees_mutex_);
+        allocator_->frees_finished_cv_.notify_all();
       }
-      // Under the mutex, so that an allocation between checking frees_finished_
-      // and waiting does not miss it.
-      std::lock_guard<std::mutex> g(allocator_->frees_mutex_);
-      allocator_->frees_finished_cv_.notify_all();
+      std::for_each(counted_end, blocks.end(), free_one);
       return error;
     }
 
@@ -541,7 +572,9 @@ struct CachingHostAllocatorImpl {
     // to create a new block.
     void* ptr = nullptr;
     auto allocate_memory = [&] {
-      if (host_mem_pool) {
+      if (pool.allocator_) {
+        allocate_host_memory_with_allocator(*pool.allocator_, roundSize, &ptr);
+      } else if (host_mem_pool) {
         allocate_host_mem_pool_memory(roundSize, &ptr);
       } else {
         allocate_host_memory(roundSize, &ptr);
@@ -580,6 +613,7 @@ struct CachingHostAllocatorImpl {
     block->requested_size_.store(size, std::memory_order_relaxed);
     block->owning_pool_ = mempool_id;
     block->owning_block_pool_ = &pool;
+    block->allocator_ = pool.allocator_;
     block->was_allocated_during_stream_capture_ = current_stream_is_capturing_fast_path();
     block->capture_owner_ = block->was_allocated_during_stream_capture_
         ? capture_owner : c10::MempoolId_t{0, 0};
@@ -1260,13 +1294,16 @@ struct CachingHostAllocatorImpl {
     return true;
   }
 
-  void create_pool(c10::MempoolId_t pool_id) {
+  void create_pool(
+      c10::MempoolId_t pool_id,
+      std::shared_ptr<c10::Allocator> allocator = nullptr) {
     TORCH_CHECK(
         pool_id != c10::MempoolId_t({0, 0}),
         "create_pool: (0, 0) is the default pool");
     std::unique_lock<std::shared_mutex> lg(instance_mutex_);
     auto pp = std::make_unique<PrivatePool>(pool_id);
     pp->is_host_mem_pool = true;
+    pp->blocks.allocator_ = std::move(allocator);
     bool inserted = graph_pools_.emplace(pool_id, std::move(pp)).second;
     TORCH_CHECK(
         inserted, "create_pool: pool (", pool_id.first, ", ", pool_id.second,
@@ -1505,6 +1542,15 @@ private:
   // memory comes from the calling thread.
   virtual void allocate_host_mem_pool_memory(size_t size, void** ptr) {
     allocate_host_memory(size, ptr);
+  }
+
+  // Allocates the memory of a new block of a pool that has its own allocator
+  // (create_pool). free_block must free such a block through
+  // block->allocator_.
+  virtual void allocate_host_memory_with_allocator(
+      c10::Allocator& allocator, size_t size, void** ptr) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "Not implemented for allocate_host_memory_with_allocator");
   }
 
   // Free block and release the pointer contained in block.
@@ -1790,7 +1836,8 @@ private:
   BlockPool default_pool_;
 
   // Blocks added to a PendingHostFrees, and blocks whose free was attempted,
-  // so that a failed allocation can wait for the frees in flight.
+  // so that a failed allocation can wait for the frees in flight. Frees
+  // through a pool's own allocator are not counted (PendingHostFrees::counted).
   std::atomic<size_t> frees_started_{0};
   std::atomic<size_t> frees_finished_{0};
   std::mutex frees_mutex_;
@@ -1862,7 +1909,13 @@ struct TORCH_API HostAllocator : public at::Allocator {
   // (release_pool or end_allocate_current_thread_to_pool) frees its cached
   // blocks, with no allocator lock held. Blocks still in use or waiting for
   // events are freed by a later empty_cache().
-  virtual void create_pool(c10::MempoolId_t /*pool_id*/) {
+  // If allocator is set, the memory of the pool's blocks comes from it, and
+  // goes back to it, instead of the backend's default. The backend decides
+  // which allocators it accepts (for CUDA, a CUDAAllocator that returns
+  // pinned host memory).
+  virtual void create_pool(
+      c10::MempoolId_t /*pool_id*/,
+      std::shared_ptr<c10::Allocator> /*allocator*/ = nullptr) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for create_pool");
   }
 
@@ -1984,8 +2037,10 @@ struct CachingHostAllocatorInterface : public HostAllocator {
     impl_->release_pool(pool_id);
   }
 
-  void create_pool(c10::MempoolId_t pool_id) override {
-    impl_->create_pool(pool_id);
+  void create_pool(
+      c10::MempoolId_t pool_id,
+      std::shared_ptr<c10::Allocator> allocator = nullptr) override {
+    impl_->create_pool(pool_id, std::move(allocator));
   }
 
   void begin_allocate_current_thread_to_pool(c10::MempoolId_t pool_id) override {
