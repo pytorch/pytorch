@@ -39,6 +39,7 @@
 #include <c10/core/DynamicCast.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/TypeCast.h>
 
 #ifdef __NVCC__
@@ -178,6 +179,56 @@ constexpr auto calc_io_size(){
   return input_size + output_size;
 #endif
 }
+
+#ifdef USE_ROCM
+// Work per thread of vectorized_elementwise_kernel on gfx1250 for large
+// launches: kMultiVectorsPerThread vectors of kMultiVectorBytes of the widest
+// operand, or elems_per_thread() if that is more. elems_per_thread() is sized
+// by calc_io_size() (on ROCm the smaller of the first input and the output):
+// one 16-byte vector for 1-, 2- and 4-byte sizes, which on gfx1250 (wave32)
+// keeps too few bytes in flight per thread.
+constexpr int kMultiVectorBytes = 16;
+constexpr int kMultiVectorsPerThread = 2;
+// Launches with fewer elements per CU keep elems_per_thread(): their grid is
+// too small to hide latency with fewer, larger blocks.
+constexpr int64_t kMultiVectorMinNumelPerCU = 32768;
+
+template <typename func_t>
+constexpr int multi_vector_elems_per_thread() {
+  using traits = function_traits<func_t>;
+  using args_t = typename traits::ArgsTuple;
+  constexpr size_t widest_size = std::max(
+      max_of_sizes(args_t{}, std::make_index_sequence<std::tuple_size_v<args_t>>{}),
+      sizeof(typename traits::result_type));
+  constexpr int elems_per_vector = widest_size >= kMultiVectorBytes ? 1 : kMultiVectorBytes / widest_size;
+  return std::max<int>(elems_per_thread<calc_io_size<func_t>()>(), kMultiVectorsPerThread * elems_per_vector);
+}
+
+// Per-device inputs of the tws choice in launch_vectorized_kernel, read once
+// per device. Non-template, so one cache serves every functor.
+struct MultiVectorDeviceInfo {
+  // Smallest launch that gets multi_vector_elems_per_thread(); INT64_MAX off
+  // gfx1250.
+  int64_t min_numel;
+  bool is_gfx942;
+};
+
+inline const MultiVectorDeviceInfo& multi_vector_device_info(
+    c10::DeviceIndex device) {
+  TORCH_INTERNAL_ASSERT(device >= 0 && device < C10_COMPILE_TIME_MAX_GPUS);
+  static std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> once_flags;
+  static std::array<MultiVectorDeviceInfo, C10_COMPILE_TIME_MAX_GPUS> infos{};
+  c10::call_once(once_flags[device], [device] {
+    const auto& hooks = at::detail::getCUDAHooks();
+    infos[device].min_numel = hooks.isGPUArch({"gfx1250"}, device)
+        ? kMultiVectorMinNumelPerCU *
+            at::cuda::getDeviceProperties(device)->multiProcessorCount
+        : std::numeric_limits<int64_t>::max();
+    infos[device].is_gfx942 = hooks.isGPUArch({"gfx942"}, device);
+  });
+  return infos[device];
+}
+#endif
 
 #ifndef USE_ROCM
 // To save on binary size of libtorch_cuda.so, we split the vectorized_elementwise_kernel
@@ -332,10 +383,27 @@ __forceinline__ __device__ void vectorized_elementwise_kernel_impl(int N, func_t
 
 template <int vec_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
-__global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
+__global__ void vectorized_elementwise_kernel(
+    int N,
+    func_t f,
+    array_t data,
+    [[maybe_unused]] bool multi_vector = false) {
   constexpr auto io_size = calc_io_size<func_t>();
   constexpr auto tws_942 = 16;
   constexpr auto tws = elems_per_thread<io_size>();
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__SPIRV__)
+  constexpr auto multi_tws = multi_vector_elems_per_thread<func_t>();
+  if constexpr (multi_tws != tws) {
+    if (multi_vector)
+      return vectorized_elementwise_kernel_impl<vec_size, multi_tws>(
+          N, f, data);
+  }
+#else
+  CUDA_KERNEL_ASSERT_MSG(
+      !multi_vector,
+      "Fatal! vectorized_elementwise_kernel with multi_vector supports only "
+      "gfx1250. Please report an issue on GitHub.");
+#endif
   if (__builtin_amdgcn_processor_is("gfx942"))
     return vectorized_elementwise_kernel_impl<vec_size, tws_942>(N, f, data);
 
@@ -381,8 +449,25 @@ static inline void launch_vectorized_kernel(
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
   c10::DeviceIndex curDevice = -1;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&curDevice));
-  // Similar check in vectorized_elementwise_kernel() as well. Both should be in sync.
-  int tws = at::detail::getCUDAHooks().isGPUArch({"gfx942"}, curDevice) ? 16 : elems_per_thread<io_size>();
+  const auto& device_info = multi_vector_device_info(curDevice);
+  constexpr int multi_tws = multi_vector_elems_per_thread<func_t>();
+  // A last block of more than 4 * num_threads() elements that is not full
+  // takes the per-element unroll path of vectorized_elementwise_kernel_impl
+  // (any tws > 4). With 16 or 32 elements per thread that path measured slower
+  // than the larger blocks save, so those sizes keep elems_per_thread(); with
+  // 8 the larger blocks measured faster even then.
+  // Similar checks in vectorized_elementwise_kernel(); keep both in sync: the
+  // gfx942 tws (isGPUArch here, __builtin_amdgcn_processor_is("gfx942")
+  // there), and multi_vector, which the kernel takes only when compiled for
+  // __gfx1250__, __gfx1250_strict__ or __SPIRV__ and asserts on elsewhere.
+  const bool multi_vector = N >= device_info.min_numel &&
+      (multi_tws <= 8 || N % (multi_tws * num_threads()) <= 4 * num_threads());
+  int tws = elems_per_thread<io_size>();
+  if (multi_vector) {
+    tws = multi_tws;
+  } else if (device_info.is_gfx942) {
+    tws = 16;
+  }
 #else
   using cpp_type = typename function_traits<func_t>::result_type;
   const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data);
@@ -426,14 +511,14 @@ static inline void launch_vectorized_kernel(
 #ifdef USE_ROCM
     case 16:
       vectorized_elementwise_kernel<16, func_t, array_t>
-          <<<grid, num_threads(), 0, stream>>>(N, f, data);
+          <<<grid, num_threads(), 0, stream>>>(N, f, data, multi_vector);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
 #endif
     case 8:
 #ifdef USE_ROCM
       vectorized_elementwise_kernel<8, func_t, array_t>
-          <<<grid, num_threads(), 0, stream>>>(N, f, data);
+          <<<grid, num_threads(), 0, stream>>>(N, f, data, multi_vector);
 #else
       if (use_sm107_optimizations) {
         vectorized_elementwise_kernel<8, func_t, array_t, tws_128b >= 8>
@@ -446,13 +531,23 @@ static inline void launch_vectorized_kernel(
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case 4:
+#ifdef USE_ROCM
+      vectorized_elementwise_kernel<4, func_t, array_t>
+          <<<grid, num_threads(), 0, stream>>>(N, f, data, multi_vector);
+#else
       vectorized_elementwise_kernel<4, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
+#endif
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case 2:
+#ifdef USE_ROCM
+      vectorized_elementwise_kernel<2, func_t, array_t>
+          <<<grid, num_threads(), 0, stream>>>(N, f, data, multi_vector);
+#else
       vectorized_elementwise_kernel<2, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
+#endif
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case 1: {
