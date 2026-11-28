@@ -1,14 +1,18 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/CallOnce.h>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/NumericLimits.cuh>
+#include <algorithm>
+#include <array>
 #include <type_traits>
 
 #include <ATen/native/cuda/Loops.cuh>
@@ -849,6 +853,207 @@ cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, index_t class
 }
 
 
+// host_softmax's block size for cunn_SoftMaxForwardGmem and
+// cunn_SoftMaxForwardFast.
+constexpr int kSoftmaxForwardGmemThreads = 512;
+
+// True if host_softmax runs these rows (inner_size == 1) with the persistent
+// softmax, dispatch_softmax_forward.
+static inline bool use_persistent_softmax_forward(int64_t dim_size, int64_t elem_size) {
+  return dim_size <= 2048 && dim_size * elem_size <= 8192;
+}
+
+#ifdef USE_ROCM
+// Register softmax forward with vectorized accesses, used on gfx1250 for rows
+// that host_softmax would otherwise send to cunn_SoftMaxForwardReg,
+// cunn_SoftMaxForwardSmem or cunn_SoftMaxForward (log_softmax), or to
+// cunn_SoftMaxForwardGmem or cunn_SoftMaxForwardFast (softmax). Same structure
+// as cunn_SoftMaxForwardReg
+// (one block per row, the row held in registers, block max and block sum-exp
+// reductions, then the epilogue), but every access is one vector of ILP
+// elements. Thread t holds vectors t, t + blockDim.x, ..., at most
+// kSoftmaxForwardRegVecMaxVecsPerThread of them.
+//
+// With with_mul it uses cunn_SoftMaxForwardGmem's arithmetic (SumExpfFloat,
+// blockReduceWarpInverse, EpilogueWithMul) at blockDim.x ==
+// kSoftmaxForwardGmemThreads. With 16-byte vectors every thread then holds the
+// same vectors in the same order as in cunn_SoftMaxForwardGmem, so the output is
+// bit-identical to it; the row is read once instead of three times.
+
+// Vectors held per thread; rows of up to 4 * blockDim.x vectors take this path.
+constexpr int kSoftmaxForwardRegVecMaxVecsPerThread = 4;
+
+template <int ILP, int vecs_per_thread, bool with_mul, typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue>
+__global__ void
+cunn_SoftMaxForwardRegVec(outscalar_t *output, const scalar_t *input, int64_t classes)
+{
+  extern __shared__ unsigned char smem[];
+  auto sdata = reinterpret_cast<accscalar_t*>(smem);
+  using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
+  using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
+
+  const auto in = reinterpret_cast<const LoadT*>(input + static_cast<int64_t>(blockIdx.x) * classes);
+  auto out = reinterpret_cast<StoreT*>(output + static_cast<int64_t>(blockIdx.x) * classes);
+  const int num_vecs = static_cast<int>(classes / ILP);
+
+  LoadT reg[vecs_per_thread];
+  accscalar_t threadMax = std::numeric_limits<accscalar_t>::lowest();
+  MaxFloat<scalar_t, accscalar_t> maxFunc;
+  #pragma unroll
+  for (int v = 0; v < vecs_per_thread; v++) {
+    const int idx = threadIdx.x + v * blockDim.x;
+    if (idx < num_vecs) {
+      reg[v] = in[idx];
+      #pragma unroll
+      for (int j = 0; j < ILP; j++) {
+        threadMax = maxFunc(threadMax, reg[v].val[j]);
+      }
+    }
+  }
+  accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(sdata, threadMax,
+    Max<accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
+
+  using SumExpT = std::conditional_t<with_mul, SumExpfFloat<scalar_t, accscalar_t>, SumExpFloat<scalar_t, accscalar_t>>;
+  SumExpT sumExpFunc(max_k);
+  accscalar_t threadExp = static_cast<accscalar_t>(0);
+  #pragma unroll
+  for (int v = 0; v < vecs_per_thread; v++) {
+    if (threadIdx.x + v * blockDim.x < num_vecs) {
+      #pragma unroll
+      for (int j = 0; j < ILP; j++) {
+        threadExp = sumExpFunc(threadExp, reg[v].val[j]);
+      }
+    }
+  }
+  accscalar_t sumAll;
+  if constexpr (with_mul) {
+    sumAll = blockReduceWarpInverse<Add, accscalar_t>(sdata, threadExp, Add<accscalar_t>(), static_cast<accscalar_t>(0));
+  } else {
+    sumAll = blockReduceWarp<Add, accscalar_t>(sdata, threadExp, Add<accscalar_t>(), static_cast<accscalar_t>(0));
+  }
+
+  Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
+  #pragma unroll
+  for (int v = 0; v < vecs_per_thread; v++) {
+    const int idx = threadIdx.x + v * blockDim.x;
+    if (idx < num_vecs) {
+      StoreT o;
+      #pragma unroll
+      for (int j = 0; j < ILP; j++) {
+        o.val[j] = epilogue(reg[v].val[j]);
+      }
+      out[idx] = o;
+    }
+  }
+}
+
+static bool is_gfx1250_device(c10::DeviceIndex device_index) {
+  TORCH_INTERNAL_ASSERT(device_index >= 0 && device_index < C10_COMPILE_TIME_MAX_GPUS);
+  static std::array<c10::once_flag, C10_COMPILE_TIME_MAX_GPUS> once_flags;
+  static std::array<bool, C10_COMPILE_TIME_MAX_GPUS> results{};
+  c10::call_once(once_flags[device_index], [device_index] {
+    results[device_index] = at::detail::getCUDAHooks().isGPUArch({"gfx1250"}, device_index);
+  });
+  return results[device_index];
+}
+
+// Bytes per vector for the register softmax forward: 16, or 8 when the row
+// length or a base pointer is only a multiple of 8 bytes; 0 if neither holds or
+// an 8-byte vector would hold a single element.
+static inline int64_t softmax_forward_reg_vec_bytes(const Tensor& input, const Tensor& output, int64_t dim_size) {
+  using at::native::memory::get_alignment;
+  const int64_t elem_size = input.element_size();
+  const auto alignment = static_cast<int64_t>(std::min({get_alignment(input.const_data_ptr()),
+      get_alignment(output.const_data_ptr()), get_alignment(static_cast<size_t>(dim_size * elem_size))}));
+  for (const int64_t vec_bytes : {int64_t(ALIGN_BYTES), int64_t(ALIGN_BYTES / 2)}) {
+    if (vec_bytes / elem_size >= 2 && alignment >= vec_bytes) {
+      return vec_bytes;
+    }
+  }
+  return 0;
+}
+
+// True if host_softmax would not use the persistent softmax for these rows
+// (dim_size > 2048 or wider than 8192 bytes), they take 16- or 8-byte vectors,
+// and the row fits in kSoftmaxForwardRegVecMaxVecsPerThread vectors per thread
+// of a block: up to max_threads for log_softmax, kSoftmaxForwardGmemThreads for
+// softmax (fast_softmax). The caller checks !half_to_float.
+static inline bool can_use_softmax_forward_reg_vec(const Tensor& input, const Tensor& output, int64_t dim_size, bool fast_softmax) {
+  const int64_t elem_size = input.element_size();
+  const int64_t vec_bytes = softmax_forward_reg_vec_bytes(input, output, dim_size);
+  if (use_persistent_softmax_forward(dim_size, elem_size) || vec_bytes == 0) {
+    return false;
+  }
+  const int64_t max_threads_per_row = fast_softmax ? kSoftmaxForwardGmemThreads : max_threads;
+  return dim_size / (vec_bytes / elem_size) <= max_threads_per_row * kSoftmaxForwardRegVecMaxVecsPerThread;
+}
+
+// Smallest power of two that is at least one wave and covers num_vecs vectors at
+// kSoftmaxForwardRegVecMaxVecsPerThread vectors per thread, capped at max_threads.
+static inline int softmax_forward_reg_vec_block_size(int64_t num_vecs) {
+  int threads = at::cuda::warp_size();
+  while (threads < max_threads && static_cast<int64_t>(threads) * kSoftmaxForwardRegVecMaxVecsPerThread < num_vecs) {
+    threads *= 2;
+  }
+  return threads;
+}
+
+template <int ILP, bool with_mul, typename scalar_t, typename accscalar_t, template <typename, typename, typename> class Epilogue>
+static inline void launch_softmax_forward_reg_vec(scalar_t* output, const scalar_t* input, int64_t outer_size, int64_t dim_size, cudaStream_t stream) {
+  const int64_t num_vecs = dim_size / ILP;
+  const dim3 grid(outer_size);
+  const dim3 block(with_mul ? kSoftmaxForwardGmemThreads : softmax_forward_reg_vec_block_size(num_vecs));
+  const size_t smem_reduction_sz = block.x / at::cuda::warp_size() * sizeof(accscalar_t);
+  switch ((num_vecs + block.x - 1) / block.x) {
+    case 1:
+      cunn_SoftMaxForwardRegVec<ILP, 1, with_mul, scalar_t, accscalar_t, scalar_t, Epilogue><<<grid, block, smem_reduction_sz, stream>>>(output, input, dim_size);
+      break;
+    case 2:
+      cunn_SoftMaxForwardRegVec<ILP, 2, with_mul, scalar_t, accscalar_t, scalar_t, Epilogue><<<grid, block, smem_reduction_sz, stream>>>(output, input, dim_size);
+      break;
+    case 3:
+      cunn_SoftMaxForwardRegVec<ILP, 3, with_mul, scalar_t, accscalar_t, scalar_t, Epilogue><<<grid, block, smem_reduction_sz, stream>>>(output, input, dim_size);
+      break;
+    case 4:
+      static_assert(kSoftmaxForwardRegVecMaxVecsPerThread == 4);
+      cunn_SoftMaxForwardRegVec<ILP, 4, with_mul, scalar_t, accscalar_t, scalar_t, Epilogue><<<grid, block, smem_reduction_sz, stream>>>(output, input, dim_size);
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "register softmax forward: ", num_vecs, " vectors do not fit a block of ", block.x);
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+// Requires can_use_softmax_forward_reg_vec(input, output, dim_size, use_fast_softmax).
+template <template <typename, typename, typename> class Epilogue, template <typename, typename, typename> class EpilogueWithMul, bool use_fast_softmax>
+static inline void launch_softmax_forward_reg_vec_kernel(const Tensor& input, const Tensor& output, int64_t outer_size, int64_t dim_size, cudaStream_t stream) {
+  const int64_t vec_bytes = softmax_forward_reg_vec_bytes(input, output, dim_size);
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "host_softmax", [&] {
+    using accscalar_t = acc_type<scalar_t, true>;
+    auto output_ptr = output.mutable_data_ptr<scalar_t>();
+    auto input_ptr = input.const_data_ptr<scalar_t>();
+    constexpr int kVecElems = ALIGN_BYTES / sizeof(scalar_t);
+    constexpr bool with_mul = use_fast_softmax;
+    if (vec_bytes == ALIGN_BYTES) {
+      if constexpr (with_mul) {
+        launch_softmax_forward_reg_vec<kVecElems, true, scalar_t, accscalar_t, EpilogueWithMul>(output_ptr, input_ptr, outer_size, dim_size, stream);
+      } else {
+        launch_softmax_forward_reg_vec<kVecElems, false, scalar_t, accscalar_t, Epilogue>(output_ptr, input_ptr, outer_size, dim_size, stream);
+      }
+    } else if constexpr (kVecElems >= 4) {
+      TORCH_INTERNAL_ASSERT(vec_bytes == ALIGN_BYTES / 2, "register softmax forward: unsupported vector of ", vec_bytes, " bytes");
+      if constexpr (with_mul) {
+        launch_softmax_forward_reg_vec<kVecElems / 2, true, scalar_t, accscalar_t, EpilogueWithMul>(output_ptr, input_ptr, outer_size, dim_size, stream);
+      } else {
+        launch_softmax_forward_reg_vec<kVecElems / 2, false, scalar_t, accscalar_t, Epilogue>(output_ptr, input_ptr, outer_size, dim_size, stream);
+      }
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "register softmax forward: unsupported vector of ", vec_bytes, " bytes");
+    }
+  });
+}
+#endif
+
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t,
   template <typename, typename, typename> class EpilogueWithMul, typename index_t = int32_t>
 __global__ void
@@ -1116,13 +1321,20 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
     // XXX: it assumes that inner_size == 1
 
     if (inner_size == 1) {
+#ifdef USE_ROCM
+      if (!half_to_float && is_gfx1250_device(input.device().index()) &&
+          can_use_softmax_forward_reg_vec(input, output, dim_size, use_fast_softmax)) {
+        launch_softmax_forward_reg_vec_kernel<Epilogue, EpilogueWithMul, use_fast_softmax>(input, output, outer_size, dim_size, stream);
+        return output;
+      }
+#endif
       dim3 grid(outer_size);
       AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "host_softmax", [&] {
         using accscalar_t = acc_type<scalar_t, true>;
         if (!half_to_float) {
           auto output_ptr = output.mutable_data_ptr<scalar_t>();
           auto input_ptr = input.const_data_ptr<scalar_t>();
-          if (dim_size <= 2048 && dim_size*sizeof(scalar_t) <= 8192) {
+          if (use_persistent_softmax_forward(dim_size, sizeof(scalar_t))) {
             int64_t remaining = outer_size;
             int64_t chunk_size = (1L << 30L) / dim_size;
             while(remaining > 0) {
@@ -1135,7 +1347,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
             if constexpr (use_fast_softmax) {
-              dim3 block(512);
+              dim3 block(kSoftmaxForwardGmemThreads);
               size_t smem_reduction_sz = block.x / at::cuda::warp_size() * sizeof(accscalar_t);
               if (dim_size % ILP == 0) {
                 cunn_SoftMaxForwardGmem<ILP, scalar_t, accscalar_t, scalar_t, EpilogueWithMul>
@@ -1213,7 +1425,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
         } else {
           auto output_ptr = output.mutable_data_ptr<accscalar_t>();
           auto input_ptr = input.const_data_ptr<scalar_t>();
-          if (dim_size <= 2048 && dim_size*sizeof(scalar_t) <= 8192) {
+          if (use_persistent_softmax_forward(dim_size, sizeof(scalar_t))) {
             int64_t remaining = outer_size;
             int64_t chunk_size = (1<<30) / dim_size;
             while(remaining > 0) {
@@ -1226,7 +1438,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
             if constexpr (use_fast_softmax) {
-              dim3 block(512);
+              dim3 block(kSoftmaxForwardGmemThreads);
               size_t smem_reduction_sz = block.x / at::cuda::warp_size() * sizeof(accscalar_t);
               if (dim_size % ILP == 0) {
                 cunn_SoftMaxForwardGmem<ILP, scalar_t, accscalar_t, accscalar_t, EpilogueWithMul>

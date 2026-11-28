@@ -75,6 +75,31 @@ softmax_two_dims_configs = op_bench.config_list(
     tags=["long"],
 )
 
+# Rows too wide for the persistent softmax on CUDA, at a recommendation model's
+# shapes, plus a row width that is not a multiple of 16 bytes.
+softmax_two_dims_configs_long_rows = op_bench.config_list(
+    attr_names=["M", "N", "dim"],
+    attrs=[
+        [17750, 8192, 1],
+        [15750, 8192, 1],
+        [12500, 8192, 1],
+        [7500, 8192, 1],
+        [4096, 3000, 1],
+        [4096, 3004, 1],
+    ],
+    cross_product_configs={"device": ["cuda"], "dtype": [torch.bfloat16]},
+    tags=["long_rows"],
+)
+
+softmax_two_dims_configs_long_rows_fp32 = op_bench.config_list(
+    attr_names=["M", "N", "dim"],
+    attrs=[
+        [8192, 4096, 1],
+    ],
+    cross_product_configs={"device": ["cuda"], "dtype": [torch.float]},
+    tags=["long_rows"],
+)
+
 
 class SoftmaxBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, N, C, H, W, device, op_func):
@@ -86,8 +111,8 @@ class SoftmaxBenchmark(op_bench.TorchBenchmarkBase):
 
 
 class Softmax2DimsBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, dim, device, op_func):
-        self.inputs = {"input": torch.rand(M, N, device=device)}
+    def init(self, M, N, dim, device, op_func, dtype=torch.float):
+        self.inputs = {"input": torch.rand(M, N, device=device, dtype=dtype)}
         self.op_func = op_func(dim=dim)
 
     def forward(self, input):
@@ -100,7 +125,11 @@ op_bench.generate_pt_tests_from_op_list(
 
 
 op_bench.generate_pt_tests_from_op_list(
-    softmax_two_dims_ops_list, softmax_two_dims_configs, Softmax2DimsBenchmark
+    softmax_two_dims_ops_list,
+    softmax_two_dims_configs
+    + softmax_two_dims_configs_long_rows
+    + softmax_two_dims_configs_long_rows_fp32,
+    Softmax2DimsBenchmark,
 )
 
 

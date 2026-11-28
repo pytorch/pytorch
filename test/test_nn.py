@@ -11245,6 +11245,29 @@ class TestNNDeviceType(NNTestCase):
             # test non-persistent softmax kernel
             _test_helper((4, 1536))
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_softmax_forward_vectorized_rows(self, device, dtype):
+        # Row widths around the gfx1250 vectorized register path: rows that take
+        # 8-byte vectors (row bytes a multiple of 8 but not 16) or none, and the
+        # largest rows it holds for softmax (2048 vectors) and log_softmax (4096
+        # vectors) with 8- and 16-byte vectors, and one vector past them, on
+        # 16-byte aligned, 8-byte aligned and misaligned base pointers (for
+        # float64 the last two are the same layout, and only 16-byte vectors
+        # apply). The reference is computed on the CPU in float64.
+        rows = 37
+        offset_8b = 8 // torch.empty(0, dtype=dtype).element_size()
+        for cols in (3000, 3002, 3004, 4096, 4098, 8188, 8192, 8196, 8200, 16380, 16384, 16388, 16392, 32768, 32776):
+            x = torch.randn(rows * cols + offset_8b, device=device, dtype=dtype)
+            for name, inp in (
+                ("aligned", x[: rows * cols].view(rows, cols)),
+                ("misaligned", x[1 : 1 + rows * cols].view(rows, cols)),
+                ("8-byte aligned", x[offset_8b : offset_8b + rows * cols].view(rows, cols)),
+            ):
+                for fn in (torch.softmax, torch.log_softmax):
+                    expected = fn(inp.cpu().double(), -1).to(dtype)
+                    self.assertEqual(fn(inp, -1).cpu(), expected, msg=f"{fn.__name__} {name} {cols}")
+
     def test_save_lstm_compatibility(self, device):
         # Test that saving an LSTM in PyTorch 1.7 and older can still be
         # loaded in newer versions of PyTorch.
