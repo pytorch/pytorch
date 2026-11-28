@@ -1,0 +1,169 @@
+use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyFrozenSet, PyList, PySet, PyTuple};
+
+mod bindings;
+mod bytecode_printer;
+mod cfg;
+mod exec;
+
+use bindings::Tensor;
+
+#[pyfunction]
+fn test_function() -> &'static str {
+    "hello from rust"
+}
+
+#[pyfunction]
+fn tensor_size(t: &Tensor) -> PyResult<Vec<i64>> {
+    t.sizes().map(<[i64]>::to_vec).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.what().to_string()))
+}
+
+#[pyfunction]
+fn collect_tensors<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Vec<Bound<'py, Tensor>>> {
+    let mut out = Vec::new();
+    collect_into(obj, &mut out)?;
+    Ok(out)
+}
+
+fn collect_into<'py>(
+    obj: &Bound<'py, PyAny>,
+    out: &mut Vec<Bound<'py, Tensor>>,
+) -> PyResult<()> {
+    if let Ok(t) = obj.cast::<Tensor>() {
+        out.push(t.clone());
+        return Ok(());
+    }
+    if let Ok(d) = obj.cast::<PyDict>() {
+        for (_, v) in d.iter() {
+            collect_into(&v, out)?;
+        }
+    } else if let Ok(seq) = obj.cast::<PyList>() {
+        for item in seq.iter() {
+            collect_into(&item, out)?;
+        }
+    } else if let Ok(seq) = obj.cast::<PyTuple>() {
+        for item in seq.iter() {
+            collect_into(&item, out)?;
+        }
+    } else if let Ok(s) = obj.cast::<PySet>() {
+        for item in s.iter() {
+            collect_into(&item, out)?;
+        }
+    } else if let Ok(s) = obj.cast::<PyFrozenSet>() {
+        for item in s.iter() {
+            collect_into(&item, out)?;
+        }
+    }
+    Ok(())
+}
+
+// Declare the module safe to run without the GIL so the free-threaded CPython
+// build (e.g. py3.14t) does not re-enable the GIL and emit a RuntimeWarning when
+// torch._rust is imported. Any shared mutable state must be thread-safe without
+// relying on the GIL (see bytecode_printer.rs, which guards it with a Mutex).
+#[pymodule(gil_used = false)]
+fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(test_function, m)?)?;
+    m.add_function(wrap_pyfunction!(tensor_size, m)?)?;
+    m.add_function(wrap_pyfunction!(collect_tensors, m)?)?;
+    m.add_function(wrap_pyfunction!(bytecode_printer::call_with_bytecode_printing, m)?)?;
+    m.add_function(wrap_pyfunction!(cfg::python::bytecode_to_cfg, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::call_with_cfg_execution, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_outline, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_optimize, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_record, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::cfg_observed, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::optimize_block, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_specialize, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_reoptimize, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_clones, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_elide, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_add_block_checks, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_misses, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_region_stats, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_set_cfg_regions, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_cfg_region_passed_over, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_own, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::foreign::_region_keep, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::foreign::_region_callbacks, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_bound, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::writes::_region_writes, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::writes::_region_not_plain, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::writes::_set_cfg_effects, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::writes::_cfg_write_site, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_plan_stats, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_set_cfg_region_observe, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_set_cfg_region_reads, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_spans, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_pure_calls, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_pure_callables, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_untraced, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_reoptimize_after, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_reoptimize_all, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_bypass_cold, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_skip, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::own::_cfg_own_frames, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::left::_cfg_left, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::order::_cfg_releases, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::left::_cfg_fail_plans, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::live::_cfg_takes_all, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_impure, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_pass_hook, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_opaque, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_opaque_site, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_scalar_reads, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::exact::_same, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::ambient::_not_neutral, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::ambient::_ambient_word, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_region_entry_door, m)?)?;
+    m.add_function(wrap_pyfunction!(bindings::tensor::_bridge_answers, m)?)?;
+    m.add_class::<exec::TreeChecks>()?;
+    m.add_class::<exec::tensor_key::TensorKey>()?;
+    m.add_function(wrap_pyfunction!(exec::region::_region_given_up, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_region_stood, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_region_body, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_region_refuse, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::value_reads::_region_value_read, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::value_reads::_region_value_needed, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_reads, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_settled, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_known, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_made, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_read_misses, m)?)?;
+    m.add_class::<exec::reads::Reads>()?;
+    m.add_class::<exec::overlap::Overlap>()?;
+    m.add_function(wrap_pyfunction!(exec::graph::_run_aten_graph, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::hist::_gate_report, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_dump, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_kinds, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_groups, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_unheard, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_hear, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::dump::_rules_callee_kind, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch_forms, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch_form_reads, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch_domain, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::rules::torch::_rules_torch_befores, m)?)?;
+    m.add_class::<exec::graph::Ref>()?;
+    m.add_function(wrap_pyfunction!(exec::joint::_trace_joint, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::autograd::_set_cfg_autograd, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::autograd::_cfg_last_joint, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_autograd_blocks, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::torch_ops::set_print_torch_ops, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::_calls_make, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::_calls_run, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::_calls_text, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::_calls_tables, m)?)?;
+    m.add_class::<exec::calls::List>()?;
+    m.add_function(wrap_pyfunction!(exec::calls::_witness, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::shadow::_calls_shadow, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::shadow::_calls_shadow_missed, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::shadow::_calls_validate, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::shadow::_calls_later, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::witness::_witness_names, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::calls::witness::_witness_pause, m)?)?;
+    m.add_function(wrap_pyfunction!(cfg::python::_cfg_opcodes, m)?)?;
+    m.add_function(wrap_pyfunction!(cfg::python::_cfg_signature, m)?)?;
+    Ok(())
+}

@@ -1,0 +1,9532 @@
+# Owner(s): ["module: dynamo"]
+
+"""Tests of torch.vm under the thread state that sits above the level a region
+is traced at: a region's graph is what ran below autocast, and it is run, and
+lowered, without autocast treating its operators a second time. Of what a
+region keeps of the call it was traced on: none of that call's tensors. And
+of a region's constants, the weights its graph reads: what the region checks
+of them, a lowering that is bound to them, and a pass that keeps what it
+derived from them while nothing wrote to them (vm.Unwritten). And of how a
+call's tensors share memory: what is made of a region's graph runs only on
+calls whose tensors overlap as the traced call's did. And of gradients: a
+region with one input is differentiated, and a detach inside a region stops
+the gradient on every list and can be named by a pattern. And of what C
+code does to an operand: it is taken to have no effect only for the kinds of
+operand the engine lists, so an iterator from outside, a C callable handed
+to a builtin, a setter of torch's state and a defaultdict end a region; and
+id() and hash() give which object their operand is on every call. And of
+state a region reads without a check of its own: the backend flags are part
+of the thread state a region is for, no region is traced or entered under a
+torch function mode, and a method that tells of a tensor what a region does
+not check ends the region also where it is taken from the class. And of a
+nested tensor, which the executor's record of the operators that run does
+not ask for sizes. And of a list or a dict a region's run makes: it is made
+anew by every run, also when the run read it, and one that was there before
+is handed back as the object it is. And of a float handed to a torch call:
+it is an input of a region's graph only under an operator that is declared
+to take no size from a scalar. And of a read of a tensor's ``.data``: a
+region reads it again on every run, so the tensor it gives counts its own
+versions there as in eager, and what a region makes of such a graph is the
+graph as traced under every pass list. And of a value read from a CPU
+tensor (``.item()``) in a region: it sees every write the program made to
+that memory before it, through whatever tensor, and none it made after. And of a trace that is given up after its
+body filled a display or a call's arguments that an earlier block began:
+the container is handed back as it was before the code runs again, and
+what anything else did to a container meanwhile stays. And of the class of
+a tensor a region is handed: it is a check of the region. And of where a
+region sits: at the same place whatever the process did before.
+"""
+
+import abc
+import array
+import collections
+import contextlib
+import copy
+import ctypes
+import dataclasses
+import functools
+import gc
+import itertools
+import math
+import operator
+import os
+import subprocess
+import sys
+import tempfile
+import time
+import traceback
+import types
+import unittest
+import weakref
+
+import torch
+import torch.nn.functional as F
+from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_utils import (
+    DeterministicGuard,
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TEST_NUMPY,
+    TestCase,
+)
+
+
+vm = torch.vm
+HAS_VM = getattr(torch, "_rust", None) is not None and sys.version_info[:2] == (3, 12)
+
+# The default pass list with regions formed early: types are observed on the
+# third call of a function, the fourth call is traced, and the fifth is the
+# first to run a region (the default schedule starts at call 24).
+EARLY = vm.configure(vm.DEFAULT_PASSES, regions={"at": 3, "observe": 1}, pure_calls=1)
+
+# Set in a child process to the id of the one test it is to run.
+CHILD = "TORCH_VM_TEST_CHILD"
+
+
+def isolated(test):
+    """Runs a test method in a child process of its own: the executor's
+    switches are process-wide, so a test that needs regions to form on a known
+    call of its own function runs alone (as in test_vm.py)."""
+
+    @functools.wraps(test)
+    def wrapper(self, *args, **kwargs):
+        if os.environ.get(CHILD) == self.id():
+            method = getattr(type(self), self._testMethodName)
+            if not getattr(method, "__unittest_expecting_failure__", False):
+                return test(self, *args, **kwargs)
+            # An expected failure is the parent's to report: the child only
+            # says, by its exit status, whether the test failed.
+            try:
+                test(self, *args, **kwargs)
+            except BaseException:
+                traceback.print_exc()
+                sys.stderr.flush()
+                os._exit(1)
+            os._exit(0)
+        name = f"{type(self).__name__}.{self._testMethodName}"
+        env = {**os.environ, CHILD: self.id()}
+        # A crash is to end the child at once, without a core file.
+        command = (
+            f"ulimit -c 0; exec {sys.executable} {os.path.abspath(__file__)} {name}"
+        )
+        ran = subprocess.run(
+            ["/bin/sh", "-c", command],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=1200,
+        )
+        if ran.returncode != 0:
+            how = (
+                f"died of signal {-ran.returncode}"
+                if ran.returncode < 0
+                else f"exited with status {ran.returncode}"
+            )
+            self.fail(f"the child process {how}:\n{ran.stderr[-3000:]}")
+
+    return wrapper
+
+
+def region_runs(fn):
+    """How many times the regions of ``fn`` have run."""
+    return sum(r["runs"] for r in vm.regions(fn) if r["state"] == "region")
+
+
+def keep(gm, input_types):
+    return gm
+
+
+def under_autocast(device, dtype=torch.bfloat16):
+    """Autocast on ``device``, and the attention operator's math path (the
+    one a build without a fused kernel runs)."""
+    stack = contextlib.ExitStack()
+    stack.enter_context(torch.autocast(torch.device(device).type, dtype=dtype))
+    stack.enter_context(sdpa_kernel(SDPBackend.MATH))
+    return stack
+
+
+def modes_attend(q, k, v):
+    # Autocast casts the three to its dtype and runs the operator with
+    # autocast off; the operator's math path raises them to float32 for its
+    # two matrix products.
+    a = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+    return (a + q).tanh() * 2.0
+
+
+def modes_attended(device):
+    """Makes the three inputs of modes_attend in a dtype."""
+
+    def make(dtype):
+        return [torch.randn(2, 4, 16, 8, device=device).to(dtype) for _ in "qkv"]
+
+    return make
+
+
+def modes_distances(x, y):
+    # Autocast runs cdist in float32, with autocast off for the matrix
+    # product inside it.
+    return (torch.cdist(x, y) + 1).tanh() * 2.0
+
+
+class ModesProduct(torch.autograd.Function):
+    """A product whose gradient is passed straight through."""
+
+    @staticmethod
+    def forward(ctx, x, w):
+        return torch.mm(x, w)
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad.float() * 0.5, None
+
+
+def modes_function(x, w):
+    y = ModesProduct.apply(x, w)
+    a = torch.nn.functional.scaled_dot_product_attention(y[None], y[None], y[None])
+    return (a[0].float() + x).tanh() * 2.0
+
+
+modes_seen = []
+
+
+def modes_note(y, w):
+    modes_seen.append(torch.mm(y, w).dtype)
+
+
+def modes_inner_notes(y, w):
+    modes_note(y, w)
+    a = torch.nn.functional.scaled_dot_product_attention(y[None], y[None], y[None])
+    return a[0].float().tanh() * 2
+
+
+def modes_outer_notes(x, w):
+    return modes_inner_notes(x.sin() + 1, w).cos().exp()
+
+
+class ModesNet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 8, 3, padding=1)
+        self.proj = torch.nn.Linear(8, 8)
+        self.head = torch.nn.Linear(8, 4)
+
+    def forward(self, x):
+        h = self.conv(x).relu().flatten(2).transpose(1, 2)
+        q = self.proj(h)[:, None]
+        a = torch.nn.functional.scaled_dot_product_attention(q, q, q)[:, 0]
+        return self.head((a + h).tanh()).mean(1)
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmAutocast(TestCase):
+    """A region traced under autocast computes what eager computes there."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, device, dtype, compiled, fn, make, exact=True, **tolerance):
+        # Eight calls per kind of input: the fourth is traced, the later ones
+        # run the region.
+        for inputs in (torch.float32, dtype):
+            before = region_runs(compiled)
+            for call in range(8):
+                args = make(inputs)
+                # Eager first: a warning an operator gives once is eager's.
+                with under_autocast(device, dtype):
+                    want, got = fn(*args), compiled(*args)
+                msg = f"{inputs} inputs, call {call}"
+                self.assertEqual(got.dtype, want.dtype, msg=msg)
+                if exact:
+                    self.assertEqual(got, want, atol=0, rtol=0, msg=msg)
+                else:
+                    self.assertEqual(got.float(), want.float(), msg=msg, **tolerance)
+            self.assertGreater(region_runs(compiled), before, msg=f"{inputs} inputs")
+
+    @dtypes(torch.bfloat16, torch.float16)
+    @isolated
+    def test_attention_runs_its_products_as_eager_does(self, device, dtype):
+        # Eager's two matrix products run in float32. The region's graph
+        # holds them in float32; run under autocast again they would be cast
+        # to the autocast dtype.
+        compiled, make = vm(modes_attend, passes=EARLY), modes_attended(device)
+        self.calls(device, dtype, compiled, modes_attend, make)
+
+    @dtypes(torch.bfloat16, torch.float16)
+    @isolated
+    def test_operator_autocast_runs_in_float32_stays_in_float32(self, device, dtype):
+        def make(inputs):
+            return [torch.randn(40, 8, device=device).to(inputs) for _ in "xy"]
+
+        compiled = vm(modes_distances, passes=EARLY)
+        self.calls(device, dtype, compiled, modes_distances, make)
+
+    @dtypes(torch.bfloat16, torch.float16)
+    @isolated
+    def test_block_pass_that_keeps_the_graph(self, device, dtype):
+        compiled = vm(modes_attend, passes=(*EARLY, keep))
+        self.calls(device, dtype, compiled, modes_attend, modes_attended(device))
+
+    @dtypes(torch.bfloat16, torch.float16)
+    @isolated
+    def test_graph_lowered_by_aot_autograd(self, device, dtype):
+        # AOT Autograd traces the region's graph again, under autocast: the
+        # graph it is handed runs with autocast off. The versions are compared
+        # with each other (verify) the way a region runs them.
+        passes = (*EARLY, vm.passes.Autograd(), vm.passes.Partition())
+        compiled = vm(modes_attend, passes=passes, verify=True)
+        make, close = modes_attended(device), {"rtol": 1e-05, "atol": 1e-06}
+        self.calls(device, dtype, compiled, modes_attend, make, False, **close)
+        reports = compiled.__vm_program__.pipeline.reports.values()
+        self.assertEqual([n for r in reports for n in r.notes if "verify" in n], [])
+        self.assertEqual([r.name for r in reports if not r.versions[-1].hits], [])
+
+    @dtypes(torch.bfloat16, torch.float16)
+    @isolated
+    def test_graph_lowered_by_inductor_is_what_torch_compile_gives(self, device, dtype):
+        # Inductor has numerics of its own in the autocast dtype, so the
+        # region is compared with the same function under torch.compile.
+        compiled = vm(modes_attend, passes=(*EARLY, vm.passes.Inductor()))
+        args = modes_attended(device)(torch.float32)
+        with under_autocast(device, dtype):
+            modes_attend(*args)
+            for _ in range(8):
+                got = compiled(*args)
+            self.assertGreater(region_runs(compiled), 0)
+            expected = torch.compile(modes_attend)(*args)
+        reports = compiled.__vm_program__.pipeline.reports.values()
+        self.assertEqual([n for r in reports for n in r.notes], [])
+        self.assertEqual(got.dtype, expected.dtype)
+        self.assertEqual(got, expected, rtol=1e-05, atol=1e-05)
+
+    @isolated
+    def test_lowered_graph_is_for_the_autocast_state_of_its_trace(self, device):
+        # With inputs in the autocast dtype the attention's graph is the same
+        # with autocast off and on. What AOT Autograd made of it with autocast
+        # off does not stand for it under autocast: there its backward would
+        # run with autocast on.
+        passes = (*EARLY, vm.passes.Autograd(), vm.passes.Partition())
+        compiled = vm(modes_attend, passes=passes)
+        for call in range(16):
+            q, k, v = modes_attended(device)(torch.bfloat16)
+            leaves = [q.clone().requires_grad_(), q.clone().requires_grad_()]
+            outs = []
+            with under_autocast(device) if call >= 8 else sdpa_kernel(SDPBackend.MATH):
+                for fn, leaf in zip((modes_attend, compiled), leaves):
+                    outs.append(fn(leaf, k, v).float())
+                    outs[-1].sum().backward()
+            grads = [leaf.grad.float() for leaf in leaves]
+            msg = f"call {call}"
+            self.assertEqual(outs[1], outs[0], rtol=1e-05, atol=1e-06, msg=msg)
+            self.assertEqual(grads[1], grads[0], rtol=1e-05, atol=1e-06, msg=msg)
+        self.assertGreater(region_runs(compiled), 0)
+
+    @parametrize("lowering", ("none", "autograd", "inductor"))
+    @isolated
+    def test_backward_inside_the_autocast_block(self, device, lowering):
+        # The gradients of a step whose backward runs under autocast too:
+        # eager's, bit for bit, with the default list; within the autocast
+        # dtype's precision when AOT Autograd made the backward.
+        kind = torch.device(device).type
+        passes = {
+            "none": EARLY,
+            "autograd": (*EARLY, vm.passes.Autograd(), vm.passes.Partition()),
+            "inductor": (*EARLY, vm.passes.Inductor()),
+        }[lowering]
+
+        def make():
+            torch.manual_seed(0)
+            net = ModesNet().to(device)
+
+            def step(x, y):
+                net.zero_grad(set_to_none=True)
+                with torch.autocast(kind, dtype=torch.bfloat16):
+                    loss = torch.nn.functional.cross_entropy(net(x), y)
+                    loss.backward()
+                return [loss.detach(), *(p.grad.clone() for p in net.parameters())]
+
+            return step
+
+        eager, compiled = make(), vm(make(), passes=passes)
+        exact, close = {"atol": 0, "rtol": 0}, {"atol": 0.01, "rtol": 0.01}
+        tolerance = exact if lowering == "none" else close
+        with sdpa_kernel(SDPBackend.MATH):
+            for call in range(9):
+                torch.manual_seed(call)
+                x = torch.randn(4, 3, 8, 8, device=device)
+                y = torch.randint(0, 4, (4,), device=device)
+                want, got = eager(x, y), compiled(x, y)
+                self.assertEqual(got, want, msg=f"call {call}", **tolerance)
+        self.assertGreater(region_runs(compiled), 0)
+
+    @isolated
+    def test_custom_function_runs_under_the_callers_autocast(self, device):
+        # The region's graph calls the Function's apply as one node, and runs
+        # with autocast off: the Function's forward is the program's own code,
+        # and runs under autocast as eager runs it (its product in bfloat16).
+        # The call of a Function is taken into a region when the pass list
+        # says it only computes.
+        apply = torch._C._FunctionBase.__dict__["apply"]
+        passes = vm.configure(EARLY, pure_calls={"rounds": 1, "pure": (apply,)})
+        compiled = vm(modes_function, passes=passes)
+        w = torch.randn(8, 8, device=device)
+        for call in range(8):
+            x = torch.randn(8, 8, device=device)
+            xs = [x.clone().requires_grad_(), x.clone().requires_grad_()]
+            outs = []
+            with under_autocast(device):
+                for fn, leaf in zip((modes_function, compiled), xs):
+                    outs.append(fn(leaf, w))
+                    outs[-1].sum().backward()
+            self.assertEqual(outs[1], outs[0], atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(xs[1].grad, xs[0].grad, atol=0, rtol=0, msg=f"call {call}")
+        self.assertGreater(region_runs(compiled), 0)
+        self.assertIn("apply_ModesProduct", vm.explain(compiled, view="fx"))
+
+    @isolated
+    def test_call_merged_as_it_is_runs_under_the_callers_autocast(self, device):
+        def merge_note(cfg: vm.Cfg) -> None:
+            for call in cfg.calls():
+                if call.callee is modes_note:
+                    cfg.merge_across(call)
+
+        passes = (*vm.configure(EARLY, pure_calls=3), merge_note)
+        compiled = vm(modes_outer_notes, passes=passes)
+        w = torch.randn(8, 8, device=device)
+        for call in range(8):
+            x = torch.randn(8, 8, device=device)
+            del modes_seen[:]
+            with under_autocast(device):
+                want, got = modes_outer_notes(x, w), compiled(x, w)
+            # The call the pass merged is made once by each, under autocast.
+            self.assertEqual(modes_seen, [torch.bfloat16] * 2, msg=f"call {call}")
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        self.assertGreater(region_runs(compiled), 0)
+        self.assertIn("opaque_modes_note", vm.explain(compiled, view="fx"))
+
+
+instantiate_device_type_tests(TestVmAutocast, globals())
+
+
+def modes_weighted(x, w):
+    return ((x * w).tanh().cos().sin() + x).sum()
+
+
+def lowered(gm, input_types):
+    # A lowering that keeps the graph it was given: what it returns calls it.
+    return vm.lower_to(gm, gm.forward)
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmTracedTensors(TestCase):
+    """The tensors of the call a region was traced on are the caller's to
+    free, as in eager: the passes see them, the region does not keep them."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("passes", ("default", "kept", "lowered", "autograd", "inductor"))
+    @isolated
+    def test_input_of_the_traced_call_is_freed(self, device, passes):
+        behind = {
+            "default": (),
+            "kept": (keep,),
+            "lowered": (lowered,),
+            "autograd": (vm.passes.Autograd(), vm.passes.Partition()),
+            "inductor": (vm.passes.Inductor(),),
+        }[passes]
+        exact = passes not in ("autograd", "inductor")
+        tolerance = {"atol": 0, "rtol": 0} if exact else {"atol": 1e-05, "rtol": 1e-04}
+        size = 1 << 20
+        w = torch.full((size,), 1.5, device=device)
+        compiled = vm(modes_weighted, passes=(*EARLY, *behind))
+        inputs = []
+        for call in range(12):
+            # 4 MiB that only this call refers to.
+            x = torch.randn(size, device=device)
+            inputs.append(weakref.ref(x))
+            got, want = compiled(x, w), modes_weighted(x, w)
+            self.assertEqual(got, want, msg=f"call {call}", **tolerance)
+            del x, got, want
+        gc.collect()
+        alive = [call for call, ref in enumerate(inputs) if ref() is not None]
+        self.assertEqual(alive, [])
+        # No other tensor of that size is left either (a copy of an input).
+        left = [t for t in gc.get_objects() if type(t) is torch.Tensor and t is not w]
+        self.assertEqual([t.shape for t in left if t.numel() == size], [])
+        # The region runs on, and still says what it was traced for.
+        before = region_runs(compiled)
+        self.assertGreater(before, 0)
+        x = torch.randn(size, device=device)
+        self.assertEqual(compiled(x, w), modes_weighted(x, w), **tolerance)
+        self.assertGreater(region_runs(compiled), before)
+        self.assertIn(f"f32[{size}]", vm.explain(compiled))
+
+    @isolated
+    def test_gradients_of_the_traced_step_are_freed(self, device):
+        # The optimizer's region is handed every gradient. With the gradients
+        # set to None at the start of a step, only the last step's are alive.
+        def make():
+            torch.manual_seed(0)
+            layers = [torch.nn.Linear(64, 64), torch.nn.Tanh(), torch.nn.Linear(64, 8)]
+            net = torch.nn.Sequential(*layers).to(device)
+            optimizer = torch.optim.Adam(net.parameters(), lr=0.001)
+
+            def step(x):
+                optimizer.zero_grad(set_to_none=True)
+                loss = net(x).square().mean()
+                loss.backward()
+                optimizer.step()
+                return loss.detach()
+
+            return net, step
+
+        (net, step), (eager_net, eager_step) = make(), make()
+        compiled = vm(step, passes=EARLY)
+        alive = []
+        for call in range(12):
+            x = torch.randn(8, 64, device=device)
+            got, want = compiled(x), eager_step(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            alive.append([weakref.ref(p.grad) for p in net.parameters()])
+        weights, expected = list(net.parameters()), list(eager_net.parameters())
+        self.assertEqual(weights, expected, atol=0, rtol=0)
+        gc.collect()
+        alive = [any(ref() is not None for ref in refs) for refs in alive]
+        self.assertEqual(alive, [False] * 11 + [True])
+        rows = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertTrue(any("adam" in r["where"] and r["runs"] for r in rows), msg=rows)
+
+    @parametrize("optimizer", ("Adam", "AdamW"))
+    @isolated
+    def test_foreach_optimizer_step_is_a_region(self, device, optimizer):
+        # The foreach form (the default on a GPU) hands its operators lists of
+        # tensors of different sizes, with floats it computes from the
+        # learning rate and from the step count it reads from a tensor: all
+        # inputs of the region's graph, so one region serves every step.
+        def make():
+            torch.manual_seed(0)
+            layers = [torch.nn.Linear(64, 64), torch.nn.Tanh(), torch.nn.Linear(64, 8)]
+            net = torch.nn.Sequential(*layers).to(device)
+            opt = getattr(torch.optim, optimizer)(net.parameters(), foreach=True)
+
+            def step(x):
+                opt.zero_grad(set_to_none=True)
+                loss = net(x).square().mean()
+                loss.backward()
+                opt.step()
+                return loss.detach()
+
+            return net, opt, step
+
+        (net, opt, step), (eager_net, eager_opt, eager_step) = make(), make()
+        compiled = vm(step, passes=EARLY)
+        for call in range(12):
+            # As a scheduler does between steps.
+            lr = 0.001 * 0.9**call
+            opt.param_groups[0]["lr"] = eager_opt.param_groups[0]["lr"] = lr
+            x = torch.randn(8, 64, device=device)
+            got, want = compiled(x), eager_step(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        weights, expected = list(net.parameters()), list(eager_net.parameters())
+        self.assertEqual(weights, expected, atol=0, rtol=0)
+        rows = [r for r in vm.regions(compiled) if "_multi_tensor_adam" in r["where"]]
+        rows = [r for r in rows if r["state"] != "not movable"]
+        steps = [r for r in rows if r["state"] == "region" and r["runs"]]
+        self.assertTrue(steps, msg=str(rows))
+        # A float is checked by value only where the code branches on it (the
+        # weight decay): another learning rate is no miss.
+        decay = f"(float) == {opt.defaults['weight_decay']!r}"
+        for r in steps:
+            self.assertEqual(r["misses"], {}, msg=str(r))
+            self.assertEqual([v for v in r["values"] if not v.endswith(decay)], [])
+
+    @isolated
+    def test_foreach_sgd_step_with_momentum_is_a_region(self, device):
+        # The foreach form collects the momentum buffers in a list it makes,
+        # appends to and hands to its operators: a write to a list the run
+        # made and hands to nobody is no write of the region.
+        def make():
+            torch.manual_seed(0)
+            layers = [torch.nn.Linear(64, 64), torch.nn.Tanh(), torch.nn.Linear(64, 8)]
+            net = torch.nn.Sequential(*layers).to(device)
+            opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9, foreach=True)
+
+            def step(x):
+                opt.zero_grad(set_to_none=True)
+                loss = net(x).square().mean()
+                loss.backward()
+                opt.step()
+                return loss.detach()
+
+            return net, step
+
+        (net, step), (eager_net, eager_step) = make(), make()
+        compiled = vm(step, passes=EARLY)
+        for call in range(12):
+            x = torch.randn(8, 64, device=device)
+            got, want = compiled(x), eager_step(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        weights, expected = list(net.parameters()), list(eager_net.parameters())
+        self.assertEqual(weights, expected, atol=0, rtol=0)
+        rows = [r for r in vm.regions(compiled) if "_multi_tensor_sgd" in r["where"]]
+        rows = [r for r in rows if r["state"] != "not movable"]
+        steps = [r for r in rows if r["state"] == "region" and r["runs"]]
+        self.assertTrue(steps, msg=str(rows))
+        for r in steps:
+            self.assertEqual(r["misses"], {}, msg=str(r))
+
+
+instantiate_device_type_tests(TestVmTracedTensors, globals())
+
+
+class ModesWeights(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(8, 8))
+        self.b = torch.nn.Parameter(torch.randn(8))
+
+    def forward(self, x):
+        y = torch.mm(x, self.w) + self.b
+        return (y.reshape(y.shape[0] * y.shape[1]).tanh() * 2 + 1).cos()
+
+
+def modes_chained(x, w):
+    y = (x * w).sin().cos().tanh()
+    # No region holds this call: the tensor work is two regions.
+    time.perf_counter()
+    return (y + x).sin().cos().tanh() * 2
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmConstants(TestCase):
+    """A region's constants are the tensors its graph reads that are none of
+    its arguments: a module's weights."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def bound(self, log):
+        """A block pass whose lowering takes the constants once: it notes when
+        it is bound and what it is called with, and does not look at the
+        constants when it is called."""
+
+        def lower(gm, input_types):
+            def bind(consts):
+                where = [vm.address(c) for c in consts]
+                log.append(("bind", len(consts)))
+
+                def call(*inputs):
+                    log.append(("call", len(inputs)))
+                    # Between two binds the constants are where they were.
+                    now = [vm.address(c) for c in consts]
+                    if now != where:
+                        raise AssertionError("a constant moved and bind was not called")
+                    return gm.forward(*inputs, *consts)
+
+                return call
+
+            return vm.lower_to(gm, bind=bind)
+
+        return lower
+
+    @isolated
+    def test_weight_given_another_shape_is_traced_again(self, device):
+        # `param.data = ...` leaves the parameter the object it was. The graph
+        # is for its shape: a region is entered while its constants have the
+        # metadata of the trace.
+        net = ModesWeights().to(device)
+        compiled = vm(net.forward, passes=EARLY)
+        for call in range(14):
+            x = torch.randn(4, 8, device=device)
+            if call == 8:
+                net.w.data = torch.randn(8, 8, device=device)
+            if call == 11:
+                net.w.data = torch.randn(8, 16, device=device)
+                net.b.data = torch.randn(16, device=device)
+            with torch.no_grad():
+                want, got = net(x), compiled(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        (row,) = (r for r in vm.regions(compiled) if r["state"] == "region")
+        # The swap to the same shape is no miss; the other shape is one, and
+        # gets a region of its own.
+        self.assertEqual((row["variants"], sum(row["misses"].values())), (2, 1))
+
+    @parametrize("lowering", ("autograd", "inductor"))
+    @isolated
+    def test_weight_that_starts_to_require_grad(self, device, lowering):
+        # What AOT Autograd made of the region while the weight took no
+        # gradient has no backward: the region is traced again when it does.
+        behind = {
+            "autograd": (vm.passes.Autograd(), vm.passes.Partition()),
+            "inductor": (vm.passes.Inductor(),),
+        }[lowering]
+        net = ModesWeights().to(device).requires_grad_(False)
+        compiled = vm(net.forward, passes=(*EARLY, *behind))
+        for call in range(12):
+            x = torch.randn(4, 8, device=device)
+            if call == 8:
+                net.w.requires_grad_(True)
+            grads = []
+            for fn in (net, compiled):
+                out = fn(x).sum()
+                self.assertEqual(out.requires_grad, call >= 8, msg=f"call {call}")
+                net.w.grad = None
+                if call >= 8:
+                    out.backward()
+                grads.append(net.w.grad)
+            msg, close = f"call {call}", {"rtol": 1e-04, "atol": 1e-05}
+            self.assertEqual(grads[1], grads[0], msg=msg, **close)
+        self.assertGreater(region_runs(compiled), 0)
+
+    @isolated
+    def test_lowering_is_bound_to_the_constants(self, device):
+        log = []
+        net = ModesWeights().to(device)
+        compiled = vm(net.forward, passes=(*EARLY, self.bound(log)))
+        seen = []
+        for call in range(16):
+            x = torch.randn(4, 8, device=device)
+            with torch.no_grad():
+                if call == 8:
+                    net.w.add_(1)
+                if call == 10:
+                    net.w.data = torch.randn(8, 8, device=device)
+                if call == 13:
+                    net.b.data = torch.randn(8, device=device)
+                want = net(x)
+                del log[:]
+                got = compiled(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            seen.append(list(log))
+        # Bound at the trace (the fourth call), and again before the calls at
+        # which a weight's memory was another; a weight written in place
+        # (call 8) is read where it is. Every call hands over the one input
+        # that is no constant.
+        binds = [at for at, entries in enumerate(seen) if ("bind", 2) in entries]
+        self.assertEqual(binds, [3, 10, 13])
+        self.assertEqual(seen[4:10], [[("call", 1)]] * 6)
+        self.assertEqual(seen[10], [("bind", 2), ("call", 1)])
+
+    @isolated
+    def test_bound_lowering_of_each_region_has_its_own_constants(self, device):
+        # Two layers of one class have the same graph, and share what the
+        # passes made of it: each region binds the lowering to its own weights.
+        log = []
+        first, second = ModesWeights().to(device), ModesWeights().to(device)
+
+        def both(x):
+            return first(x), second(x)
+
+        compiled = vm(both, passes=(*EARLY, self.bound(log)))
+        for call in range(8):
+            x = torch.randn(4, 8, device=device)
+            with torch.no_grad():
+                want, got = both(x), compiled(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        self.assertEqual(log.count(("bind", 2)), 2)
+        self.assertGreater(region_runs(compiled), 0)
+
+    def test_bound_lowering_called_with_every_input(self, device):
+        # What `verify`, or a pass that wraps the lowering, does: then the
+        # lowering looks at the constants itself.
+        gm = torch.fx.symbolic_trace(lambda x, w: x * w + 1)
+        gm.meta["vm_const_inputs"] = ["w"]
+        binds = []
+
+        def bind(consts):
+            binds.append(list(consts))
+            return lambda x: x * consts[0] + 1
+
+        lowered = vm.lower_to(gm, bind=bind)
+        x, w = torch.randn(4, device=device), torch.randn(4, device=device)
+        other = torch.randn(4, device=device)
+        self.assertEqual(lowered(x, w), x * w + 1)
+        self.assertEqual(lowered(x + 1, w), (x + 1) * w + 1)
+        self.assertEqual(len(binds), 1)
+        self.assertEqual(lowered(x, other), x * other + 1)
+        w.data = torch.randn(4, device=device)
+        self.assertEqual(lowered(x, w), x * w + 1)
+        self.assertEqual([c[0] is w for c in binds], [True, False, True])
+        with self.assertRaisesRegex(TypeError, "bind="):
+            vm.lower_to(gm)
+
+    @isolated
+    def test_input_type_says_which_region_made_the_input(self, device):
+        seen = []
+
+        def look(gm, input_types):
+            seen.append([t.made_by for t in input_types])
+            return gm
+
+        compiled = vm(modes_chained, passes=(*EARLY, look))
+        w = torch.randn(8, device=device)
+        for _ in range(8):
+            x = torch.randn(8, device=device)
+            self.assertEqual(compiled(x, w), modes_chained(x, w), atol=0, rtol=0)
+        rows = [r["where"] for r in vm.regions(compiled) if r["state"] == "region"]
+        # The second region's first input is what the first region gave.
+        self.assertEqual(seen, [[None, None], [(rows[0], 0), None]])
+
+
+instantiate_device_type_tests(TestVmConstants, globals())
+
+
+def modes_written(a, b):
+    # Writes one input and then reads the other: what the read sees depends
+    # on whether the two overlap.
+    a.add_(1.0)
+    c = b * 2.0
+    a.mul_(c.sum().tanh())
+    return (a - b).tanh() + c
+
+
+class ModesShared(torch.nn.Module):
+    """A weight in the middle of a larger piece of memory, so that an input
+    can overlap it."""
+
+    def __init__(self, device):
+        super().__init__()
+        self.store = torch.zeros(16, device=device)
+        self.w = torch.nn.Parameter(self.store[4:12], requires_grad=False)
+
+    def forward(self, x):
+        x.add_(1.0)
+        c = self.w * 2.0
+        x.mul_(c.sum().tanh())
+        return (x - self.w).tanh() + c
+
+
+# Put on the test's device by the test.
+MODES_READ = torch.arange(8.0) / 8
+
+
+def modes_reading(x, w):
+    # Reads a global tensor, and is given a tensor that may be that one.
+    a = x * w
+    b = a + MODES_READ.sum()
+    return (b.tanh() - w) * 2.0 + MODES_READ
+
+
+def modes_reads_memory(x):
+    return ((x * 2 + 1).sin() * x).cos() + x
+
+
+MODES_LISTS = {
+    "default": EARLY,
+    "autograd": (*EARLY, vm.passes.Autograd(), vm.passes.Partition()),
+    "inductor": (*EARLY, vm.passes.Inductor()),
+    "fast": vm.configure(vm.FAST, regions={"at": 3, "observe": 1}, pure_calls=1),
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmSharedMemory(TestCase):
+    """A region whose graph block passes rewrote or lowered runs on calls
+    whose tensors share memory as the traced call's did; another call is
+    traced for itself. Eager's result either way, in the inputs too."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def inputs(self, device, call, apart, overlap, net):
+        # The arguments of a call, and the memory to look at after it.
+        torch.manual_seed(call)
+        base, other = torch.randn(16, device=device), torch.randn(16, device=device)
+        if overlap == "read":
+            return (base[0:8], other[0:8] if apart else MODES_READ), [base]
+        if net is not None:
+            with torch.no_grad():
+                net.store.copy_(torch.arange(16.0, device=device) / 16 + call / 8)
+            if apart:
+                return (base[0:8],), [base, net.store]
+            x = net.store[0:8] if overlap == "partial" else net.w.detach()
+            return (x,), [net.store]
+        if apart:
+            return (base[0:8], other[0:8]), [base, other]
+        if overlap == "same":
+            a = base[0:8]
+            return (a, a), [base]
+        return (base[0:8], base[4:12] if overlap == "partial" else base[0:8]), [base]
+
+    def calls(self, device, passes, overlap, traced, module=None, fn=modes_written):
+        nets = (module(device), module(device)) if module else (None, None)
+        eager = nets[0] if module else fn
+        compiled = vm(nets[1] if module else fn, passes=MODES_LISTS[passes])
+        exact, close = {"atol": 0, "rtol": 0}, {"atol": 1e-05, "rtol": 1e-04}
+        tolerance = exact if passes == "default" else close
+        runs = []
+        # Six calls as the region is traced (on the fourth), five the other
+        # way, four as it was traced again.
+        for call in range(15):
+            apart = (traced == "apart") == (call < 6 or call >= 11)
+            args, memory = self.inputs(device, call, apart, overlap, nets[0])
+            want = [eager(*args), *memory]
+            args, memory = self.inputs(device, call, apart, overlap, nets[1])
+            got = [compiled(*args), *memory]
+            self.assertEqual(got, want, msg=f"call {call}", **tolerance)
+            runs.append(region_runs(compiled))
+        # Regions ran each way.
+        self.assertGreater(runs[5], 0)
+        self.assertGreater(runs[10], runs[6])
+        self.assertGreater(runs[14], runs[10])
+
+    @parametrize("traced", ("apart", "overlapping"))
+    @parametrize("passes", list(MODES_LISTS))
+    @isolated
+    def test_inputs_that_overlap_on_some_calls(self, device, passes, traced):
+        self.calls(device, passes, "partial", traced)
+
+    @parametrize("traced", ("apart", "overlapping"))
+    @parametrize("passes", ("default", "inductor"))
+    @isolated
+    def test_one_tensor_given_twice_on_some_calls(self, device, passes, traced):
+        # Traced when the two are one object, the graph has one input for
+        # both: every list needs them to be one object again.
+        self.calls(device, passes, "same", traced)
+
+    @parametrize("traced", ("apart", "overlapping"))
+    @parametrize("passes", list(MODES_LISTS))
+    @isolated
+    def test_input_over_a_weight_on_some_calls(self, device, passes, traced):
+        self.calls(device, passes, "exact", traced, module=ModesShared)
+
+    @parametrize("bit", ["conjugate", "negative"])
+    @parametrize("passes", list(MODES_LISTS))
+    @isolated
+    def test_bit_that_says_how_memory_is_read(self, device, passes, bit):
+        # A kernel made for the trace's tensors reads memory as theirs was:
+        # a tensor with another conjugate or negative bit is a call of its
+        # own.
+        compiled = vm(modes_reads_memory, passes=MODES_LISTS[passes])
+        dtype = torch.cfloat if bit == "conjugate" else torch.float
+        mark = torch.conj if bit == "conjugate" else torch._neg_view
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, dtype=dtype, device=device)
+            x = mark(x) if call >= 6 else x
+            want = modes_reads_memory(x)
+            self.assertEqual(compiled(x), want, msg=f"call {call}")
+        self.assertGreater(region_runs(compiled), 0)
+
+    @isolated
+    def test_input_that_overlaps_a_weight_in_part(self, device):
+        self.calls(device, "inductor", "partial", "apart", module=ModesShared)
+
+    @parametrize("traced", ("apart", "overlapping"))
+    @parametrize("passes", ("default", "inductor"))
+    @isolated
+    def test_argument_that_is_a_tensor_the_body_reads(self, device, passes, traced):
+        # Traced when the argument is the global tensor, the graph has one
+        # input for the argument and for what the body read.
+        global MODES_READ
+        MODES_READ = MODES_READ.to(device)
+        self.calls(device, passes, "read", traced, fn=modes_reading)
+
+    def relation(self, inputs, consts=(), read=()):
+        relation = torch._rust.Overlap(list(inputs), list(consts))
+        relation.also_read(list(inputs), list(read))
+        return relation
+
+    def test_relation_traced_apart(self, device):
+        a, b, w = (torch.zeros(8, device=device) for _ in range(3))
+        r = self.relation([a, b], [w])
+        base = torch.zeros(16, device=device)
+        empty = torch.zeros(0, device=device)
+        for inputs, holds in (
+            ([torch.zeros(8, device=device), torch.zeros(8, device=device)], True),
+            ([a, empty], True),
+            # One storage, and apart in it: a view made of one reaches the
+            # other.
+            ([base[0:8], base[8:16]], False),
+            ([base[0:8], base[0:0]], False),
+            ([base[0:8], base[4:12]], False),
+            ([base[0:8], base[0:8]], False),
+            ([a, a], False),
+            ([a, w], False),
+            ([a, w.detach()], False),
+            ([a, w[2:6]], False),
+        ):
+            self.assertEqual(r.holds(inputs), holds, msg=f"{inputs}")
+
+    def test_relation_traced_overlapping(self, device):
+        base = torch.zeros(16, device=device)
+        r = self.relation([base[0:8], base[4:12]])
+        other = torch.zeros(16, device=device)
+        self.assertTrue(r.holds([other[0:8], other[4:12]]))
+        # As far apart, somewhere else in the storage: the same relation.
+        self.assertTrue(r.holds([other[2:10], other[6:14]]))
+        # What a lowering makes of a graph that writes is for where each
+        # is in the storage.
+        lowered = torch._rust.Overlap([base[0:8], base[4:12]], [], True)
+        self.assertTrue(lowered.holds([other[0:8], other[4:12]]))
+        self.assertFalse(lowered.holds([other[2:10], other[6:14]]))
+        self.assertFalse(r.holds([other[0:8], other[2:10]]))
+        self.assertFalse(r.holds([other[0:8], base[4:12]]))
+        a = other[0:8]
+        self.assertFalse(r.holds([a, a]))
+        self.assertNotEqual(r.key(), self.relation([base[0:8], other[0:8]]).key())
+        self.assertEqual(r.key(), self.relation([other[0:8], other[4:12]]).key())
+
+    def test_relation_of_elements_that_interleave(self, device):
+        # Spans are compared: two columns count as overlapping, and a call
+        # stands as the trace did when they are the same two columns.
+        m, n = torch.zeros(4, 4, device=device), torch.zeros(4, 4, device=device)
+        r = self.relation([m[:, 0], m[:, 1]])
+        self.assertTrue(r.holds([n[:, 0], n[:, 1]]))
+        self.assertFalse(r.holds([n[:, 0], n[:, 2]]))
+        self.assertFalse(r.holds([n[:, 0], m[:, 1]]))
+
+    def test_relation_traced_with_one_tensor_twice(self, device):
+        a, b = torch.zeros(8, device=device), torch.zeros(8, device=device)
+        r = self.relation([a, a, b])
+        self.assertTrue(r.needed)
+        self.assertTrue(r.holds([b, b, a]))
+        self.assertFalse(r.holds([a, a.detach(), b]))
+        self.assertFalse(r.holds([a, b, b]))
+        # Traced with two tensors, a graph is for two, as traced or lowered.
+        r = self.relation([a, b])
+        self.assertTrue(r.needed)
+        self.assertFalse(r.holds([a, a]))
+        # One tensor stands to no other.
+        self.assertFalse(self.relation([a]).needed)
+
+    def test_relation_of_an_input_the_body_also_read(self, device):
+        a, w = torch.zeros(8, device=device), torch.zeros(8, device=device)
+        r = self.relation([a, w], read=[1])
+        self.assertTrue(r.needed)
+        self.assertTrue(r.holds([torch.zeros(8, device=device), w]))
+        self.assertFalse(r.holds([a, torch.zeros(8, device=device)]))
+        r = self.relation([w], read=[0])
+        self.assertTrue(r.needed)
+        self.assertTrue(r.holds([w]))
+        self.assertFalse(r.holds([a]))
+
+    def test_memory_that_two_storages_share(self, device):
+        # Memory handed to PyTorch twice is two storages over the same
+        # addresses: the relation goes by addresses.
+        if torch.device(device).type != "cpu":
+            self.skipTest("memory from a buffer is the CPU's")
+        memory = bytearray(64)
+        a = torch.frombuffer(memory, dtype=torch.float32)
+        b = torch.frombuffer(memory, dtype=torch.float32)
+        r = self.relation([torch.zeros(16), torch.zeros(16)])
+        self.assertFalse(r.two_storages)
+        self.assertFalse(r.holds([a, b]))
+        r = self.relation([a, b])
+        self.assertTrue(r.two_storages)
+        self.assertTrue(r.holds([b, a]))
+        self.assertFalse(r.holds([a, a[:]]))
+
+    def test_documented_limit_memory_at_two_addresses(self, device):
+        # One file mapped twice is the same memory at two addresses: nothing
+        # in PyTorch knows that the two overlap.
+        if torch.device(device).type != "cpu":
+            self.skipTest("a mapped file is the CPU's")
+        with tempfile.NamedTemporaryFile() as file:
+            file.write(bytes(64))
+            file.flush()
+            a = torch.from_file(file.name, shared=True, size=16)
+            b = torch.from_file(file.name, shared=True, size=16)
+            a[0] = 1.0
+            self.assertEqual(b[0].item(), 1.0)
+            r = self.relation([torch.zeros(16), torch.zeros(16)])
+            self.assertTrue(r.holds([a, b]))
+
+    def test_relation_follows_a_constant_whose_memory_moved(self, device):
+        x, w, v = (torch.zeros(8, device=device) for _ in range(3))
+        base = torch.zeros(16, device=device)
+        r = self.relation([x], [w, v])
+        self.assertTrue(r.holds([base[0:8]]))
+        w.data = base[4:12]
+        self.assertFalse(r.holds([base[0:8]]))
+        self.assertTrue(r.holds([x]))
+        v.data = base[8:16]
+        self.assertFalse(r.holds([x]))
+        v.data = torch.zeros(8, device=device)
+        self.assertTrue(r.holds([x]))
+
+
+instantiate_device_type_tests(TestVmSharedMemory, globals())
+
+
+def modes_single(x):
+    # One tensor in, and no weight.
+    h = torch.tanh(x * 2.0)
+    return ((h - 1.0) ** 2).sum() + h.mean()
+
+
+def modes_detaching(device):
+    torch.manual_seed(0)
+    lin = torch.nn.Linear(8, 8).to(device)
+
+    def step(x):
+        lin.zero_grad(set_to_none=True)
+        h = torch.tanh(lin(x))
+        # No gradient goes through the target.
+        target = h.detach().mean(0)
+        loss = ((h - target) ** 2).sum() + (h * target).sum()
+        loss.backward()
+        return loss.detach(), lin.weight.grad.clone()
+
+    return step
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmGradients(TestCase):
+    """What is made of a region's graph differentiates as the program does."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @isolated
+    def test_region_with_one_input_is_differentiated(self, device):
+        # The joint graph of such a region has more inputs than the region.
+        compiled = vm(modes_single, passes=MODES_LISTS["autograd"])
+        for call in range(9):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            a, b = x.clone().requires_grad_(), x.clone().requires_grad_()
+            want, got = modes_single(a), compiled(b)
+            want.backward()
+            got.backward()
+            msg = f"call {call}"
+            self.assertEqual(got, want, atol=1e-05, rtol=1e-04, msg=msg)
+            self.assertEqual(b.grad, a.grad, atol=1e-05, rtol=1e-04, msg=msg)
+        self.assertGreater(region_runs(compiled), 0)
+
+    @parametrize("passes", list(MODES_LISTS))
+    @isolated
+    def test_gradient_stops_at_a_detach(self, device, passes):
+        eager = modes_detaching(device)
+        compiled = vm(modes_detaching(device), passes=MODES_LISTS[passes])
+        exact, close = {"atol": 0, "rtol": 0}, {"atol": 1e-05, "rtol": 1e-04}
+        tolerance = exact if passes == "default" else close
+        for call in range(9):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            want, got = eager(x), compiled(x)
+            self.assertEqual(got, want, msg=f"call {call}", **tolerance)
+        self.assertGreater(region_runs(compiled), 0)
+
+    @parametrize("passes", ("autograd", "inductor", "fast"))
+    @isolated
+    def test_backward_of_a_region_for_a_second_size(self, device, passes):
+        # A backward graph is compiled when the backward first runs: for the
+        # second size, in a call of the program's that traces nothing.
+        eager = modes_detaching(device)
+        compiled = vm(modes_detaching(device), passes=MODES_LISTS[passes])
+        for call in range(10):
+            torch.manual_seed(call)
+            x = torch.randn(5 if call >= 6 else 4, 8, device=device)
+            want, got = eager(x), compiled(x)
+            self.assertEqual(got, want, msg=f"call {call}", atol=1e-05, rtol=1e-04)
+        self.assertGreater(region_runs(compiled), 0)
+
+    @isolated
+    def test_pattern_with_a_detach_matches(self, device):
+        found = []
+
+        def look(gm, input_types):
+            def pattern(h):
+                return h.detach().mean(0)
+
+            found.append(len(vm.match(gm, pattern)))
+            return gm
+
+        compiled = vm(modes_detaching(device), passes=(*EARLY, look))
+        for call in range(9):
+            compiled(torch.randn(4, 8, device=device))
+        self.assertGreater(region_runs(compiled), 0)
+        self.assertIn(1, found)
+
+
+instantiate_device_type_tests(TestVmGradients, globals())
+
+
+def modes_keeps(log):
+    """A block pass that keeps a copy of each weight, under vm.Unwritten, and
+    computes with the copies: what it derived from the weights' content. It
+    notes when it kept copies and when it could not place the guard."""
+
+    def keeps(gm, input_types):
+        kept = {}
+        placeholders = gm.graph.find_nodes(op="placeholder")
+        for i, (placeholder, t) in enumerate(zip(placeholders, input_types)):
+            if not t.is_const:
+                continue
+            try:
+                vm.guard(gm, placeholder, vm.Unwritten())
+            except vm.CannotGuard:
+                log.append("cannot")
+                continue
+            kept[i] = t.const.detach().clone()
+        if not kept:
+            return gm
+        log.append("kept")
+        run = gm.forward
+
+        def with_copies(*inputs):
+            return run(*[kept.get(i, x) for i, x in enumerate(inputs)])
+
+        return vm.lower_to(gm, with_copies)
+
+    return keeps
+
+
+class ModesWeight(torch.nn.Module):
+    def __init__(self, weight=None):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(8, 8) if weight is None else weight)
+
+    def forward(self, x):
+        return (torch.mm(x, self.w).tanh() * 2 + 1).cos()
+
+
+def modes_on_storage(p):
+    return torch.empty(0, device=p.device).set_(p.untyped_storage(), 0, p.shape)
+
+
+# Ways of writing to a weight `p` through PyTorch.
+MODES_WRITES = {
+    "in_place": lambda p: p.add_(1),
+    "through_a_view": lambda p: p[0].add_(1),
+    "through_detach": lambda p: p.detach().add_(1),
+    "through_data": lambda p: p.data.add_(1),
+    "through_a_tensor_on_its_storage": lambda p: modes_on_storage(p).add_(1),
+    "data_swapped": lambda p: setattr(p, "data", torch.randn_like(p)),
+    "copied_into": lambda p: p.copy_(torch.randn_like(p)),
+    "under_inference_mode": lambda p: torch.inference_mode()(lambda: p.add_(1))(),
+}
+# Ways of handing out the address of its memory, without a write.
+MODES_EXPORTS = {
+    "data_ptr": lambda p: p.data_ptr(),
+    "numpy": lambda p: p.detach().numpy(),
+    "dlpack": lambda p: torch.from_dlpack(p.detach()),
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmUnwritten(TestCase):
+    """vm.Unwritten: what a pass derived from a weight's content stands until
+    something writes to the weight through PyTorch."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, device, net, compiled, at_7, n=12):
+        """Calls 0 to n - 1 against eager's; ``at_7(net.w)`` before call 7."""
+        equal = []
+        for call in range(n):
+            x = torch.randn(4, 8, device=device)
+            with torch.no_grad():
+                if call == 7:
+                    at_7(net.w)
+                want, got = net(x), compiled(x)
+            equal.append(bool(torch.equal(got, want)))
+        return equal
+
+    @parametrize("way", list(MODES_WRITES))
+    @isolated
+    def test_write_fails_the_guard(self, device, way):
+        log = []
+        net = ModesWeight().to(device)
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+        equal = self.calls(device, net, compiled, MODES_WRITES[way])
+        self.assertEqual(equal, [True] * 12)
+        # The call after the write was traced again, and there the guard
+        # could not be placed a second time: no copy is kept any more.
+        self.assertEqual(log, ["kept", "cannot"])
+        (row,) = (r for r in vm.regions(compiled) if r["state"] == "region")
+        self.assertEqual((row["variants"], sum(row["misses"].values())), (2, 1))
+
+    @parametrize("way", list(MODES_EXPORTS))
+    @isolated
+    def test_address_handed_out_fails_the_guard(self, device, way):
+        if way != "data_ptr" and torch.device(device).type != "cpu":
+            self.skipTest("NumPy and DLPack share the memory of CPU tensors")
+        log = []
+        net = ModesWeight().to(device)
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+        equal = self.calls(device, net, compiled, MODES_EXPORTS[way])
+        self.assertEqual(equal, [True] * 12)
+        self.assertEqual(log, ["kept", "cannot"])
+
+    @isolated
+    def test_reads_leave_the_guard(self, device):
+        def reads(p):
+            x = torch.randn(4, 8, device=p.device)
+            return p @ p, torch.nn.functional.linear(x, p), p.sum(), p.clone(), p.half()
+
+        log = []
+        net = ModesWeight().to(device)
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+        self.assertEqual(self.calls(device, net, compiled, reads), [True] * 12)
+        self.assertEqual(log, ["kept"])
+        (row,) = (r for r in vm.regions(compiled) if r["state"] == "region")
+        self.assertEqual((row["variants"], row["misses"]), (1, {}))
+
+    @isolated
+    def test_reported_write_places_the_guard_again(self, device):
+        # What compiled code does after it wrote to a tensor: it bumps the
+        # version counter, and nothing asked PyTorch for the memory. The
+        # guard fails, and can be placed anew: the pass derives again.
+        log = []
+        net = ModesWeight().to(device)
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+        bump = torch.autograd.graph.increment_version
+        self.assertEqual(self.calls(device, net, compiled, bump), [True] * 12)
+        self.assertEqual(log, ["kept", "kept"])
+
+    @isolated
+    def test_memory_that_is_not_pytorchs_alone_takes_no_guard(self, device):
+        if torch.device(device).type != "cpu":
+            self.skipTest("memory shared with NumPy is CPU memory")
+        # A NumPy array over the weight's memory, made before the pass looks:
+        # a write through it could not be seen, so the guard is not placed.
+        log = []
+        net = ModesWeight()
+        alias = net.w.detach().numpy()
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+        equal = self.calls(device, net, compiled, lambda p: alias.fill(1.0))
+        self.assertEqual((equal, log), ([True] * 12, ["cannot"]))
+
+    @isolated
+    def test_documented_limit_write_through_an_address_taken_before(self, device):
+        # THE LIMIT OF vm.Unwritten, shown, not covered: an address that
+        # left PyTorch before the guard was placed. Nothing in PyTorch sees a
+        # write through it (the version counter does not either), the guard
+        # holds, and the region computes with what the pass derived.
+        if torch.device(device).type != "cpu":
+            self.skipTest("a write through a raw address of host memory")
+        log = []
+        net = ModesWeight()
+        address = net.w.data_ptr()
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+
+        def poke(p):
+            ctypes.memset(address, 0, p.numel() * p.element_size())
+
+        equal = self.calls(device, net, compiled, poke)
+        self.assertEqual(log, ["kept"])
+        self.assertEqual(equal, [True] * 7 + [False] * 5)
+
+    def test_guard_goes_on_a_weight_while_the_pass_runs(self, device):
+        gm = torch.fx.symbolic_trace(lambda x, w: x * w + 1)
+        x, w = gm.graph.find_nodes(op="placeholder")
+        gm.meta["vm_const_inputs"] = ["w"]
+        with self.assertRaisesRegex(vm.CannotGuard, "goes on a weight"):
+            vm.guard(gm, x, vm.Unwritten())
+        with self.assertRaisesRegex(vm.CannotGuard, "while the pass runs"):
+            vm.guard(gm, w, vm.Unwritten())
+
+
+instantiate_device_type_tests(TestVmUnwritten, globals())
+
+
+def modes_around(x, k):
+    # Four operations in front of the construct under test and four behind.
+    return (((x.sin() * 2).cos() + 1).tanh() * k + 1).cos().tanh().exp()
+
+
+class ModesBox:
+    def __init__(self):
+        self.n = 0.0
+
+
+# State that outlives a call, made anew by modes_reset.
+MODES_IT = MODES_KEPT = MODES_W = MODES_BOX = MODES_SEEN = None
+
+
+def modes_reset(device):
+    global MODES_IT, MODES_KEPT, MODES_W, MODES_BOX, MODES_SEEN
+    MODES_IT = iter([float(i) for i in range(64)])
+    MODES_KEPT = [3.0, 1.0, 2.0]
+    MODES_W = torch.ones(8, device=device)
+    MODES_BOX = ModesBox()
+    MODES_SEEN = collections.defaultdict(float)
+
+
+def modes_state():
+    left = MODES_IT.__length_hint__()
+    flags = (torch.is_grad_enabled(), MODES_W.requires_grad)
+    return left, list(MODES_KEPT), flags, MODES_BOX.n, sorted(MODES_SEEN)
+
+
+# C code takes items from an iterator that outlives the call.
+def modes_unpack(x):
+    (k,) = itertools.islice(MODES_IT, 1)
+    return modes_around(x, k)
+
+
+def modes_listed(x):
+    return modes_around(x, list(itertools.islice(MODES_IT, 2))[1])
+
+
+def modes_summed(x):
+    return modes_around(x, sum(itertools.islice(MODES_IT, 2)))
+
+
+def modes_starred(x):
+    return modes_around(x, max(*itertools.islice(MODES_IT, 2)))
+
+
+def modes_zipped(x):
+    return modes_around(x, dict(zip("a", MODES_IT))["a"])
+
+
+# A builtin calls a C callable that changes something.
+def modes_mapped(x):
+    list(map(MODES_KEPT.append, [1.5]))
+    return modes_around(x, len(MODES_KEPT))
+
+
+def modes_keyed(x):
+    sorted([1.5], key=MODES_KEPT.append)
+    return modes_around(x, len(MODES_KEPT))
+
+
+def modes_sentinel(x):
+    for _ in iter(MODES_KEPT.pop, 1.0):
+        break
+    MODES_KEPT.extend([4.0, 5.0])
+    return modes_around(x, len(MODES_KEPT))
+
+
+# A call sets state and runs no operator a graph would record.
+def modes_grad_mode(x):
+    torch._C._set_grad_enabled(False)
+    return modes_around(x, 2.0)
+
+
+def modes_requires_grad(x):
+    MODES_W.requires_grad_(True)
+    return modes_around(x, 2.0)
+
+
+def modes_attribute(x):
+    object.__setattr__(MODES_BOX, "n", MODES_BOX.n + 1.0)
+    return modes_around(x, MODES_BOX.n)
+
+
+def modes_detached(x):
+    h = x * MODES_W
+    h.detach_()
+    return modes_around(h, 2.0)
+
+
+# Reading a key a defaultdict lacks puts the key in.
+def modes_missing(x):
+    return modes_around(x, MODES_SEEN[len(MODES_SEEN)] + len(MODES_SEEN))
+
+
+# Items taken from iterators the function makes itself: no effect.
+def modes_made_zip(x):
+    k = 0.0
+    for u, v in zip(MODES_KEPT, (0.5, 0.25, 2.0)):
+        k = k + u * v
+    return modes_around(x, k)
+
+
+def modes_made_generator(x):
+    return modes_around(x, sum(u * 2 for u in MODES_KEPT) + max(MODES_KEPT))
+
+
+def modes_made_enumerate(x):
+    k = sum(i * u for i, u in enumerate(MODES_KEPT))
+    return modes_around(x, k + len(list(reversed(MODES_KEPT))))
+
+
+# A defaultdict read for keys that are there: the weights a list the
+# function reads holds (an optimizer's state), and a string.
+MODES_WEIGHTS = MODES_PER_WEIGHT = None
+
+
+def modes_keyed_by_weights(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    k = MODES_PER_WEIGHT["steps"] + MODES_PER_WEIGHT[MODES_WEIGHTS[0]]
+    return ((y * k + 1).cos().tanh().exp() * 2).sin()
+
+
+# A C callable that runs operators and is none of torch's own functions:
+# autograd's engine, which also adds to .grad. The backward of prod asks for
+# a size that depends on the data, which a trace gives up at.
+def modes_backward(x):
+    MODES_W.grad = None
+    loss = (MODES_W * x).prod() + (MODES_W * x).sum()
+    loss.backward(retain_graph=True)
+    return loss.detach(), MODES_W.grad.clone()
+
+
+# A node of the autograd graph that is called: AccumulateGrad clones what
+# it is handed (an operator) and binds the clone as its leaf's .grad.
+def modes_node_called(x, node):
+    y = ((x * 2 + 1).sin() * x).cos()
+    node(y.sum(0))
+    return (y + 1).tanh()
+
+
+MODES_ENDS = [
+    modes_unpack,
+    modes_listed,
+    modes_summed,
+    modes_starred,
+    modes_zipped,
+    modes_mapped,
+    modes_keyed,
+    modes_sentinel,
+    modes_grad_mode,
+    modes_requires_grad,
+    modes_attribute,
+    modes_detached,
+    modes_missing,
+]
+
+
+# Every torchvision operator begins by telling a telemetry hook, once per
+# process and key, that it was used. A region exists only after its code ran
+# as written, so the report was made, and no program reads it.
+def modes_logs_usage(x):
+    torch._C._log_api_usage_once("test_vm_modes.modes_logs_usage")
+    return modes_around(x, 2.0)
+
+
+# torch.nn.functional.pad asks whether deterministic algorithms are on: a
+# flag of the thread state every region is checked on.
+def modes_padded(x):
+    return modes_around(torch.nn.functional.pad(x, (0, 1))[:, 1:], 2.0)
+
+
+# C callables that are torch's own way to the operators they ran and are no
+# function of torch's namespaces: the operator module's function for `@`,
+# and a tensor class called with data.
+def modes_matmul_function(x):
+    return modes_around(x, operator.matmul(x, x.t()).sum())
+
+
+def modes_legacy_constructor(x):
+    return modes_around(x, torch.FloatTensor([1.0, 2.0]).sum())
+
+
+def modes_tensor_class(x):
+    return modes_around(x, torch.Tensor([1.0, 2.0]).sum())
+
+
+MODES_STAYS = [
+    modes_made_zip,
+    modes_made_generator,
+    modes_made_enumerate,
+    modes_logs_usage,
+    modes_padded,
+    modes_matmul_function,
+    modes_legacy_constructor,
+    modes_tensor_class,
+]
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmEffects(TestCase):
+    """What C code does to an operand has no effect only for the kinds of
+    operand the engine lists (see exec/shown.rs): everything else ends the
+    region, and the program's state is eager's after every call."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def log(self, device, fn, grad):
+        # Nine calls from a fresh state: what each returned and left behind.
+        modes_reset(device)
+        out = []
+        try:
+            for call in range(9):
+                torch.set_grad_enabled(True)
+                MODES_W.requires_grad_(grad)
+                torch.manual_seed(call)
+                x = torch.randn(4, 8, device=device, requires_grad=grad)
+                y = fn(x)
+                out.append((y.detach(), y.requires_grad, modes_state()))
+        finally:
+            torch.set_grad_enabled(True)
+        return out
+
+    def both(self, device, fn):
+        grad = fn is modes_detached
+        want = self.log(device, fn, grad)
+        compiled = vm(fn, passes=EARLY)
+        self.assertEqual(self.log(device, compiled, grad), want, atol=0, rtol=0)
+        return compiled
+
+    @parametrize("fn", MODES_ENDS, name_fn=lambda fn: fn.__name__[6:])
+    @isolated
+    def test_effect_of_c_code_is_made_on_every_call(self, device, fn):
+        self.both(device, fn)
+
+    @parametrize("fn", MODES_STAYS, name_fn=lambda fn: fn.__name__[6:])
+    @isolated
+    def test_what_has_no_effect_stays_in_a_region(self, device, fn):
+        # Iterators the function makes itself, a builtin of the table that
+        # asks nothing of its arguments, a read of state regions are checked
+        # on: one region for the function.
+        compiled = self.both(device, fn)
+        self.assertGreater(region_runs(compiled), 0)
+        places = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertEqual(len(places), 1)
+
+    @isolated
+    def test_c_callee_that_ran_an_operator_and_was_not_recorded(self, device):
+        # What the call did besides, the operator does not say: it ends the
+        # region, and the leaf has its .grad after every call.
+        leaves = [torch.ones(8, device=device, requires_grad=True) for _ in range(2)]
+        ours, eagers = ((t * 1).grad_fn.next_functions[0][0] for t in leaves)
+        compiled = vm(modes_node_called, passes=EARLY)
+        for call in range(9):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            leaves[0].grad = leaves[1].grad = None
+            got, want = compiled(x, ours), modes_node_called(x, eagers)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(leaves[0].grad, leaves[1].grad, atol=0, rtol=0)
+        rows = [r for r in vm.regions(compiled) if r["function"] == "modes_node_called"]
+        calls = [r["state"] for r in rows if r["kind"] == "call"]
+        self.assertEqual(calls, ["not movable"], msg=str(rows))
+
+    @isolated
+    def test_c_callee_that_ran_operators_and_is_in_no_table(self, device):
+        # The autograd engine, the named case: what its call did besides
+        # running operators, they do not say. It ends the region, and is
+        # made once on every call.
+        modes_reset(device)
+        MODES_W.requires_grad_(True)
+        compiled = vm(modes_backward, passes=EARLY)
+        for call in range(9):
+            torch.manual_seed(call)
+            x = torch.randn(8, device=device)
+            want = modes_backward(x)
+            self.assertEqual(compiled(x), want, atol=0, rtol=0, msg=f"call {call}")
+
+    @isolated
+    def test_defaultdict_read_for_keys_that_are_there(self, device):
+        # The region is found by the list's weights and by the dict's
+        # content: the keys are there when it is entered, so nothing is put
+        # in, and the read sits inside the region. A call on which a key is
+        # not there is a call of its own, and the key is put in.
+        global MODES_WEIGHTS, MODES_PER_WEIGHT
+        MODES_WEIGHTS = [torch.ones(2, device=device)]
+        MODES_PER_WEIGHT = collections.defaultdict(float, steps=0.5)
+        MODES_PER_WEIGHT[MODES_WEIGHTS[0]] = 1.5
+        compiled = vm(modes_keyed_by_weights, passes=EARLY)
+        runs, places = [], 0
+        for call in range(14):
+            if call == 8:
+                # The operations in front of the read and behind it are one
+                # region so far. A weight the dict lacks:
+                places = sum(r["state"] == "region" for r in vm.regions(compiled))
+                MODES_WEIGHTS.insert(0, torch.ones(2, device=device))
+            if call == 11:
+                # A key that was there is gone.
+                del MODES_PER_WEIGHT["steps"]
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            got = compiled(x)
+            # Its keys are the weights and "steps", after the call on the VM.
+            keys = len(MODES_WEIGHTS) + 1
+            self.assertEqual(len(MODES_PER_WEIGHT), keys, msg=f"call {call}")
+            want = modes_keyed_by_weights(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            runs.append(region_runs(compiled))
+        self.assertGreater(runs[7], runs[4])
+        self.assertGreater(runs[10], runs[8])
+        self.assertGreater(runs[13], runs[11])
+        self.assertEqual(places, 1)
+
+
+instantiate_device_type_tests(TestVmEffects, globals())
+
+
+def modes_work(x):
+    return ((x.sin() * 2).cos() + 1).tanh().exp()
+
+
+def modes_id(x):
+    return modes_work(x), id(x)
+
+
+def modes_hash(x):
+    return modes_work(x), hash(x)
+
+
+def modes_id_as_key(x):
+    return modes_work(x), {id(x): 1}
+
+
+def modes_id_of_made(x):
+    y = modes_work(x)
+    return y, id(y)
+
+
+def modes_dunder_hash(x):
+    return modes_work(x), x.__hash__()
+
+
+def modes_id_of_list(x, items):
+    return modes_work(x) + len(items), id(items)
+
+
+def modes_id_of_read(x):
+    return modes_work(x), id(MODES_BOX)
+
+
+MODES_WHICH = [
+    modes_id,
+    modes_hash,
+    modes_id_as_key,
+    modes_id_of_made,
+    modes_dunder_hash,
+    modes_id_of_list,
+    modes_id_of_read,
+]
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmIdentity(TestCase):
+    """id() and hash() have no effect, but what they give is which object
+    their operand is: the call's own, not the traced call's. They stay in a
+    region only where the region is found by that object."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("fn", MODES_WHICH, name_fn=lambda fn: fn.__name__[6:])
+    @isolated
+    def test_which_object_is_this_calls(self, device, fn):
+        modes_reset(device)
+        compiled = vm(fn, passes=EARLY)
+        for call in range(9):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            args = (x, [1, 2]) if fn is modes_id_of_list else (x,)
+            want, got = fn(*args), compiled(*args)
+            msg = f"call {call}"
+            self.assertEqual(got[0], want[0], atol=0, rtol=0, msg=msg)
+            # Of a tensor the call makes: the one the call returned.
+            which = id(got[0]) if fn is modes_id_of_made else want[1]
+            self.assertEqual(got[1], which, msg=msg)
+        self.assertGreater(region_runs(compiled), 0)
+
+
+instantiate_device_type_tests(TestVmIdentity, globals())
+
+
+class ModesAddsOne(torch.overrides.TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        out = func(*args, **(kwargs or {}))
+        return out + 1 if func is torch.Tensor.cos else out
+
+
+# No branch on what is read: the read is in the block of the operations.
+def modes_reads_flag(x):
+    return modes_around(x, (3.0, 2.0)[bool(torch.backends.cudnn.enabled)])
+
+
+# A flag the thread state had before: its reader is a builtin of the table.
+def modes_reads_deterministic(x):
+    on = torch.are_deterministic_algorithms_enabled()
+    return modes_around(x, (3.0, 2.0)[on])
+
+
+# The method is taken from the class: no attribute of a tensor is loaded.
+def modes_asks_the_class(x):
+    return modes_around(x, 1.0 + torch.Tensor.storage_offset(x))
+
+
+def modes_under_a_mode(x):
+    return modes_around(x, 2.0)
+
+
+# A tensor is asked what no region checks, behind operations and in front
+# of others, in the block and in a callee.
+def modes_asks_grad(x, t):
+    y = ((x.sin() * 2).cos() + 1).tanh() + t
+    if t.grad is not None:
+        y = y + t.grad
+    return (y * 2).sin().cos().tanh()
+
+
+def modes_has_grad(t):
+    return t.grad is not None
+
+
+def modes_asks_in_a_callee(x, t):
+    y = ((x.sin() * 2).cos() + 1).tanh() + t
+    if modes_has_grad(t):
+        y = y + 1
+    return (y * 2).sin().cos().tanh()
+
+
+MODES_ASKS = [modes_asks_grad, modes_asks_in_a_callee]
+
+MODES_READS = [
+    modes_reads_flag,
+    modes_reads_deterministic,
+    modes_asks_the_class,
+    modes_under_a_mode,
+]
+
+
+# An argument of a kind whose content no region checks, read by C code.
+def modes_item_of(x, arg):
+    return modes_work(x) * float(arg[0])
+
+
+def modes_length_of(x, arg):
+    return modes_work(x) * len(arg)
+
+
+MODES_ARGUMENTS = {
+    "numpy": (modes_item_of, lambda: torch.tensor([2.0, 1.0]).numpy()),
+    "bytearray": (modes_item_of, lambda: bytearray([2, 1])),
+    "deque": (modes_item_of, lambda: collections.deque([2.0, 1.0])),
+    "array": (modes_item_of, lambda: array.array("d", [2.0, 1.0])),
+    "deque_length": (modes_length_of, lambda: collections.deque([2.0, 1.0])),
+}
+
+
+# What a call binds from the function object it enters: its code, and the
+# defaults it fills the missing arguments from.
+def modes_scaled(h, scale=2.0, shift=1.0):
+    return h * scale + shift
+
+
+def modes_scaled_kw(h, *, scale=2.0, shift=1.0):
+    return h * scale + shift
+
+
+def modes_body(h, scale=2.0, shift=1.0):
+    return h * scale + shift
+
+
+def modes_other_body(h, scale=2.0, shift=1.0):
+    return h * scale - shift
+
+
+class ModesScaler:
+    def scaled(self, h, scale=2.0, shift=1.0):
+        return h * scale + shift
+
+    def other(self, h, scale=2.0, shift=1.0):
+        return h * scale - shift
+
+
+MODES_SCALER = ModesScaler()
+MODES_CODES = (modes_body.__code__, modes_other_body.__code__)
+MODES_METHOD_CODES = (ModesScaler.scaled.__code__, ModesScaler.other.__code__)
+
+
+def modes_fills_defaults(x):
+    return (modes_scaled(torch.relu(x) + 1) * 2).sum()
+
+
+def modes_fills_keyword_defaults(x):
+    return (modes_scaled_kw(torch.relu(x) + 1) * 2).sum()
+
+
+def modes_runs_code(x):
+    return (modes_body(torch.relu(x) + 1) * 2).sum()
+
+
+def modes_runs_method(x):
+    return (MODES_SCALER.scaled(torch.relu(x) + 1) * 2).sum()
+
+
+# The same call in a loop: its blocks are one span.
+def modes_fills_defaults_in_a_loop(x):
+    y = torch.relu(x) + 1
+    for _ in range(3):
+        y = modes_scaled(y) * 0.5
+    return y.sum()
+
+
+def modes_new_defaults(other):
+    modes_scaled.__defaults__ = (7.0, 3.0) if other else (2.0, 1.0)
+
+
+def modes_new_keyword_defaults(other):
+    scale, shift = (7.0, 3.0) if other else (2.0, 1.0)
+    modes_scaled_kw.__kwdefaults__ = {"scale": scale, "shift": shift}
+
+
+def modes_new_keyword_default(other):
+    modes_scaled_kw.__kwdefaults__["scale"] = 7.0 if other else 2.0
+
+
+def modes_new_code(other):
+    modes_body.__code__ = MODES_CODES[other]
+
+
+def modes_new_method_code(other):
+    ModesScaler.scaled.__code__ = MODES_METHOD_CODES[other]
+
+
+MODES_REBOUND = {
+    "defaults": (modes_fills_defaults, modes_new_defaults),
+    "keyword_defaults": (modes_fills_keyword_defaults, modes_new_keyword_defaults),
+    "keyword_default_in_place": (
+        modes_fills_keyword_defaults,
+        modes_new_keyword_default,
+    ),
+    "code": (modes_runs_code, modes_new_code),
+    "code_of_a_method": (modes_runs_method, modes_new_method_code),
+    "defaults_under_a_span": (modes_fills_defaults_in_a_loop, modes_new_defaults),
+}
+
+
+# State of an object that a call or an attribute load reads in C code, and
+# that the program changes without binding a name anew.
+class ModesHolder:
+    def __init__(self):
+        self.k = 2.0
+
+
+def modes_pick(a=1.0):
+    return a
+
+
+@functools.cache
+def modes_cached():
+    return MODES_KEPT[0]
+
+
+MODES_HOLDER = ModesHolder()
+MODES_PARTIAL = functools.partial(modes_pick, a=2.0)
+
+
+def modes_reads_attribute(x):
+    return modes_around(x, MODES_HOLDER.k)
+
+
+def modes_calls_partial(x):
+    return modes_around(x, MODES_PARTIAL())
+
+
+def modes_calls_method(x):
+    return modes_around(x, 2.0).modes_times()
+
+
+def modes_calls_cached(x):
+    return modes_around(x, modes_cached())
+
+
+def modes_new_dict(other):
+    MODES_HOLDER.__dict__ = {"k": 5.0 if other else 2.0}
+
+
+def modes_new_keyword(other):
+    MODES_PARTIAL.keywords["a"] = 5.0 if other else 2.0
+
+
+def modes_new_method(other):
+    by = 4 if other else 2
+    torch.Tensor.modes_times = lambda self: self * by
+
+
+def modes_new_cache(other):
+    MODES_KEPT[0] = 5.0 if other else 3.0
+    modes_cached.cache_clear()
+
+
+MODES_STATES = {
+    "dict_of_an_object": (modes_reads_attribute, modes_new_dict),
+    "keywords_of_a_partial": (modes_calls_partial, modes_new_keyword),
+    "method_put_on_the_tensor_class": (modes_calls_method, modes_new_method),
+    "cache_of_a_function": (modes_calls_cached, modes_new_cache),
+}
+
+
+# A generator the function is handed and hands on to an operator.
+def modes_draws(x, gen):
+    return modes_work(x) * torch.rand(8, generator=gen, device=x.device)
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmStateRead(TestCase):
+    """State a program reads and a region has no check of its own for: a
+    call made in another state is not served by a region of the first."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def log(self, device, fn, what):
+        # Six calls in the first state, three in the other, three in the
+        # first again.
+        out = []
+        for call in range(12):
+            other = 6 <= call < 9
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            stack = contextlib.ExitStack()
+            if what is modes_reads_flag:
+                stack.enter_context(torch.backends.cudnn.flags(enabled=not other))
+            elif what is modes_reads_deterministic:
+                stack.enter_context(DeterministicGuard(other))
+            elif what is modes_asks_the_class and other:
+                # The same values, further into a storage.
+                x = torch.cat([x, x])[4:]
+            elif what is modes_under_a_mode and other:
+                stack.enter_context(ModesAddsOne())
+            with stack:
+                out.append(fn(x).detach())
+        return out
+
+    @parametrize("fn", MODES_READS, name_fn=lambda fn: fn.__name__[6:])
+    @isolated
+    def test_call_in_another_state_is_eagers(self, device, fn):
+        want = self.log(device, fn, fn)
+        compiled = vm(fn, passes=EARLY)
+        self.assertEqual(self.log(device, compiled, fn), want, atol=0, rtol=0)
+
+    @parametrize("kind", list(MODES_ARGUMENTS))
+    @isolated
+    def test_argument_read_by_c_code_is_read_on_every_call(self, device, kind):
+        if kind == "numpy" and not TEST_NUMPY:
+            self.skipTest("needs numpy")
+        fn, make = MODES_ARGUMENTS[kind]
+        arg = make()
+        compiled = vm(fn, passes=EARLY)
+        for call in range(10):
+            if call == 6:
+                # The same object, with other content.
+                if fn is modes_length_of:
+                    arg.append(1.0)
+                else:
+                    arg[0] = 3
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            got, want = compiled(x, arg), fn(x, arg)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        # The operations in front of the read are still a region.
+        self.assertGreater(region_runs(compiled), 0)
+
+    @parametrize("what", list(MODES_REBOUND))
+    @isolated
+    def test_function_object_rebound_between_calls(self, device, what):
+        # Rebound before the eighth call and put back before the eleventh.
+        fn, rebind = MODES_REBOUND[what]
+        compiled = vm(fn, passes=EARLY)
+        for call in range(12):
+            if call in (0, 7, 10):
+                rebind(call == 7)
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            got, want = compiled(x), fn(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        rows = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertGreater(sum(r["runs"] for r in rows), 0)
+        if what == "defaults_under_a_span":
+            self.assertIn("span", [r["kind"] for r in rows if r["runs"]], msg=str(rows))
+
+    @parametrize("what", list(MODES_STATES))
+    @isolated
+    def test_state_of_an_object_that_c_code_reads(self, device, what):
+        fn, change = MODES_STATES[what]
+        modes_reset(device)
+        compiled = vm(fn, passes=EARLY)
+        for call in range(12):
+            if call in (0, 6, 9):
+                change(call == 6)
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            got, want = compiled(x), fn(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        self.assertGreater(region_runs(compiled), 0)
+
+    @isolated
+    def test_generator_handed_in_is_the_one_drawn_from(self, device):
+        # Two regions with the same code, each with the generator of its
+        # trace: what is made of one graph is not the other's.
+        ours = [torch.Generator(device).manual_seed(seed) for seed in (1, 2)]
+        eagers = [torch.Generator(device).manual_seed(seed) for seed in (1, 2)]
+        compiled = vm(modes_draws, passes=EARLY)
+        for call in range(12):
+            other = 6 <= call < 9
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            got, want = compiled(x, ours[other]), modes_draws(x, eagers[other])
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        self.assertGreater(region_runs(compiled), 0)
+
+    @parametrize("fn", MODES_ASKS, name_fn=lambda fn: fn.__name__[6:])
+    @isolated
+    def test_question_no_region_checks_ends_the_region_in_front_of_it(self, device, fn):
+        # The six operations in front of the question are a region and so are
+        # the four behind it; the answer is the call's own.
+        plain = torch.ones(8, device=device, requires_grad=True)
+        graded = torch.ones(8, device=device, requires_grad=True)
+        graded.grad = torch.full((8,), 0.5, device=device)
+        compiled = vm(fn, passes=EARLY)
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            t = graded if 6 <= call < 9 else plain
+            got, want = compiled(x, t), fn(x, t)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        rows = [r for r in vm.regions(compiled) if r["function"] == fn.__name__]
+        blocks = sorted((r["state"], r["ops"]) for r in rows if r["kind"] == "block")
+        self.assertEqual(blocks[:2], [("region", 4), ("region", 6)], msg=str(rows))
+        self.assertNotIn("refused", [state for state, _ in blocks], msg=str(rows))
+
+
+instantiate_device_type_tests(TestVmStateRead, globals())
+
+
+def modes_nested(x, nt):
+    return modes_work(x), (nt * 2).to_padded_tensor(0.0)
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmNestedTensors(TestCase):
+    """A nested tensor has no sizes to ask for: the executor does not ask,
+    and a function that is given one runs as eager runs it."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @isolated
+    def test_nested_tensor_argument(self, device):
+        compiled = vm(modes_nested, passes=EARLY)
+        for call in range(8):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            parts = [torch.randn(n, 3, device=device) for n in (2, 4)]
+            nt = torch.nested.nested_tensor(parts)
+            got, want = compiled(x, nt), modes_nested(x, nt)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+
+
+instantiate_device_type_tests(TestVmNestedTensors, globals())
+
+
+def modes_typed(x, t):
+    return ((x.sin() * t).cos() + 1).tanh().exp()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmTypeOf(TestCase):
+    """vm.type_of gives an intermediate node's type also when the region has
+    an input that is no tensor."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @isolated
+    def test_intermediate_of_a_region_with_a_float_input(self, device):
+        types = []
+
+        def looks(gm: torch.fx.GraphModule, input_types) -> torch.fx.GraphModule:
+            tanh = torch.ops.aten.tanh.default
+            node = next(n for n in gm.graph.nodes if n.target is tanh)
+            types.append((input_types, vm.type_of(gm, input_types, node)))
+            return gm
+
+        compiled = vm(modes_typed, passes=(*EARLY, looks))
+        for call in range(8):
+            torch.manual_seed(call)
+            x, t = torch.rand(3 + call % 2, 8, device=device), 0.5 + call
+            self.assertEqual(compiled(x, t), modes_typed(x, t), atol=0, rtol=0)
+        # (One graph for each of the two sizes.)
+        self.assertGreater(len(types), 0)
+        for input_types, of_tanh in types:
+            self.assertEqual(
+                [type(t) for t in input_types], [vm.TensorType, vm.FloatType]
+            )
+            # The first size was 3 and 4 on the calls before the trace.
+            self.assertEqual([(d.lo, d.hi) for d in of_tanh.dims], [(3, 4), (8, 8)])
+        self.assertGreater(region_runs(compiled), 0)
+
+
+instantiate_device_type_tests(TestVmTypeOf, globals())
+
+
+class ModesScales(torch.nn.Module):
+    def __init__(self, k):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.full((8,), 1.0 + k / 16))
+
+
+def modes_scales(layers, x, seen):
+    for layer in layers:
+        x = (x * layer.weight).tanh().cos().sin() + x
+        # (The loop is no region: its body is one, for each layer.)
+        seen.append(1)
+    return x
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmPassExamples(TestCase):
+    """What a pass list makes of a graph is shared by the regions with that
+    graph until a pass is handed the VALUE of a weight: through the input
+    type, out of the traced run's inputs, or as a value computed from them."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize(
+        "how,runs",
+        [
+            ("returns_the_graph", 1),
+            ("reads_an_input_and_the_length", 1),
+            ("returns_the_graph_the_inductor_pass_lowered", 1),
+            ("const_of_the_type", 6),
+            ("indexed", 6),
+            ("sliced", 6),
+            ("iterated", 6),
+            ("run_until", 6),
+        ],
+        name_fn=lambda how, runs: how,
+    )
+    @isolated
+    def test_output_of_a_pass_that_was_handed_a_weight_is_not_shared(
+        self, device, how, runs
+    ):
+        ran = []
+
+        def a_pass(gm, input_types):
+            ran.append(1)
+            examples = gm.meta["vm_example_inputs"]
+            i = next(i for i, t in enumerate(input_types) if t.is_const)
+            if how.startswith("returns_the_graph"):
+                return gm
+            if how == "reads_an_input_and_the_length":
+                self.assertEqual(len(examples), len(input_types))
+                self.assertEqual(examples[1 - i].shape, (4, 8))
+                return gm
+            if how == "const_of_the_type":
+                weight = input_types[i].const
+            elif how == "indexed":
+                weight = examples[i]
+            elif how == "sliced":
+                weight = examples[i:][0]
+            elif how == "iterated":
+                weight = list(examples)[i]
+            else:
+                placeholder = list(gm.graph.find_nodes(op="placeholder"))[i]
+                weight = vm.run_until(gm, placeholder)
+            run = gm.forward
+
+            # Computes with the weight the pass saw, whatever it is handed.
+            def with_weight(*inputs):
+                return run(*inputs[:i], weight, *inputs[i + 1 :])
+
+            return vm.lower_to(gm, with_weight)
+
+        layers = [ModesScales(k).to(device) for k in range(6)]
+        # (The Inductor pass is handed the weights too: for their sizes.)
+        lowered = [vm.passes.Inductor()] if how.endswith("lowered") else []
+        compiled = vm(modes_scales, passes=(*EARLY, *lowered, a_pass))
+        with torch.no_grad():
+            for call in range(8):
+                torch.manual_seed(call)
+                x = torch.randn(4, 8, device=device)
+                want, got = modes_scales(layers, x, []), compiled(layers, x, [])
+                # (A compiled kernel rounds as it does: no exact comparison.)
+                exact = {} if lowered else {"atol": 0, "rtol": 0}
+                self.assertEqual(got, want, msg=f"call {call}", **exact)
+        self.assertEqual(len(ran), runs)
+
+    def test_what_the_inputs_say_to_a_pass_that_takes_them_for_a_list(self, device):
+        from torch.vm._examples import Examples
+
+        read = []
+        examples = Examples(
+            [torch.ones(2, device=device), 0.5], frozenset({0}), lambda: read.append(1)
+        )
+        for text in (repr(examples), self.raised(lambda: examples + [])):
+            self.assertIn("list(examples)", text)
+            self.assertIn("input_types[i].const", text)
+            self.assertIn("bind=", text)
+        self.assertIn("by position", self.raised(lambda: examples["weight"]))
+        with self.assertRaises(TypeError):
+            torch.stack(examples)
+        self.assertEqual((examples[1], len(examples), read), (0.5, 2, []))
+        self.assertEqual(torch.stack(list(examples)[:1]).shape, (1, 2))
+        self.assertEqual(read, [1])
+
+    def raised(self, f):
+        with self.assertRaises(TypeError) as caught:
+            f()
+        return str(caught.exception)
+
+
+instantiate_device_type_tests(TestVmPassExamples, globals())
+
+
+MODES_LAYERS = torch.nn.ModuleList([torch.nn.Linear(8, 8) for _ in range(6)]).eval()
+
+
+class ModesKeeps:
+    def __init__(self):
+        self.items = [torch.ones(8)]
+        self.kept = None
+
+    @property
+    def through_property(self):
+        return self.items
+
+
+MODES_KEEPS = ModesKeeps()
+MODES_KEPT = [torch.ones(8)]
+MODES_KEPT_LISTS = [[torch.ones(8)], [torch.zeros(8)]]
+
+
+def modes_made_in_a_loop(x, which=4):
+    out = []
+    for i, m in enumerate(MODES_LAYERS):
+        x = m(x)
+        if i == which:
+            out.append(x)
+    return x, out
+
+
+def modes_made_holds_the_result(x):
+    return modes_made_in_a_loop(x, 5)
+
+
+def modes_made_on_every_round(x):
+    out = []
+    for m in MODES_LAYERS:
+        x = m(x)
+        out.append(x)
+    return x, out
+
+
+def modes_made_dict_in_a_loop(x):
+    d = {}
+    for i, m in enumerate(MODES_LAYERS):
+        x = m(x)
+        if i == 4:
+            d["four"] = x
+    return x, d
+
+
+def modes_made_in_a_tuple(x):
+    out = []
+    for i, m in enumerate(MODES_LAYERS):
+        x = m(x)
+        if i == 4:
+            out.append(x)
+    return x, (out, 1)
+
+
+def modes_made_in_a_callee(x):
+    return modes_made_in_a_loop(x)
+
+
+def modes_made_then_iterated(x):
+    a = x * 2
+    c = (a + 1).relu()
+    ys = [a, c]
+    d = torch.cat(ys).sum()
+    return d * 2, ys
+
+
+def modes_made_then_measured(x):
+    a = x * 2
+    c = (a + 1).relu()
+    ys = [a, c]
+    return c.sum() * len(ys), ys
+
+
+def modes_made_then_subscripted(x):
+    a = x * 2
+    c = (a + 1).relu()
+    ys = [a, c]
+    return ys[0].sum() + ys[1].sum(), ys
+
+
+def modes_made_dict_then_read(x):
+    a = x * 2
+    c = (a + 1).relu()
+    d = {"a": a, "c": c}
+    return d["a"].sum() + d.get("c").sum() * len(d), d
+
+
+def modes_made_then_copied(x):
+    a = x * 2
+    c = (a + 1).relu()
+    ys = [a, c]
+    return c.sum() * len(tuple(ys)), ys[:1] + sorted(ys, key=len)
+
+
+def modes_made_then_stored(x):
+    a = x * 2
+    c = (a + 1).relu()
+    ys = [a.sin() * 2, c.cos() * 3]
+    d = torch.cat(ys).sum()
+    MODES_KEEPS.kept = ys
+    return d * 2
+
+
+def modes_made_appended_twice(x):
+    out = []
+    out.append(((x.sin() * 2).cos() + 1).tanh())
+    out.append((x * 3).relu() + x.sigmoid())
+    return out
+
+
+def modes_made_appended_then_read(x):
+    out = []
+    out.append(((x.sin() * 2).cos() + 1).tanh())
+    out.append((x * 3).relu() + x.sigmoid())
+    return out[0] + out[1]
+
+
+MODES_MADE = [
+    modes_made_in_a_loop,
+    modes_made_holds_the_result,
+    modes_made_on_every_round,
+    modes_made_dict_in_a_loop,
+    modes_made_in_a_tuple,
+    modes_made_in_a_callee,
+    modes_made_then_iterated,
+    modes_made_then_measured,
+    modes_made_then_subscripted,
+    modes_made_dict_then_read,
+    modes_made_then_copied,
+    modes_made_then_stored,
+    modes_made_appended_twice,
+    modes_made_appended_then_read,
+]
+
+
+def modes_kept_global(x):
+    c = (x * 2 + 1).relu() + MODES_KEPT[0]
+    return c.sum() * len(MODES_KEPT), MODES_KEPT
+
+
+def modes_kept_attribute(x):
+    c = (x * 2 + 1).relu() + MODES_KEEPS.items[0]
+    return c.sum() * 2, [MODES_KEEPS.items, c]
+
+
+def modes_kept_of_an_argument(x, keeps=MODES_KEEPS):
+    c = (x * 2 + 1).relu() + keeps.items[0]
+    return c.sum() * 2, keeps.items
+
+
+def modes_kept_through_a_property(x):
+    items = MODES_KEEPS.through_property
+    c = (x * 2 + 1).relu() + items[0]
+    return c.sum() * 2, items
+
+
+def modes_kept_from_an_iterator(x):
+    first = next(iter(MODES_KEPT_LISTS))
+    c = (x * 2 + 1).relu() + first[0]
+    return c.sum() * 2, first
+
+
+MODES_KEPT_FNS = [
+    modes_kept_global,
+    modes_kept_attribute,
+    modes_kept_of_an_argument,
+    modes_kept_through_a_property,
+    modes_kept_from_an_iterator,
+]
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmMadeContainers(TestCase):
+    """A list or a dict that a region's run makes is made anew by every run
+    of the region, also when the run read it (its length, an item, all of
+    it), and once, however many places it is handed on to; one that was
+    there before the run is handed back as the object it is; and a region
+    keeps no entry about a container it made."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def parts(self, out, tensors, containers):
+        if isinstance(out, (list, tuple, dict)):
+            if not isinstance(out, tuple):
+                containers.append(out)
+            for item in out.values() if isinstance(out, dict) else out:
+                self.parts(item, tensors, containers)
+        else:
+            tensors.append(out)
+        return tensors, containers
+
+    @parametrize("fn", MODES_MADE, name_fn=lambda fn: fn.__name__[11:])
+    @isolated
+    def test_made_container_is_this_calls(self, device, fn):
+        MODES_LAYERS.to(device)
+        compiled = vm(fn)
+        last = []
+        with torch.no_grad():
+            for call in range(40):
+                torch.manual_seed(call)
+                x = torch.rand(3, 8, device=device)
+                # The list that leaves through a store behind the region
+                # is looked at as one that is returned.
+                stored = fn is modes_made_then_stored
+                want = fn(x)
+                want = (want, MODES_KEEPS.kept) if stored else want
+                got = compiled(x)
+                got = (got, MODES_KEEPS.kept) if stored else got
+                (want, _), (got, made) = (
+                    self.parts(want, [], []),
+                    self.parts(got, [], []),
+                )
+                self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+                shared = [c for c in made if any(c is p for p in last)]
+                self.assertEqual(shared, [], msg=f"call {call}: from the call before")
+                last = made
+        regions = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        # (A block with a store into an object runs as it is.)
+        self.assertEqual([r["runs"] for r in regions], [] if stored else [15])
+
+    @parametrize("fn", MODES_KEPT_FNS, name_fn=lambda fn: fn.__name__[11:])
+    @isolated
+    def test_container_from_before_is_the_object(self, device, fn):
+        for t in (MODES_KEPT, MODES_KEEPS.items, *MODES_KEPT_LISTS):
+            t[0] = t[0].to(device)
+        compiled = vm(fn)
+        for call in range(40):
+            torch.manual_seed(call)
+            x = torch.rand(3, 8, device=device)
+            want, got = fn(x), compiled(x)
+            self.assertEqual(got[0], want[0], atol=0, rtol=0, msg=f"call {call}")
+            if fn is modes_kept_attribute:
+                want, got = want[1][0], got[1][0]
+            else:
+                want, got = want[1], got[1]
+            self.assertIs(got, want, msg=f"call {call}")
+        if fn in (modes_kept_global, modes_kept_attribute, modes_kept_of_an_argument):
+            self.assertEqual(region_runs(compiled), 15)
+
+    @isolated
+    def test_region_keeps_nothing_of_a_container_it_made(self, device):
+        compiled = vm(modes_made_then_iterated)
+        made = []
+        for call in range(40):
+            torch.manual_seed(call)
+            out = compiled(torch.rand(3, 8, device=device))
+            made.append(weakref.ref(out[1][0]))
+            # What a caller does to the list it was handed is its own.
+            out[1].append(None)
+            del out
+        gc.collect()
+        alive = [call for call, ref in enumerate(made) if ref() is not None]
+        self.assertEqual(alive, [])
+        (region,) = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertEqual((region["runs"], region["misses"]), (15, {}))
+
+
+instantiate_device_type_tests(TestVmMadeContainers, globals())
+
+
+# What the iterator tests loop over and take from, and where the bodies of
+# their loops leave a mark (a call that ends a region). Each side of a test,
+# eager mode and torch.vm, runs a copy of the function with a MODES_HELD and
+# a MODES_MARKS of its own (see modes_sides).
+MODES_HELD = None
+MODES_MARKS = []
+MODES_RATES = [0.5, 0.25]
+
+
+def modes_sides(fn, held):
+    """``fn`` twice, for eager mode and for torch.vm: each a copy whose
+    globals are this file's with what ``held()`` gives as MODES_HELD and an
+    empty MODES_MARKS, so that what one side leaves behind is not what the
+    other finds."""
+    sides = []
+    for _ in range(2):
+        torch.manual_seed(0)
+        space = {**globals(), "MODES_HELD": held(), "MODES_MARKS": []}
+        clone = types.FunctionType(fn.__code__, space, fn.__name__, fn.__defaults__)
+        sides.append((clone, space))
+    return sides
+
+
+def modes_loop_store(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD:
+        g["dirty"] = True
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_store_lr(x, lr):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD:
+        g["lr"] = lr
+    y = y * lr
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_optimizer(x, lr):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD.param_groups:
+        g["lr"] = lr
+    y = y * lr
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_read(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD:
+        MODES_MARKS.append(1)
+        y = y * g["s"]
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_read_what_the_body_wrote(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD:
+        MODES_MARKS.append(1)
+        y = y * g["s"]
+        MODES_HELD[1]["s"] = 3.0
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_append(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for bucket in MODES_HELD:
+        bucket.append(y)
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_items(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for name, g in MODES_HELD.items():
+        g["dirty"] = name
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_values(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD.values():
+        g["dirty"] = True
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_keys(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for name in MODES_HELD:
+        MODES_HELD[name] = MODES_HELD[name] + 1
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_enumerate(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for i, g in enumerate(MODES_HELD, start=1):
+        g["dirty"] = i
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_zip(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g, rate in zip(MODES_HELD, MODES_RATES):
+        g["dirty"] = rate
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_zip_strict(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g, rate in zip(MODES_HELD, MODES_RATES, strict=True):
+        MODES_MARKS.append(1)
+        y = y * g["s"] * rate
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_display(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in [MODES_HELD[0], MODES_HELD[1]]:
+        g["dirty"] = True
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_slice(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD[1:]:
+        g["dirty"] = True
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_inner(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for groups in MODES_HELD:
+        y = ((y.sin() * 2).cos() + 1).tanh()
+        for g in groups:
+            g["dirty"] = True
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_worklist(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for v in MODES_HELD:
+        if len(MODES_HELD) < 4:
+            MODES_HELD.append(v * 0.5)  # noqa: B909  # the test: a loop that grows the list it walks
+        y = y * v
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_first(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    first = next(iter(MODES_HELD))
+    return ((y * 3).cos() + 1).tanh().exp(), first
+
+
+def modes_loop_first_read(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    first = next(iter(MODES_HELD))
+    k = first[0]
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_loop_tensors(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for buffer in MODES_HELD:
+        MODES_MARKS.append(1)
+        buffer.add_(1.0)
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_modules(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for m in MODES_HELD:
+        MODES_MARKS.append(1)
+        y = m(y).tanh()
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_enumerate_modules(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for i, layer in enumerate(MODES_HELD.layers):
+        MODES_MARKS.append(i)
+        if i == 0:
+            # Seen by a loop over the module list itself.
+            MODES_HELD.layers[1] = MODES_HELD.spare
+        y = layer(y).tanh()
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_objects(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for box in MODES_HELD:
+        box.kept = y
+        y = y * 2
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_span(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in MODES_HELD:
+        y = y * g["s"]
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_pop(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    work = list(MODES_HELD)
+    while work:
+        v = work.pop()
+        MODES_MARKS.append(v)
+        y = y * v
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_range(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for i in range(len(MODES_HELD)):
+        MODES_MARKS.append(i)
+        y = y * (i + 2)
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_rows(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for row in y:
+        MODES_MARKS.append(1)
+        y = y + row
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_made_and_kept(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    ys = [y, y * 2]
+    for v in ys:
+        MODES_MARKS.append(1)
+        if len(ys) < 4:
+            ys.append(v * 0.5)  # noqa: B909  # the test: a loop that grows the list it walks
+        y = y + v
+    return ((y * 3).cos() + 1).tanh().exp(), ys
+
+
+def modes_loop_pairs(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    it = iter(MODES_HELD)
+    for a, b in zip(it, it):
+        MODES_MARKS.append(1)
+        y = y * a + b
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_not_seen_made(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for v in MODES_HELD.__iter__():
+        MODES_MARKS.append(1)
+        y = y * v
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_stores_held(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    MODES_HELD.kept = MODES_HELD.items
+    MODES_HELD.at = MODES_HELD.it
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given(x, ws):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for w in ws:
+        MODES_MARKS.append(1)
+        y = y * w
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_inside(x, pair):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for w in pair[0]:
+        MODES_MARKS.append(1)
+        y = y * w
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_values(x, named):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for w in named.values():
+        MODES_MARKS.append(1)
+        y = y * w
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_listed(x, named):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for w in named["ws"]:
+        MODES_MARKS.append(1)
+        y = y * w
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_next(x, it):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    w = next(it)
+    return ((y * w).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_next_inside(x, pair):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    w = next(pair[0])
+    return ((y * w).cos() + 1).tanh().exp()
+
+
+def modes_loop_stores_given(x, pair):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    MODES_HELD.kept = pair[0]
+    MODES_HELD.at = pair[1]
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_first(x, ws):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    w = next(iter(ws))
+    return ((y * w).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_zip(x, ws):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for i, (w, rate) in enumerate(zip(ws, MODES_RATES)):
+        MODES_MARKS.append(i)
+        y = y * w * rate
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_loop_given_dicts(x, groups):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for g in groups:
+        g["dirty"] = True
+    return ((y * 3).cos() + 1).tanh().exp(), [dict(g) for g in groups]
+
+
+def modes_next(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    k = next(MODES_HELD)
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_next_pair(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    a, b = next(MODES_HELD)
+    return ((y * a * (b + 1)).cos() + 1).tanh().exp()
+
+
+def modes_next_of_an_attribute(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    k = next(MODES_HELD.items)
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_next_of_an_item(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    k = next(MODES_HELD[0])
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_next_by_its_method(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    k = MODES_HELD.__next__()
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_next_by_islice(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    (k,) = itertools.islice(MODES_HELD, 1)
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_next_by_a_loop(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    k = 0.0
+    for v in MODES_HELD:
+        k = v
+        break
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_next_under_enumerate(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for i, v in enumerate(MODES_HELD):
+        MODES_MARKS.append(i)
+        y = y * v
+        if i == 1:
+            break
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_next_under_zip(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for v, rate in zip(MODES_HELD, MODES_RATES):
+        MODES_MARKS.append(1)
+        y = y * v * rate
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+class ModesLayers(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)]
+        )
+        self.second = self.layers[1]
+        self.spare = torch.nn.Linear(8, 8)
+
+
+def modes_numbers(n=400):
+    return [float(i % 7 + 1) for i in range(n)]
+
+
+def modes_weights(call):
+    return torch.full((8,), call + 1.0), torch.full((8,), 2.0)
+
+
+def modes_on(value, device):
+    """``value`` with the tensors in its tuples, lists and dicts on
+    ``device``."""
+    if isinstance(value, torch.Tensor):
+        return value.to(device)
+    if isinstance(value, (tuple, list)):
+        return type(value)(modes_on(v, device) for v in value)
+    if type(value) is type(iter(())):
+        return iter(tuple(modes_on(v, device) for v in value))
+    if isinstance(value, dict):
+        return {k: modes_on(v, device) for k, v in value.items()}
+    return value
+
+
+def modes_counted():
+    i = 0
+    while True:
+        i += 1
+        yield float(i % 7 + 1)
+
+
+def modes_holder(**fields):
+    holder = types.SimpleNamespace()
+    vars(holder).update(fields)
+    return holder
+
+
+def modes_flags(n=2):
+    return [{"dirty": False} for _ in range(n)]
+
+
+def modes_clear(held):
+    for g in held.values() if isinstance(held, dict) else held:
+        if isinstance(g, list):
+            modes_clear(g)
+        else:
+            g["dirty"] = False
+
+
+def modes_two_scales():
+    return [{"s": 2.0}, {"s": 1.0}]
+
+
+def modes_rescale(held, call):
+    if call in (6, 9):
+        held[0]["s"] = float(call)
+
+
+def modes_optimizer(device):
+    return torch.optim.SGD(torch.nn.Linear(8, 8).parameters(), lr=0.1)
+
+
+def modes_peek(held, out):
+    """What the caller's next ``next`` would give."""
+    return next(copy.deepcopy(held))
+
+
+# A test of TestVmIterators: the function; what its MODES_HELD is (given the
+# device); what the trace of its first block comes to, how often that region
+# runs in thirteen calls (regions run from the fifth call on) and why it is
+# none; the state to compare after every call (given MODES_HELD and the
+# result); what the caller does after and before every call; the other
+# arguments of a call.
+ModesLoop = collections.namedtuple(
+    "ModesLoop",
+    "fn held front state after before args",
+    defaults=(("region", 9, None), None, None, None, None),
+)
+MODES_SHARED = ("refused", 0, "its outputs share a container")
+MODES_ANOTHER = (
+    "it is found by which object (or value) an argument is, and that was another on "
+    "every call: its regions never ran, so they were dropped and the place takes no "
+    "new one"
+)
+MODES_UNSEEN = "that its run is not seen to make and that none of its reads leads to"
+MODES_LOOPS = {
+    # A loop over what was there before, whose iterator a region makes:
+    # stores into the items, and what the body reads of them.
+    "store": ModesLoop(
+        modes_loop_store,
+        lambda d: modes_flags(),
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "store_another_lr_on_every_call": ModesLoop(
+        modes_loop_store_lr,
+        lambda d: [{"lr": 0.1}, {"lr": 0.1}],
+        # The region is entered while the dicts are what the trace found.
+        front=("region", 0, None),
+        state=lambda h, out: [dict(g) for g in h],
+        args=lambda call: (0.1 * 0.9**call,),
+    ),
+    "store_the_same_lr": ModesLoop(
+        modes_loop_store_lr,
+        lambda d: [{"lr": 0.1}, {"lr": 0.1}],
+        state=lambda h, out: [dict(g) for g in h],
+        after=lambda h: [g.update(lr=0.1) for g in h],
+        args=lambda call: (0.05,),
+    ),
+    "optimizer_schedule": ModesLoop(
+        modes_loop_optimizer,
+        modes_optimizer,
+        front=("region", 0, None),
+        state=lambda h, out: [g["lr"] for g in h.param_groups],
+        args=lambda call: (0.1 * 0.9**call,),
+    ),
+    "optimizer_the_same_lr": ModesLoop(
+        modes_loop_optimizer,
+        modes_optimizer,
+        state=lambda h, out: [g["lr"] for g in h.param_groups],
+        after=lambda h: [g.update(lr=0.1) for g in h.param_groups],
+        args=lambda call: (0.05,),
+    ),
+    "read_changed_between_calls": ModesLoop(
+        modes_loop_read,
+        lambda d: modes_two_scales(),
+        front=("region", 7, None),
+        before=modes_rescale,
+    ),
+    "read_what_the_body_wrote": ModesLoop(
+        modes_loop_read_what_the_body_wrote,
+        lambda d: modes_two_scales(),
+        after=lambda h: h[1].update(s=1.0),
+    ),
+    "append": ModesLoop(
+        modes_loop_append,
+        lambda d: [[], []],
+        state=lambda h, out: [[len(b), b[-1].sum()] for b in h],
+        after=lambda h: [b.clear() for b in h],
+    ),
+    "dict_items": ModesLoop(
+        modes_loop_items,
+        lambda d: {"a": {"dirty": False}, "b": {"dirty": False}},
+        state=lambda h, out: [dict(g) for g in h.values()],
+        after=modes_clear,
+    ),
+    "dict_values": ModesLoop(
+        modes_loop_values,
+        lambda d: {"a": {"dirty": False}, "b": {"dirty": False}},
+        state=lambda h, out: [dict(g) for g in h.values()],
+        after=modes_clear,
+    ),
+    "dict_keys": ModesLoop(
+        modes_loop_keys,
+        lambda d: {"a": 0, "b": 0},
+        state=lambda h, out: dict(h),
+        after=lambda h: h.update(a=0, b=0),
+    ),
+    "enumerate": ModesLoop(
+        modes_loop_enumerate,
+        lambda d: modes_flags(),
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "zip": ModesLoop(
+        modes_loop_zip,
+        lambda d: modes_flags(),
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "list_display": ModesLoop(
+        modes_loop_display,
+        lambda d: modes_flags(),
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "slice": ModesLoop(
+        modes_loop_slice,
+        lambda d: modes_flags(3),
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "tuple": ModesLoop(
+        modes_loop_store,
+        lambda d: tuple(modes_flags()),
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "ordered_dicts": ModesLoop(
+        modes_loop_store,
+        lambda d: [
+            collections.OrderedDict(dirty=False),
+            collections.OrderedDict(dirty=False),
+        ],
+        state=lambda h, out: [dict(g) for g in h],
+        after=modes_clear,
+    ),
+    "inner_loop": ModesLoop(
+        modes_loop_inner,
+        lambda d: [modes_flags(1), modes_flags(1)],
+        state=lambda h, out: [dict(g) for groups in h for g in groups],
+        after=modes_clear,
+    ),
+    "grows_in_the_loop": ModesLoop(
+        modes_loop_worklist,
+        lambda d: [],
+        state=lambda h, out: list(h),
+        before=lambda h, call: h.__setitem__(slice(None), [2.0, 1.0]),
+    ),
+    "grows_and_shrinks_between_calls": ModesLoop(
+        modes_loop_read,
+        lambda d: modes_two_scales(),
+        front=("region", 7, None),
+        before=lambda h, call: h.append({"s": 0.5})
+        if call == 6
+        else h.pop(0)
+        if call == 9
+        else None,
+    ),
+    "first_item": ModesLoop(
+        modes_loop_first, lambda d: [[1.0], [2.0]], state=lambda h, out: out[1] is h[0]
+    ),
+    "first_item_changed_between_calls": ModesLoop(
+        modes_loop_first_read,
+        lambda d: [[2.0], [1.0]],
+        front=("region", 8, None),
+        before=lambda h, call: h[0].__setitem__(
+            0, 5.0 if 5 <= call < 8 or call >= 11 else 2.0
+        ),
+    ),
+    # What was right, and stays so.
+    "tensors": ModesLoop(
+        modes_loop_tensors,
+        lambda d: [torch.zeros(8, device=d), torch.zeros(8, device=d)],
+        state=lambda h, out: [b.clone() for b in h],
+    ),
+    "modules": ModesLoop(
+        modes_loop_modules,
+        lambda d: torch.nn.ModuleList(
+            [torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)]
+        ).to(d),
+        before=lambda h, call: h[0].weight.data.mul_(0.5) if call in (6, 9) else None,
+    ),
+    "enumerate_modules": ModesLoop(
+        modes_loop_enumerate_modules,
+        lambda d: ModesLayers().to(d),
+        after=lambda h: h.layers.__setitem__(1, h.second),
+    ),
+    "objects": ModesLoop(
+        modes_loop_objects,
+        lambda d: [modes_holder(kept=None), modes_holder(kept=None)],
+        state=lambda h, out: [box.kept for box in h],
+    ),
+    "one_span": ModesLoop(
+        modes_loop_span,
+        lambda d: modes_two_scales(),
+        front=("region", 7, None),
+        before=modes_rescale,
+    ),
+    "while_pop": ModesLoop(
+        modes_loop_pop,
+        lambda d: [2.0, 1.0],
+        front=("region", 7, None),
+        before=lambda h, call: h.__setitem__(0, float(call))
+        if call in (6, 9)
+        else None,
+    ),
+    "range": ModesLoop(
+        modes_loop_range,
+        lambda d: [1, 2, 3],
+        front=("region", 8, None),
+        before=lambda h, call: h.pop() if call == 6 else None,
+    ),
+    "rows_of_a_tensor": ModesLoop(modes_loop_rows, lambda d: None),
+    # No region: a list the run made that goes on next to its iterator, one
+    # iterator in two places, an iterator nothing is seen to make.
+    "made_and_kept": ModesLoop(
+        modes_loop_made_and_kept, lambda d: None, front=MODES_SHARED
+    ),
+    "one_iterator_twice": ModesLoop(
+        modes_loop_pairs, lambda d: [1.0, 2.0, 3.0, 4.0], front=MODES_SHARED
+    ),
+    "strict_zip": ModesLoop(
+        modes_loop_zip_strict,
+        lambda d: modes_two_scales(),
+        front=("region", 8, None),
+        before=lambda h, call: h.append({"s": 0.5}) if call == 8 else None,
+    ),
+    # What an argument holds is found by its structure, another object on
+    # every call: the loop is over this call's.
+    "argument_tuple": ModesLoop(
+        modes_loop_given, lambda d: None, args=lambda call: (modes_weights(call),)
+    ),
+    "argument_list": ModesLoop(
+        modes_loop_given,
+        lambda d: None,
+        args=lambda call: (list(modes_weights(call)),),
+    ),
+    "argument_tuple_in_a_tuple": ModesLoop(
+        modes_loop_given_inside,
+        lambda d: None,
+        args=lambda call: ((modes_weights(call), 3),),
+    ),
+    "argument_dict_values": ModesLoop(
+        modes_loop_given_values,
+        lambda d: None,
+        args=lambda call: (dict(zip("ab", modes_weights(call))),),
+    ),
+    "argument_tuple_first": ModesLoop(
+        modes_loop_given_first,
+        lambda d: None,
+        args=lambda call: (modes_weights(call),),
+    ),
+    "argument_tuple_zip": ModesLoop(
+        modes_loop_given_zip,
+        lambda d: None,
+        args=lambda call: (modes_weights(call),),
+    ),
+    "argument_list_of_dicts": ModesLoop(
+        modes_loop_given_dicts, lambda d: None, args=lambda call: (modes_flags(),)
+    ),
+    "argument_list_in_a_dict": ModesLoop(
+        modes_loop_given_listed,
+        lambda d: None,
+        args=lambda call: ({"ws": list(modes_weights(call))},),
+    ),
+    "argument_iterator": ModesLoop(
+        modes_loop_given_next,
+        lambda d: None,
+        args=lambda call: (iter(modes_weights(call)),),
+    ),
+    # (An iterator inside an argument is found by which object it is.)
+    "argument_iterator_in_a_tuple": ModesLoop(
+        modes_loop_given_next_inside,
+        lambda d: None,
+        front=("refused", 0, MODES_ANOTHER),
+        args=lambda call: ((iter(modes_weights(call)), 1),),
+    ),
+    # An iterator that was there before the call is the program's own.
+    "next_list_iterator": ModesLoop(
+        modes_next, lambda d: iter(modes_numbers()), state=modes_peek
+    ),
+    "next_tuple_iterator": ModesLoop(
+        modes_next, lambda d: iter(tuple(modes_numbers())), state=modes_peek
+    ),
+    "next_range_iterator": ModesLoop(
+        modes_next, lambda d: iter(range(1, 400)), state=modes_peek
+    ),
+    "next_dict_iterator": ModesLoop(
+        modes_next,
+        lambda d: iter({v + i / 64: i for i, v in enumerate(modes_numbers(40))}),
+        state=modes_peek,
+    ),
+    "next_batch": ModesLoop(
+        modes_next,
+        lambda d: iter([torch.full((8,), v, device=d) for v in modes_numbers(40)]),
+        state=modes_peek,
+    ),
+    "next_of_zip": ModesLoop(
+        modes_next_pair, lambda d: zip(modes_numbers(), range(400)), state=modes_peek
+    ),
+    "next_of_enumerate": ModesLoop(
+        modes_next_pair, lambda d: enumerate(modes_numbers()), state=modes_peek
+    ),
+    "next_of_an_attribute": ModesLoop(
+        modes_next_of_an_attribute,
+        lambda d: modes_holder(items=iter(modes_numbers())),
+        state=lambda h, out: modes_peek(h.items, out),
+    ),
+    "next_of_an_item": ModesLoop(
+        modes_next_of_an_item,
+        lambda d: [iter(modes_numbers())],
+        state=lambda h, out: modes_peek(h[0], out),
+    ),
+    "next_by_its_method": ModesLoop(
+        modes_next_by_its_method, lambda d: iter(modes_numbers()), state=modes_peek
+    ),
+    "next_by_islice": ModesLoop(
+        modes_next_by_islice, lambda d: iter(modes_numbers()), state=modes_peek
+    ),
+    "next_by_a_loop": ModesLoop(
+        modes_next_by_a_loop, lambda d: iter(modes_numbers()), state=modes_peek
+    ),
+    "next_under_enumerate": ModesLoop(
+        modes_next_under_enumerate, lambda d: iter(modes_numbers()), state=modes_peek
+    ),
+    "next_under_zip": ModesLoop(
+        modes_next_under_zip, lambda d: iter(modes_numbers()), state=modes_peek
+    ),
+    "next_of_a_generator": ModesLoop(
+        modes_next,
+        lambda d: modes_counted(),
+        front=("refused", 0, "an output is a generator"),
+    ),
+    "next_of_a_cycle": ModesLoop(
+        modes_next,
+        lambda d: itertools.cycle([2.0, 5.0, 3.0]),
+        front=("refused", 0, "an output is a cycle"),
+    ),
+    "not_seen_made": ModesLoop(
+        modes_loop_not_seen_made,
+        lambda d: [2.0, 1.0],
+        front=("refused", 0, f"it hands on a list_iterator {MODES_UNSEEN}"),
+    ),
+}
+
+
+def modes_front(fn, compiled):
+    """What the trace of the block (or the span) that the first line of
+    ``fn``'s body is in came to, how often its region ran, and why it is
+    none."""
+    line = fn.__code__.co_firstlineno
+    rows = [r for r in vm.regions(compiled) if r["function"] == fn.__name__]
+    spans = [r for r in rows if r["kind"] == "span"]
+    (row,) = spans or [
+        r for r in rows if r["kind"] == "block" and r["lines"][0] == line
+    ]
+    return row["state"], row["runs"], row["why"]
+
+
+def modes_compare(test, case, device):
+    """Thirteen calls of ``case`` (a ModesLoop) in eager mode and under
+    torch.vm, each side on a state of its own: the results, the state left
+    behind and the marks of every call, then the trace of the first block."""
+    (eager, theirs), (traced, mine) = modes_sides(case.fn, lambda: case.held(device))
+    compiled = vm(traced, passes=EARLY)
+    for call in range(13):
+        row = []
+        for run, space in ((eager, theirs), (compiled, mine)):
+            held = space["MODES_HELD"]
+            if case.before is not None:
+                case.before(held, call)
+            torch.manual_seed(call)
+            x = torch.rand(4, 8, device=device)
+            given = modes_on(case.args(call), device) if case.args else ()
+            try:
+                out = run(x, *given)
+            except ValueError as e:
+                out = str(e)
+            state = None if case.state is None else case.state(held, out)
+            if case.after is not None:
+                case.after(held)
+            # A container handed back is compared by what it holds.
+            row.append((out, state, list(space["MODES_MARKS"])))
+        test.assertEqual(row[1], row[0], atol=0, rtol=0, msg=f"call {call}")
+    test.assertEqual(modes_front(case.fn, compiled), case.front)
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmIterators(TestCase):
+    """What a region hands on of an iterator: one its run made (the
+    ``for`` right behind tensor work) loops over the list or the dict
+    itself where that was there before the run, so a store into an item is
+    the program's and what the body does to the container is seen; one that
+    was there before the run is the program's own, and goes on from where it
+    is; anything else is no region."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def front(self, fn, compiled):
+        return modes_front(fn, compiled)
+
+    @parametrize("name", list(MODES_LOOPS), name_fn=str)
+    @isolated
+    def test_loop(self, device, name):
+        modes_compare(self, MODES_LOOPS[name], device)
+
+    @isolated
+    def test_what_a_write_is_handed_is_the_object(self, device):
+        # With the effects pass a region makes the stores again: with the
+        # list and the iterator the program has, not with copies of them.
+        def held():
+            return modes_holder(
+                items=[1.0, 2.0], it=iter(modes_numbers()), kept=None, at=None
+            )
+
+        (eager, _), (traced, mine) = modes_sides(modes_loop_stores_held, held)
+        effects = (*vm.DEFAULT_PASSES, vm.passes.Effects())
+        compiled = vm(
+            traced,
+            passes=vm.configure(effects, regions={"at": 3, "observe": 1}, pure_calls=1),
+        )
+        held = mine["MODES_HELD"]
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.rand(4, 8, device=device)
+            self.assertEqual(compiled(x), eager(x), atol=0, rtol=0, msg=f"call {call}")
+            self.assertIs(held.kept, held.items, msg=f"call {call}")
+            self.assertIs(held.at, held.it, msg=f"call {call}")
+            held.kept = held.at = None
+        self.assertEqual(
+            self.front(modes_loop_stores_held, compiled), ("region", 9, None)
+        )
+
+    @isolated
+    def test_what_a_write_is_handed_of_an_argument(self, device):
+        # The list and the iterator inside the argument of this call, which
+        # are others on every call.
+        (eager, _), (traced, mine) = modes_sides(
+            modes_loop_stores_given, lambda: modes_holder(kept=None, at=None)
+        )
+        effects = (*vm.DEFAULT_PASSES, vm.passes.Effects())
+        compiled = vm(
+            traced,
+            passes=vm.configure(effects, regions={"at": 3, "observe": 1}, pure_calls=1),
+        )
+        held = mine["MODES_HELD"]
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.rand(4, 8, device=device)
+            ours, theirs = (([1.0, call], iter(modes_numbers())) for _ in range(2))
+            got, want = compiled(x, ours), eager(x, theirs)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertIs(held.kept, ours[0], msg=f"call {call}")
+            self.assertIs(held.at, ours[1], msg=f"call {call}")
+            held.kept = held.at = None
+
+
+instantiate_device_type_tests(TestVmIterators, globals())
+
+
+@dataclasses.dataclass
+class ModesConfig:
+    scale: float
+    n: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
+class ModesFrozen:
+    scale: float
+
+
+@dataclasses.dataclass
+class ModesOut:
+    a: torch.Tensor
+    b: object = None
+
+
+@dataclasses.dataclass
+class ModesPooled:
+    """Its objects are handed out by a ``__new__`` of its own, which could
+    as well give one that was there before."""
+
+    scale: float
+    n: int = 0
+
+    def __new__(cls, *args, **kwargs):
+        return object.__new__(cls)
+
+
+ModesPair = collections.namedtuple("ModesPair", "a b")
+
+
+class ModesCounter:
+    def __init__(self):
+        self.n = 0
+        self.kept = self.bump
+
+    def bump(self):
+        self.n += 1
+        return self.n
+
+
+def modes_object_stored_into(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    c = MODES_HELD
+    MODES_MARKS.append(1)
+    c.n += 1
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_object_returned(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    c = MODES_HELD
+    MODES_MARKS.append(1)
+    return ((y * 3).cos() + 1).tanh().exp(), c
+
+
+def modes_object_of_an_attribute(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    c = MODES_HELD.cfg
+    MODES_MARKS.append(1)
+    c.n += 1
+    y = y * c.scale
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_object_in_a_display(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    cs = [MODES_HELD[0], MODES_HELD[1]]
+    MODES_MARKS.append(1)
+    cs[0].n += 1
+    return ((y * 3).cos() + 1).tanh().exp(), cs[1] is MODES_HELD[1]
+
+
+def modes_object_inside_an_argument(x, pair):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    c = pair[0]
+    MODES_MARKS.append(1)
+    c.n += 1
+    return ((y * c.scale).cos() + 1).tanh().exp(), c.n
+
+
+def modes_object_looped(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    for c in MODES_HELD:
+        MODES_MARKS.append(1)
+        c.n += 1
+        y = y * c.scale
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_object_made(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    return ModesOut(y.exp(), b=y * 2)
+
+
+def modes_object_made_then_changed(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    o = ModesOut(y, y * 2)
+    MODES_MARKS.append(1)
+    o.b = o.b + 1
+    return ((y * 3).cos() + 1).tanh().exp(), o
+
+
+def modes_out_of(a, b):
+    return ModesOut(a=a, b=b)
+
+
+def modes_object_made_in_a_callee(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    o = modes_out_of(y, y * 2)
+    MODES_MARKS.append(1)
+    return ((y * 3).cos() + 1).tanh().exp(), o
+
+
+def modes_object_made_holding_a_list(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    o = ModesOut(y, [y * 2, y * 3])
+    MODES_MARKS.append(1)
+    o.b.append(1)
+    return ((y * 3).cos() + 1).tanh().exp(), o
+
+
+def modes_object_made_by_replace(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    c = dataclasses.replace(MODES_HELD, n=3)
+    MODES_MARKS.append(1)
+    c.n += 1
+    return ((y * 3).cos() + 1).tanh().exp(), c, c is MODES_HELD
+
+
+def modes_object_handed_out(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    c = ModesPooled(2.0)
+    MODES_MARKS.append(1)
+    c.n += 1
+    return ((y * 3).cos() + 1).tanh().exp(), c
+
+
+def modes_object_made_and_stored(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    MODES_HELD.kept = ModesOut(y, [y * 2])
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_node_held(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    pair = MODES_HELD
+    MODES_MARKS.append(1)
+    pair.b.append(1.0)
+    return ((y * 3).cos() + 1).tanh().exp(), pair
+
+
+def modes_node_made(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    pair = ModesPair(y, [y * 2])
+    MODES_MARKS.append(1)
+    pair.b.append(1.0)
+    return ((y * 3).cos() + 1).tanh().exp(), pair
+
+
+def modes_node_made_over_held(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    named = collections.OrderedDict(kept=MODES_HELD)
+    MODES_MARKS.append(1)
+    named["kept"].append(1.0)
+    return ((y * 3).cos() + 1).tanh().exp(), named
+
+
+def modes_method_of_a_made_list(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    out = []
+    add = out.append
+    MODES_MARKS.append(1)
+    add(y)
+    return ((y * 3).cos() + 1).tanh().exp(), out
+
+
+def modes_method_of_an_argument(x, out):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    add = out.append
+    MODES_MARKS.append(1)
+    add(1)
+    return ((y * 3).cos() + 1).tanh().exp(), list(out)
+
+
+def modes_method_inside_an_argument(x, pair):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    bump = pair[0].bump
+    MODES_MARKS.append(1)
+    k = bump()
+    return ((y * k).cos() + 1).tanh().exp(), pair[0].n
+
+
+def modes_method_of_a_made_dict(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    d = {"a": y}
+    get = d.get
+    MODES_MARKS.append(1)
+    return ((y * 3).cos() + 1).tanh().exp() + get("a")
+
+
+def modes_method_of_a_made_iterator(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    take = iter(MODES_HELD).__next__
+    MODES_MARKS.append(1)
+    k = take() + take()
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_method_of_held(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    bump = MODES_HELD.bump
+    MODES_MARKS.append(1)
+    k = bump()
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_method_that_is_kept(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    bump = MODES_HELD.kept
+    MODES_MARKS.append(1)
+    k = bump()
+    return ((y * k).cos() + 1).tanh().exp()
+
+
+def modes_method_of_a_held_list(x):
+    y = ((x.sin() * 2).cos() + 1).tanh()
+    add = MODES_HELD.append
+    MODES_MARKS.append(1)
+    add(y)
+    return ((y * 3).cos() + 1).tanh().exp()
+
+
+def modes_two_configs():
+    return [ModesConfig(2.0), ModesConfig(1.0)]
+
+
+def modes_method_refused(kind):
+    why = f"it hands on a method of a {kind} that its run made, or that none of its reads leads to"
+    return ("refused", 0, why)
+
+
+MODES_OBJECTS = {
+    # A dataclass instance that was there before the run is the object.
+    "known_stored_into": ModesLoop(
+        modes_object_stored_into,
+        lambda d: ModesConfig(2.0),
+        state=lambda h, out: h.n,
+    ),
+    "known_returned": ModesLoop(
+        modes_object_returned,
+        lambda d: ModesConfig(2.0),
+        state=lambda h, out: out[1] is h,
+    ),
+    "known_frozen": ModesLoop(
+        modes_object_returned,
+        lambda d: ModesFrozen(2.0),
+        state=lambda h, out: out[1] is h,
+    ),
+    "known_of_an_attribute": ModesLoop(
+        modes_object_of_an_attribute,
+        lambda d: modes_holder(cfg=ModesConfig(2.0)),
+        state=lambda h, out: h.cfg.n,
+        before=lambda h, call: setattr(h.cfg, "scale", float(call))
+        if call in (6, 9)
+        else None,
+    ),
+    "known_in_a_display": ModesLoop(
+        modes_object_in_a_display,
+        lambda d: modes_two_configs(),
+        state=lambda h, out: h[0].n,
+    ),
+    # (Inside an argument it is found by which object it is: another on
+    # every call here.)
+    "known_inside_an_argument": ModesLoop(
+        modes_object_inside_an_argument,
+        lambda d: None,
+        front=("refused", 0, MODES_ANOTHER),
+        args=lambda call: ((ModesConfig(call + 1.0, call), 1),),
+    ),
+    "known_looped_over": ModesLoop(
+        modes_object_looped,
+        lambda d: modes_two_configs(),
+        state=lambda h, out: [c.n for c in h],
+        before=lambda h, call: setattr(h[0], "scale", float(call))
+        if call in (6, 9)
+        else None,
+    ),
+    # One the run made is made by every run.
+    "made": ModesLoop(modes_object_made, lambda d: None),
+    "made_then_changed": ModesLoop(modes_object_made_then_changed, lambda d: None),
+    "made_in_a_callee": ModesLoop(modes_object_made_in_a_callee, lambda d: None),
+    "made_holding_a_list": ModesLoop(modes_object_made_holding_a_list, lambda d: None),
+    "made_by_replace": ModesLoop(
+        modes_object_made_by_replace,
+        lambda d: ModesConfig(2.0),
+        state=lambda h, out: h.n,
+    ),
+    # A class that hands out its objects itself is called behind the region.
+    "handed_out_by_its_class": ModesLoop(modes_object_handed_out, lambda d: None),
+    # A namedtuple or an OrderedDict is built of what it holds, each by its
+    # own rule: a list in it that was there before is the object itself.
+    "node_holding_a_known_list": ModesLoop(
+        modes_node_held,
+        lambda d: ModesPair(1.0, [2.0]),
+        state=lambda h, out: [len(h.b), out[1].b is h.b],
+    ),
+    "node_made": ModesLoop(modes_node_made, lambda d: None),
+    "node_made_over_a_known_list": ModesLoop(
+        modes_node_made_over_held,
+        lambda d: [],
+        state=lambda h, out: [len(h), out[1]["kept"] is h],
+        after=lambda h: h.clear(),
+    ),
+    # A method bound by the run is pinned only to what is found again.
+    "method_of_a_made_list": ModesLoop(
+        modes_method_of_a_made_list,
+        lambda d: None,
+        front=modes_method_refused("list"),
+    ),
+    "method_of_an_argument": ModesLoop(
+        modes_method_of_an_argument,
+        lambda d: None,
+        front=modes_method_refused("list"),
+        args=lambda call: ([],),
+    ),
+    "method_of_an_object_in_an_argument": ModesLoop(
+        modes_method_inside_an_argument,
+        lambda d: None,
+        front=modes_method_refused("ModesCounter"),
+        args=lambda call: ((ModesCounter(), call),),
+    ),
+    "method_of_a_made_dict": ModesLoop(
+        modes_method_of_a_made_dict,
+        lambda d: None,
+        front=modes_method_refused("dict"),
+    ),
+    "method_of_a_made_iterator": ModesLoop(
+        modes_method_of_a_made_iterator,
+        lambda d: modes_numbers(40),
+        front=modes_method_refused("list_iterator"),
+    ),
+    "method_of_a_known_object": ModesLoop(
+        modes_method_of_held,
+        lambda d: ModesCounter(),
+        state=lambda h, out: h.n,
+    ),
+    "method_that_was_there_before": ModesLoop(
+        modes_method_that_is_kept,
+        lambda d: ModesCounter(),
+        state=lambda h, out: h.n,
+    ),
+    "method_of_a_known_list": ModesLoop(
+        modes_method_of_a_held_list,
+        lambda d: [],
+        state=lambda h, out: [len(h), h[-1].sum()],
+        after=lambda h: h.clear(),
+    ),
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmHandedOn(TestCase):
+    """What a region hands on of an object it can make again from its
+    fields (a dataclass instance) and of a bound method: the instance that
+    was there before the run is the program's own object, one the run made
+    is made by every run, and one of unknown origin is no region; a method
+    the run bound is handed on only where what it is bound to is found
+    again as the same object."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("name", list(MODES_OBJECTS), name_fn=str)
+    @isolated
+    def test_object(self, device, name):
+        modes_compare(self, MODES_OBJECTS[name], device)
+
+    def test_unknown_origin_is_no_region(self, device):
+        # No program hands a region such an object today (a call that could
+        # give one that was there before ends the region in front of it), so
+        # the rule itself is asked: outside a trace nothing is made, and
+        # nothing is led to.
+        from torch._rust_inductor import _held, _Refused
+
+        for x, what in (
+            (ModesConfig(2.0), f"a ModesConfig {MODES_UNSEEN}"),
+            (iter([1.0]), f"a list_iterator {MODES_UNSEEN}"),
+            ([].append, "a method of a list that its run made"),
+            (ModesCounter().bump, "a method of a ModesCounter that its run made"),
+        ):
+            with self.assertRaisesRegex(_Refused, f"it hands on {what}"):
+                _held([x], {}, [])
+
+    @isolated
+    def test_made_object_is_this_calls(self, device):
+        compiled = vm(modes_object_made_holding_a_list, passes=EARLY)
+        made = []
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.rand(4, 8, device=device)
+            want, out = modes_object_made_holding_a_list(x), compiled(x)
+            self.assertEqual(out, want, atol=0, rtol=0, msg=f"call {call}")
+            before = [ref() for ref in made]
+            self.assertFalse(any(out[1] is o for o in before), msg=f"call {call}")
+            made.append(weakref.ref(out[1]))
+            # What a caller does to the object it was handed is its own.
+            out[1].b = None
+            del out, want, before
+        gc.collect()
+        alive = [call for call, ref in enumerate(made) if ref() is not None]
+        self.assertEqual(alive, [])
+        (region,) = [
+            r
+            for r in vm.regions(compiled)
+            if r["state"] == "region"
+            and r["lines"][0]
+            == modes_object_made_holding_a_list.__code__.co_firstlineno
+        ]
+        self.assertEqual((region["runs"], region["misses"]), (9, {}))
+
+    @isolated
+    def test_made_object_a_write_is_handed(self, device):
+        # With the effects pass the store is the region's: of a new object
+        # on every run, holding a new list.
+        (eager, theirs), (traced, mine) = modes_sides(
+            modes_object_made_and_stored, lambda: modes_holder(kept=None)
+        )
+        effects = (*vm.DEFAULT_PASSES, vm.passes.Effects())
+        compiled = vm(
+            traced,
+            passes=vm.configure(effects, regions={"at": 3, "observe": 1}, pure_calls=1),
+        )
+        last = None
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.rand(4, 8, device=device)
+            self.assertEqual(compiled(x), eager(x), atol=0, rtol=0, msg=f"call {call}")
+            got, want = mine["MODES_HELD"].kept, theirs["MODES_HELD"].kept
+            self.assertEqual((got.a, got.b), (want.a, want.b), atol=0, rtol=0)
+            self.assertIsNot(got, last, msg=f"call {call}")
+            last = got
+        self.assertEqual(
+            modes_front(modes_object_made_and_stored, compiled), ("region", 9, None)
+        )
+
+
+instantiate_device_type_tests(TestVmHandedOn, globals())
+
+
+# What the kinds tests iterate, unpack, test membership in or compute with:
+# of one kind on the calls that are observed, of another later.
+MODES_KIND = None
+MODES_KIND_ITEMS = {"source": None}
+MODES_KIND_MODULE = types.ModuleType("modes_kind_module")
+
+
+class ModesCounts:
+    """Iterated as a list of two floats is, by a method written in Python
+    that counts its calls."""
+
+    def __init__(self):
+        self.items, self.iterated = [2.0, 3.0], 0
+
+    def __iter__(self):
+        self.iterated += 1
+        return iter(self.items)
+
+
+class ModesTensor(torch.Tensor):
+    pass
+
+
+def modes_kind_work(x, k=2.0):
+    return ((x.sin() * k).cos() + 1).tanh().exp()
+
+
+def modes_kind_iterated(x):
+    for v in MODES_KIND:
+        x = ((x * v).sin() + 1).cos().tanh()
+    return modes_kind_work(x)
+
+
+def modes_kind_of_a_module(x):
+    for v in MODES_KIND_MODULE.source:
+        x = ((x * v).sin() + 1).cos().tanh()
+    return modes_kind_work(x)
+
+
+def modes_kind_of_a_dict(x):
+    for v in MODES_KIND_ITEMS["source"]:
+        x = ((x * v).sin() + 1).cos().tanh()
+    return modes_kind_work(x)
+
+
+def modes_kind_of_a_cell():
+    source = None
+
+    def put(value):
+        nonlocal source
+        source = value
+
+    def iterated(x):
+        for v in source:
+            x = ((x * v).sin() + 1).cos().tanh()
+        return modes_kind_work(x)
+
+    return iterated, put
+
+
+def modes_kind_in_a_callee(x):
+    return modes_kind_iterated(x) * 2
+
+
+def modes_kind_unpacked(x):
+    a, b = MODES_KIND
+    return modes_kind_work(x, a + b)
+
+
+def modes_kind_member(x):
+    return modes_kind_work(x, 2.0 + (3.0 in MODES_KIND))
+
+
+def modes_kind_starred(x):
+    items = [*MODES_KIND]
+    return modes_kind_work(x, 2.0 + len(items))
+
+
+def modes_kind_summed(x):
+    return modes_kind_work(x, sum(MODES_KIND, 2.0))
+
+
+def modes_kind_sliced(x):
+    for v in itertools.islice(MODES_KIND, 2):
+        x = ((x * v).sin() + 1).cos().tanh()
+    return modes_kind_work(x)
+
+
+def modes_kind_grown(x):
+    items = MODES_KIND
+    items += (4.0,)
+    return modes_kind_work(x, 2.0 + len(items))
+
+
+def modes_kind_keyed(x):
+    return modes_kind_work(x, MODES_KIND["k"])
+
+
+def modes_kind_multiplied(x):
+    return modes_kind_work(x) * MODES_KIND
+
+
+def modes_kind_divided(x):
+    return modes_kind_work(x, MODES_KIND / 2 + MODES_KIND // 2 + MODES_KIND % 2)
+
+
+def modes_kind_asked(x):
+    return modes_kind_work(x, 2.0 + (MODES_KIND is None) + bool(MODES_KIND))
+
+
+def modes_kind_global(value):
+    global MODES_KIND
+    MODES_KIND = value
+
+
+def modes_two():
+    return [2.0, 3.0]
+
+
+def modes_two_iterator():
+    return iter([2.0, 3.0])
+
+
+# name: (the function, what puts its operand in place, the operand on the
+# calls that are observed, the operand of the other kind). The first group
+# takes the items of the operand or changes it in place; the second only
+# reads it or computes with it.
+MODES_KINDS = {
+    "iterator": (modes_kind_iterated, modes_kind_global, modes_two, modes_two_iterator),
+    "generator": (
+        modes_kind_iterated,
+        modes_kind_global,
+        modes_two,
+        lambda: (v for v in [2.0, 3.0]),
+    ),
+    "deque": (
+        modes_kind_iterated,
+        modes_kind_global,
+        modes_two,
+        lambda: collections.deque([2.0, 3.0]),
+    ),
+    "count": (
+        modes_kind_sliced,
+        modes_kind_global,
+        modes_two,
+        lambda: itertools.count(2.0),
+    ),
+    "module_attribute": (
+        modes_kind_of_a_module,
+        lambda v: setattr(MODES_KIND_MODULE, "source", v),
+        modes_two,
+        modes_two_iterator,
+    ),
+    "dict_item": (
+        modes_kind_of_a_dict,
+        lambda v: MODES_KIND_ITEMS.update(source=v),
+        modes_two,
+        modes_two_iterator,
+    ),
+    "closure_cell": (*modes_kind_of_a_cell(), modes_two, modes_two_iterator),
+    "callee_iterator": (
+        modes_kind_in_a_callee,
+        modes_kind_global,
+        modes_two,
+        modes_two_iterator,
+    ),
+    "callee_generator": (
+        modes_kind_in_a_callee,
+        modes_kind_global,
+        modes_two,
+        lambda: (v for v in [2.0, 3.0]),
+    ),
+    "unpacked": (modes_kind_unpacked, modes_kind_global, modes_two, modes_two_iterator),
+    "member": (modes_kind_member, modes_kind_global, modes_two, modes_two_iterator),
+    "starred": (modes_kind_starred, modes_kind_global, modes_two, modes_two_iterator),
+    "summed": (modes_kind_summed, modes_kind_global, modes_two, modes_two_iterator),
+    "list_grown_in_place": (
+        modes_kind_grown,
+        modes_kind_global,
+        lambda: (2.0, 3.0),
+        modes_two,
+    ),
+    "python_class": (modes_kind_iterated, modes_kind_global, modes_two, ModesCounts),
+    "tensor_subclass": (
+        modes_kind_multiplied,
+        modes_kind_global,
+        lambda: torch.ones(8),
+        lambda: torch.ones(8).as_subclass(ModesTensor),
+    ),
+    "parameter": (
+        modes_kind_multiplied,
+        modes_kind_global,
+        lambda: torch.ones(8),
+        lambda: torch.nn.Parameter(torch.ones(8)),
+    ),
+    "defaultdict": (
+        modes_kind_keyed,
+        modes_kind_global,
+        lambda: {"k": 2.0},
+        lambda: collections.defaultdict(lambda: 2.0),
+    ),
+    "int_for_float": (modes_kind_divided, modes_kind_global, lambda: 3.0, lambda: 3),
+    "numpy_for_float": (
+        modes_kind_divided,
+        modes_kind_global,
+        lambda: 3.0,
+        lambda: __import__("numpy").float64(3.0),
+    ),
+    "bool_for_int": (modes_kind_divided, modes_kind_global, lambda: 1, lambda: True),
+    "none_for_object": (modes_kind_asked, modes_kind_global, object, lambda: None),
+}
+# The cases whose operand of the other kind is one the instruction takes
+# from or changes: no region may run that instruction.
+MODES_KINDS_TAKEN = (
+    "iterator",
+    "generator",
+    "count",
+    "module_attribute",
+    "dict_item",
+    "callee_iterator",
+    "callee_generator",
+    "unpacked",
+    "member",
+    "starred",
+    "summed",
+    "list_grown_in_place",
+)
+# The cases with no region for another reason: the loop of a closure is in
+# none today, a method written in Python is code no call ran, and a deque is
+# of no class that is shown to be only read.
+MODES_KINDS_NO_REGION = ("closure_cell", "python_class", "tensor_subclass", "deque")
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmKinds(TestCase):
+    """An instruction of a traced body takes the items of an operand, or
+    changes it in place, only if a call before the trace showed an operand
+    of that class there: a trace that comes to another is given up before
+    the instruction runs, and the place is observed and judged with it."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def left(self, value):
+        if isinstance(value, ModesCounts):
+            return value.iterated
+        if isinstance(value, itertools.count):
+            return next(value)
+        if (
+            isinstance(value, (torch.Tensor, float, int, type(None)))
+            or type(value) is object
+        ):
+            return None
+        return list(value)
+
+    def calls(self, fn, put, a, b, other, device):
+        out = []
+        for call in range(40):
+            put(b if other(call) else a)
+            torch.manual_seed(call)
+            x = torch.rand(3, 8, device=device)
+            try:
+                y = fn(x)
+                out.append((type(y).__name__, y.detach().as_subclass(torch.Tensor)))
+            except Exception as e:
+                out.append((type(e).__name__, str(e)))
+        return out, self.left(a), self.left(b)
+
+    # The other kind from the call that is traced on, on calls the region
+    # would run, and on the calls that are observed.
+    ORDERS = {
+        "traced": lambda call: call >= 3,
+        "run": lambda call: 10 <= call < 20,
+        "observed": lambda call: call < 3,
+    }
+
+    @parametrize(
+        "case,order",
+        [
+            *[(case, "traced") for case in MODES_KINDS],
+            *[
+                (case, order)
+                for case in ("iterator", "generator", "callee_iterator")
+                for order in ("run", "observed")
+            ],
+        ],
+        name_fn=lambda case, order: f"{case}_{order}",
+    )
+    @isolated
+    def test_operand_of_a_kind_no_call_showed(self, device, case, order):
+        if case == "numpy_for_float" and not TEST_NUMPY:
+            self.skipTest("needs numpy")
+        fn, put, make_a, make_b = MODES_KINDS[case]
+
+        def on(v):
+            # A Parameter moved by `.to` is no Parameter on another device,
+            # and no leaf: it is built there.
+            if isinstance(v, torch.nn.Parameter):
+                return torch.nn.Parameter(v.detach().to(device))
+            return v.to(device) if isinstance(v, torch.Tensor) else v
+
+        other = self.ORDERS[order]
+        want = self.calls(fn, put, on(make_a()), on(make_b()), other, device)
+        compiled = vm(fn, passes=EARLY)
+        got = self.calls(compiled, put, on(make_a()), on(make_b()), other, device)
+        for call, (w, g) in enumerate(zip(want[0], got[0])):
+            self.assertEqual(g, w, atol=0, rtol=0, msg=f"call {call}")
+        self.assertEqual(got[1:], want[1:], msg="what is left of the operands")
+        rows = [r for r in vm.regions(compiled) if r["function"] == fn.__qualname__]
+        if order != "traced":
+            return
+        if case in MODES_KINDS_TAKEN:
+            # The place is refused with the class it came to.
+            why = [r.get("why") or "" for r in rows if r["state"] == "refused"]
+            self.assertTrue(
+                any("which no call before it showed there" in w for w in why),
+                msg=f"{rows}",
+            )
+        elif case not in MODES_KINDS_NO_REGION:
+            self.assertTrue(
+                any(r["state"] == "region" and r.get("runs") for r in rows),
+                msg=f"{rows}",
+            )
+
+
+instantiate_device_type_tests(TestVmKinds, globals())
+
+
+def modes_value_front(x):
+    return (x * 3).relu() + x.sigmoid()
+
+
+def modes_value_branch(x):
+    y = modes_value_front(x)
+    if (y > 10).any():
+        y = y * 2
+    return y.exp().cos().sin().tanh()
+
+
+def modes_value_bool(x):
+    y = modes_value_front(x)
+    flag = bool((y > 10).all())
+    return (y.exp().cos() + 1).tanh(), flag
+
+
+def modes_value_int(x):
+    y = modes_value_front(x)
+    n = int((y > 1).sum())
+    return (y.exp().cos() + 1).tanh(), n
+
+
+def modes_value_float(x):
+    y = modes_value_front(x)
+    s = float(y.sum())
+    return (y.exp().cos() + 1).tanh(), s
+
+
+def modes_value_int_item(x):
+    y = modes_value_front(x)
+    n = (y > 1).sum().item()
+    return (y.exp().cos() + 1).tanh(), n
+
+
+def modes_value_tolist(x):
+    y = modes_value_front(x)
+    values = y.sum(1).tolist()
+    return (y.exp().cos() + 1).tanh(), values
+
+
+def modes_value_equal(x):
+    y = modes_value_front(x)
+    if torch.equal(y.clamp(max=10), y):
+        y = y + 1
+    return y.exp().cos().sin().tanh()
+
+
+def modes_value_assert(x):
+    loss = modes_value_front(x).square().mean()
+    # What `assert torch.isfinite(loss)` does, without the statement.
+    if not torch.isfinite(loss):
+        raise AssertionError("the loss is not finite")
+    return (loss.exp().cos() + 1).tanh()
+
+
+def modes_value_index(x):
+    y = modes_value_front(x)
+    k = (y > 1).sum() % 3
+    row = y[k]
+    return (row.exp().cos() + 1).tanh()
+
+
+def modes_value_store_index(x):
+    y = modes_value_front(x)
+    k = (y > 1).sum() % 3
+    y[k] = 0.0
+    return (y.exp().cos() + 1).tanh()
+
+
+def modes_value_checked(y):
+    if (y > 10).any():
+        y = y * 2
+    return y
+
+
+def modes_value_in_callee(x):
+    y = modes_value_front(x)
+    y = modes_value_checked((y - 1).abs().sqrt())
+    return y.exp().cos().sin().tanh()
+
+
+# The function, and the torch operations in front of its read.
+MODES_VALUE_READS = {
+    "branch": (modes_value_branch, 6),
+    "bool": (modes_value_bool, 6),
+    "int": (modes_value_int, 6),
+    "float": (modes_value_float, 5),
+    "int_item": (modes_value_int_item, 6),
+    "tolist": (modes_value_tolist, 5),
+    "equal": (modes_value_equal, 5),
+    "assert": (modes_value_assert, 10),
+    "in_callee": (modes_value_in_callee, 7),
+    # A tensor with no dimensions as an index: torch reads its value.
+    "index": (modes_value_index, 7),
+    "store_index": (modes_value_store_index, 7),
+}
+
+
+def modes_value_out(x):
+    y = modes_value_front(x)
+    s = y.sum().item()
+    return (y.exp().cos() + 1).tanh(), s
+
+
+def modes_value_operand(x):
+    y = modes_value_front(x)
+    s = y.mean().item()
+    return (y.cos() + s).tanh() * s
+
+
+def modes_value_arithmetic(x):
+    y = modes_value_front(x)
+    s = y.mean().item() * 0.5 + 1
+    return (y.cos() * s).tanh(), s
+
+
+MODES_VALUE_KEPT = {
+    "out": (modes_value_out, 10),
+    "operand": (modes_value_operand, 10),
+    "arithmetic": (modes_value_arithmetic, 11),
+}
+
+
+def modes_value_compared(x):
+    y = modes_value_front(x)
+    s = y.mean().item()
+    if s > 5:
+        y = y * 2
+    return y.exp().cos().sin().tanh(), s
+
+
+def modes_value_loop(x):
+    err = modes_value_front(x).sum()
+    n = 0
+    while err.item() > 1.0:
+        err = (err * 0.5).sin().abs() * 0.9 + err * 0.1
+        n += 1
+    return err, n
+
+
+def modes_value_formatted(x):
+    y = modes_value_front(x)
+    text = f"{y.mean().item():.3f}"
+    return (y.exp().cos() + 1).tanh(), text
+
+
+def modes_value_rounded(x):
+    y = modes_value_front(x)
+    r = round(y.mean().item(), 2)
+    return (y.exp().cos() + 1).tanh(), r
+
+
+def modes_value_mean(y):
+    return y.mean().item()
+
+
+def modes_value_from_callee(x):
+    y = modes_value_front(x)
+    s = modes_value_mean(y)
+    if s > 5:
+        y = y * 2
+    return y.exp().cos().sin().tanh(), s
+
+
+MODES_VALUE_NEEDED = {
+    "compared": (modes_value_compared, 5),
+    "loop": (modes_value_loop, 5),
+    "formatted": (modes_value_formatted, 5),
+    "rounded": (modes_value_rounded, 5),
+    "from_callee": (modes_value_from_callee, 4),
+}
+
+
+def modes_value_step(net, opt, x):
+    opt.zero_grad()
+    loss = ((net(x).relu() * 2).sigmoid() - x).square().mean()
+    loss.backward()
+    opt.step()
+    return loss.item()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmValueReads(TestCase):
+    """A region ends in front of an instruction that hands a tensor's value
+    to Python (``if t.any():``, ``bool(t)``, ``int(t)``, ``float(t)``,
+    ``t.item()``, ``t.tolist()``, ``torch.equal``): the operations in front
+    of it are a region, the read is made by every call, and what is behind
+    it is judged on its own. A float read by ``t.item()`` from a CPU tensor
+    stays a value of the region's graph while the traced run hands it only
+    to what the graph records; a run that needs it in Python ends the region
+    in front of that read from the next call on."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def inputs(self, call, device):
+        # Two ranges, so that what a read gives differs between calls.
+        torch.manual_seed(call)
+        return torch.rand(3, 8, device=device) + 5 * (call % 3 == 1)
+
+    def run_both(self, fn, device, calls=40):
+        compiled = vm(fn, passes=EARLY)
+        for call in range(calls):
+            x = self.inputs(call, device)
+            want, got = fn(x), compiled(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(
+                [type(v) for v in got] if isinstance(got, tuple) else type(got),
+                [type(v) for v in want] if isinstance(want, tuple) else type(want),
+            )
+        return [r for r in vm.regions(compiled) if r["function"] == fn.__qualname__]
+
+    def cut(self, rows, front, needed=False):
+        """The one row of the read, with a region of `front` operations in
+        front of it and no region across it (one may end, and another begin,
+        on the line of the read)."""
+        why = "reads a tensor's value"
+        why += ", which the traced run needed in Python" if needed else ""
+        reads = [r for r in rows if r["state"] == "not movable" and why in r["why"]]
+        self.assertEqual(len({r["lines"] for r in reads}), 1, msg=f"{rows}")
+        self.assertTrue(needed or all(r["why"].endswith(why) for r in reads))
+        if not needed and "tolist" not in reads[0]["function"]:
+            self.assertIn(" ran aten::", reads[0]["why"])
+        line = reads[0]["lines"][0]
+        regions = [r for r in rows if r["state"] == "region"]
+        for r in regions:
+            first, last = r["lines"] or (line, line)
+            self.assertTrue(last <= line or first >= line, msg=f"{r['where']}")
+        ahead = [r for r in regions if r["lines"] and r["lines"][1] <= line]
+        self.assertEqual([r["ops"] for r in ahead], [front], msg=f"{rows}")
+        self.assertGreater(ahead[0]["runs"], 30)
+        whole = [r for r in rows if r["state"] == "refused" and r["kind"] == "block"]
+        self.assertEqual(
+            [r["why"] for r in whole if "value" in r["why"] or "aten" in r["why"]], []
+        )
+
+    @parametrize("case", list(MODES_VALUE_READS))
+    @isolated
+    def test_region_ends_in_front_of_the_read(self, device, case):
+        fn, front = MODES_VALUE_READS[case]
+        rows = self.run_both(fn, device)
+        if case == "store_index" and not any(r["state"] == "not movable" for r in rows):
+            # Torch stores through an index that is on a GPU without
+            # reading it: nothing ends the region.
+            regions = [r["ops"] for r in rows if r["state"] == "region"]
+            return self.assertEqual(regions, [12], msg=f"{rows}")
+        self.cut(rows, front)
+
+    @isolated
+    def test_read_is_made_by_every_call(self, device):
+        # The assertion fails on the call whose data fails it, not before.
+        compiled = vm(modes_value_assert, passes=EARLY)
+        for call in range(20):
+            x = self.inputs(call, device)
+            if call in (9, 15):
+                x[0, 0] = math.inf
+                for fn in (modes_value_assert, compiled):
+                    with self.assertRaises(AssertionError, msg=f"call {call}"):
+                        fn(x)
+            else:
+                self.assertEqual(compiled(x), modes_value_assert(x), atol=0, rtol=0)
+
+    @parametrize("case", list(MODES_VALUE_KEPT))
+    @isolated
+    def test_float_item_handed_to_the_graph_stays_in_the_region(self, device, case):
+        fn, ops = MODES_VALUE_KEPT[case]
+        rows = self.run_both(fn, device)
+        if torch.device(device).type != "cpu":
+            # Read from another device, it is a read as any other.
+            return self.cut(rows, 5)
+        regions = [r for r in rows if r["state"] == "region"]
+        self.assertEqual([r["ops"] for r in regions], [ops], msg=f"{rows}")
+        self.assertGreater(regions[0]["runs"], 30)
+        self.assertEqual([r for r in rows if r["state"] == "not movable"], [])
+
+    @parametrize("case", list(MODES_VALUE_NEEDED))
+    @isolated
+    def test_float_item_the_run_needs_ends_the_region(self, device, case):
+        fn, front = MODES_VALUE_NEEDED[case]
+        rows = self.run_both(fn, device)
+        self.cut(rows, front, needed=torch.device(device).type == "cpu")
+
+    @isolated
+    def test_training_step_that_ends_in_a_read(self, device):
+        torch.manual_seed(0)
+        nets = [torch.nn.Linear(8, 8).to(device)]
+        nets.append(torch.nn.Linear(8, 8).to(device))
+        nets[1].load_state_dict(nets[0].state_dict())
+        opts = [torch.optim.SGD(n.parameters(), lr=0.05, momentum=0.9) for n in nets]
+        compiled = vm(modes_value_step, passes=EARLY)
+        for call in range(40):
+            x = self.inputs(call, device)
+            want = modes_value_step(nets[0], opts[0], x)
+            got = compiled(nets[1], opts[1], x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertIs(type(got), float)
+            for p, q in zip(nets[0].parameters(), nets[1].parameters()):
+                self.assertEqual(q, p, atol=0, rtol=0, msg=f"call {call}")
+        rows = vm.regions(compiled)
+        step = [r for r in rows if r["function"] == "modes_value_step"]
+        forward = [r for r in step if r["state"] == "region"]
+        self.assertEqual([r["ops"] for r in forward], [8], msg=f"{step}")
+        self.assertGreater(forward[0]["runs"], 30)
+
+
+instantiate_device_type_tests(TestVmValueReads, globals())
+
+
+class ModesRowsBox:
+    k = 0
+    items = None
+
+
+MODES_ROWS_BOX = ModesRowsBox()
+MODES_ROWS_BOX.items = []
+
+
+def modes_rows_body(x):
+    return ((x.sin() * 2).cos() + 1).tanh()
+
+
+def modes_rows_tail(y):
+    return (y * 3).relu() + y.sigmoid()
+
+
+def modes_rows_literal(x):
+    y = modes_rows_body(x)
+    n = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], device=x.device)
+    return modes_rows_tail(y) * n
+
+
+def modes_rows_store(x):
+    y = modes_rows_body(x)
+    MODES_ROWS_BOX.k = y.shape[-1]
+    return modes_rows_tail(y)
+
+
+def modes_rows_iadd(x):
+    y = modes_rows_body(x)
+    items = MODES_ROWS_BOX.items
+    items += [1]
+    return modes_rows_tail(y)
+
+
+def modes_rows_says(x):
+    print(end="")
+    return (x.sin() * 2).cos()
+
+
+def modes_rows_twice(x):
+    return modes_rows_says(x).tanh() + modes_rows_says(x * 2).exp()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmReportRows(TestCase):
+    """What ``torch.vm.regions`` says of where a region ends is true of the
+    plan that runs: an instruction that is inside a region has no row, an
+    instruction that ends one has one row with its line and the reason, and
+    a block that is refused for a store names the store."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def rows(self, fn, device, calls=12, of=None):
+        """The rows of `of` (`fn` itself if None) after `calls` calls."""
+        compiled = vm(fn, passes=vm.configure(EARLY, pure_calls=3))
+        for call in range(calls):
+            torch.manual_seed(call)
+            x = torch.rand(4, 8, device=device)
+            self.assertEqual(compiled(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+        rows = vm.regions(compiled)
+        ends = [r for r in rows if r["state"] == "not movable"]
+        said = [(r["where"], r["why"]) for r in ends]
+        self.assertEqual(len(said), len(set(said)), msg="a row said twice")
+        return [r for r in rows if r["function"] == (of or fn).__qualname__]
+
+    @isolated
+    def test_call_inside_a_region_has_no_row(self, device):
+        # torch.tensor(...) detaches what it makes: the verdict on the call
+        # alone refuses it, the rule for torch's own functions takes it.
+        rows = self.rows(modes_rows_literal, device)
+        self.assertEqual([r["ops"] for r in rows if r["state"] == "region"], [11])
+        self.assertEqual([r for r in rows if r["state"] == "not movable"], [])
+
+    @isolated
+    def test_store_that_refuses_a_block_is_named(self, device):
+        rows = self.rows(modes_rows_store, device)
+        (row,) = (r for r in rows if r["state"] == "refused")
+        line = modes_rows_store.__code__.co_firstlineno + 2
+        self.assertIn(f"(line {line}: ", row["why"])
+        self.assertIn("StoreAttr", row["why"])
+        self.assertEqual(MODES_ROWS_BOX.k, 8)
+
+    @isolated
+    def test_in_place_operator_that_ends_a_region_has_a_row(self, device):
+        rows = self.rows(modes_rows_iadd, device)
+        line = modes_rows_iadd.__code__.co_firstlineno + 3
+        (row,) = (r for r in rows if r["state"] == "not movable")
+        self.assertEqual(row["lines"], (line, line))
+        self.assertIn("changes its left operand in place", row["why"])
+        regions = [r["lines"] for r in rows if r["state"] == "region"]
+        self.assertEqual(regions, [(line - 3, line), (line + 1, line + 1)])
+        # Eager's calls and the VM's: one item each.
+        self.assertEqual(MODES_ROWS_BOX.items, [1] * 24)
+
+    @isolated
+    def test_row_is_of_the_plan_that_runs(self, device):
+        # The callee is judged in several rounds, and each call site of it
+        # has a plan of its own: one row per instruction that ends a region.
+        rows = self.rows(modes_rows_twice, device)
+        line = modes_rows_twice.__code__.co_firstlineno + 1
+        ends = [r for r in rows if r["state"] == "not movable"]
+        self.assertEqual([r["lines"] for r in ends], [(line, line)] * 2)
+        for r in ends:
+            self.assertIn("called <built-in function print>", r["why"])
+
+    @isolated
+    def test_row_of_a_callee_is_said_once(self, device):
+        rows = self.rows(modes_rows_twice, device, of=modes_rows_says)
+        ends = [r for r in rows if r["state"] == "not movable"]
+        line = modes_rows_says.__code__.co_firstlineno + 1
+        self.assertEqual([r["lines"] for r in ends], [(line, line)], msg=f"{ends}")
+
+
+instantiate_device_type_tests(TestVmReportRows, globals())
+
+
+def sizes_range_into_out(x, t):
+    steps = torch.arange(0, t * 10, 1.0, out=torch.zeros(0, device=x.device))
+    return modes_work(x).sum() * steps.shape[0]
+
+
+def sizes_range_into_an_argument(x, t, out):
+    steps = torch.arange(0, t * 10, 1.0, out=out)
+    return modes_work(x).sum() * steps.shape[0]
+
+
+def sizes_interpolated(x, t):
+    up = F.interpolate(modes_work(x)[None, None], scale_factor=t)
+    return up.sum() * up.shape[-1]
+
+
+def sizes_range(x, t):
+    steps = torch.arange(0, t * 10, 1.0, device=x.device)
+    return modes_work(x).sum() * steps.shape[0]
+
+
+def sizes_linspace(x, t):
+    return modes_work(x)[:3] + torch.linspace(0, t, 3, device=x.device)
+
+
+def sizes_full_of_an_int(x, t):
+    ones = torch.full((int(t * 4),), 1.0, device=x.device)
+    return modes_work(x).sum() + ones.sum()
+
+
+def sizes_new_full_of_a_ceiling(x, t):
+    return modes_work(x).sum() + x.new_full((math.ceil(t * 3), 2), t).sum()
+
+
+def sizes_scale_read_from_a_tensor(x, s):
+    up = F.interpolate(modes_work(x)[None, None], scale_factor=s.item())
+    return up.sum() * up.shape[-1]
+
+
+def sizes_range_read_from_a_tensor(x, s):
+    steps = torch.arange(0, s.item() * 10, 1.0, out=torch.zeros(0, device=x.device))
+    return modes_work(x).sum() * steps.shape[0]
+
+
+def sizes_inputs(x, t):
+    filled = torch.full((3,), t, device=x.device) + x.new_full((1,), t)
+    y = modes_work(x).clamp(max=t) + torch.full_like(x, t)[:3] + filled
+    return torch.add(y, t, out=torch.empty(0, device=x.device)).mul_(t) - t
+
+
+def sizes_where(x, t):
+    return torch.where(x > 0.5, modes_work(x), t) * 2 + 1
+
+
+# How a schema writes a scalar parameter, and a list of them.
+SIZES_SCALAR = {"number", "float", "Optional[number]", "Optional[float]"}
+SIZES_SCALARS = {"List[number]", "List[float]", "Optional[List[float]]"}
+
+
+def sizes_of_a_call(op, scalar):
+    """Calls the overload ``op`` on small tensors with multiples of
+    ``scalar`` for its scalar parameters (the second gets twice the first,
+    as the end of a range would): the sizes of what it returned, and those
+    of its first argument before and after the call."""
+    whole, scalars = type(scalar) is int, 0
+
+    def tensor(*shape):
+        t = torch.rand(shape) + 0.5
+        return (t * 4).long() if whole else t
+
+    args, kwargs = [], {}
+    for a in op._schema.arguments:
+        kind = str(a.type)
+        if a.is_out:
+            value = tensor(0)
+        elif kind == "Tensor":
+            value = tensor(2, 3)
+            if a.name == "mask":
+                value = tensor(2, 3) > 2
+            if a.name == "index":
+                value = torch.zeros(2, dtype=torch.long)
+        elif kind == "List[Tensor]":
+            value = [tensor(2, 3), tensor(3)]
+        elif kind in SIZES_SCALAR:
+            scalars += 1
+            value = scalar * scalars
+        elif kind in SIZES_SCALARS:
+            value = [scalar, scalar]
+        elif a.has_default_value():
+            continue
+        elif kind.startswith("Optional["):
+            value = None
+        elif kind in ("int", "bool"):
+            value = {"int": 0, "bool": True}[kind]
+        else:
+            raise NotImplementedError(kind)
+        if a.kwarg_only:
+            kwargs[a.name] = value
+        else:
+            args.append(value)
+
+    def sizes(x):
+        xs = x if isinstance(x, (list, tuple)) else (x,)
+        return [tuple(t.shape) for t in xs if isinstance(t, torch.Tensor)]
+
+    before = sizes(args[0]) if args else []
+    return sizes(op(*args, **kwargs)), before, sizes(args[0]) if args else []
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmScalarSizes(TestCase):
+    """A float handed to a torch call is an input of a region's graph only
+    where the operator the call ran is declared to take no size from a
+    scalar; under any other operator the region is checked on the float's
+    value, whatever the sizes of the traced call were."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # The value of the traced (fourth) call, by where the first value comes.
+    ORDERS = {
+        "traced": lambda a, b, c: [a] * 4 + [b, c] * 4,
+        "later": lambda a, b, c: [b] * 4 + [a, c] * 4,
+        "in_turn": lambda a, b, c: [a, b, c] * 4,
+    }
+
+    def rows(self, fn, device, values, order, argument=lambda t: (t,), size=6):
+        g = vm(fn, passes=EARLY)
+        for call, t in enumerate(self.ORDERS[order](*values)):
+            x = torch.rand(size, device=device) + 0.25
+            got, want = g(x, *argument(t)), fn(x, *argument(t))
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}, {t}")
+        return [r for r in vm.regions(g) if r["function"] == fn.__name__]
+
+    def by_value(self, fn, device, values, order, **kwargs):
+        # Every call equals eager's, and a region that ran is checked on
+        # the float: one variant per value.
+        rows = self.rows(fn, device, values, order, **kwargs)
+        ran = [r for r in rows if r["state"] == "region" and r["runs"]]
+        for r in ran:
+            checked = sorted(v.split(" (float) == ")[1] for v in r["values"])
+            self.assertEqual(checked, sorted(map(repr, values)), msg=str(r))
+            self.assertEqual(r["variants"], 3, msg=str(r))
+        return ran
+
+    @parametrize("order", tuple(ORDERS))
+    @isolated
+    def test_range_written_to_out(self, device, order):
+        # The tensor given as out= has the result's size after the call.
+        ran = self.by_value(sizes_range_into_out, device, (0.5, 0.75, 1.0), order)
+        self.assertEqual(len(ran), 1)
+
+    @isolated
+    def test_range_written_to_an_argument(self, device):
+        def out(t):
+            return t, torch.empty(0, device=device)
+
+        fn, values = sizes_range_into_an_argument, (0.5, 0.75, 1.0)
+        self.by_value(fn, device, values, "in_turn", argument=out)
+
+    @parametrize("order", tuple(ORDERS))
+    @isolated
+    def test_interpolation_by_the_scale_one(self, device, order):
+        # At the scale 1.0 the result has the size of the input.
+        ran = self.by_value(sizes_interpolated, device, (1.0, 0.5, 2.0), order)
+        self.assertEqual(len(ran), 1)
+
+    @parametrize("call", ("range", "linspace"))
+    @isolated
+    def test_scalar_of(self, device, call):
+        fn = {"range": sizes_range, "linspace": sizes_linspace}[call]
+        ran = self.by_value(fn, device, (0.5, 0.75, 1.0), "in_turn")
+        self.assertEqual(len(ran), 1)
+
+    @parametrize("made", ("int", "ceil"))
+    @parametrize("order", tuple(ORDERS))
+    @isolated
+    def test_size_computed_from_the_float(self, device, made, order):
+        # The size is given as ints, which the function made of the float.
+        fn = {"int": sizes_full_of_an_int, "ceil": sizes_new_full_of_a_ceiling}[made]
+        ran = self.by_value(fn, device, (0.5, 0.75, 1.0), order)
+        self.assertEqual(len(ran), 1)
+
+    @parametrize("call", ("interpolate", "range"))
+    @isolated
+    def test_value_read_from_a_tensor(self, device, call):
+        # Nothing to check a region that holds the read on: the region ends
+        # in front of the read, and the call behind it has the float as an
+        # argument (see the tests above).
+        def scalar(t):
+            return (torch.tensor(t),)
+
+        fns = (sizes_scale_read_from_a_tensor, sizes_range_read_from_a_tensor)
+        fn = dict(zip(("interpolate", "range"), fns))[call]
+        rows = self.rows(fn, device, (1.0, 0.5, 2.0), "traced", argument=scalar)
+        ends = [r["why"] for r in rows if r["state"] == "not movable"]
+        needed = "reads a tensor's value, which the traced run needed in Python"
+        self.assertTrue(any(w.endswith(needed) for w in ends), msg=str(rows))
+        self.assertEqual([r["why"] for r in rows if r["state"] == "refused"], [])
+
+    @isolated
+    def test_scalars_that_stay_inputs(self, device):
+        # full and new_full (a size given as ints), full_like, a float by
+        # keyword, add with out=, an in-place operator and a pointwise one:
+        # each call traced one node of its own operator, with the float in
+        # the parameter it was handed at. One region for every value, no
+        # check.
+        rows = self.rows(sizes_inputs, device, (0.5, 0.75, 1.0), "in_turn", size=3)
+        (row,) = (r for r in rows if r["state"] == "region")
+        found = (row["variants"], row["values"], row["runs"], row["misses"])
+        self.assertEqual(found, (1, [], 8, {}), msg=str(row))
+
+    @isolated
+    def test_scalar_that_where_makes_a_tensor(self, device):
+        # where makes a tensor of its scalar and runs a second operator on
+        # it: the trace of the call does not show that the number of the
+        # first is the call's own, and the region is checked on it.
+        ran = self.by_value(sizes_where, device, (0.5, 0.75, 1.0), "in_turn")
+        self.assertEqual(len(ran), 1)
+
+
+instantiate_device_type_tests(TestVmScalarSizes, globals())
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmScalarOperators(TestCase):
+    """What the operators whose scalars a region takes as inputs are declared
+    to be, they are: none of them takes a size from a scalar."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_no_declared_operator_takes_a_size_from_a_scalar(self):
+        # Every overload the rule takes by its tag (pointwise; in place and
+        # no view) or by name, and that takes a scalar: the sizes it returns
+        # are the same for every scalar (and, in place, its operand's). A
+        # tag that is wrong, or that comes to mean something else, fails here.
+        import torch._rust_inductor as ri
+
+        covered, skipped = 0, []
+        for schema in torch._C._jit_get_all_schemas():
+            kinds = {str(a.type) for a in schema.arguments}
+            if not schema.name.startswith("aten::"):
+                continue
+            if kinds.isdisjoint(SIZES_SCALAR | SIZES_SCALARS):
+                continue
+            packet = getattr(torch.ops.aten, schema.name[6:])
+            op = getattr(packet, schema.overload_name or "default", None)
+            if not isinstance(op, torch._ops.OpOverload):
+                continue
+            node = torch.fx.Graph().create_node("call_function", op)
+            if not ri._scalars_decide_no_size(node, (), {}):
+                continue
+            # Floats, and whole numbers for the operators of integers.
+            for values in ((0.25, 0.75, 3.0), (1, 2, 3)):
+                found = []
+                for scalar in values:
+                    with contextlib.suppress(Exception):
+                        found.append(sizes_of_a_call(op, scalar))
+                if len(found) > 1:
+                    break
+            if len(found) < 2:
+                skipped.append(str(op))
+                continue
+            covered += 1
+            made = {str(sizes) for sizes, _, _ in found}
+            self.assertEqual(len(made), 1, msg=f"{op}: {made}")
+            if torch.Tag.inplace in op.tags:
+                kept = [after == before for _, before, after in found]
+                self.assertEqual(kept, [True] * len(found), msg=str(op))
+        print(f"operators covered: {covered}; not called: {len(skipped)}")
+        self.assertGreater(covered, 200, msg=str(skipped))
+
+
+class DataNet(torch.nn.Module):
+    """What the tests of ``.data`` read and write: two parameters, an
+    average that takes no gradient, a buffer, and tensors in lists. Each
+    method is a function of one test."""
+
+    def __init__(self, device):
+        super().__init__()
+        torch.manual_seed(0)
+        self.p = torch.nn.Parameter(torch.randn(8, device=device))
+        self.rows = torch.nn.Parameter(torch.randn(2, 8, device=device))
+        self.mean = torch.nn.Parameter(torch.zeros(8, device=device), False)
+        self.register_buffer("seen", torch.zeros(8, device=device))
+        self.weights = [self.p, self.rows]
+        self.means = [torch.zeros(8, device=device), torch.zeros(2, 8, device=device)]
+
+    def tensors(self):
+        return [self.p, self.rows, self.mean, self.seen, *self.means]
+
+    def adds(self, x):
+        y = (x * self.p).cos().tanh()
+        self.p.data.add_(y.mean(0) * 0.01)
+        return ((y * self.p).sin() * 2).cos()
+
+    def adds_to_a_buffer(self, x):
+        y = (x * self.p).cos().tanh()
+        self.seen.data.add_(y.mean(0))
+        return ((y * self.seen).sin() * 2).cos()
+
+    def adds_to_an_input(self, x):
+        y = (x * self.p).cos().tanh()
+        x.data.add_(1.0)
+        return ((y * x).sin() * 2).cos()
+
+    def scales_views(self, x):
+        # `.data` of a view, and a view of `.data`.
+        y = (x * self.rows[0]).cos().tanh()
+        self.rows[1].data.mul_(0.5)
+        self.rows.data[0].add_(y.mean(0) * 0.01)
+        return ((y * self.rows[1]).sin() * 2).cos()
+
+    def scales_what_it_made(self, x):
+        y = (x * self.p).cos().tanh()
+        y.data.mul_(0.5)
+        return y, ((y * self.p).sin() * 2).cos()
+
+    def clips(self, x):
+        y = (x * self.p).cos().tanh()
+        self.p.data.clamp_(-0.5, 0.5)
+        return ((y * self.p).sin() * 2).cos()
+
+    def averages(self, x):
+        y = (x * self.p).cos().tanh()
+        self.mean.data.mul_(0.9).add_(self.p.data, alpha=0.1)
+        return ((y * self.mean).sin() * 2).cos()
+
+    def copies(self, x):
+        y = (x * self.p).cos().tanh()
+        self.p.data.copy_(y.mean(0))
+        return ((y * self.p).sin() * 2).cos()
+
+    def zeroes(self, x):
+        y = (x * self.p).cos().tanh()
+        self.p.data.zero_()
+        return ((y + self.p).sin() * 2).cos()
+
+    def averages_each(self, x):
+        y = (x * self.p).cos().tanh() * self.rows[1]
+        for mean, weight in zip(self.means, self.weights):
+            mean.data.mul_(0.9).add_(weight.data, alpha=0.1)
+        return ((y * self.means[0]).sin() * self.means[1][0]).cos()
+
+    def clips_each(self, x):
+        y = (x * self.p).cos().tanh() * self.rows[1]
+        for weight in self.weights:
+            weight.data.clamp_(-0.5, 0.5)
+        return ((y * self.p).sin() * 2).cos()
+
+    def clips_each_of_a_tuple(self, x):
+        loss = ((x * self.p).sin() * 2).cos().pow(2).mean()
+        for weight in (self.p,):
+            weight.data.clamp_(-0.5, 0.5)
+        return loss
+
+    def writes_behind_a_result(self, x):
+        h = ((x * self.p).sin() * self.p).sum()
+        self.p.data.mul_(0.99)
+        return h
+
+    def reads(self, x):
+        y = (x * self.p.data).cos().tanh()
+        return ((y * self.p).sin() * 2).cos()
+
+    def reads_alone(self, x):
+        return ((x * self.p.data).sin() * 2).cos().tanh()
+
+    def reads_out_of_place(self, x):
+        y = (x * self.p).cos().tanh()
+        z = self.p.data * 2 + y
+        return ((z + self.p).sin() * 2).cos()
+
+    def returns(self, x):
+        y = (x * self.p).cos().tanh()
+        return ((y * self.p.data).sin() * 2).cos(), self.p.data, x.data
+
+    def assigns(self, x):
+        y = (x * self.p).cos().tanh()
+        self.p.data = self.p.data * 0.99
+        return ((y * self.p).sin() * 2).cos()
+
+    def adds_without_grad(self, x):
+        y = (x * self.p).cos().tanh()
+        with torch.no_grad():
+            self.p.add_(y.mean(0) * 0.01)
+        return ((y * self.p).sin() * 2).cos()
+
+    def adds_to_a_detached(self, x):
+        y = (x * self.p).cos().tanh()
+        self.p.detach().add_(y.mean(0) * 0.01)
+        return ((y * self.p).sin() * 2).cos()
+
+    def steps_by_hand(self, x):
+        loss = ((x * self.p).sin() * 2).cos().pow(2).mean()
+        self.p.grad = None
+        loss.backward()
+        self.p.data.add_(self.p.grad, alpha=-0.1)
+        return loss
+
+
+def data_facts(t):
+    """What a test compares of a tensor a call made, besides the tensor."""
+    return t.detach().clone(), t.requires_grad, type(t.grad_fn).__name__, t._version
+
+
+def data_backward(net, x, out):
+    """The caller's backward of a result, as a test compares it: the
+    gradients, or the error."""
+    net.p.grad = net.rows.grad = None
+    try:
+        (out[-1] if isinstance(out, tuple) else out).sum().backward()
+    except RuntimeError as e:
+        return type(e).__name__, str(e)[:60]
+    return net.p.grad, net.rows.grad
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmData(TestCase):
+    """A read of a tensor's ``.data`` in a region is that read on every
+    run. What it gives is over the tensor's memory and counts its own
+    versions: an in-place operator on it writes to the tensor and counts no
+    version of the tensor, and a result computed before the write is
+    backpropagated as in eager. (The operator make_fx has for the read,
+    ``aten.detach``, shares the tensor's counter.)"""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, name, device, passes=EARLY, after=None, before=None):
+        """Thirteen calls of DataNet's method ``name`` on the VM and in
+        eager, each on a net of its own: the results (values,
+        requires_grad, grad_fn, _version), what ``after(net, x, out)``
+        gives, and the values and ``_version`` of every tensor of the net
+        and of the input are eager's. Returns the VM's function and net."""
+        nets = [DataNet(device), DataNet(device)]
+        compiled = vm(getattr(nets[1], name), passes=passes)
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            found = []
+            for net, fn in zip(nets, (getattr(nets[0], name), compiled)):
+                mine = x.clone()
+                if before is not None:
+                    before(net, mine)
+                out = fn(mine)
+                outs = out if isinstance(out, tuple) else (out,)
+                row = [data_facts(o) for o in outs]
+                row.append(None if after is None else after(net, mine, out))
+                state = (*net.tensors(), mine)
+                row.extend((t.detach().clone(), t._version) for t in state)
+                found.append(row)
+            self.assertEqual(found[1], found[0], atol=0, rtol=0, msg=f"call {call}")
+        return compiled, nets[1]
+
+    def region(self, compiled, name):
+        # The one region of a method that is one block.
+        rows = [r for r in vm.regions(compiled) if r["function"] == f"DataNet.{name}"]
+        (row,) = (r for r in rows if r["state"] == "region")
+        self.assertEqual((row["variants"], row["runs"], row["misses"]), (1, 9, {}))
+        return row
+
+    # The operations of each method's region (the read of `.data` is one).
+    WRITES = {
+        "adds": 11,
+        "adds_to_a_buffer": 10,
+        "adds_to_an_input": 9,
+        "scales_views": 17,
+        "scales_what_it_made": 9,
+        "clips": 9,
+        "averages": 11,
+        "copies": 10,
+        "zeroes": 9,
+    }
+
+    @parametrize("name", tuple(WRITES))
+    @isolated
+    def test_write_through_data_counts_no_version(self, device, name):
+        compiled, net = self.calls(name, device, after=data_backward)
+        self.assertEqual(self.region(compiled, name)["ops"], self.WRITES[name])
+        self.assertIn(".data", vm.explain(compiled, view="fx"))
+        self.assertNotIn("aten.detach", vm.explain(compiled, view="fx"))
+        # No write through `.data` is one of the parameter's.
+        self.assertEqual((net.p._version, net.rows._version), (0, 0))
+
+    @parametrize("name", ("averages_each", "clips_each", "clips_each_of_a_tuple"))
+    @isolated
+    def test_write_through_data_in_a_loop(self, device, name):
+        # An average of every parameter, and weight clipping: the loop's
+        # writes run in regions.
+        compiled, net = self.calls(name, device, after=data_backward)
+        graphs = vm.explain(compiled, view="fx")
+        self.assertIn(".data", graphs)
+        self.assertIn("aten.clamp_" if "clips" in name else "aten.add_", graphs)
+        self.assertGreater(region_runs(compiled), 0)
+        self.assertEqual((net.p._version, net.rows._version), (0, 0))
+
+    @isolated
+    def test_result_computed_before_the_write_is_backpropagated(self, device):
+        # Autograd saved the parameter for the backward of the result: the
+        # write through `.data` leaves that valid, and eager computes the
+        # gradient (from the values the write left).
+        name = "writes_behind_a_result"
+        compiled, net = self.calls(name, device, after=data_backward)
+        self.assertEqual(self.region(compiled, name)["ops"], 6)
+        self.assertIsNotNone(net.p.grad)
+
+    READS = {"reads": 8, "reads_out_of_place": 10}
+
+    @parametrize("name", tuple(READS))
+    @isolated
+    def test_read_through_data_stays_in_a_region(self, device, name):
+        compiled, net = self.calls(name, device, after=data_backward)
+        self.assertEqual(self.region(compiled, name)["ops"], self.READS[name])
+
+    @parametrize("passes", ("default", "fast"))
+    @isolated
+    def test_tensor_saved_through_data_outlives_a_counted_write(self, device, passes):
+        # Autograd saves what `.data` gave for the backward of the input.
+        # The caller then writes the parameter in place, as an optimizer
+        # does, which counts a version of the parameter and none of that
+        # tensor: eager computes the input's gradient.
+        def after(net, x, out):
+            with torch.no_grad():
+                net.p.mul_(0.99)
+            out.sum().backward()
+            return x.grad
+
+        def before(net, x):
+            x.requires_grad_()
+
+        lists = MODES_LISTS[passes]
+        compiled, net = self.calls("reads_alone", device, lists, after, before)
+        self.assertEqual(self.region(compiled, "reads_alone")["ops"], 6)
+        self.assertEqual(net.p._version, 13)
+
+    @isolated
+    def test_data_handed_out_is_a_tensor_of_its_own(self, device):
+        # What `.data` gives is a new tensor on every read, over the same
+        # memory, that takes no gradient and starts its own count of
+        # versions, whatever the count of the tensor it was read from.
+        def before(net, x):
+            with torch.no_grad():
+                net.p.add_(0.0)
+
+        def after(net, x, out):
+            _, p, i = out
+            over = p.data_ptr() == net.p.data_ptr() and i.data_ptr() == x.data_ptr()
+            facts = (p is net.p, i is x, over, p.is_leaf, i.is_leaf, p._base is None)
+            # A write to it afterwards is none of the parameter's.
+            p.add_(0.25)
+            return facts, net.p._version, p._version
+
+        compiled, net = self.calls("returns", device, after=after, before=before)
+        self.assertEqual(self.region(compiled, "returns")["ops"], 10)
+        self.assertEqual(net.p._version, 13)
+
+    # What counts a version in eager counts it in a region: an assignment
+    # to `.data` (none), an in-place operator without grad or on a detached
+    # tensor (one), and a step by hand behind a backward (none: `.data`).
+    COUNTED = {
+        "assigns": 0,
+        "adds_without_grad": 13,
+        "adds_to_a_detached": 13,
+        "steps_by_hand": 0,
+    }
+
+    @parametrize("name", tuple(COUNTED))
+    @isolated
+    def test_other_writes_count_what_eager_counts(self, device, name):
+        after = None if name == "steps_by_hand" else data_backward
+        compiled, net = self.calls(name, device, after=after)
+        self.assertEqual(net.p._version, self.COUNTED[name])
+        self.assertGreater(region_runs(compiled), 0)
+
+    @parametrize("name", ("averages", "writes_behind_a_result", "reads"))
+    @parametrize("passes", ("autograd", "inductor", "fast"))
+    @isolated
+    def test_graph_that_reads_data_is_given_to_no_pass(self, device, passes, name):
+        # What a lowering makes of the read is `aten.detach`: the graph is
+        # given to no block pass, and its results are eager's bit for bit.
+        compiled, net = self.calls(name, device, MODES_LISTS[passes], data_backward)
+        row = self.region(compiled, name)
+        self.assertEqual(len(row["notes"]), 1, msg=str(row["notes"]))
+        self.assertIn("no block pass ran: the graph reads .data", row["notes"][0])
+        self.assertEqual(net.p._version, 0)
+
+
+instantiate_device_type_tests(TestVmData, globals())
+
+
+def reads_bumper(count):
+    def bump():
+        count.add_(1.5)
+
+    return bump
+
+
+class ReadsNet(torch.nn.Module):
+    """A count on the CPU (as an optimizer's step counts are) that a method
+    writes in place and reads a value from, and a weight on the device.
+    Each method is a function of one test."""
+
+    def __init__(self, device):
+        super().__init__()
+        torch.manual_seed(0)
+        self.p = torch.nn.Parameter(torch.randn(8, device=device))
+        self.register_buffer("count", torch.arange(8.0), persistent=False)
+        self.bump = reads_bumper(self.count)
+
+    def through_a_view(self, x):
+        y = (x * self.p).cos().tanh()
+        self.count[0:4].add_(1.5)
+        k = self.count.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+    def through_a_detached(self, x):
+        y = (x * self.p).cos().tanh()
+        self.count.detach().add_(1.5)
+        k = self.count.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+    def through_data(self, x):
+        y = (x * self.p).cos().tanh()
+        self.count.data.add_(1.5)
+        k = self.count.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+    def through_itself(self, x):
+        y = (x * self.p).cos().tanh()
+        self.count.add_(1.5)
+        k = self.count.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+    # The same with what is written computed from the argument (and taken
+    # out of autograd's graph): the rest of the region's graph needs it too.
+    def computed_through_a_view(self, x):
+        y = (x * self.p).cos().tanh()
+        self.count[0:4].add_(y.detach().mean(0)[0:4].cpu() * 0.01)
+        k = self.count.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+    def computed_through_a_detached(self, x):
+        y = (x * self.p).cos().tanh()
+        self.count.detach().add_(y.detach().mean(0).cpu() * 0.01)
+        k = self.count.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+    def computed_through_data(self, x):
+        y = (x * self.p).cos().tanh()
+        self.count.data.add_(y.detach().mean(0).cpu() * 0.01)
+        k = self.count.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+    def computed_through_itself(self, x):
+        y = (x * self.p).cos().tanh()
+        self.count.add_(y.detach().mean(0).cpu() * 0.01)
+        k = self.count.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+    def reads_then_writes(self, x):
+        y = (x * self.p).cos().tanh()
+        k = self.count.sum().item()
+        self.count[0:4].add_(1.5)
+        return ((y * k).sin() * 2).cos()
+
+    def reads_around_a_write(self, x):
+        y = (x * self.p).cos().tanh()
+        a = self.count.sum().item()
+        self.count[0:4].add_(1.5)
+        b = self.count.sum().item()
+        return ((y * a).sin() * b).cos()
+
+    def behind_a_merged_call(self, x):
+        y = (x * self.p).cos().tanh()
+        self.bump()
+        k = self.count.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+    def view_of_an_input(self, x, c):
+        y = (x * self.p).cos().tanh()
+        c[0:4].add_(1.5)
+        k = c.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+    def data_of_an_input(self, x, c):
+        y = (x * self.p).cos().tanh()
+        c.data.mul_(1.5)
+        k = c.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+    def writes_one_reads_another(self, x, a, b):
+        y = (x * self.p).cos().tanh()
+        a.add_(1.5)
+        k = b.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+    def writes_the_count_reads_an_input(self, x, c):
+        y = (x * self.p).cos().tanh()
+        self.count.add_(1.5)
+        k = c.sum().item()
+        return ((y * k).sin() * 2).cos()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmValueReadOrder(TestCase):
+    """A region runs the reads of CPU tensors' values first, with what they
+    read from, and the rest of its graph behind them, only where that is
+    the program's order: a read sees every write the program made before
+    it to the memory it reads, through a view, through ``detach()`` or
+    ``.data``, through another argument over the same memory, and none the
+    program made after it."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, name, device, given=lambda net, call: (), passes=EARLY):
+        """Thirteen calls of ReadsNet's method ``name`` on the VM and in
+        eager, each on a net of its own: the result, and the values and
+        ``_version`` of the count and of every tensor ``given(net, call)``
+        hands the method besides the input, are eager's. Returns the row
+        of the method's region."""
+        nets = [ReadsNet(device), ReadsNet(device)]
+        compiled = vm(getattr(nets[1], name), passes=passes)
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            found = []
+            for net, fn in zip(nets, (getattr(nets[0], name), compiled)):
+                torch.manual_seed(100 + call)
+                more = given(net, call)
+                out = fn(x, *more)
+                state = (net.count, *more)
+                found.append([out, *((t.clone(), t._version) for t in state)])
+            self.assertEqual(found[1], found[0], atol=0, rtol=0, msg=f"call {call}")
+        rows = [r for r in vm.regions(compiled) if r["function"] == f"ReadsNet.{name}"]
+        (row,) = (r for r in rows if r["state"] == "region")
+        return row
+
+    # Whether the reads run first: where the write takes nothing the rest
+    # of the graph computes, it runs in front of them, with the read behind
+    # it; elsewhere the read stays where the program has it. One region
+    # either way, entered by the nine calls behind its trace.
+    FORMS = ("a_view", "a_detached", "data", "itself")
+
+    @parametrize("form", FORMS)
+    @parametrize("written", ("constant", "computed"))
+    @isolated
+    def test_read_behind_a_write_through(self, device, written, form):
+        name = ("" if written == "constant" else "computed_") + f"through_{form}"
+        row = self.calls(name, device)
+        self.assertEqual((row["variants"], row["runs"], row["misses"]), (1, 9, {}))
+
+    @parametrize("name", ("reads_then_writes", "reads_around_a_write"))
+    @isolated
+    def test_read_in_front_of_a_write(self, device, name):
+        row = self.calls(name, device)
+        self.assertEqual((row["variants"], row["runs"], row["misses"]), (1, 9, {}))
+
+    @isolated
+    def test_read_behind_a_call_merged_as_it_is(self, device):
+        # A call a cfg pass merged as it is runs in the region where the
+        # program has it. It writes the count, which the graph does not
+        # show: no read moves in front of such a call.
+        def merge(cfg: vm.Cfg) -> None:
+            for call in cfg.calls():
+                if getattr(call.callee, "__name__", None) == "bump":
+                    cfg.merge_across(call)
+
+        row = self.calls("behind_a_merged_call", device, passes=(*EARLY, merge))
+        self.assertEqual((row["variants"], row["runs"], row["misses"]), (1, 9, {}))
+
+    @parametrize("name", ("view_of_an_input", "data_of_an_input"))
+    @isolated
+    def test_read_of_an_input_behind_a_write_through_an_alias(self, device, name):
+        row = self.calls(name, device, lambda net, call: (torch.rand(8),))
+        self.assertEqual((row["variants"], row["runs"], row["misses"]), (1, 9, {}))
+
+    # The calls on which the two tensors the method is handed share memory.
+    OVERLAPPING = {
+        "later": lambda call: call >= 7,
+        "at_the_trace": lambda call: call < 7,
+        "in_turn": lambda call: call % 2 == 1,
+    }
+
+    @parametrize("when", tuple(OVERLAPPING))
+    @parametrize("how", ("view", "same"))
+    @isolated
+    def test_read_of_an_input_that_is_over_the_one_written(self, device, how, when):
+        # The traced (fourth) call finds the two apart, or one over the
+        # other (a view of it, or the same tensor twice): a call that finds
+        # them the other way is a miss, and is traced for itself.
+        def given(net, call):
+            a = torch.rand(8)
+            if not self.OVERLAPPING[when](call):
+                return a, torch.rand(4)
+            return a, (a[0:4] if how == "view" else a)
+
+        row = self.calls("writes_one_reads_another", device, given)
+        self.assertEqual(row["variants"], 2, msg=str(row))
+        self.assertGreater(row["runs"], 0)
+
+    @parametrize("when", tuple(OVERLAPPING))
+    @isolated
+    def test_read_of_an_input_that_is_a_view_of_a_tensor_the_region_writes(
+        self, device, when
+    ):
+        # The count is a constant of the graph: how the inputs stand to it
+        # is part of what the region is entered on.
+        def given(net, call):
+            return (net.count[0:4] if self.OVERLAPPING[when](call) else torch.rand(4),)
+
+        row = self.calls("writes_the_count_reads_an_input", device, given)
+        self.assertEqual(row["variants"], 2, msg=str(row))
+        self.assertGreater(row["runs"], 0)
+
+    @isolated
+    def test_optimizer_step_that_reads_a_value_misses_no_call(self, device):
+        # Adam reads each step count behind in-place writes to the other
+        # state of its parameter: its regions keep their reads in front,
+        # are entered by every call, and leave eager's weights.
+        def make():
+            torch.manual_seed(0)
+            layers = [torch.nn.Linear(16, 16), torch.nn.Tanh(), torch.nn.Linear(16, 4)]
+            net = torch.nn.Sequential(*layers).to(device)
+            opt = torch.optim.Adam(net.parameters(), 0.01, foreach=False)
+
+            def step(x):
+                opt.zero_grad(set_to_none=True)
+                loss = net(x).square().mean()
+                loss.backward()
+                opt.step()
+                return loss.detach()
+
+            return net, step
+
+        (net, step), (eager_net, eager_step) = make(), make()
+        compiled = vm(step, passes=EARLY)
+        for call in range(13):
+            x = torch.randn(8, 16, device=device)
+            got, want = compiled(x), eager_step(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        weights, expected = list(net.parameters()), list(eager_net.parameters())
+        self.assertEqual(weights, expected, atol=0, rtol=0)
+        # The step's region sits in _single_tensor_adam or in a caller that
+        # holds all of it (adam): whichever runs, no call misses it.
+        rows = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        steps = [r for r in rows if "adam" in r["where"] and r["runs"]]
+        self.assertTrue(steps, msg=str(rows))
+        self.assertEqual(max(r["ops"] for r in steps), 72, msg=str(rows))
+        self.assertEqual([r["misses"] for r in steps], [{}] * len(steps), msg=str(rows))
+
+
+instantiate_device_type_tests(TestVmValueReadOrder, globals())
+
+
+# The callees of the calls below add up the tensors they are handed and
+# compute with the sum. A trace that comes to one is given up there: by an
+# operator whose result's size depends on the data, on every call, or by
+# code that the traced call is the first to run (`on`). The operator is an
+# index by a mask, which a trace learns of only as it runs it. A call that
+# is known to be sized by data (`nonzero`) gives no trace up: no trace
+# begins on a block that would come to it (fills_stopped_in_front).
+def fills_sized_by_data(on, *items, past=None, **kwargs):
+    out = items[0]
+    for t in items[1:]:
+        out = out + t
+    out = (out.sin() * 2).cos().tanh() * kwargs.get("scale", 1.0)
+    return out + out[out > 0].shape[0]
+
+
+def fills_stopped_in_front(on, *items, past=None, **kwargs):
+    out = items[0]
+    for t in items[1:]:
+        out = out + t
+    out = (out.sin() * 2).cos().tanh() * kwargs.get("scale", 1.0)
+    return out + out.nonzero().shape[0]
+
+
+def fills_runs_new_code(on, *items, past=None, **kwargs):
+    out = items[0]
+    for t in items[1:]:
+        out = out + t
+    if on:
+        out = out + 1
+    return (out.sin() * 2).cos().tanh() * kwargs.get("scale", 1.0)
+
+
+def fills_pops(on, *items, past=None, **kwargs):
+    scale = kwargs.pop("scale", 1.0)
+    out = items[0]
+    for t in items[1:]:
+        out = out + t
+    if on:
+        out = out + 1
+    return (out.sin() * 2).cos().tanh() * scale + len(kwargs)
+
+
+# The forms: a display or a call's arguments that one block begins and a
+# later block fills. The local read between the two is a cell (the nested
+# function closes over it), and the executor ends a block at a cell's load:
+# the container is handed to the block that fills it and calls the callee.
+def fills_star(callee, on, x, *rest):
+    def cell():
+        return rest
+
+    return callee(on, x, *rest)
+
+
+def fills_keywords(callee, on, x, **kwargs):
+    def cell():
+        return kwargs
+
+    return callee(on, x, past=None, **kwargs), kwargs
+
+
+def fills_forward(func, *args, **kwargs):
+    # As nn.Module._call_impl ends: the three names are cells.
+    def cell():
+        return func, args, kwargs
+
+    return func(*args, **kwargs)
+
+
+def fills_forwarded(callee, on, x, **kwargs):
+    return fills_forward(callee, on, x, past=None, **kwargs), kwargs
+
+
+def fills_list_display(callee, on, x, items):
+    def cell():
+        return items
+
+    return [x, *items, callee(on, x)]
+
+
+def fills_dict_display(callee, on, x, items):
+    def cell():
+        return items
+
+    return {"a": 1, **items, "y": callee(on, x)}
+
+
+def fills_set_display(callee, on, x, items):
+    def cell():
+        return items
+
+    return {0, *items}, callee(on, x)
+
+
+def fills_list_append(callee, on, x, items, last):
+    def cell():
+        return last
+
+    return [*items, last, callee(on, x)]
+
+
+def fills_map_add(callee, on, x, items, last):
+    def cell():
+        return last
+
+    return {**items, "k": last, "y": callee(on, x)}
+
+
+def fills_set_add(callee, on, x, items, last):
+    def cell():
+        return last
+
+    return {*items, last}, callee(on, x)
+
+
+def fills_comprehension(callee, on, x, items):
+    return [callee(on, x, t) for t in items]
+
+
+# The same list is filled by an instruction and appended to by a call (a
+# write the Effects pass takes into the block), then handed to the callee.
+def fills_and_appends(callee, on, x, *rest):
+    def cell():
+        return rest
+
+    out = [x, *rest]
+    out.append(x * 5)
+    return callee(on, *out), out
+
+
+def fills_notes(log, value):
+    log.append(value)
+
+
+def fills_noting(on, x, log):
+    fills_notes(log, x.shape[0])
+    out = (x.sin() * 2).cos().tanh()
+    return out + out[out > 0].shape[0]
+
+
+def fills_with_a_log(callee, on, x, log):
+    return callee(on, x, log), log
+
+
+def fills_measured(callee, on, x, table):
+    return callee(on, x) + (len(table) >= 0)
+
+
+# By form: the function, and what a call hands it after (callee, on, x).
+FILLS_FORMS = {
+    "star": (fills_star, lambda x: ((x * 2, x * 3), {})),
+    "keywords": (fills_keywords, lambda x: ((), {"scale": 2.0, "extra": 1})),
+    "forwarded": (fills_forwarded, lambda x: ((), {"scale": 2.0, "extra": 1})),
+    "list_display": (fills_list_display, lambda x: (((x * 2, x * 3),), {})),
+    "dict_display": (fills_dict_display, lambda x: (({"b": 2, "c": x * 3},), {})),
+    "set_display": (fills_set_display, lambda x: (((1, 2, 3, 17, 33),), {})),
+    "list_append": (fills_list_append, lambda x: (([x * 2], x * 3), {})),
+    "map_add": (fills_map_add, lambda x: (({"b": 2}, x * 3), {})),
+    "set_add": (fills_set_add, lambda x: (((1, 2, 3), 17), {})),
+    "comprehension": (fills_comprehension, lambda x: (([x * 2, x * 3, x * 4],), {})),
+}
+
+# By the way a trace is given up: the callee, and what the trace says.
+FILLS_GIVEN_UP = {
+    "data_size": (fills_sized_by_data, "whose size depends on the data"),
+    "new_code": (fills_runs_new_code, "which no call before it ran"),
+    "popped": (fills_pops, None),
+    "stopped": (fills_stopped_in_front, None),
+}
+
+FILLS_CASES = [(f, h) for f in FILLS_FORMS for h in ("data_size", "new_code")]
+FILLS_CASES += [(f, "popped") for f in ("keywords", "forwarded")]
+FILLS_CASES += [(f, "stopped") for f in ("star", "list_append", "comprehension")]
+
+
+def fills_plain(out, tensors):
+    """``out`` with each tensor in it replaced by its place in ``tensors``
+    (which it is appended to), and a dict or a set as its items in order."""
+    if isinstance(out, torch.Tensor):
+        tensors.append(out)
+        return ("tensor", len(tensors) - 1)
+    if isinstance(out, dict):
+        return ("dict", [(k, fills_plain(v, tensors)) for k, v in out.items()])
+    if isinstance(out, (list, tuple, set)):
+        return (type(out).__name__, [fills_plain(v, tensors) for v in out])
+    return out
+
+
+def fills_forwarding(func):
+    """As a library wraps the forward of its modules: the wrapper hands on
+    what it was given."""
+
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        return func(self, *args, **kwargs)
+
+    return wrapper
+
+
+class FillsAttention(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.proj = torch.nn.Linear(8, 8)
+        self.late, self.sized = False, False
+
+    def forward(self, hidden, mask=None, past=None, position=None, **kwargs):
+        out = (self.proj(hidden).sin() * 2).cos()
+        if self.late:
+            out = out + 1
+        if self.sized:
+            out = out + out[out > 0].shape[0]
+        return out * kwargs.get("scale", 1.0), None
+
+
+class FillsLayer(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.attention = FillsAttention()
+
+    @fills_forwarding
+    def forward(self, hidden, mask=None, past=None, position=None, **kwargs):
+        out, _ = self.attention(hidden, mask, past=past, position=position, **kwargs)
+        return out.tanh()
+
+
+FILLS_LAYER = FillsLayer().eval()
+
+
+def fills_module(x, scale):
+    return FILLS_LAYER(x, scale=scale)
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmGivenUpFills(TestCase):
+    """A trace that is given up after its body filled a display or a call's
+    arguments that an earlier block began hands the container back as it
+    was, before the code runs again: every call is eager's, whichever way
+    the trace is given up. What anything but an instruction of the body did
+    to a container the trace was handed stays."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # With EARLY, the call that is traced first.
+    TRACED = 3
+
+    def calls(self, fn, callee, make, device, traced=TRACED, calls=10):
+        # Per call: what it returned (or raised), and what it was handed
+        # as the call left it.
+        rows = []
+        for call in range(calls):
+            torch.manual_seed(call)
+            x = torch.rand(3, 8, device=device)
+            args, kwargs = make(x)
+            tensors = []
+            try:
+                result = fn(callee, call >= traced, x, *args, **kwargs)
+                out = fills_plain(result, tensors)
+            except Exception as e:
+                out = f"{type(e).__name__}: {e}"
+            rows.append((repr(out), tensors, repr(fills_plain((args, kwargs), []))))
+        return rows
+
+    def same(self, got, want):
+        for call, (g, w) in enumerate(zip(got, want)):
+            self.assertEqual(g[0], w[0], msg=f"call {call}")
+            self.assertEqual(g[1], w[1], atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(g[2], w[2], msg=f"call {call}: what it was handed")
+
+    def given_up(self, compiled, functions, why):
+        rows = [r for r in vm.regions(compiled) if r["function"] in functions]
+        said = [w or "" for r in rows for _, w in r.get("traces", ())]
+        self.assertTrue(any(why in w for w in said), msg=f"{rows}")
+
+    @parametrize("form,how", FILLS_CASES, name_fn=lambda form, how: f"{form}_{how}")
+    @isolated
+    def test_container_an_earlier_block_made(self, device, form, how):
+        (fn, make), (callee, why) = FILLS_FORMS[form], FILLS_GIVEN_UP[how]
+        want = self.calls(fn, callee, make, device)
+        compiled = vm(fn, passes=EARLY)
+        self.same(self.calls(compiled, callee, make, device), want)
+        # (A set among a block's args refuses its trace before the body
+        # runs, a callee that pops from its keywords is no region, and no
+        # trace begins in front of a call known to be sized by data.)
+        if why is not None and "set" not in form:
+            names = {fn.__qualname__, fills_forward.__qualname__}
+            self.given_up(compiled, names, why)
+
+    @isolated
+    def test_container_that_is_filled_and_appended_to(self, device):
+        # The append is taken back first, then what the list held is put
+        # back: the other way round, taking the append back would take an
+        # item out of the list as it was handed over.
+        make = FILLS_FORMS["star"][1]
+        want = self.calls(fills_and_appends, fills_sized_by_data, make, device)
+        compiled = vm(fills_and_appends, passes=(*EARLY, vm.passes.Effects()))
+        self.same(self.calls(compiled, fills_sized_by_data, make, device), want)
+        rows = [r for r in vm.regions(compiled) if r["function"] == "fills_and_appends"]
+        # One block holds the fill, the append and the call.
+        lines = [r["lines"][1] - r["lines"][0] for r in rows]
+        self.assertEqual(lines, [2], msg=f"{rows}")
+        self.given_up(compiled, {"fills_and_appends"}, FILLS_GIVEN_UP["data_size"][1])
+
+    @isolated
+    def test_write_under_the_body_is_taken_back_as_before(self, device):
+        # A list the trace was handed, appended to by the callee's callee:
+        # a write the trace records, and takes back when it is given up.
+        make = lambda x: (([],), {})  # noqa: E731
+        want = self.calls(fills_with_a_log, fills_noting, make, device)
+        compiled = vm(fills_with_a_log, passes=(*EARLY, vm.passes.Effects()))
+        self.same(self.calls(compiled, fills_noting, make, device), want)
+        self.given_up(compiled, {"fills_with_a_log"}, FILLS_GIVEN_UP["data_size"][1])
+
+    @isolated
+    def test_what_others_did_to_a_given_container_stays(self, device):
+        # A hook for the interpreter's events counts those raised under a
+        # dispatch mode into a dict that the function is handed as well. A
+        # trace's own machinery raises such events while its body runs,
+        # and what the hook counted then is not the body's: a trace that is
+        # given up leaves it. (The tracer plans from its args before, and
+        # they are to stay as they are until the body runs.)
+        counts, check = {"events": 0}, [0]
+
+        def hook(event, args):
+            if torch._C._len_torch_dispatch_stack() > 0:
+                counts["events"] += 1
+                check[0] += 1
+
+        compiled = vm(fills_measured, passes=EARLY)
+        during = []
+        for call in range(8):
+            if call == self.TRACED:
+                sys.addaudithook(hook)
+            torch.manual_seed(call)
+            x = torch.rand(3, 8, device=device)
+            before = check[0]
+            compiled(fills_sized_by_data, False, x, counts)
+            mine, theirs = counts["events"], check[0]
+            during.append(theirs - before)
+            self.assertEqual(mine, theirs, msg=f"call {call}")
+        self.assertGreater(during[self.TRACED], 0)
+        self.given_up(compiled, {"fills_measured"}, FILLS_GIVEN_UP["data_size"][1])
+
+    @parametrize("how", ["new_code", "data_size"], name_fn=lambda how: how)
+    @isolated
+    def test_module_called_with_keywords_through_a_wrapper(self, device, how):
+        # nn.Module.__call__ ends in `forward_call(*args, **kwargs)` with
+        # the names in cells, under a forward that a wrapper hands its
+        # keywords on to. The default list, which traces first on call 24.
+        FILLS_LAYER.to(device)
+        attention = FILLS_LAYER.attention
+
+        def run(fn):
+            rows = []
+            for call in range(40):
+                attention.late = how == "new_code" and call >= 24
+                attention.sized = how == "data_size"
+                torch.manual_seed(call)
+                x = torch.rand(3, 8, device=device)
+                try:
+                    rows.append(("", [fn(x, 2.0)]))
+                except Exception as e:
+                    rows.append((f"{type(e).__name__}: {e}", []))
+            return rows
+
+        with torch.no_grad():
+            want = run(fills_module)
+            compiled = vm(fills_module)
+            got = run(compiled)
+        for call, (g, w) in enumerate(zip(got, want)):
+            self.assertEqual(g[0], w[0], msg=f"call {call}")
+            self.assertEqual(g[1], w[1], atol=0, rtol=0, msg=f"call {call}")
+        rows = vm.regions(compiled)
+        said = [w or "" for r in rows for _, w in r.get("traces", ())]
+        self.assertTrue(any(FILLS_GIVEN_UP[how][1] in w for w in said), msg=f"{said}")
+
+
+instantiate_device_type_tests(TestVmGivenUpFills, globals())
+
+
+# A frame under a traced body that ends in a raise.
+
+
+class CaughtInner(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.randn(8, 8))
+
+
+def caught_through(attend, m, x):
+    return attend(m, x)
+
+
+class CaughtOuter(torch.nn.Module):
+    def __init__(self, attend):
+        super().__init__()
+        self.inner = CaughtInner()
+        self.attend = attend
+
+    def forward(self, x):
+        h = caught_through(self.attend, self.inner, x)
+        return (h * 3).tanh() + h
+
+
+def caught_tail(y):
+    return (y.cos() + y).relu()
+
+
+def caught_hasattr(m, x):
+    y = (x @ m.weight).sin() * 2
+    if hasattr(m, "groups") and m.groups > 1:
+        y = y + m.groups
+    return caught_tail(y)
+
+
+def caught_getattr(m, x):
+    y = (x @ m.weight).sin() * 2
+    y = y * getattr(m, "groups", 0.5)
+    return caught_tail(y)
+
+
+class CaughtTable:
+    def __init__(self):
+        self.table = {"scale": 2.0}
+
+    def __getattr__(self, name):
+        table = self.__dict__["table"]
+        if name in table:
+            return table[name]
+        raise AttributeError(f"no {name}")
+
+
+CAUGHT_TABLE = CaughtTable()
+
+
+def caught_own(m, x):
+    y = (x @ m.weight).sin() * CAUGHT_TABLE.scale
+    y = y * getattr(CAUGHT_TABLE, "groups", 3.0)
+    return caught_tail(y)
+
+
+class CaughtItems:
+    """Iterated the old way: by __getitem__ until it raises IndexError."""
+
+    def __init__(self, items):
+        self.items = items
+
+    def __getitem__(self, i):
+        if i >= len(self.items):
+            raise IndexError(i)
+        return self.items[i]
+
+
+CAUGHT_ITEMS = CaughtItems([2.0, 3.0])
+
+
+def caught_sum(m, x):
+    y = (x @ m.weight).sin() * sum(CAUGHT_ITEMS)
+    return caught_tail(y)
+
+
+def caught_loop(m, x):
+    y = (x @ m.weight).sin() * 2
+    for s in CAUGHT_ITEMS:
+        y = y * s
+    return caught_tail(y)
+
+
+class CaughtCount:
+    def __init__(self, n):
+        self.n, self.i = n, 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.i >= self.n:
+            raise StopIteration(self.i)
+        self.i += 1
+        return float(self.i)
+
+
+def caught_next(m, x):
+    y = (x @ m.weight).sin() * 2
+    y = y + next(CaughtCount(getattr(m, "groups", 0)), 5.0)
+    return caught_tail(y)
+
+
+def caught_for(m, x):
+    y = (x @ m.weight).sin() * 2
+    for s in CaughtCount(getattr(m, "groups", 2)):
+        y = y * s
+    return caught_tail(y)
+
+
+def caught_by_the_code(m, x):
+    y = (x @ m.weight).sin() * 2
+    try:
+        y = y * m.groups
+    except AttributeError:
+        y = y - 1
+    return caught_tail(y)
+
+
+def caught_checks(m):
+    if "groups" not in m.__dict__:
+        raise ValueError("no groups")
+    return m.__dict__["groups"]
+
+
+def caught_from_a_call(m, x):
+    y = (x @ m.weight).sin() * 2
+    try:
+        y = y * caught_checks(m)
+    except ValueError:
+        y = y - 1
+    return caught_tail(y)
+
+
+def caught_and_read(m, x):
+    y = (x @ m.weight).sin() * 2
+    try:
+        y = y * caught_checks(m)
+    except ValueError as e:
+        y = y - len(str(e))
+    return caught_tail(y)
+
+
+def caught_puts(inner, where, value):
+    """Binds the name the forms look for in one place, or (None) nowhere."""
+    inner.__dict__.pop("groups", None)
+    CAUGHT_TABLE.table.pop("groups", None)
+    del CAUGHT_ITEMS.items[2:]
+    if "groups" in CaughtInner.__dict__:
+        del CaughtInner.groups
+    if where == "instance":
+        inner.groups = value
+    elif where == "class":
+        CaughtInner.groups = value
+    elif where == "table":
+        CAUGHT_TABLE.table["groups"] = value
+    elif where == "items":
+        CAUGHT_ITEMS.items.append(value)
+
+
+# What C code catches: (the form, where the name is bound on some calls, to
+# what, the operations of the one region).
+CAUGHT_BY_C = {
+    "hasattr_instance": (caught_hasattr, "instance", 2, 10),
+    "hasattr_class": (caught_hasattr, "class", 2, 10),
+    "getattr_instance": (caught_getattr, "instance", 2.0, 10),
+    "getattr_class": (caught_getattr, "class", 2.0, 10),
+    "own_getattr": (caught_own, "table", 7.0, 10),
+    "index_error": (caught_sum, "items", 5.0, 9),
+}
+
+# What stays out of a region: (the form, where, to what, whether the name is
+# there on the first calls too, what a trace says).
+CAUGHT_BY_THE_CODE = {
+    "load_attr": (caught_by_the_code, "instance", 2.0, False, None),
+    "from_a_call": (
+        caught_from_a_call,
+        "instance",
+        2.0,
+        True,
+        "the code's own handler",
+    ),
+    "and_read": (caught_and_read, "instance", 2.0, True, "the code's own handler"),
+    "loop": (caught_loop, "items", 5.0, False, None),
+    "next": (caught_next, "instance", 1, False, None),
+    "for": (caught_for, "instance", 3, False, None),
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmCaughtRaises(TestCase):
+    """A frame that ends in `raise X(...)` under hasattr, getattr with a
+    default or a consumer of the old iteration protocol only computed if its
+    blocks did: C code catches the exception and the instruction goes on.
+    The code around it is one region, checked on what the frame looked for;
+    an exception that the program's own handler takes is none."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, fn, inner, where, value, device, first=False):
+        # The name is there on calls 10-13 and 22-25 (`first`: and on the
+        # first two, so that the code that finds it has run to its end).
+        outs = []
+        with torch.no_grad():
+            for call in range(30):
+                there = 10 <= call < 14 or 22 <= call < 26 or (first and call < 2)
+                caught_puts(inner, where if there else None, value)
+                torch.manual_seed(call)
+                outs.append(fn(torch.randn(4, 8, device=device)))
+        caught_puts(inner, None, value)
+        return outs
+
+    def same(self, got, want):
+        for call, (g, w) in enumerate(zip(got, want)):
+            self.assertEqual(g, w, atol=0, rtol=0, msg=f"call {call}")
+
+    @parametrize("form", list(CAUGHT_BY_C))
+    @isolated
+    def test_caught_by_c_code(self, device, form):
+        attend, where, value, ops = CAUGHT_BY_C[form]
+        torch.manual_seed(0)
+        model = CaughtOuter(attend).eval().to(device)
+        want = self.calls(model, model.inner, where, value, device)
+        compiled = vm(model, passes=EARLY)
+        self.same(self.calls(compiled, model.inner, where, value, device), want)
+        regions = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertEqual([r["ops"] for r in regions], [ops], msg=f"{regions}")
+        # One for the calls that lack the name, one for those that find it;
+        # the change is a miss each time.
+        self.assertEqual(regions[0]["variants"], 2, msg=f"{regions}")
+        self.assertGreaterEqual(regions[0]["runs"], 18, msg=f"{regions}")
+        self.assertGreaterEqual(sum(regions[0]["misses"].values()), 4, msg=f"{regions}")
+
+    @parametrize("form", list(CAUGHT_BY_THE_CODE))
+    @isolated
+    def test_not_caught_by_c_code(self, device, form):
+        attend, where, value, first, why = CAUGHT_BY_THE_CODE[form]
+        torch.manual_seed(0)
+        model = CaughtOuter(attend).eval().to(device)
+        want = self.calls(model, model.inner, where, value, device, first)
+        compiled = vm(model, passes=EARLY)
+        self.same(self.calls(compiled, model.inner, where, value, device, first), want)
+        rows = vm.regions(compiled)
+        # No region but the tail's.
+        regions = [r for r in rows if r["state"] == "region"]
+        self.assertTrue(all(r["ops"] <= 4 for r in regions), msg=f"{regions}")
+        if why is not None:
+            said = [w or "" for r in rows for _, w in r.get("traces", ())]
+            self.assertTrue(any(why in w for w in said), msg=f"{said}")
+
+
+instantiate_device_type_tests(TestVmCaughtRaises, globals())
+
+
+# Hooks registered while a module's code already runs as regions.
+
+
+class HookedNet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+        self.register_buffer("scale", torch.full((8,), 0.5))
+
+    def forward(self, x):
+        h = (self.lin(x).sin() * self.scale).cos()
+        return (h * 3).tanh() + h
+
+
+class HookedGrid(torch.nn.Module):
+    """Binds a buffer in its forward, as a detection head keeps its grid."""
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("grid", torch.zeros(2))
+
+    def forward(self, x):
+        self.grid = torch.tensor((x.shape[0], x.shape[1]), dtype=torch.float)
+        return (x.sin() * self.grid.sum() * 0.01).tanh().cos().exp()
+
+
+class HookedTwice(torch.nn.Module):
+    def forward(self, w):
+        return w * 2
+
+
+HOOKED_CALLS = []
+
+
+def hooked_counts(module, name, value):
+    HOOKED_CALLS.append((type(module).__name__, name))
+
+
+def hooked_plus_one(module, name, buffer):
+    return buffer + 1
+
+
+def hooked_forward(net):
+    return net.lin.register_forward_hook(lambda m, args, out: out + 1)
+
+
+def hooked_forward_pre(net):
+    return net.lin.register_forward_pre_hook(lambda m, args: (args[0] * 2,))
+
+
+def hooked_parametrized(net):
+    torch.nn.utils.parametrize.register_parametrization(
+        net.lin, "weight", HookedTwice()
+    )
+
+
+# What is registered between calls, and the miss the region then has.
+HOOKED_FORMS = {
+    "forward_hook": (hooked_forward, "read: a namespace or a container"),
+    "forward_pre_hook": (hooked_forward_pre, "read: a namespace or a container"),
+    "parametrization": (hooked_parametrized, "read: the class of an object"),
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmModuleHooks(TestCase):
+    """The modules torch.fx builds for a region's graph are the engine's
+    own: the hooks a program registered for every module do not run for
+    them. And a hook or a parametrization put on a module whose code already
+    runs as regions is seen at the next call."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, net, fn, device, install=None, sizes=(4,)):
+        # `install` is called before call 10; what it put there is taken
+        # off before call 18.
+        outs, handle = [], None
+        for call in range(24):
+            if call == 10 and install is not None:
+                handle = install(net)
+            if call == 18 and install is not None:
+                if handle is not None:
+                    handle.remove()
+                else:
+                    torch.nn.utils.parametrize.remove_parametrizations(
+                        net.lin, "weight", leave_parametrized=False
+                    )
+            torch.manual_seed(call)
+            with torch.no_grad():
+                outs.append(
+                    fn(torch.randn(sizes[(call // 3) % len(sizes)], 8, device=device))
+                )
+        return outs
+
+    def same(self, got, want):
+        for call, (g, w) in enumerate(zip(got, want)):
+            self.assertEqual(g, w, atol=0, rtol=0, msg=f"call {call}")
+
+    @isolated
+    def test_buffer_hook_that_computes_registered_between_calls(self, device):
+        # The hook's own operator was recorded into the graph make_fx was
+        # finishing, for ever.
+        def install(net):
+            return torch.nn.modules.module.register_module_buffer_registration_hook(
+                hooked_plus_one
+            )
+
+        net, twin = HookedGrid().to(device), HookedGrid().to(device)
+        want = self.calls(twin, twin, device, install, sizes=(4, 5))
+        got = self.calls(net, vm(net, passes=EARLY), device, install, sizes=(4, 5))
+        self.same(got, want)
+        self.assertEqual(net.grid, twin.grid, atol=0, rtol=0)
+
+    @parametrize("what", ["buffer", "parameter"])
+    @isolated
+    def test_registration_hook_is_not_called_for_the_graph_s_modules(
+        self, device, what
+    ):
+        register = getattr(
+            torch.nn.modules.module, f"register_module_{what}_registration_hook"
+        )
+        handle = register(hooked_counts)
+        try:
+            torch.manual_seed(0)
+            net = HookedNet().eval().to(device)
+            want = self.calls(net, net, device)
+            eager = list(HOOKED_CALLS)
+            compiled = vm(net, passes=EARLY)
+            self.same(self.calls(net, compiled, device), want)
+        finally:
+            handle.remove()
+        self.assertEqual(region_runs(compiled), 20)
+        # The graph holds the layer's two parameters and the buffer.
+        self.assertEqual(HOOKED_CALLS, eager)
+
+    @parametrize("form", list(HOOKED_FORMS))
+    @isolated
+    def test_registered_between_calls(self, device, form):
+        install, miss = HOOKED_FORMS[form]
+        torch.manual_seed(0)
+        net = HookedNet().eval().to(device)
+        torch.manual_seed(0)
+        twin = HookedNet().eval().to(device)
+        want = self.calls(twin, twin, device, install)
+        compiled = vm(net, passes=EARLY)
+        self.same(self.calls(net, compiled, device, install), want)
+        # The region of the calls before runs again once the module is as
+        # it was; while it is not, every call is a miss of that region.
+        first = next(
+            r for r in vm.regions(compiled) if r["state"] == "region" and r["ops"] == 8
+        )
+        self.assertEqual(first["misses"], {miss: 8}, msg=f"{first}")
+        self.assertEqual(first["runs"], 12, msg=f"{first}")
+
+
+instantiate_device_type_tests(TestVmModuleHooks, globals())
+
+
+# What a region checks of the class of a tensor it is handed.
+
+
+class KlassSub(torch.Tensor):
+    """A tensor class with a method of its own."""
+
+    def cos(self):
+        return torch.Tensor.cos(self) + 1
+
+
+def klass_argument(x, w):
+    y = x.sin() * 2 + w
+    return (y * 3 + 1).cos().tanh().exp()
+
+
+def klass_inner(w, x=None):
+    y = x.sin() * 2 + w
+    return (y * 3 + 1).cos().tanh().exp()
+
+
+def klass_keyword(x, w):
+    return klass_inner(w, x=x)
+
+
+def klass_listed(xs):
+    y = xs[1].sin() * 2 + xs[0]
+    return (y * 3 + 1).cos().tanh().exp()
+
+
+def klass_looped(x, w):
+    y = x.sin() * 2 + w
+    for _ in range(3):
+        y = (y * 3 + 1).cos().tanh()
+    return y.exp()
+
+
+def klass_names(x, w):
+    y = x.sin() * 2 + w
+    return (y * 3 + 1).cos().tanh().exp(), x.__class__.__name__
+
+
+class KlassHeld:
+    w = None
+
+
+def klass_reads(x, w):
+    y = x.sin() * 2 + w
+    return (y * 3 + KlassHeld.w).cos().tanh().exp()
+
+
+def klass_parts(x, w):
+    y = x.sin() * 2 + w
+    return (y * 3 + 1).cos().tanh().exp(), x.detach(), x.clone(), x.view(-1), x.data
+
+
+class KlassBox(torch.nn.Module):
+    pass
+
+
+KLASS_BOX = KlassBox()
+
+
+def klass_stores(x, w):
+    y = x.sin() * 2 + w
+    KLASS_BOX.kept = x
+    return (y * 3 + 1).cos().tanh().exp()
+
+
+# How each form is handed the tensor whose class changes, and the other one.
+KLASS_FORMS = {
+    "argument": (klass_argument, lambda x, w: (x, w)),
+    "keyword": (klass_keyword, lambda x, w: (x, w)),
+    "in_a_list": (klass_listed, lambda x, w: ([w, x],)),
+    "in_a_tuple": (klass_listed, lambda x, w: ((w, x),)),
+    "span": (klass_looped, lambda x, w: (x, w)),
+}
+
+KLASS_OF = {
+    "tensor": lambda x: x.requires_grad_(),
+    "parameter": torch.nn.Parameter,
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmTensorClass(TestCase):
+    """The class of a tensor a region is handed is one of the region's
+    checks: a region traced on a torch.Tensor does not run for an object of
+    a subclass with a method of its own, nor for an nn.Parameter (and the
+    other way round), whose class Python code reads."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    # The calls whose tensor is of the second class: the trace (call 3) and
+    # the first runs of the region saw the first.
+    SECOND = (5, 6, 7, 11, 12)
+
+    def calls(self, fn, device, first, second, pack=lambda x, w: (x, w), state=None):
+        outs = []
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            w = torch.randn(4, 8, device=device)
+            x = (second if call in self.SECOND else first)(x)
+            if state is None:
+                outs.append(fn(*pack(x, w)))
+            else:
+                KLASS_BOX._parameters.pop("kept", None)
+                KLASS_BOX.__dict__.pop("kept", None)
+                outs.append((fn(*pack(x, w)), state()))
+        return outs
+
+    def same(self, got, want, call=""):
+        if isinstance(want, tuple):
+            self.assertEqual(len(got), len(want))
+            for g, w in zip(got, want):
+                self.same(g, w, call)
+        elif isinstance(want, torch.Tensor):
+            self.assertIs(type(got), type(want), msg=call)
+            plain = (got.as_subclass(torch.Tensor), want.as_subclass(torch.Tensor))
+            self.assertEqual(*plain, atol=0, rtol=0, msg=call)
+        else:
+            self.assertEqual(got, want, msg=call)
+
+    def all_same(self, got, want):
+        for call, (g, w) in enumerate(zip(got, want)):
+            self.same(g, w, f"call {call}")
+
+    @parametrize("form", list(KLASS_FORMS))
+    @isolated
+    def test_subclass_with_a_method_of_its_own(self, device, form):
+        fn, pack = KLASS_FORMS[form]
+
+        def plain(x):
+            return x
+
+        def sub(x):
+            return x.as_subclass(KlassSub)
+
+        want = self.calls(fn, device, plain, sub, pack)
+        compiled = vm(fn, passes=EARLY)
+        self.all_same(self.calls(compiled, device, plain, sub, pack), want)
+        self.assertIs(type(want[5]), KlassSub)
+        # The calls with a torch.Tensor behind the trace run the region.
+        self.assertEqual(region_runs(compiled), 4)
+
+    @parametrize("first", list(KLASS_OF))
+    @isolated
+    def test_parameter_and_tensor_whose_class_is_read(self, device, first):
+        second = "parameter" if first == "tensor" else "tensor"
+        args = (device, KLASS_OF[first], KLASS_OF[second])
+        want = self.calls(klass_names, *args)
+        compiled = vm(klass_names, passes=EARLY)
+        self.all_same(self.calls(compiled, *args), want)
+        self.assertEqual(want[5][1], second.capitalize())
+
+    @parametrize("first", list(KLASS_OF))
+    @isolated
+    def test_parameter_and_tensor_stored_on_a_module(self, device, first):
+        # Module.__setattr__ registers a Parameter and keeps a Tensor as a
+        # plain attribute.
+        def state():
+            return sorted(KLASS_BOX._parameters), "kept" in KLASS_BOX.__dict__
+
+        second = "parameter" if first == "tensor" else "tensor"
+        args = (device, KLASS_OF[first], KLASS_OF[second])
+        want = self.calls(klass_stores, *args, state=state)
+        compiled = vm(klass_stores, passes=(*EARLY, vm.passes.Effects()))
+        self.all_same(self.calls(compiled, *args, state=state), want)
+        registered = (["kept"], False) if second == "parameter" else ([], True)
+        self.assertEqual(want[5][1], registered)
+
+    @isolated
+    def test_parameter_and_tensor_each_have_their_region(self, device):
+        # Operators treat the two alike; each class gets a variant of the
+        # region, and no call behind the two traces runs as written.
+        args = (device, KLASS_OF["tensor"], KLASS_OF["parameter"])
+        want = self.calls(klass_parts, *args)
+        compiled = vm(klass_parts, passes=EARLY)
+        self.all_same(self.calls(compiled, *args), want)
+        self.assertEqual(region_runs(compiled), 8)
+
+    @isolated
+    def test_class_of_the_argument_object_rebound_between_calls(self, device):
+        kept = {}
+
+        def plain(x):
+            kept.setdefault("x", x).__class__ = torch.Tensor
+            return kept["x"]
+
+        def sub(x):
+            kept["x"].__class__ = KlassSub
+            return kept["x"]
+
+        want = self.calls(klass_argument, device, plain, sub)
+        kept.clear()
+        compiled = vm(klass_argument, passes=EARLY)
+        self.all_same(self.calls(compiled, device, plain, sub), want)
+        self.assertIs(type(want[5]), KlassSub)
+        self.assertEqual(region_runs(compiled), 4)
+
+    @isolated
+    def test_class_of_a_tensor_read_from_state_rebound_between_calls(self, device):
+        # The tensor is a constant of the region's graph, found again as
+        # the same object: its class is compared too.
+        def plain(x):
+            KlassHeld.w.__class__ = torch.Tensor
+            return x
+
+        def sub(x):
+            KlassHeld.w.__class__ = KlassSub
+            return x
+
+        KlassHeld.w = torch.randn(4, 8, device=device)
+        want = self.calls(klass_reads, device, plain, sub)
+        compiled = vm(klass_reads, passes=EARLY)
+        self.all_same(self.calls(compiled, device, plain, sub), want)
+        self.assertIs(type(want[5]), KlassSub)
+        rows = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertEqual(sum(r["runs"] for r in rows), 4, msg=str(rows))
+        miss = "read: the class, shape, dtype, device or requires_grad of a constant"
+        misses = [r["misses"] for r in rows if r["runs"]]
+        self.assertEqual(misses, [{miss: 5}], msg=str(rows))
+
+
+instantiate_device_type_tests(TestVmTensorClass, globals())
+
+
+def placed_tail(x):
+    y = x.sin() * 2
+    return (y * 3 + 1).cos().tanh().exp()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmStablePlaces(TestCase):
+    """Which place holds a region does not depend on what the process did
+    before: a trace leaves no code behind that would run, when a tensor of
+    the program's dies, under whichever instruction is running then."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @isolated
+    def test_traced_call_s_tensors_are_left_without_a_callback(self, device):
+        compiled = vm(placed_tail, passes=EARLY)
+        kept = [torch.randn(4, 8, device=device) for _ in range(8)]
+        # Call 3 is traced: torch.fx tracks its tensor by a weak reference
+        # whose callback is Python code, in a table that is garbage when
+        # the trace is over. The collector is kept from freeing it here.
+        gc.disable()
+        try:
+            for x in kept:
+                self.assertEqual(compiled(x), placed_tail(x), atol=0, rtol=0)
+            left = [r for x in kept for r in weakref.getweakrefs(x) if r.__callback__]
+        finally:
+            gc.enable()
+        self.assertEqual(region_runs(compiled), 4)
+        self.assertEqual(left, [])
+
+    @parametrize("before", [0, 50, 500])
+    @isolated
+    def test_optimizer_step_s_region_sits_at_the_same_place(self, device, before):
+        # Functions that have nothing to do with the step, defined and
+        # called first: they move the moment at which the collector frees
+        # what the traces of the step leave behind.
+        unrelated: dict = {}
+        for k in range(before):
+            exec(f"def f{k}(x):\n    return x * {k + 1} + {k}\n", unrelated)
+            for _ in range(3):
+                unrelated[f"f{k}"](torch.ones(2, device=device))
+
+        def make():
+            torch.manual_seed(0)
+            layers = [torch.nn.Linear(16, 16), torch.nn.Tanh(), torch.nn.Linear(16, 4)]
+            net = torch.nn.Sequential(*layers).to(device)
+            opt = torch.optim.Adam(net.parameters(), 0.01, foreach=False)
+
+            def step(x):
+                opt.zero_grad(set_to_none=True)
+                loss = net(x).square().mean()
+                loss.backward()
+                opt.step()
+                return loss.detach()
+
+            return net, step
+
+        (net, step), (eager_net, eager_step) = make(), make()
+        compiled = vm(step, passes=EARLY)
+        for call in range(13):
+            x = torch.randn(8, 16, device=device)
+            got, want = compiled(x), eager_step(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        weights, expected = list(net.parameters()), list(eager_net.parameters())
+        self.assertEqual(weights, expected, atol=0, rtol=0)
+        # The step of the four parameters is one region of 72 operations.
+        # `adam` holds all of it, so the region that runs is adam's, not the
+        # one of the function it calls for the step.
+        rows = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        ran = [(r["function"], r["kind"], r["ops"]) for r in rows if r["runs"]]
+        steps = [r for r in ran if "adam" in r[0]]
+        self.assertEqual(steps, [("adam", "span", 72)], msg=str(rows))
+
+
+instantiate_device_type_tests(TestVmStablePlaces, globals())
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+@unittest.skipUnless(torch.cuda.is_available(), "needs CUDA")
+class TestVmCudaGraphs(TestCase):
+    """Lowerings that replay CUDA graphs of their own."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    @isolated
+    def test_cuda_graph_reads_the_constants_where_they_are(self):
+        # The lowering a CUDA graph wants: the weights' addresses are in the
+        # graph, and nothing compares them on a call.
+        captures = []
+
+        def graphed(gm, input_types):
+            def bind(consts):
+                state = {}
+
+                def call(x):
+                    if not state:
+                        state["x"] = torch.empty_like(x)
+                        state["graph"] = torch.cuda.CUDAGraph()
+                        with torch.cuda.graph(state["graph"]):
+                            state["outs"] = gm.forward(state["x"], *consts)
+                        captures.append(len(consts))
+                    state["x"].copy_(x)
+                    state["graph"].replay()
+                    return [out.clone() for out in state["outs"]]
+
+                return call
+
+            return vm.lower_to(gm, bind=bind)
+
+        device = "cuda"
+        net = ModesWeights().to(device)
+        compiled = vm(net.forward, passes=(*EARLY, graphed))
+        with torch.no_grad():
+            for call in range(14):
+                x = torch.randn(4, 8, device=device)
+                if call == 8:
+                    net.w.add_(1)
+                if call == 11:
+                    net.w.data = torch.randn(8, 8, device=device)
+                want, got = net(x), compiled(x)
+                self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        self.assertEqual(captures, [2, 2])
+        self.assertGreater(region_runs(compiled), 0)
+
+    def unwritten(self, during):
+        """Calls of a region whose pass keeps a copy of a CUDA weight under
+        vm.Unwritten; ``during(net)`` runs before call 7. Returns what the
+        pass noted."""
+        log = []
+        net = ModesWeight().to("cuda")
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+        with torch.no_grad():
+            for call in range(12):
+                x = torch.randn(4, 8, device="cuda")
+                if call == 7:
+                    during(net)
+                want, got = net(x), compiled(x)
+                self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        self.assertGreater(region_runs(compiled), 0)
+        return log
+
+    @isolated
+    def test_capture_of_the_users_own_that_reads_a_guarded_weight(self):
+        # PyTorch refuses a capture that reads a tensor with the guard's mark.
+        # A capture begun from Python clears the marks first: it works as it
+        # does without the VM, and the guard has failed.
+        def capture(net):
+            x = torch.randn(4, 8, device="cuda")
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                y = torch.mm(x, net.w)
+            graph.replay()
+            self.assertEqual(y, torch.mm(x, net.w), atol=0, rtol=0)
+
+        self.assertEqual(self.unwritten(capture), ["kept", "cannot"])
+
+    @isolated
+    def test_capture_that_keeps_the_guards(self):
+        # A lowering whose graph reads what the pass derived, and no guarded
+        # tensor, says so: its capture leaves the guards.
+        def capture(net):
+            x = torch.randn(4, 8, device="cuda")
+            graph = torch.cuda.CUDAGraph()
+            with vm.keep_unwritten(), torch.cuda.graph(graph):
+                y = x * 2
+            graph.replay()
+            self.assertEqual(y, x * 2, atol=0, rtol=0)
+
+        self.assertEqual(self.unwritten(capture), ["kept"])
+
+
+class ModesAsked:
+    """A tensor in each kind of place a traced call finds one in."""
+
+    def __init__(self, device):
+        self.t = torch.ones(8, device=device)
+        self.listed = [torch.ones(8, device=device)]
+        self.pair = (torch.ones(8, device=device), None)
+        self.named = {"t": torch.ones(8, device=device)}
+        self.net = torch.nn.BatchNorm1d(8, device=device)
+        self.sparse = torch.ones(8, device=device).to_sparse()
+
+
+MODES_ASKED = MODES_ASKED_GLOBAL = None
+
+
+def modes_asked_in_a_cell():
+    t = MODES_ASKED_GLOBAL
+    return lambda: t
+
+
+# Where the call finds the tensor it asks about.
+MODES_ASKED_IN = {
+    "attribute": lambda: MODES_ASKED.t,
+    "list": lambda: MODES_ASKED.listed[0],
+    "tuple": lambda: MODES_ASKED.pair[0],
+    "dict": lambda: MODES_ASKED.named["t"],
+    "parameter": lambda: MODES_ASKED.net.weight,
+    "buffer": lambda: MODES_ASKED.net.running_mean,
+    "parameters": lambda: next(iter(MODES_ASKED.net.parameters())),
+    "global": lambda: MODES_ASKED_GLOBAL,
+    "cell": modes_asked_in_a_cell,
+}
+
+
+def modes_other_data(make):
+    def change(t, other, device):
+        t.data = make(device) if other else torch.ones(8, device=device)
+
+    return change
+
+
+def modes_other_class(t, other, device):
+    t.__class__ = ModesTensor if other else torch.Tensor
+
+
+MODES_OTHER_DTYPE = modes_other_data(lambda d: torch.ones(8, device=d).long())
+MODES_OTHER_SIZE = modes_other_data(lambda d: torch.ones(5, device=d))
+MODES_OTHER_RANK = modes_other_data(lambda d: torch.ones(2, 4, device=d))
+MODES_OTHER_STRIDE = modes_other_data(lambda d: torch.ones(16, device=d)[::2])
+MODES_OTHER_DEVICE = modes_other_data(lambda d: torch.ones(8))
+
+# What is asked of the tensor (the answer is a number of the result), and a
+# change to the same object that gives another answer.
+MODES_QUESTIONS = {
+    "dtype": (lambda t: 2.0 if t.dtype == torch.float32 else 3.0, MODES_OTHER_DTYPE),
+    "is_floating_point": (
+        lambda t: 2.0 if t.is_floating_point() else 3.0,
+        MODES_OTHER_DTYPE,
+    ),
+    "function_is_floating_point": (
+        lambda t: 2.0 if torch.is_floating_point(t) else 3.0,
+        MODES_OTHER_DTYPE,
+    ),
+    "shape": (lambda t: float(t.shape[0]), MODES_OTHER_SIZE),
+    "size": (lambda t: float(t.size(0)), MODES_OTHER_SIZE),
+    "numel": (lambda t: float(t.numel()), MODES_OTHER_SIZE),
+    "function_numel": (lambda t: float(torch.numel(t)), MODES_OTHER_SIZE),
+    "len": (lambda t: float(len(t)), MODES_OTHER_SIZE),
+    "data_shape": (lambda t: float(t.data.shape[0]), MODES_OTHER_SIZE),
+    "ndim": (lambda t: float(t.ndim), MODES_OTHER_RANK),
+    "dim": (lambda t: float(t.dim()), MODES_OTHER_RANK),
+    "is_contiguous": (
+        lambda t: 2.0 if t.is_contiguous() else 3.0,
+        MODES_OTHER_STRIDE,
+    ),
+    "stride": (lambda t: float(t.stride(0)), MODES_OTHER_STRIDE),
+    "requires_grad": (
+        lambda t: 2.0 if t.requires_grad else 3.0,
+        lambda t, other, device: t.requires_grad_(other),
+    ),
+    "isinstance": (
+        lambda t: 2.0 if isinstance(t, ModesTensor) else 3.0,
+        modes_other_class,
+    ),
+    "type": (lambda t: 2.0 if type(t) is torch.Tensor else 3.0, modes_other_class),
+    "is_cuda": (lambda t: 2.0 if t.is_cuda else 3.0, MODES_OTHER_DEVICE),
+    "device": (lambda t: 2.0 if t.device.type == "cpu" else 3.0, MODES_OTHER_DEVICE),
+}
+
+
+def modes_asking(find, ask):
+    def asking(x):
+        y = modes_work(x)
+        return modes_work(y * ask(find()))
+
+    return asking
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmAskedTensors(TestCase):
+    """What a call asks of a tensor it finds in the program's state (its
+    dtype, its sizes, whether it requires grad, its class) is the answer for
+    as long as that tensor is as it was: a region formed with the answer is
+    not entered once the same object has another dtype, other sizes or
+    strides, another device, class or requires_grad."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, device, find, ask, change=None):
+        # Six calls, three with the tensor changed, three with it put back.
+        global MODES_ASKED, MODES_ASKED_GLOBAL
+        MODES_ASKED = ModesAsked(device)
+        MODES_ASKED_GLOBAL = torch.ones(8, device=device)
+        if find is modes_asked_in_a_cell:
+            find = find()
+        fn = modes_asking(find, ask)
+        compiled = vm(fn, passes=EARLY)
+        runs = []
+        for call in range(12):
+            if change is not None and call in (6, 9):
+                change(find(), call == 6, device)
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(compiled(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+            runs.append(region_runs(compiled))
+        return compiled, runs
+
+    @parametrize("what", list(MODES_QUESTIONS))
+    @isolated
+    def test_answer_is_the_call_s_own_after_the_tensor_changed(self, device, what):
+        if what in ("is_cuda", "device") and torch.device(device).type == "cpu":
+            self.skipTest("needs a second device")
+        ask, change = MODES_QUESTIONS[what]
+        _, runs = self.calls(device, MODES_ASKED_IN["attribute"], ask, change)
+        # A region served the first state, and one serves the other.
+        self.assertGreater(runs[5], 0)
+        self.assertGreater(runs[8], runs[6])
+        self.assertGreater(runs[11], runs[8])
+
+    @parametrize("where", list(MODES_ASKED_IN))
+    @isolated
+    def test_tensor_is_asked_wherever_the_call_found_it(self, device, where):
+        ask, change = MODES_QUESTIONS["shape"]
+        _, runs = self.calls(device, MODES_ASKED_IN[where], ask, change)
+        self.assertGreater(runs[5], 0)
+        self.assertGreater(runs[11], runs[8])
+
+    @parametrize("where", list(MODES_ASKED_IN))
+    @isolated
+    def test_tensor_that_stays_as_it_was_costs_no_region(self, device, where):
+        ask, _ = MODES_QUESTIONS["shape"]
+        compiled, runs = self.calls(device, MODES_ASKED_IN[where], ask)
+        # Every call behind the traced one ran its regions, and none missed.
+        steps = {after - before for before, after in itertools.pairwise(runs[4:])}
+        self.assertEqual(len(steps), 1, msg=str(runs))
+        self.assertGreater(min(steps), 0)
+        rows = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertEqual([dict(r["misses"] or {}) for r in rows], [{}] * len(rows))
+
+    @isolated
+    def test_tensor_that_is_not_strided_is_asked_on_every_call(self, device):
+        # No check covers a sparse tensor: what is asked of it is no region's.
+        def resize(t, other, device):
+            t.sparse_resize_and_clear_((5 if other else 8,), 1, 0)
+
+        ask, _ = MODES_QUESTIONS["shape"]
+        self.calls(device, lambda: MODES_ASKED.sparse, ask, resize)
+
+
+instantiate_device_type_tests(TestVmAskedTensors, globals())
+
+
+# The domain of "a tensor a call finds in the program's state and asks
+# about": where the call finds it, how it hands it on, what it asks. Every
+# member of each of the three lists runs with every member of the other two.
+
+
+@dataclasses.dataclass
+class ModesLedFields:
+    t: torch.Tensor
+
+
+class ModesLedSlots:
+    __slots__ = ("t",)
+
+    def __init__(self, t):
+        self.t = t
+
+
+ModesLedPair = collections.namedtuple("ModesLedPair", "t u")
+
+
+class ModesLedProperty:
+    def __init__(self, t):
+        self._t = t
+
+    @property
+    def t(self):
+        return self._t
+
+
+class ModesLedHook:
+    def __init__(self, t):
+        self.store = {"t": t}
+
+    def __getattr__(self, name):
+        return self.__dict__["store"][name]
+
+
+def modes_led_default(t):
+    def helper(found=t):
+        return found
+
+    return helper
+
+
+def modes_led_keyword_default(t):
+    def helper(*, found=t):
+        return found
+
+    return helper
+
+
+def modes_led_module(t):
+    module = types.ModuleType("modes_led")
+    module.t = t
+    return module
+
+
+def modes_led_first(t):
+    return t
+
+
+def modes_led_net(t):
+    net = torch.nn.Module()
+    if isinstance(t, torch.nn.Parameter):
+        net.t = t
+    else:
+        net.register_buffer("t", t)
+    return net
+
+
+# Where the call finds the tensor: what holds it (made of the tensor, and
+# bound to the global HELD of the program), how the call reads it there, and
+# whether the tensor is an nn.Parameter.
+MODES_LED_HOMES = {
+    "global": (lambda t: t, "HELD", False),
+    "list": (lambda t: [t], "HELD[0]", False),
+    "list_from_the_end": (lambda t: [None, t], "HELD[-1]", False),
+    "dict": (lambda t: {"t": t}, 'HELD["t"]', False),
+    "dict_get": (lambda t: {"t": t}, 'HELD.get("t")', False),
+    "tuple": (lambda t: (t, None), "HELD[0]", False),
+    "tuple_five_deep": (lambda t: (((((t,),),),),), "HELD[0][0][0][0][0]", False),
+    "tuple_in_a_list": (lambda t: [((t,),)], "HELD[0][0][0]", False),
+    "frozenset": (lambda t: frozenset([t]), "list(HELD)[0]", False),
+    "dataclass": (ModesLedFields, "HELD.t", False),
+    "slot": (ModesLedSlots, "HELD.t", False),
+    "namedtuple": (lambda t: ModesLedPair(t, 1), "HELD.t", False),
+    "class_attribute": (
+        lambda t: type("ModesLedClass", (), {"t": t})(),
+        "HELD.t",
+        False,
+    ),
+    "namespace": (lambda t: types.SimpleNamespace(t=t), "HELD.t", False),
+    "module_global": (modes_led_module, "HELD.t", False),
+    "partial": (lambda t: functools.partial(modes_led_first, t), "HELD()", False),
+    "property": (ModesLedProperty, "HELD.t", False),
+    "getattr_hook": (ModesLedHook, "HELD.t", False),
+    "default": (modes_led_default, "HELD()", False),
+    "keyword_default": (modes_led_keyword_default, "HELD()", False),
+    "cell": (lambda t: lambda: t, "HELD()", False),
+    "parameter": (modes_led_net, "HELD.t", True),
+    "buffer": (modes_led_net, "HELD.t", False),
+    "parameter_list": (lambda t: torch.nn.ParameterList([t]), "HELD[0]", True),
+    "parameters_dict": (modes_led_net, 'HELD._parameters["t"]', True),
+}
+
+# What the call does with the tensor it found before it asks: the expression
+# is what the question is asked of. Some hand on what is itself in state
+# (made of the tensor, and bound to the global KEPT of the program).
+MODES_LED_HANDS = {
+    "directly": (None, "{found}"),
+    "positional": (None, "torch.clone({found})"),
+    "keyword": (None, "torch.clone(input={found})"),
+    "star_tuple": (None, "torch.clone(*({found},))"),
+    "star_tuple_in_state": (lambda t: (t,), "torch.clone(*KEPT)"),
+    "star_frozenset_in_state": (lambda t: frozenset([t]), "torch.clone(*KEPT)"),
+    "keyword_dict": (None, 'torch.clone(**{{"input": {found}}})'),
+    "keyword_dict_in_state": (lambda t: {"input": t}, "torch.clone(**KEPT)"),
+    "list": (None, "torch.cat([{found}, {found}])"),
+    "tuple": (None, "torch.cat(({found}, {found}))"),
+    "list_in_state": (lambda t: [t, t], "torch.cat(KEPT)"),
+    "list_in_a_star_tuple": (None, "torch.cat(*([{found}, {found}],))"),
+    "tuple_in_a_keyword_dict": (
+        None,
+        'torch.cat(**{{"tensors": ({found}, {found})}})',
+    ),
+    "stacked_list": (None, "torch.stack([{found}], dim=1)"),
+    "bound_method_in_state": (lambda t: t.clone, "KEPT()"),
+    "view": (None, "{found}[0:]"),
+    "product": (None, "({found} * 2)"),
+}
+
+
+def modes_led_rows(r):
+    rows = 0.0
+    for _ in r:
+        rows += 1.0
+    return rows
+
+
+def modes_led_other_data(**other):
+    def change(t, device):
+        was = t.data
+        size, dtype = other.get("size", 8), other.get("dtype")
+        t.data = torch.ones(size, device=device, dtype=dtype)
+        return lambda: setattr(t, "data", was)
+
+    return change
+
+
+def modes_led_other_grad(t, device):
+    was = t.requires_grad
+    t.requires_grad_(not was)
+    return lambda: t.requires_grad_(was)
+
+
+def modes_led_other_class(t, device):
+    was = type(t)
+    t.__class__ = ModesTensor
+    return lambda: setattr(t, "__class__", was)
+
+
+MODES_LED_SIZE = modes_led_other_data(size=5)
+MODES_LED_DTYPE = modes_led_other_data(dtype=torch.float64)
+
+# What is asked (the answer is a number of the result, computed without a
+# branch: the question stays between the operators of one block), and a
+# change to the same object that gives another answer; it returns what puts
+# the tensor back.
+MODES_LED_ASKS = {
+    "shape": ("float({r}.shape[0])", MODES_LED_SIZE),
+    "size": ("float({r}.size(0))", MODES_LED_SIZE),
+    "function_numel": ("float(torch.numel({r}))", MODES_LED_SIZE),
+    "len": ("float(len({r}))", MODES_LED_SIZE),
+    "unbound_method": ("float(torch.Tensor.size({r}, 0))", MODES_LED_SIZE),
+    "getattr": ('float(getattr({r}, "shape")[0])', MODES_LED_SIZE),
+    "iteration": ("modes_led_rows({r})", MODES_LED_SIZE),
+    "dtype": ("2.0 + float({r}.dtype == torch.float32)", MODES_LED_DTYPE),
+    "element_size": ("float({r}.element_size())", MODES_LED_DTYPE),
+    "requires_grad": ("2.0 + float({r}.requires_grad)", modes_led_other_grad),
+    "isinstance": (
+        "2.0 + float(isinstance({r}, ModesTensor))",
+        modes_led_other_class,
+    ),
+}
+
+MODES_LED_PROGRAM = """
+def program(x):
+    y = modes_work(x)
+    k = {asked}
+    return modes_work(y * k)
+
+
+def answer():
+    return {asked}
+"""
+
+
+MODES_LED_CHANGED = None
+
+
+def modes_led_changed_and_asked(x):
+    y = modes_work(x)
+    MODES_LED_CHANGED.resize_(5)
+    k = float(MODES_LED_CHANGED.shape[0])
+    MODES_LED_CHANGED.resize_(8)
+    return modes_work(y * k)
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmAskedDomain(TestCase):
+    """A tensor a call finds in the program's state and asks about is
+    compared before a region with the answer is entered, by whatever way the
+    call came by it (an item, a tuple at any depth, a frozenset, an attribute,
+    a default, what a bound method is bound to), however it handed it on
+    (itself, or in a list, a tuple, a starred tuple or frozenset or a keyword
+    dict given to C code) and whatever it asked."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def phases(self, device, home, hand, ask):
+        # The schedule A, B, A: the tensor as it is, changed, and put back.
+        hold, found, parameter = MODES_LED_HOMES[home]
+        keep, handed = MODES_LED_HANDS[hand]
+        question, change = MODES_LED_ASKS[ask]
+        t = torch.ones(8, device=device)
+        t = torch.nn.Parameter(t) if parameter else t
+        names = {
+            "torch": torch,
+            "modes_work": modes_work,
+            "modes_led_rows": modes_led_rows,
+            "ModesTensor": ModesTensor,
+            "HELD": hold(t),
+            "KEPT": None if keep is None else keep(t),
+        }
+        asked = question.format(r=handed.format(found=found))
+        exec(MODES_LED_PROGRAM.format(asked=asked), names)
+        fn = names["program"]
+        compiled = vm(fn, passes=EARLY)
+        answers, runs, misses = [], [], []
+        back = None
+        for phase, calls in enumerate((6, 3, 3)):
+            if phase == 1:
+                back = change(t, device)
+            elif phase == 2:
+                back()
+            answers.append(names["answer"]())
+            for call in range(calls):
+                torch.manual_seed(10 * phase + call)
+                x = torch.randn(4, 8, device=device)
+                msg = f"{asked}: phase {phase}, call {call}"
+                self.assertEqual(compiled(x), fn(x), atol=0, rtol=0, msg=msg)
+            runs.append(region_runs(compiled))
+            misses.append(torch._rust._region_read_misses())
+        return answers, runs, misses
+
+    @parametrize("home", list(MODES_LED_HOMES))
+    @isolated
+    def test_answer_is_the_call_s_own_wherever_found_and_however_handed(
+        self, device, home
+    ):
+        for hand, ask in itertools.product(MODES_LED_HANDS, MODES_LED_ASKS):
+            with self.subTest(hand=hand, ask=ask):
+                answers, runs, misses = self.phases(device, home, hand, ask)
+                # A region ran over the first phase: the calls compared were
+                # not all the interpreter's.
+                self.assertGreater(runs[0], 0)
+                if answers[1] != answers[0]:
+                    # The regions formed with the first answer were not
+                    # entered with the other, and ran again with the first.
+                    self.assertGreater(misses[1], misses[0])
+                    self.assertGreater(runs[2], runs[1])
+
+    @isolated
+    def test_tensor_the_call_itself_changes_around_the_question(self, device):
+        # The key of an asked tensor is taken when it is first asked: here
+        # that is not how a call finds the tensor. No region is entered on
+        # one state and formed for another, call after call.
+        global MODES_LED_CHANGED
+        MODES_LED_CHANGED = torch.ones(8, device=device)
+        compiled = vm(modes_led_changed_and_asked, passes=EARLY)
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            want = modes_led_changed_and_asked(x)
+            self.assertEqual(compiled(x), want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(MODES_LED_CHANGED.shape, (8,))
+        self.assertGreater(region_runs(compiled), 0)
+        self.assertEqual(torch._rust._region_read_misses(), 0)
+
+    @parametrize("ask", ["attribute", "operand"])
+    @isolated
+    def test_tensor_that_no_read_leads_to_refuses_the_trace(self, device, ask):
+        # A callable of C the program declared to only compute hands out a
+        # tensor held by a deque, which no read of the call stands for: a
+        # question about that tensor (or handing it on to C code) cannot be
+        # checked on a later call, so no region is formed.
+        global MODES_UNLED
+        MODES_UNLED = collections.deque([torch.ones(8, device=device)])
+        fn = modes_unled_asked if ask == "attribute" else modes_unled_handed
+        pure = {"pure": (operator.getitem,)}
+        compiled = vm(fn, passes=vm.configure(EARLY, pure_calls=pure))
+        for call in range(13):
+            if call in (5, 9):
+                MODES_UNLED[0].resize_(13 - MODES_UNLED[0].shape[0])
+            torch.manual_seed(call)
+            x = torch.randn(4, MODES_UNLED[0].shape[0], device=device)
+            self.assertEqual(compiled(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+        rows = [r for r in vm.regions(compiled) if r["function"] == fn.__name__]
+        reasons = [str(r.get("why")) for r in rows if r["state"] == "refused"]
+        self.assertTrue(
+            any("none of its reads leads to" in r for r in reasons), msg=str(rows)
+        )
+
+
+instantiate_device_type_tests(TestVmAskedDomain, globals())
+
+
+# What C code is handed without an instruction of its own handing it: the
+# arguments of a functools.partial of C code, what a method object of a
+# function of C is bound to, a lone starred operand. By name: what makes the
+# state (the read, the change made in place before call 5, and what takes
+# it back before call 9), and whether a region is to be entered again (else
+# the trace is to be refused).
+def modes_unseen_tensor(make):
+    def kind(device):
+        t = torch.ones(8, device=device)
+        read = make(t)
+        return (read, lambda: t.resize_(5), lambda: t.resize_(8))
+
+    return kind
+
+
+def modes_unseen_dict(make):
+    def kind(device):
+        d = {"k": 2.0}
+        read = make(d)
+        return (read, lambda: d.update(k=3.0), lambda: d.update(k=2.0))
+
+    return kind
+
+
+def modes_unseen_generator(t):
+    return lambda: torch.numel(*(x for x in [t]))
+
+
+MODES_HANDED = {
+    "partial_argument": (
+        modes_unseen_tensor(lambda t: functools.partial(torch.numel, t)),
+        True,
+    ),
+    "partial_keyword": (
+        modes_unseen_tensor(lambda t: functools.partial(torch.numel, input=t)),
+        True,
+    ),
+    "partial_of_a_bound_method": (
+        modes_unseen_tensor(lambda t: functools.partial(t.numel)),
+        True,
+    ),
+    "partial_of_dict_get": (
+        modes_unseen_dict(lambda d: functools.partial(dict.get, d, "k")),
+        True,
+    ),
+    "partial_of_getitem": (
+        modes_unseen_dict(lambda d: functools.partial(operator.getitem, d, "k")),
+        True,
+    ),
+    "partial_of_a_dict_method": (
+        modes_unseen_dict(lambda d: functools.partial(d.get, "k")),
+        True,
+    ),
+    "partial_of_a_method_object": (
+        modes_unseen_dict(
+            lambda d: functools.partial(types.MethodType(dict.get, d), "k")
+        ),
+        True,
+    ),
+    "method_object_of_dict_get": (
+        modes_unseen_dict(lambda d: lambda m=types.MethodType(dict.get, d): m("k")),
+        True,
+    ),
+    "method_object_of_numel": (
+        modes_unseen_tensor(lambda t: types.MethodType(torch.numel, t)),
+        True,
+    ),
+    "star_of_an_iterator": (
+        modes_unseen_tensor(lambda t: lambda: torch.numel(*iter([t]))),
+        True,
+    ),
+    "star_of_a_deque": (
+        modes_unseen_tensor(lambda t: lambda d=collections.deque([t]): torch.numel(*d)),
+        False,
+    ),
+    "star_of_a_generator": (modes_unseen_tensor(modes_unseen_generator), False),
+}
+MODES_HANDED_READ = None
+
+
+def modes_unseen_reading(x):
+    y = modes_work(x)
+    k = MODES_HANDED_READ()
+    return modes_work(y * float(k))
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmHandedUnseen(TestCase):
+    """What C code reads of something it is handed where no instruction of
+    the call hands it over is checked like anything else the call read, or
+    the trace is refused."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def log(self, device, what, fn):
+        global MODES_HANDED_READ
+        MODES_HANDED_READ, change, back = MODES_HANDED[what][0](device)
+        out = []
+        for call in range(13):
+            if call == 5:
+                change()
+            if call == 9:
+                back()
+            torch.manual_seed(call)
+            out.append(fn(torch.randn(4, 8, device=device)))
+        return out
+
+    @parametrize("what", list(MODES_HANDED))
+    @isolated
+    def test_what_c_code_is_handed_unseen(self, device, what):
+        want = self.log(device, what, modes_unseen_reading)
+        compiled = vm(modes_unseen_reading, passes=EARLY)
+        self.assertEqual(self.log(device, what, compiled), want, atol=0, rtol=0)
+        name = modes_unseen_reading.__name__
+        rows = [r for r in vm.regions(compiled) if r["function"] == name]
+        if MODES_HANDED[what][1]:
+            # Entered while the state is as it was traced, and not while it
+            # is changed.
+            self.assertGreater(region_runs(compiled), 0, msg=str(rows))
+            self.assertGreater(torch._rust._region_read_misses(), 0, msg=str(rows))
+        else:
+            reasons = [str(r.get("why")) for r in rows if r["state"] == "refused"]
+            unseen = "into C code, whose members no check covers"
+            self.assertTrue(any(unseen in r for r in reasons), msg=str(rows))
+
+
+instantiate_device_type_tests(TestVmHandedUnseen, globals())
+
+
+MODES_UNLED = None
+
+
+def modes_unled_asked(x):
+    y = modes_work(x)
+    t = operator.getitem(MODES_UNLED, 0)
+    return modes_work(y * float(t.shape[0]))
+
+
+def modes_unled_handed(x):
+    y = modes_work(x)
+    t = operator.getitem(MODES_UNLED, 0)
+    return modes_work(y * t)
+
+
+# The pass lists a rule about writes is tested under: with the default one a
+# store into what outlives the call ends a region in front of it, with the
+# Effects pass a region makes the store again.
+MODES_OWN_PASSES = {
+    "default": EARLY,
+    "effects": (*EARLY, vm.passes.Effects()),
+}
+
+
+class ModesDropped:
+    """An object whose finalizer changes state: the change is made inside the
+    call that drops the object, and by no instruction of that call."""
+
+    change = None
+
+    def __del__(self):
+        ModesDropped.change()
+
+
+class ModesDroppedStoring(ModesDropped):
+    """Its __init__ stores an attribute: the record of the call's writes
+    holds the object until the traced call is over."""
+
+    def __init__(self):
+        self.n = 1
+
+
+class ModesDroppedCalled(ModesDropped):
+    """A method of it is called: the record of the call's reads holds the
+    object until the traced call is over."""
+
+    def poke(self):
+        return None
+
+
+MODES_STALE_READ = None
+MODES_FOREIGN = "a frame that is not the body's ran under it"
+
+
+def modes_stale_reading(x):
+    y = modes_work(x)
+    k = MODES_STALE_READ()
+    ModesDropped()
+    return modes_work(y * k)
+
+
+def modes_stale_reading_storing(x):
+    y = modes_work(x)
+    k = MODES_STALE_READ()
+    ModesDroppedStoring()
+    return modes_work(y * k)
+
+
+def modes_stale_reading_called(x):
+    y = modes_work(x)
+    k = MODES_STALE_READ()
+    ModesDroppedCalled().poke()
+    return modes_work(y * k)
+
+
+# Where the dropped object dies under a trace: at the drop, or when the
+# trace lets go of the record that held it (behind the moment the trace
+# compares what it read).
+MODES_STALE_DROPS = {
+    "at_the_drop": modes_stale_reading,
+    "held_by_a_write": modes_stale_reading_storing,
+    "held_by_a_read": modes_stale_reading_called,
+}
+
+
+def modes_stale_item(device):
+    state = {"k": 2.0}
+
+    def change():
+        state["k"] = 5.0 - state["k"]
+
+    return (lambda: state["k"], change)
+
+
+def modes_stale_list_item(device):
+    state = [2.0]
+
+    def change():
+        state[0] = 5.0 - state[0]
+
+    return (lambda: state[0], change)
+
+
+def modes_stale_length(device):
+    state = [1.0, 1.0]
+
+    def change():
+        if len(state) == 2:
+            state.append(1.0)
+        else:
+            state.pop()
+
+    return (lambda: float(len(state)), change)
+
+
+def modes_stale_whole(device):
+    state = [1.0, 1.0]
+
+    def change():
+        state[1] = 3.0 - state[1]
+
+    return (lambda: sum(state), change)
+
+
+def modes_stale_cell(device):
+    k = 2.0
+
+    def change():
+        nonlocal k
+        k = 5.0 - k
+
+    return (lambda: k, change)
+
+
+def modes_stale_defaults(device):
+    def scale(k=2.0):
+        return k
+
+    def change():
+        scale.__defaults__ = (5.0 - scale.__defaults__[0],)
+
+    return (lambda: scale(), change)
+
+
+def modes_stale_code(device):
+    def scale():
+        return 2.0
+
+    def other():
+        return 3.0
+
+    codes = [other.__code__, scale.__code__]
+
+    def change():
+        codes.append(scale.__code__)
+        scale.__code__ = codes.pop(0)
+
+    return (lambda: scale(), change)
+
+
+def modes_stale_dict(device):
+    box = ModesHolder()
+
+    def change():
+        box.__dict__ = {"k": 5.0 - box.k}
+
+    return (lambda: box.k, change)
+
+
+def modes_stale_tensor(device):
+    t = torch.ones(8, device=device)
+
+    def change():
+        t.resize_(13 - t.shape[0])
+
+    return (lambda: float(t.shape[0]), change)
+
+
+def modes_stale_absent(device):
+    state = {}
+
+    def change():
+        if "k" in state:
+            del state["k"]
+        else:
+            state["k"] = 2.0
+
+    return (lambda: state.get("k", 3.0), change)
+
+
+def modes_stale_set(device):
+    state = set()
+
+    def change():
+        if state:
+            state.discard(5)
+        else:
+            state.add(5)
+
+    return (lambda: 2.0 + float(5 in state), change)
+
+
+def modes_stale_kwdefaults(device):
+    def scale(*, k=2.0):
+        return k
+
+    def change():
+        scale.__kwdefaults__["k"] = 5.0 - scale.__kwdefaults__["k"]
+
+    return (lambda: scale(), change)
+
+
+def modes_stale_slot(device):
+    class Slotted:
+        __slots__ = ("k",)
+
+    box = Slotted()
+    box.k = 2.0
+
+    def change():
+        box.k = 5.0 - box.k
+
+    return (lambda: box.k, change)
+
+
+def modes_stale_class_attribute(device):
+    class Scaled:
+        k = 2.0
+
+    def change():
+        Scaled.k = 5.0 - Scaled.k
+
+    return (lambda: Scaled.k, change)
+
+
+def modes_stale_class_attribute_of_an_instance(device):
+    class Scaled:
+        k = 2.0
+
+    box = Scaled()
+
+    def change():
+        Scaled.k = 5.0 - Scaled.k
+
+    return (lambda: box.k, change)
+
+
+def modes_stale_method(device):
+    class Scaled:
+        def two(self):
+            return 2.0
+
+        def three(self):
+            return 3.0
+
+        scale = two
+
+    box = Scaled()
+
+    def change():
+        Scaled.scale = Scaled.three if Scaled.scale is Scaled.two else Scaled.two
+
+    return (lambda: box.scale(), change)
+
+
+def modes_stale_class(device):
+    class Two:
+        def scale(self):
+            return 2.0
+
+    class Three:
+        def scale(self):
+            return 3.0
+
+    box = Two()
+
+    def change():
+        box.__class__ = Three if type(box) is Two else Two
+
+    return (lambda: box.scale(), change)
+
+
+def modes_stale_bases(device):
+    class Plain:
+        pass
+
+    class Marked:
+        pass
+
+    class Based(Plain):
+        pass
+
+    box = Based()
+
+    def change():
+        Based.__bases__ = (Marked,) if Based.__bases__ == (Plain,) else (Plain,)
+
+    return (lambda: 2.0 + float(isinstance(box, Marked)), change)
+
+
+def modes_stale_registered(device):
+    Registry = abc.ABCMeta("Registry", (), {})
+
+    class Plain:
+        pass
+
+    box = Plain()
+
+    def change():
+        Registry.register(type("Other", (), {}))
+
+    return (lambda: 2.0 + float(isinstance(box, Registry)), change)
+
+
+def modes_stale_view(make):
+    def kind(device):
+        state = {"a": 1}
+        view = make(state)
+
+        def change():
+            if "b" in state:
+                del state["b"]
+            else:
+                state["b"] = 1
+
+        return (lambda: float(len(view)) + 1.0, change)
+
+    return kind
+
+
+def modes_stale_requires_grad(device):
+    t = torch.ones(3, device=device)
+
+    def change():
+        t.requires_grad_(not t.requires_grad)
+
+    return (lambda: 2.0 + float(t.requires_grad), change)
+
+
+MODES_STALE = {
+    "requires_grad": modes_stale_requires_grad,
+    "slot": modes_stale_slot,
+    "class_attribute": modes_stale_class_attribute,
+    "class_attribute_of_an_instance": modes_stale_class_attribute_of_an_instance,
+    "method": modes_stale_method,
+    "class": modes_stale_class,
+    "bases": modes_stale_bases,
+    "registered": modes_stale_registered,
+    "keys_length": modes_stale_view(dict.keys),
+    "values_length": modes_stale_view(dict.values),
+    "items_length": modes_stale_view(dict.items),
+    "proxy_length": modes_stale_view(types.MappingProxyType),
+    "item": modes_stale_item,
+    "absent": modes_stale_absent,
+    "set": modes_stale_set,
+    "kwdefaults": modes_stale_kwdefaults,
+    "list_item": modes_stale_list_item,
+    "length": modes_stale_length,
+    "whole": modes_stale_whole,
+    "cell": modes_stale_cell,
+    "defaults": modes_stale_defaults,
+    "code": modes_stale_code,
+    "dict": modes_stale_dict,
+    "tensor": modes_stale_tensor,
+}
+
+
+# What a call reads twice, with a change in between that no instruction of
+# the call makes and that is taken back before the call is over: `change` is
+# what the finalizer does the first time (by `step`, which nothing of the
+# call reads) and the second time (back to what was read first).
+def modes_stale_item_again(step):
+    state = {"k": 2.0}
+
+    def change(first):
+        state["k"] = 2.0 + step[0] if first else 2.0
+
+    return (lambda: state["k"], change)
+
+
+def modes_stale_whole_again(step):
+    state = [2.0, 1.0]
+
+    def change(first):
+        state[0] = 2.0 + step[0] if first else 2.0
+
+    return (lambda: sum(state), change)
+
+
+def modes_stale_length_again(step):
+    state = [2.0]
+
+    def change(first):
+        if first:
+            state.extend([0.0] * int(step[0]))
+        else:
+            del state[1:]
+
+    return (lambda: float(len(state)), change)
+
+
+def modes_stale_view_length_again(step):
+    state = {"a": 2.0}
+    view = state.keys()
+
+    def change(first):
+        for n in range(int(step[0])):
+            if first:
+                state[n] = 0.0
+            else:
+                del state[n]
+
+    return (lambda: float(len(view)), change)
+
+
+def modes_stale_cell_again(step):
+    k = 2.0
+
+    def change(first):
+        nonlocal k
+        k = 2.0 + step[0] if first else 2.0
+
+    return (lambda: k, change)
+
+
+def modes_stale_slot_again(step):
+    class Slotted:
+        __slots__ = ("k",)
+
+    box = Slotted()
+    box.k = 2.0
+
+    def change(first):
+        box.k = 2.0 + step[0] if first else 2.0
+
+    return (lambda: box.k, change)
+
+
+def modes_stale_class_attribute_again(step):
+    class Scaled:
+        k = 2.0
+
+    two = Scaled.k
+
+    def change(first):
+        Scaled.k = 2.0 + step[0] if first else two
+
+    return (lambda: Scaled.k, change)
+
+
+def modes_stale_method_again(step):
+    class Scaled:
+        def two(self):
+            return 2.0
+
+        def three(self):
+            return 3.0
+
+        def four(self):
+            return 4.0
+
+        def five(self):
+            return 5.0
+
+        scale = two
+
+    box = Scaled()
+    scales = [vars(Scaled)[n] for n in ("two", "three", "four", "five")]
+
+    def change(first):
+        Scaled.scale = scales[int(step[0])] if first else scales[0]
+
+    return (lambda: box.scale(), change)
+
+
+def modes_stale_class_again(step):
+    class Two:
+        def scale(self):
+            return 2.0
+
+    class Three(Two):
+        def scale(self):
+            return 3.0
+
+    class Four(Two):
+        def scale(self):
+            return 4.0
+
+    box = Two()
+
+    def change(first):
+        box.__class__ = (Three if step[0] == 1.0 else Four) if first else Two
+
+    return (lambda: box.scale(), change)
+
+
+def modes_stale_bases_again(step):
+    class Plain:
+        pass
+
+    class Marked:
+        pass
+
+    class Other:
+        pass
+
+    class Based(Plain):
+        pass
+
+    box = Based()
+
+    def change(first):
+        Based.__bases__ = ((Marked if step[0] == 1.0 else Other) if first else Plain,)
+
+    return (lambda: 2.0 + float(isinstance(box, Marked)), change)
+
+
+# By name: what is read twice, and what the refusal says (the second read
+# is what found the change: when the call is over all is as it was).
+MODES_STALE_AGAIN = {
+    "item": (modes_stale_item_again, "when the run reads it again"),
+    "slot": (modes_stale_slot_again, "when the run reads it again"),
+    "whole": (modes_stale_whole_again, "when the run reads it again"),
+    "length": (modes_stale_length_again, "when the run reads it again"),
+    "view_length": (modes_stale_view_length_again, "when the run reads it again"),
+    "cell": (modes_stale_cell_again, "when the run reads it again"),
+    "class_attribute": (
+        modes_stale_class_attribute_again,
+        "when the run reads the class again",
+    ),
+    "method": (modes_stale_method_again, "when the run reads the class again"),
+    "class": (modes_stale_class_again, "changed while it was traced"),
+    "bases": (modes_stale_bases_again, "changed while it was traced"),
+}
+
+
+def modes_stale_reading_again(x):
+    y = modes_work(x)
+    k = MODES_STALE_READ()
+    ModesDropped()
+    k = k + MODES_STALE_READ()
+    ModesDropped()
+    return modes_work(y * k)
+
+
+# The length of a view of a dict (or of a mappingproxy) kept in state.
+# By name: the class of the dict, and what makes the view of it.
+MODES_VIEWS = {
+    "keys": (dict, dict.keys),
+    "values": (dict, dict.values),
+    "items": (dict, dict.items),
+    "proxy": (dict, types.MappingProxyType),
+    "ordered_keys": (collections.OrderedDict, collections.OrderedDict.keys),
+}
+MODES_VIEW = None
+
+
+def modes_view_length(x):
+    y = modes_work(x)
+    return modes_work(y * float(len(MODES_VIEW)))
+
+
+def modes_slot_or(o, default):
+    try:
+        return o.k
+    except AttributeError:
+        return default
+
+
+# Whether a slot holds something, every way a call can ask: by name, what
+# the call computes its factor from, with O an object whose slot `k` is
+# empty or holds a float.
+MODES_SLOT_ASKED = {
+    "hasattr": "2.0 + float(hasattr(O, 'k'))",
+    "getattr_with_a_default": "getattr(O, 'k', 3.0)",
+    "hasattr_then_the_value": "O.k if hasattr(O, 'k') else 3.0",
+    "the_value_then_hasattr": "(O.k if SET[0] else 3.0) + float(hasattr(O, 'k'))",
+    "load_that_raises": "modes_slot_or(O, 3.0)",
+}
+# By name: what the slot holds from which call on (None: nothing), and
+# whether the answer to "does it hold something" changes on the way.
+MODES_SLOT_SCHEDULES = {
+    "empty_when_traced": ({0: None, 5: 2.0, 9: None}, True),
+    "set_when_traced": ({0: 2.0, 5: None, 9: 2.0}, True),
+    "another_value": ({0: 2.0, 5: 4.0, 9: 2.0}, False),
+}
+MODES_SLOT_PROGRAM = """
+class Slotted:
+    __slots__ = ("k",)
+
+
+O = Slotted()
+SET = [False]
+
+
+def {name}(x):
+    y = modes_work(x)
+    k = {asked}
+    return modes_work(y * k)
+"""
+
+# What is there, by how it is made: an instance that takes a weak reference,
+# one that takes none (its death is seen by its finalizer alone), a tensor.
+MODES_PRESENCE_HELD = {
+    "instance": "Seen()",
+    "slotted_instance": "SeenSlotted()",
+    "tensor": "torch.ones(3)",
+}
+# A call that asks only whether something is there: by name, the class of
+# the holder O, what the call computes its factor from, how the test puts
+# an object there, how it takes it out, and which objects it is tried with.
+# (`hasattr` of an attribute in an instance's __dict__ is recorded as a read
+# of the VALUE, and a value of a class that takes no weak reference is
+# counted for as long as the region lives: no member here.)
+MODES_PRESENCE = {
+    "slot": (
+        "class Holder:\n    __slots__ = ('k',)",
+        "2.0 + float(hasattr(O, 'k'))",
+        lambda o, v: setattr(o, "k", v),
+        lambda o: delattr(o, "k"),
+        ("instance", "slotted_instance", "tensor"),
+    ),
+    "attribute": (
+        "class Holder:\n    pass",
+        "2.0 + float(hasattr(O, 'k'))",
+        lambda o, v: setattr(o, "k", v),
+        lambda o: delattr(o, "k"),
+        ("instance", "tensor"),
+    ),
+    "item": (
+        "Holder = dict",
+        "2.0 + float('k' in O)",
+        lambda o, v: o.__setitem__("k", v),
+        lambda o: o.__delitem__("k"),
+        ("instance", "slotted_instance", "tensor"),
+    ),
+}
+MODES_PRESENCE_CASES = {
+    f"{where}_holding_a_{held}": (where, held)
+    for where, row in MODES_PRESENCE.items()
+    for held in row[4]
+}
+# What the test does before the sixth call.
+MODES_PRESENCE_SCHEDULES = ("replaced", "deleted")
+MODES_PRESENCE_PROGRAM = """
+DIED = []
+
+
+class Seen:
+    def __del__(self):
+        DIED.append(1)
+
+
+class SeenSlotted:
+    __slots__ = ()
+
+    def __del__(self):
+        DIED.append(1)
+
+
+{holder}
+
+
+O = Holder()
+
+
+def make():
+    return {made}
+
+
+def {name}(x):
+    y = modes_work(x)
+    k = {asked}
+    return modes_work(y * k)
+"""
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmStaleReads(TestCase):
+    """What a traced call read and something else then changed, inside the
+    same call and by no write of the call's own instructions, is not what a
+    later call finds: no region is formed with the value of that read."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def log(self, device, what, fn):
+        # Fresh state: what is read, and what the finalizer does to it.
+        global MODES_STALE_READ
+        MODES_STALE_READ, ModesDropped.change = MODES_STALE[what](device)
+        out = []
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            out.append((fn(x), MODES_STALE_READ()))
+        return out
+
+    @parametrize("what", list(MODES_STALE))
+    @parametrize("drop", list(MODES_STALE_DROPS))
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_read_changed_by_a_finalizer_gives_no_region(
+        self, device, what, drop, passes
+    ):
+        reading = MODES_STALE_DROPS[drop]
+        want = self.log(device, what, reading)
+        compiled = vm(reading, passes=MODES_OWN_PASSES[passes])
+        self.assertEqual(self.log(device, what, compiled), want, atol=0, rtol=0)
+        rows = [r for r in vm.regions(compiled) if r["function"] == reading.__name__]
+        why = [str(r.get("why") or "") for r in rows if r["state"] == "refused"]
+        self.assertTrue(why, msg=str(rows))
+        if drop == "at_the_drop":
+            # The change is there when the trace compares what it read: the
+            # comparison says so itself.
+            self.assertFalse([r for r in why if MODES_FOREIGN in r], msg=str(rows))
+
+    def log_again(self, device, what, fn):
+        global MODES_STALE_READ
+        step, dropped = [0.0], [0]
+        MODES_STALE_READ, change = MODES_STALE_AGAIN[what][0](step)
+
+        def toggle():
+            dropped[0] += 1
+            change(dropped[0] % 2 == 1)
+
+        ModesDropped.change = toggle
+        out = []
+        for call in range(12):
+            step[0] = float(call % 3) + 1.0
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            out.append((fn(x), MODES_STALE_READ()))
+        return out
+
+    @parametrize("what", list(MODES_STALE_AGAIN))
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_read_again_behind_a_change_gives_no_region(self, device, what, passes):
+        # When the call is over everything is as it was first read: only
+        # the second read saw the change.
+        want = self.log_again(device, what, modes_stale_reading_again)
+        compiled = vm(modes_stale_reading_again, passes=MODES_OWN_PASSES[passes])
+        self.assertEqual(self.log_again(device, what, compiled), want, atol=0, rtol=0)
+        name = modes_stale_reading_again.__name__
+        rows = [r for r in vm.regions(compiled) if r["function"] == name]
+        why = [str(r.get("why") or "") for r in rows if r["state"] == "refused"]
+        said = MODES_STALE_AGAIN[what][1]
+        self.assertTrue([r for r in why if said in r], msg=str(rows))
+
+    @parametrize("what", list(MODES_VIEWS))
+    @isolated
+    def test_length_of_a_view_follows_its_dict(self, device, what):
+        # The dict changes between calls, in place: a region with the
+        # length of the traced call is not entered then, and is again once
+        # the dict is as it was.
+        make, view = MODES_VIEWS[what]
+
+        def log(fn):
+            global MODES_VIEW
+            state = make({"j": 1.0, "k": 2.0})
+            MODES_VIEW = view(state)
+            out = []
+            for call in range(13):
+                if call == 5:
+                    state["z"] = 0.0
+                if call == 9:
+                    del state["z"]
+                torch.manual_seed(call)
+                out.append(fn(torch.randn(4, 8, device=device)))
+            return out
+
+        want = log(modes_view_length)
+        compiled = vm(modes_view_length, passes=EARLY)
+        self.assertEqual(log(compiled), want, atol=0, rtol=0)
+        self.assertGreater(region_runs(compiled), 0)
+        self.assertGreater(torch._rust._region_read_misses(), 0)
+
+    @parametrize("how", list(MODES_SLOT_ASKED))
+    @parametrize("schedule", list(MODES_SLOT_SCHEDULES))
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_whether_a_slot_is_set_follows_the_slot(
+        self, device, how, schedule, passes
+    ):
+        # The slot changes between calls: a region with the answer of the
+        # traced call is not entered then, and is again once the slot is as
+        # it was.
+        name = f"slot_{how}_{schedule}"
+        source = MODES_SLOT_PROGRAM.format(name=name, asked=MODES_SLOT_ASKED[how])
+        names = {"modes_work": modes_work, "modes_slot_or": modes_slot_or}
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[name], passes=MODES_OWN_PASSES[passes])
+        holds, answer_changes = MODES_SLOT_SCHEDULES[schedule]
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            results = []
+            for space, fn in ((mine, compiled), (theirs, theirs[name])):
+                if call in holds:
+                    held = holds[call]
+                    if held is not None:
+                        space["O"].k = held
+                    elif hasattr(space["O"], "k"):
+                        del space["O"].k
+                    space["SET"][0] = held is not None
+                results.append(fn(x))
+            self.assertEqual(*results, atol=0, rtol=0, msg=f"call {call}\n{source}")
+        self.assertGreater(region_runs(compiled), 0, msg=source)
+        if answer_changes:
+            self.assertGreater(torch._rust._region_read_misses(), 0, msg=source)
+
+    @parametrize("case", list(MODES_PRESENCE_CASES))
+    @parametrize("schedule", MODES_PRESENCE_SCHEDULES)
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_asking_whether_something_is_there_keeps_nothing_alive(
+        self, device, case, schedule, passes
+    ):
+        # The region's check is that something is there, not what: the
+        # object that was there when the call was traced dies when the
+        # program lets go of it, as the interpreter's does, call by call.
+        where, held = MODES_PRESENCE_CASES[case]
+        holder, asked, put, take_out, _ = MODES_PRESENCE[where]
+        name = f"presence_{case}_{schedule}"
+        source = MODES_PRESENCE_PROGRAM.format(
+            name=name, holder=holder, asked=asked, made=MODES_PRESENCE_HELD[held]
+        )
+        names = {"modes_work": modes_work, "torch": torch}
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[name], passes=MODES_OWN_PASSES[passes])
+        alive = {id(mine): [], id(theirs): []}
+
+        def place(space):
+            made = space["make"]()
+            if held != "slotted_instance":
+                alive[id(space)].append(weakref.ref(made))
+            put(space["O"], made)
+
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            results, lives = [], []
+            for space, fn in ((mine, compiled), (theirs, theirs[name])):
+                if call == 0 or (call == 5 and schedule == "replaced"):
+                    place(space)
+                elif call == 5:
+                    take_out(space["O"])
+                results.append(fn(x))
+                lives.append(
+                    ([w() is not None for w in alive[id(space)]], len(space["DIED"]))
+                )
+            self.assertEqual(*results, atol=0, rtol=0, msg=f"call {call}\n{source}")
+            self.assertEqual(lives[0], lives[1], msg=f"call {call}\n{source}")
+        self.assertGreater(region_runs(compiled), 0, msg=source)
+
+
+instantiate_device_type_tests(TestVmStaleReads, globals())
+
+
+# What a call reads (`read`, a number), from what (`setup`), the stores the
+# call itself can make there (`writes`), what a finalizer does to what was
+# read (`change`), which of the stores put a value over the finalizer's
+# (`over`), and which of those read the item again to do so (`again`).
+# `whole`: the read is of all of the holder or of its length.
+MODES_OWN_READS = {
+    "dict_item": {
+        "setup": "S = {'a': 2.0, 'b': 0.0}",
+        "read": "S['a']",
+        "writes": {
+            "same": "S['a'] = 5.0 - S['a']",
+            "put": "S['a'] = 7.0",
+            "other": "S['b'] = 1.0 - S['b']",
+            "new": "S['n'] = 1.0",
+        },
+        "change": "S['a'] = 5.0 - S['a']",
+        "over": ("same", "put"),
+        "again": ("same",),
+        "state": "list(S.items())",
+    },
+    "list_item": {
+        "setup": "S = [2.0, 0.0]",
+        "read": "S[0]",
+        "writes": {
+            "same": "S[0] = 5.0 - S[0]",
+            "put": "S[0] = 7.0",
+            "other": "S[1] = 1.0 - S[1]",
+            "new": "S.append(1.0)",
+        },
+        "change": "S[0] = 5.0 - S[0]",
+        "over": ("same", "put"),
+        "again": ("same",),
+        "state": "list(S)",
+    },
+    "attribute": {
+        "setup": "S = ModesHolder()\nS.a = 2.0\nS.b = 0.0",
+        "read": "S.a",
+        "writes": {
+            "same": "S.a = 5.0 - S.a",
+            "put": "S.a = 7.0",
+            "other": "S.b = 1.0 - S.b",
+            "new": "S.n = 1.0",
+        },
+        "change": "S.a = 5.0 - S.a",
+        "over": ("same", "put"),
+        "again": ("same",),
+        "state": "sorted(vars(S).items())",
+    },
+    "module_attribute": {
+        "setup": "S = torch.nn.Linear(2, 2)\nS.a = 2.0\nS.b = 0.0",
+        "read": "S.a",
+        "writes": {
+            "same": "S.a = 5.0 - S.a",
+            "put": "S.a = 7.0",
+            "other": "S.b = 1.0 - S.b",
+            "new": "S.n = 1.0",
+        },
+        "change": "S.a = 5.0 - S.a",
+        "over": ("same", "put"),
+        "again": ("same",),
+        "state": "(S.a, S.b, getattr(S, 'n', None))",
+    },
+    "slot": {
+        "setup": "class Slots:\n    __slots__ = ('a', 'b')\n\n\nS = Slots()\nS.a = 2.0\nS.b = 0.0",
+        "read": "S.a",
+        "writes": {
+            "same": "S.a = 5.0 - S.a",
+            "put": "S.a = 7.0",
+            "other": "S.b = 1.0 - S.b",
+        },
+        "change": "S.a = 5.0 - S.a",
+        "over": ("same", "put"),
+        "again": ("same",),
+        "state": "(S.a, S.b)",
+    },
+    # A dict that also has a slot of the item's name: a store into the slot
+    # is no store of the item, whatever then puts the same object there.
+    "dict_with_a_slot": {
+        "setup": "class Slotted(dict):\n    __slots__ = ('a',)\n\n\nS = Slotted(a=2.0)\nS.a = 0.0",
+        "read": "S['a']",
+        "writes": {"slot": "S.a = 5.0 - S['a']"},
+        "change": "S['a'] = S.a",
+        "over": (),
+        "state": "(list(S.items()), S.a)",
+    },
+    "dict_length": {
+        "setup": "S = {'a': 2.0}",
+        "read": "float(len(S))",
+        "writes": {"same": "S['a'] = 5.0 - S['a']", "new": "S['n'] = 1.0"},
+        "change": "S.pop('z') if 'z' in S else S.__setitem__('z', 1.0)",
+        "over": (),
+        "whole": True,
+        "state": "list(S.items())",
+    },
+    "list_length": {
+        "setup": "S = [2.0]",
+        "read": "float(len(S))",
+        "writes": {"same": "S[0] = 5.0 - S[0]", "new": "S.append(1.0)"},
+        "change": "S.pop() if len(S) % 2 == 0 else S.append(1.0)",
+        "over": (),
+        "whole": True,
+        "state": "list(S)",
+    },
+    "dict_whole": {
+        "setup": "S = {'a': 2.0, 'b': 1.0}",
+        "read": "sum(S.values())",
+        "writes": {
+            "same": "S['a'] = 5.0 - S['a']",
+            "other": "S['b'] = 1.0 - S['b']",
+            "new": "S['n'] = 1.0",
+        },
+        "change": "S['a'] = 5.0 - S['a']",
+        "over": ("same",),
+        "whole": True,
+        "state": "list(S.items())",
+    },
+    "list_whole": {
+        "setup": "S = [2.0, 1.0]",
+        "read": "sum(S)",
+        "writes": {
+            "same": "S[0] = 5.0 - S[0]",
+            "other": "S[1] = 1.0 - S[1]",
+            "new": "S.append(1.0)",
+        },
+        "change": "S[0] = 5.0 - S[0]",
+        "over": ("same",),
+        "whole": True,
+        "state": "list(S)",
+    },
+    "set_whole": {
+        "setup": "S = {1}",
+        "read": "2.0 + float(5 in S)",
+        "writes": {"same": "S.add(1)", "new": "S.add(7)", "out": "S.discard(7)"},
+        "change": "S.discard(5) if 5 in S else S.add(5)",
+        "over": (),
+        "whole": True,
+        "state": "sorted(S)",
+    },
+    "keyword_defaults": {
+        "setup": "def scale(*, k=2.0):\n    return k\n\n\nS = scale.__kwdefaults__",
+        "read": "scale()",
+        "writes": {"same": "S['k'] = 5.0 - S['k']"},
+        "change": "S['k'] = 5.0 - S['k']",
+        "over": ("same",),
+        "whole": True,
+        "state": "list(S.items())",
+    },
+}
+
+MODES_OWN_ORDERS = {
+    "read_write_drop": ("read", "write", "drop"),
+    "write_read_drop": ("write", "read", "drop"),
+    "read_drop_write": ("read", "drop", "write"),
+}
+
+MODES_OWN_PROGRAM = """
+{setup}
+
+
+def CHANGE():
+    {change}
+
+
+class Dropped:
+    def __del__(self):
+        CHANGE()
+
+
+def {name}(x):
+    y = modes_work(x)
+    {first}
+    {second}
+    {third}
+    return modes_work(y * k)
+
+
+def state():
+    return {state}
+"""
+
+MODES_OWN_STALE = "no write the run recorded explains it"
+
+
+def modes_own_refused(passes, read, order, write, changed):
+    """Whether the trace of a program is refused for a read that is no longer
+    as it was read: True, False, "either" (the rule does not say), or None for
+    a program the rule does not speak about."""
+    if not changed:
+        return False
+    if passes == "default":
+        # The store ends a region in front of it, and which of the read and
+        # the drop the regions around it hold is not the rule's to say (a
+        # drop in a region without the read is another matter: a finalizer
+        # that changes what its region did not read). Without a store of the
+        # call's own: TestVmStaleReads.
+        return None
+    if read.get("whole") and order == "write_read_drop":
+        # Read whole after the call changed it: refused for that.
+        return "either"
+    if order == "write_read_drop" and write == "put":
+        # The call reads back what it wrote, which is no read of state (a
+        # finalizer that changes what its region did not read, again).
+        return None
+    # Only a store of the call behind the finalizer's change, to the very
+    # item it changed, leaves what the call wrote: unless the store's
+    # statement reads the item again first, and finds what no write of the
+    # call explains.
+    over = order == "read_drop_write" and write in read["over"]
+    return not over or write in read.get("again", ())
+
+
+# Programs about the moment and the order of what a traced call reads and
+# writes, by name: `setup` (it defines `state()`, and `before(call)` if the
+# state is set between calls), the lines of the body (they bind `k`), whether
+# the trace is refused for a stale read under the Effects pass (None: it is
+# refused, for that or for something else; "frame": it is refused for the
+# frame a death ran when the trace let go of what it held), and `late`:
+# the call's own store drops an object the program put into state and reads
+# behind it what the finalizer changes.
+MODES_SETTLE_DROPPED = """
+S = {{'a': 2.0}}
+{holder}
+
+
+class Dropped:
+    def __del__(self):
+        S['a'] = 5.0 - S['a']
+
+
+def before(call):
+    {put}
+
+
+def state():
+    return (S['a'], {held})
+"""
+
+MODES_SETTLE_HOLDERS = {
+    "dict_store": ("H = {'h': None}", "H['h'] = Dropped()", "H['h'] = None", "H['h']"),
+    "dict_delete": ("H = {}", "H['h'] = Dropped()", "del H['h']", "sorted(H)"),
+    "list_store": ("H = [None]", "H[0] = Dropped()", "H[0] = None", "H[0]"),
+    "attribute_store": (
+        "H = ModesHolder()\nH.h = None",
+        "H.h = Dropped()",
+        "H.h = None",
+        "H.h",
+    ),
+}
+
+MODES_SETTLE_KEYS = """
+S = {{1: 2.0, '1': 0.0}}
+
+
+def CHANGE():
+    {change}
+
+
+class Dropped:
+    def __del__(self):
+        CHANGE()
+
+
+def state():
+    return list(S.items())
+"""
+
+MODES_SETTLE_AGAIN = """
+N = {{'n': 1.0}}
+{holder}
+
+
+class Dropped:
+    def __del__(self):
+        {item} = {item} + N['n']
+
+
+def before(call):
+    N['n'] = float(call % 3) + 1.0
+
+
+def state():
+    return {item}
+"""
+
+MODES_SETTLE_ITEMS = {
+    "dict": ("S = {'a': 2.0}", "S['a']"),
+    "list": ("S = [2.0, 0.0]", "S[0]"),
+    "attribute": ("S = ModesHolder()\nS.a = 2.0", "S.a"),
+}
+
+MODES_SETTLE_CELL = """
+S = {{'a': 2.0}}
+
+
+class Dropped:
+    def __del__(self):
+        S['a'] = 2.0
+
+
+def before(call):
+    S['a'] = 3.0 if call % 2 else 2.0
+
+
+def inner():
+    {inner}
+
+
+def state():
+    return S['a']
+"""
+
+MODES_SETTLE_MOVED = """
+S = {start}
+
+
+def before(call):
+    S[:] = {fill}
+
+
+def state():
+    return list(S)
+"""
+
+
+def modes_settle_programs():
+    out = {}
+    for name, (holder, put, store, held) in MODES_SETTLE_HOLDERS.items():
+        setup = MODES_SETTLE_DROPPED.format(holder=holder, put=put, held=held)
+        # (What the store replaced dies when the trace lets go of it, at
+        # its gate and behind the comparison of its reads: the trace is
+        # refused for the frame that death runs.)
+        out[f"{name}_then_read"] = (setup, [store, "k = S['a']"], "frame", True)
+        out[f"read_then_{name}"] = (setup, ["k = S['a']", store], "frame", False)
+    # The call writes the item it read under a key that is the same item to
+    # the dict: an equal number of another class. Under a str, which is no
+    # number, it writes another item.
+    for name, key, refused in (
+        ("true", "True", True),
+        ("float", "1.0", True),
+        ("int", "1", False),
+        ("str", "'1'", False),
+        ("tuple", "(1,)", True),
+    ):
+        body = ["k = S[1]", f"S[{key}] = 5.0 - k"]
+        left = MODES_SETTLE_KEYS.format(change="pass")
+        changed = MODES_SETTLE_KEYS.format(change="S[1] = 5.0 - S[1]")
+        out[f"key_{name}_for_1"] = (left, body, refused, False)
+        out[f"key_{name}_for_1_changed"] = (changed, [*body, "Dropped()"], True, False)
+    # Something that is no write of the call changes the item between two
+    # reads of it, and the call's own store then puts back what it read.
+    for name, (holder, item) in MODES_SETTLE_ITEMS.items():
+        setup = MODES_SETTLE_AGAIN.format(holder=holder, item=item)
+        first = [f"k = {item}", "Dropped()", f"j = {item}", f"{item} = k", "k = k + j"]
+        out[f"{name}_read_change_read_write"] = (setup, first, True, False)
+        second = [f"k = {item}", f"{item} = 7.0", "Dropped()", f"j = {item}"]
+        # (A second store by index into a list is refused for the length
+        # it reads behind the first.)
+        out[f"{name}_write_change_read_write"] = (
+            setup,
+            [*second, f"{item} = k", "k = k + j"],
+            None if name == "list" else True,
+            False,
+        )
+    # An object the call makes and stores into a cell dies where the
+    # interpreter lets it die: at the next store into the cell, or with
+    # the cell.
+    for name, inner, body in (
+        (
+            "cell_replaced_then_read",
+            ["c = Dropped()", "c = None", "g = lambda: c", "return S['a']"],
+            ["k = inner()"],
+        ),
+        (
+            "cell_dies_then_read",
+            ["c = Dropped()", "g = lambda: c", "return 1.0"],
+            ["j = inner()", "k = S['a'] * j"],
+        ),
+    ):
+        setup = MODES_SETTLE_CELL.format(inner="\n    ".join(inner))
+        out[name] = (setup, body, False, False)
+    # An index read of a list the call deleted from, in front of the read
+    # and behind it. A list read whole is what was read with the deletion
+    # made on it.
+    for name, body, start, fill, refused in (
+        (
+            "del0_read0",
+            ["del S[0]", "k = S[0]"],
+            [0.0, 2.0, 1.0],
+            "[0.0, 2.0 if call % 3 else 7.0, 1.0]",
+            True,
+        ),
+        (
+            "del0_read1",
+            ["del S[0]", "k = S[1]"],
+            [0.0, 2.0, 2.0],
+            "[0.0, 2.0, 2.0 if call % 3 else 7.0]",
+            True,
+        ),
+        (
+            "delneg_read0",
+            ["del S[-3]", "k = S[0]"],
+            [0.0, 2.0, 1.0],
+            "[0.0, 2.0 if call % 3 else 7.0, 1.0]",
+            True,
+        ),
+        (
+            "delneg_read0_equal",
+            ["del S[-3]", "k = S[0]"],
+            [2.0, 2.0, 1.0],
+            "[2.0, 2.0, 1.0]",
+            True,
+        ),
+        (
+            "read1_del0",
+            ["k = S[1]", "del S[0]"],
+            [0.0, 2.0, 2.0],
+            "[0.0, 2.0, 2.0 if call % 3 else 7.0]",
+            True,
+        ),
+        (
+            "read1_equal_del0",
+            ["k = S[1]", "del S[0]"],
+            [2.0, 2.0, 2.0],
+            "[2.0, 2.0, 2.0]",
+            True,
+        ),
+        (
+            "whole_del0_append",
+            ["k = sum(S)", "del S[0]", "S.append(1.0)"],
+            [0.0, 2.0, 2.0],
+            "[0.0, 2.0, 2.0 if call % 3 else 7.0]",
+            False,
+        ),
+    ):
+        setup = MODES_SETTLE_MOVED.format(start=start, fill=fill)
+        out[name] = (setup, body, refused, False)
+    return out
+
+
+MODES_SETTLE = modes_settle_programs()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmOwnWrites(TestCase):
+    """A read of a traced call that is no longer as it was read when the call
+    is over is explained only by the call's own store to that very item with
+    the value that is there: a store to another item of the same dict, list
+    or object explains nothing, and neither does one that something else
+    then changed. Every program computes what the interpreter computes and
+    leaves the state the interpreter leaves, with and without the Effects
+    pass."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def run_program(self, device, passes, name, **parts):
+        # The rows of vm.regions are by function name: one name per program.
+        source = MODES_OWN_PROGRAM.format(name=name, **parts)
+        names = {"torch": torch, "modes_work": modes_work, "ModesHolder": ModesHolder}
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[name], passes=MODES_OWN_PASSES[passes])
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            where = f"{name}, call {call}:\n{source}"
+            self.assertEqual(compiled(x), theirs[name](x), atol=0, rtol=0, msg=where)
+            self.assertEqual(mine["state"](), theirs["state"](), msg=where)
+        rows = [r for r in vm.regions(compiled) if r["function"] == name]
+        return [str(r.get("why") or r.get("reason") or "") for r in rows], compiled
+
+    @parametrize("what", list(MODES_OWN_READS))
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_only_the_store_of_that_item_explains_a_changed_read(
+        self, device, what, passes
+    ):
+        read = MODES_OWN_READS[what]
+        steps = {"read": "k = " + read["read"], "drop": "Dropped()"}
+        for order, write, changed in itertools.product(
+            MODES_OWN_ORDERS, read["writes"], (False, True)
+        ):
+            refused = modes_own_refused(passes, read, order, write, changed)
+            if refused is None:
+                continue
+            steps["write"] = read["writes"][write]
+            first, second, third = (steps[s] for s in MODES_OWN_ORDERS[order])
+            name = f"{order}_{write}_{'changed' if changed else 'left'}"
+            with self.subTest(order=order, write=write, changed=changed):
+                reasons, compiled = self.run_program(
+                    device,
+                    passes,
+                    name,
+                    setup=read["setup"],
+                    change=read["change"] if changed else "pass",
+                    first=first,
+                    second=second,
+                    third=third,
+                    state=read["state"],
+                )
+                stale = any(MODES_OWN_STALE in r for r in reasons)
+                if refused != "either":
+                    self.assertEqual(stale, refused, msg=f"{name}: {reasons}")
+                # The calls compared were not all the interpreter's.
+                self.assertGreater(region_runs(compiled), 0, msg=name)
+
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_cell_the_call_stores_into_behind_its_read(self, device, passes):
+        # The cell is the call's own: what it held when it was read is no
+        # check, once the call's own store put what it holds.
+        reasons, compiled = self.run_program(
+            device,
+            passes,
+            "stores_into_a_cell",
+            setup="S = [0.0]\n\n\ndef counted(y):\n    n = 2.0\n\n    def more():\n        nonlocal n\n        was = n\n        n = was + 1.0\n        return was\n\n    return more() + more() + n",
+            change="pass",
+            first="k = counted(y)",
+            second="S[0] = k",
+            third="Dropped()",
+            state="list(S)",
+        )
+        self.assertFalse(any(MODES_OWN_STALE in r for r in reasons), msg=str(reasons))
+        self.assertGreater(region_runs(compiled), 0)
+
+    @parametrize("program", list(MODES_SETTLE))
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_a_read_is_explained_at_the_moment_and_in_the_order_of_the_writes(
+        self, device, program, passes
+    ):
+        setup, body, refused, late = MODES_SETTLE[program]
+        if passes == "default" and program.endswith("_for_1_changed"):
+            # A drop in a region that did not read what the finalizer
+            # changes is another matter (see modes_own_refused).
+            self.skipTest("the store ends a region in front of the drop")
+        lines = "\n    ".join(body)
+        source = f"{setup}\n\ndef {program}(x):\n    y = modes_work(x)\n    {lines}\n    return modes_work(y * k)\n"
+        names = {"torch": torch, "modes_work": modes_work, "ModesHolder": ModesHolder}
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[program], passes=MODES_OWN_PASSES[passes])
+        differ = []
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            results = []
+            for space, fn in ((mine, compiled), (theirs, theirs[program])):
+                if "before" in space:
+                    space["before"](call)
+                results.append(fn(x))
+            where = f"{program}, call {call}:\n{source}"
+            self.assertEqual(mine["state"](), theirs["state"](), msg=where)
+            if not torch.equal(*results):
+                differ.append(call)
+        rows = [r for r in vm.regions(compiled) if r["function"] == program]
+        reasons = [str(r.get("why") or r.get("reason") or "") for r in rows]
+        # The record of the traced call's writes keeps what a store replaced
+        # until the call is over: on that one call the finalizer runs behind
+        # the read.
+        self.assertLessEqual(
+            len(differ),
+            1 if late and passes == "effects" else 0,
+            msg=f"{differ}\n{source}",
+        )
+        if passes == "effects" and refused is not None:
+            stale = any(MODES_OWN_STALE in r for r in reasons)
+            if refused == "frame":
+                foreign = [r for r in reasons if MODES_FOREIGN in r]
+                self.assertEqual(len(foreign), 1, msg=f"{reasons}\n{source}")
+                self.assertIn("when the trace let go", foreign[0])
+                self.assertFalse(stale, msg=f"{reasons}\n{source}")
+            else:
+                self.assertEqual(stale, refused, msg=f"{reasons}\n{source}")
+        self.assertGreater(region_runs(compiled), 0, msg=source)
+
+
+instantiate_device_type_tests(TestVmOwnWrites, globals())
+
+
+# Code that runs under a traced call because an object died, called by no
+# instruction of the call. `MODES_FOREIGN_CHANGES`: what that code changes
+# (the state, the change, how the state reads); the call reads none of it.
+# `MODES_FOREIGN_DROPS`: how the object comes to die (`setup`, what the
+# program does before each call, the lines of the call, its parameters and
+# its extra arguments), the pass lists under which it dies inside a traced
+# block (a store ends a block under the default list: there the object dies
+# between two blocks, in the program's own run), and `left_out`: the planner
+# leaves the instruction out of every traced block whatever the code does.
+# `MODES_FOREIGN`: the refusal of a trace such code ran under.
+# `MODES_FOREIGN_OUTSIDE`: how the planner says that an instruction is in no
+# block that is traced, because the runs before the trace entered such code
+# under it (code that first runs once a function of the process is traced
+# is unknown to it: a process with one program is where a trace runs over
+# the death).
+MODES_FOREIGN_OUTSIDE = ("indirectly", "its code is unknown", "it hasn't run")
+
+MODES_FOREIGN_PROGRAM = """
+{state}
+
+
+def change():
+    {change}
+
+
+{setup}
+
+
+def before(call):
+    {before}
+
+
+def state():
+    return {read}
+
+
+def {name}({params}):
+    y = modes_work(x)
+    {body}
+    return modes_work(y * 2.0)
+"""
+
+MODES_FOREIGN_CHANGES = {
+    "global": ("G = 2.0", "global G\n    G = 5.0 - G", "G"),
+    "item": ("S = {'a': 2.0}", "S['a'] = 5.0 - S['a']", "S['a']"),
+    "attribute": ("O = ModesHolder()", "O.k = 5.0 - O.k", "O.k"),
+    "slot": (
+        "class Slotted:\n    __slots__ = ('k',)\n\n\nO = Slotted()\nO.k = 2.0",
+        "O.k = 5.0 - O.k",
+        "O.k",
+    ),
+    "class_attribute": (
+        "class Counted:\n    k = 2.0",
+        "Counted.k = 5.0 - Counted.k",
+        "Counted.k",
+    ),
+    "class": (
+        "class One:\n    pass\n\n\nclass Two:\n    pass\n\n\nO = One()",
+        "O.__class__ = Two if type(O) is One else One",
+        "type(O).__name__",
+    ),
+    "bases": (
+        "class One:\n    pass\n\n\nclass Two:\n    pass\n\n\nclass Based(One):\n    pass",
+        "Based.__bases__ = (Two,) if Based.__bases__ == (One,) else (One,)",
+        "Based.__bases__[0].__name__",
+    ),
+    "tensor_key": (
+        "T = torch.ones(3)",
+        "T.requires_grad_(not T.requires_grad)",
+        "T.requires_grad",
+    ),
+    "nothing": ("N = 0", "pass", "N"),
+}
+
+MODES_FOREIGN_DEL = (
+    "class Dropped:\n    w = 1.0\n\n    def __del__(self):\n        change()"
+)
+MODES_FOREIGN_HELD = "class Plain:\n    pass\n\n\nH = {'h': None}\nW = {}"
+MODES_FOREIGN_STORE = ("effects",)
+
+MODES_FOREIGN_DROPS = {
+    "finalizer": {"setup": MODES_FOREIGN_DEL, "body": "Dropped()"},
+    "init_stores": {
+        "setup": "class Dropped:\n    def __init__(self):\n        self.w = 1.0\n\n    def __del__(self):\n        change()",
+        "body": "Dropped()",
+    },
+    "poked": {
+        "setup": "class Dropped:\n    def poke(self):\n        self.w = 1.0\n\n    def __del__(self):\n        change()",
+        "body": "Dropped().poke()",
+        "passes": MODES_FOREIGN_STORE,
+    },
+    "callee_frame": {
+        "setup": MODES_FOREIGN_DEL
+        + "\n\n\ndef inner():\n    held = Dropped()\n    return 1.0",
+        "body": "inner()",
+    },
+    "cell": {
+        "setup": MODES_FOREIGN_DEL
+        + "\n\n\ndef inner():\n    held = Dropped()\n    again = lambda: held\n    return 1.0",
+        "body": "inner()",
+    },
+    # Held by the record of the call's read of it, past the drop.
+    "read_then_dropped": {"setup": MODES_FOREIGN_DEL, "body": "w = Dropped().w"},
+    # Held by the record of the store that replaced it.
+    "replaced_by_a_store": {
+        "setup": MODES_FOREIGN_DEL + "\n\n\nH = {'h': None}",
+        "before": "H['h'] = Dropped()",
+        "body": "H['h'] = None",
+        "passes": MODES_FOREIGN_STORE,
+    },
+    # Held by the record of the call's own store of it, which a second
+    # store replaced (a dataclass: a region could make it again).
+    "stored_then_replaced": {
+        "setup": "@dataclasses.dataclass\nclass Dropped:\n    w: float\n\n    def __del__(self):\n        change()\n\n\nH = {'h': None}",
+        "body": "H['h'] = Dropped(1.0)\n    H['h'] = None",
+        "passes": MODES_FOREIGN_STORE,
+    },
+    "weakref_callback": {
+        "setup": MODES_FOREIGN_HELD,
+        "before": "H['h'] = Plain()\n    W['w'] = weakref.ref(H['h'], lambda w: change())",
+        "body": "H['h'] = None",
+        "passes": MODES_FOREIGN_STORE,
+    },
+    "weakref_finalize": {
+        "setup": MODES_FOREIGN_HELD,
+        "before": "H['h'] = Plain()\n    weakref.finalize(H['h'], change)",
+        "body": "H['h'] = None",
+        "passes": MODES_FOREIGN_STORE,
+        # (weakref.finalize takes its record out of a dict.)
+        "left_out": True,
+    },
+    "generator_closed": {
+        "setup": "def gen():\n    try:\n        yield 1.0\n        yield 2.0\n    finally:\n        change()",
+        "body": "next(gen())",
+        # (A generator the planner has not seen run to its end.)
+        "left_out": True,
+    },
+    # Held by the copies the tracer takes of an argument before the call.
+    "argument_item": {
+        "setup": MODES_FOREIGN_DEL,
+        "params": "x, held",
+        "args": "[Dropped()]",
+        "body": "held[0] = None",
+        "passes": MODES_FOREIGN_STORE,
+    },
+    "argument_nested": {
+        "setup": MODES_FOREIGN_DEL,
+        "params": "x, held",
+        "args": "{'l': [Dropped()]}",
+        "body": "held['l'] = None",
+        "passes": MODES_FOREIGN_STORE,
+    },
+}
+
+# The frames that are let through, each with what is not: the tracer's own
+# table of tensors takes the entry of a tensor that died out with a
+# weak-reference callback, and the executor calls an empty function of its
+# own (named `t`) for the interpreter to do what is pending, a collection
+# for one. `setup`, before each call, the call; `refused`: whether the
+# frame that runs is the program's.
+MODES_FOREIGN_TABLES = {
+    # A collection is pending whenever the loop goes round.
+    "the_executors": (
+        "import gc",
+        "gc.set_threshold(1, 1, 1)",
+        "for _ in range(3):\n        y = y + 1.0",
+        False,
+    ),
+    # A function of the program with the name of the executor's.
+    "same_name_as_the_executors": (
+        MODES_FOREIGN_HELD + "\n\n\ndef t(k):\n    change()",
+        "H['h'] = Plain()\n    W['w'] = weakref.ref(H['h'], t)",
+        "H['h'] = None",
+        True,
+    ),
+    # Tensors of the call's own die between two instructions.
+    "the_tracers": ("", "pass", "y = y + 1.0\n    y = y * 1.0", False),
+    # A function of the program with the name of the tracer's callback.
+    "same_name": (
+        MODES_FOREIGN_HELD + "\n\n\ndef remove(k):\n    change()",
+        "H['h'] = Plain()\n    W['w'] = weakref.ref(H['h'], remove)",
+        "H['h'] = None",
+        True,
+    ),
+    # A table of the program's of the tracer's class: the same code, and a
+    # function object of its own.
+    "same_code": (
+        "from torch.utils.weak import WeakTensorKeyDictionary\n\n\nH = {'h': None}\nW = WeakTensorKeyDictionary()",
+        "H['h'] = torch.ones(3)\n    W[H['h']] = 1",
+        "H['h'] = None",
+        True,
+    ),
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmForeignFrames(TestCase):
+    """Code that runs under a traced call and that no instruction of the call
+    called (a finalizer, a weak reference's callback, a generator closed
+    where it was suspended) is in no region: the trace it ran under is
+    refused, whatever let go of the object and whatever the code changes.
+    Every program computes what the interpreter computes and leaves the
+    state the interpreter leaves."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def reasons(self, device, passes, programs, args=None):
+        # `programs`: {name: source}. Call by call over all of them, so that
+        # the code of each has run when the first of them is traced (code
+        # that runs for the first time later is left to the interpreter).
+        names = {
+            "torch": torch,
+            "weakref": weakref,
+            "dataclasses": dataclasses,
+            "modes_work": modes_work,
+            "ModesHolder": ModesHolder,
+        }
+        spaces = {}
+        for name, source in programs.items():
+            mine, theirs = dict(names), dict(names)
+            exec(source, mine)
+            exec(source, theirs)
+            compiled = vm(mine[name], passes=MODES_OWN_PASSES[passes])
+            spaces[name] = (mine, theirs, compiled)
+        for call in range(12):
+            for name, (mine, theirs, compiled) in spaces.items():
+                torch.manual_seed(call)
+                x = torch.randn(4, 8, device=device)
+                results = []
+                for space, fn in ((mine, compiled), (theirs, theirs[name])):
+                    space["before"](call)
+                    more = () if args is None else (eval(args, space),)
+                    results.append(fn(x, *more))
+                where = f"{name}, call {call}:\n{programs[name]}"
+                self.assertEqual(*results, atol=0, rtol=0, msg=where)
+                self.assertEqual(mine["state"](), theirs["state"](), msg=where)
+        out = {}
+        for name, (_, _, compiled) in spaces.items():
+            rows = [r for r in vm.regions(compiled) if r["function"] == name]
+            why = [str(r.get("why") or r.get("reason") or "") for r in rows]
+            out[name] = (why, region_runs(compiled))
+        return out
+
+    @parametrize("drop", list(MODES_FOREIGN_DROPS))
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_code_run_by_a_death_gives_no_region(self, device, drop, passes):
+        how = MODES_FOREIGN_DROPS[drop]
+        programs = {
+            f"{drop}_{changed}": MODES_FOREIGN_PROGRAM.format(
+                name=f"{drop}_{changed}",
+                state=state,
+                change=change,
+                read=read,
+                setup=how["setup"],
+                before=how.get("before", "pass"),
+                params=how.get("params", "x"),
+                body=how["body"],
+            )
+            for changed, (state, change, read) in MODES_FOREIGN_CHANGES.items()
+        }
+        found = self.reasons(device, passes, programs, how.get("args"))
+        if passes not in how.get("passes", MODES_OWN_PASSES):
+            return
+        for name, (reasons, _) in found.items():
+            # The death is under no trace that became a region: its trace
+            # was refused, or the planner left the instruction out of every
+            # traced block.
+            refused = any(MODES_FOREIGN in r for r in reasons)
+            outside = any(o in r for r in reasons for o in MODES_FOREIGN_OUTSIDE)
+            with self.subTest(program=name):
+                self.assertTrue(refused or outside, msg=f"{reasons}\n{programs[name]}")
+
+    @parametrize("drop", list(MODES_FOREIGN_DROPS))
+    @parametrize("passes", list(MODES_OWN_PASSES))
+    @isolated
+    def test_code_that_changes_nothing_is_refused_all_the_same(
+        self, device, drop, passes
+    ):
+        # Alone in its process, and with nothing the planner could hold
+        # against the code: only the refusal stands between it and a region.
+        how = MODES_FOREIGN_DROPS[drop]
+        if passes not in how.get("passes", MODES_OWN_PASSES):
+            self.skipTest("a store ends a block under the default passes")
+        state, change, read = MODES_FOREIGN_CHANGES["nothing"]
+        source = MODES_FOREIGN_PROGRAM.format(
+            name=drop,
+            state=state,
+            change=change,
+            read=read,
+            setup=how["setup"],
+            before=how.get("before", "pass"),
+            params=how.get("params", "x"),
+            body=how["body"],
+        )
+        reasons, _ = self.reasons(device, passes, {drop: source}, how.get("args"))[drop]
+        said = MODES_FOREIGN_OUTSIDE if how.get("left_out") else (MODES_FOREIGN,)
+        refused = any(o in r for r in reasons for o in said)
+        self.assertTrue(refused, msg=f"{reasons}\n{source}")
+
+    @parametrize("table", list(MODES_FOREIGN_TABLES))
+    @isolated
+    def test_only_the_tracers_own_callback_is_let_through(self, device, table):
+        setup, before, body, refused = MODES_FOREIGN_TABLES[table]
+        state, change, read = MODES_FOREIGN_CHANGES["item"]
+        source = MODES_FOREIGN_PROGRAM.format(
+            name=table,
+            state=state,
+            change=change,
+            read=read,
+            setup=setup,
+            before=before,
+            params="x",
+            body=body,
+        )
+        reasons, runs = self.reasons(device, "effects", {table: source})[table]
+        said = (MODES_FOREIGN, *MODES_FOREIGN_OUTSIDE)
+        found = any(o in r for r in reasons for o in said)
+        self.assertEqual(found, refused, msg=f"{reasons}\n{source}")
+        if not refused:
+            self.assertGreater(runs, 0, msg=source)
+
+
+instantiate_device_type_tests(TestVmForeignFrames, globals())
+
+
+# Code a death runs that enters NO frame: a C callable as the callback of a
+# weak reference. By name: the state, the callback (it is handed the dead
+# weak reference), what puts the state back before each call, what the call
+# reads of it as a number, and the state as it is compared.
+MODES_UNFRAMED = {
+    "slot": (
+        "class Slotted:\n    __slots__ = ('k',)\n\n\nO = Slotted()",
+        "functools.partial(setattr, O, 'k')",
+        "O.k = 2.0",
+        "2.0 + float(type(O.k) is float)",
+        "type(O.k).__name__",
+    ),
+    "class_attribute": (
+        "class Counted:\n    k = 2.0",
+        "functools.partial(setattr, Counted, 'k')",
+        "Counted.k = 2.0",
+        "2.0 + float(type(Counted.k) is float)",
+        "type(Counted.k).__name__",
+    ),
+    "attribute": (
+        "O = ModesHolder()",
+        "functools.partial(setattr, O, 'k')",
+        "O.k = 2.0",
+        "2.0 + float(type(O.k) is float)",
+        "type(O.k).__name__",
+    ),
+    "item": (
+        "S = {'a': 2.0}",
+        "functools.partial(operator.setitem, S, 'a')",
+        "S['a'] = 2.0",
+        "2.0 + float(type(S['a']) is float)",
+        "type(S['a']).__name__",
+    ),
+    "length": ("S = []", "S.append", "del S[1:]", "2.0 + len(S) % 2", "len(S)"),
+}
+
+# The object is state, and the call's store drops it: the read in front of
+# the store, or behind it.
+MODES_UNFRAMED_ORDERS = {
+    "read_then_dropped": "k = {read}\n    H['h'] = None",
+    "dropped_then_read": "H['h'] = None\n    k = {read}",
+}
+
+MODES_UNFRAMED_PROGRAM = """
+class Plain:
+    pass
+
+
+H = {{'h': None}}
+W = {{}}
+{state}
+
+
+def before(call):
+    {reset}
+    H['h'] = Plain()
+    W['w'] = weakref.ref(H['h'], {callback})
+
+
+def state():
+    return {read_state}
+
+
+def {name}(x):
+    y = modes_work(x)
+    {body}
+    return modes_work(y * k)
+"""
+
+# What keeps the object alive until the trace of the call has let go of
+# everything it held, so that its callback runs behind every comparison the
+# trace makes while its body is over: by name, what the object is, where
+# the test puts it, what the call is handed beside x, and how the call
+# drops it.
+MODES_UNFRAMED_HELD = {
+    "by_the_copy_of_an_argument": (
+        "torch.ones(4, 8)",
+        "ARG[0]",
+        "ARG",
+        "held[0] = None",
+    ),
+    "by_the_record_of_a_write": (
+        "Plain()",
+        "H['h']",
+        None,
+        "H['h'].n = 1.0\n    H['h'] = None",
+    ),
+    "by_an_entry_of_the_reads": (
+        "Plain()",
+        "H['h']",
+        None,
+        "j = H['h'].poke()\n    H['h'] = None",
+    ),
+}
+MODES_UNFRAMED_LATE_ORDERS = {
+    "read_then_dropped": "k = {read}\n    {drop}",
+    "dropped_then_read": "{drop}\n    k = {read}",
+}
+MODES_UNFRAMED_LATE_PROGRAM = """
+class Plain:
+    def poke(self):
+        return 1.0
+
+
+H = {{'h': None}}
+W = {{}}
+ARG = [None]
+
+
+def thunk(f, *args):
+    return functools.partial(next, iter(functools.partial(f, *args), W))
+
+
+{state}
+
+
+def before(call):
+    {reset}
+    {where} = {made}
+    W['w'] = weakref.ref({where}, {callback})
+
+
+def state():
+    return {read_state}
+
+
+def {name}({parameters}):
+    y = modes_work(x)
+    {body}
+    return modes_work(y * k)
+"""
+# How the refusal of the trace's last comparison ends.
+MODES_UNFRAMED_PARTED = "when its trace has let go of everything it held"
+# More kinds of state for that comparison, as MODES_UNFRAMED has them.
+# `thunk(f, *args)` is a C callable that takes the dead weak reference,
+# calls f(*args) and raises nothing.
+MODES_UNFRAMED_MORE = {
+    "bases": (
+        "class Base:\n    pass\n\n\nclass Marked:\n    pass\n\n\n"
+        "class Based(Base):\n    pass\n\n\nO = Based()",
+        "thunk(setattr, Based, '__bases__', (Marked,))",
+        "Based.__bases__ = (Base,)",
+        "2.0 + float(isinstance(O, Marked))",
+        "Based.__bases__[0].__name__",
+    ),
+    "tensor_key": (
+        "T = torch.ones(3)\nS = {'t': T}",
+        "thunk(T.requires_grad_)",
+        "T.requires_grad_(False)",
+        "2.0 + float(S['t'].requires_grad)",
+        "T.requires_grad",
+    ),
+    "cell": (
+        "def make():\n    c = 2.0\n\n    def get():\n        return c\n\n"
+        "    def put(v):\n        nonlocal c\n        c = v\n\n"
+        "    return get, put\n\n\nGET, PUT = make()\nCELL = GET.__closure__[0]",
+        "functools.partial(setattr, CELL, 'cell_contents')",
+        "PUT(2.0)",
+        "2.0 + float(type(GET()) is float)",
+        "type(GET()).__name__",
+    ),
+    "function_defaults": (
+        "def scale(k=2.0):\n    return k",
+        "thunk(setattr, scale, '__defaults__', (3.0,))",
+        "scale.__defaults__ = (2.0,)",
+        "scale()",
+        "scale.__defaults__[0]",
+    ),
+}
+# A call that itself writes where it read, by what its write leaves there:
+# the state, what puts it back before each call, the read (it binds k), the
+# write, and the state as it is compared. Such a call's trace finds its own
+# write at its last comparison, and stays a region.
+MODES_UNFRAMED_OWN = {
+    "a_float": ("S = {'a': 2.0}", "pass", "k = S['a']", "S['a'] = 5.0 - k", "S['a']"),
+    "a_str": (
+        "S = {'a': 'x'}",
+        "pass",
+        "k = float(len(S['a']))",
+        "S['a'] = 'yy' if S['a'] == 'x' else 'x'",
+        "S['a']",
+    ),
+    "none_or_a_bool": (
+        "S = {'a': None}",
+        "pass",
+        "k = 2.0 if S['a'] is None else 3.0",
+        "S['a'] = True if S['a'] is None else None",
+        "S['a']",
+    ),
+    "an_instance": (
+        "S = {'a': A}",
+        "pass",
+        "k = S['a'].k",
+        "S['a'] = B if S['a'] is A else A",
+        "S['a'].k",
+    ),
+    "a_module": (
+        "S = {'a': MA}",
+        "pass",
+        "k = float(S['a'].in_features)",
+        "S['a'] = MB if S['a'] is MA else MA",
+        "S['a'].in_features",
+    ),
+    "a_list": (
+        "S = {'a': LA}",
+        "pass",
+        "k = S['a'][0]",
+        "S['a'] = LB if S['a'] is LA else LA",
+        "S['a'][0]",
+    ),
+    # (w is a float the call is handed: under the trace, a stand-in.)
+    "a_float_the_call_computed": (
+        "S = {'a': 2.0}",
+        "S['a'] = 2.0",
+        "k = S['a']",
+        "S['a'] = k + w",
+        "S['a']",
+    ),
+    "nothing": (
+        "S = {'a': 2.0}",
+        "S['a'] = 2.0",
+        "k = S['a']",
+        "del S['a']",
+        "list(S)",
+    ),
+    "an_item_of_a_list": ("S = [2.0]", "pass", "k = S[0]", "S[0] = 5.0 - k", "S[0]"),
+    "an_attribute": (
+        "S = Plain()\nS.a = A",
+        "pass",
+        "k = S.a.k",
+        "S.a = B if S.a is A else A",
+        "S.a.k",
+    ),
+    "a_slot": (
+        "class Slots:\n    __slots__ = ('a',)\n\n\nS = Slots()\nS.a = A",
+        "pass",
+        "k = S.a.k",
+        "S.a = B if S.a is A else A",
+        "S.a.k",
+    ),
+    "a_list_read_whole": (
+        "S = [2.0]",
+        "del S[1:]",
+        "k = sum(S)",
+        "S.append(1.0)",
+        "list(S)",
+    ),
+    "a_dict_read_whole": (
+        "S = {'a': 2.0}",
+        "S.pop('n', None)",
+        "k = sum(S.values())",
+        "S['n'] = 1.0",
+        "list(S.items())",
+    ),
+    "a_set_read_whole": (
+        "S = {1}",
+        "S.discard(7)",
+        "k = 2.0 + float(5 in S)",
+        "S.add(7)",
+        "sorted(S)",
+    ),
+    "the_length_of_a_list": (
+        "S = [2.0]",
+        "del S[1:]",
+        "k = float(len(S))",
+        "S.append(1.0)",
+        "len(S)",
+    ),
+    "the_length_of_a_dict": (
+        "S = {'a': 2.0}",
+        "S.pop('n', None)",
+        "k = float(len(S))",
+        "S['n'] = 1.0",
+        "len(S)",
+    ),
+}
+MODES_UNFRAMED_OWN_PROGRAM = """
+class Plain:
+    pass
+
+
+A, B = Plain(), Plain()
+A.k, B.k = 2.0, 3.0
+LA, LB = [2.0], [3.0]
+MA, MB = torch.nn.Linear(2, 2), torch.nn.Linear(3, 3)
+{setup}
+
+
+def before(call):
+    {reset}
+
+
+def state():
+    return {read_state}
+
+
+def {name}(x, w):
+    y = modes_work(x)
+    {read}
+    {write}
+    return modes_work(y * k)
+"""
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmUnframedDeaths(TestCase):
+    """C code that a death runs under a traced call enters no frame, so
+    nothing sees it run: what it changed of what the call read is found
+    when the trace compares its reads, and the trace is no region."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("what", list(MODES_UNFRAMED))
+    @parametrize("order", list(MODES_UNFRAMED_ORDERS))
+    @isolated
+    def test_read_changed_by_c_code_a_death_runs_gives_no_region(
+        self, device, what, order
+    ):
+        state, callback, reset, read, read_state = MODES_UNFRAMED[what]
+        name = f"{what}_{order}"
+        source = MODES_UNFRAMED_PROGRAM.format(
+            name=name,
+            state=state,
+            callback=callback,
+            reset=reset,
+            read_state=read_state,
+            body=MODES_UNFRAMED_ORDERS[order].format(read=read),
+        )
+        names = {
+            "weakref": weakref,
+            "functools": functools,
+            "operator": operator,
+            "modes_work": modes_work,
+            "ModesHolder": ModesHolder,
+        }
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[name], passes=MODES_OWN_PASSES["effects"])
+        differing = 0
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            results = []
+            for space, fn in ((mine, compiled), (theirs, theirs[name])):
+                space["before"](call)
+                results.append(fn(x))
+            differing += int(not torch.equal(*results))
+            self.assertEqual(mine["state"](), theirs["state"](), msg=source)
+        rows = [r for r in vm.regions(compiled) if r["function"] == name]
+        why = [str(r.get("why") or "") for r in rows if r["state"] == "refused"]
+        said = "no write the run recorded explains it"
+        self.assertTrue([r for r in why if said in r], msg=f"{rows}\n{source}")
+        # Under the trace the store's record holds the object until the
+        # body is over: the callback runs behind a read that the
+        # interpreter makes behind it, in the traced call alone.
+        late = 1 if order == "dropped_then_read" else 0
+        self.assertLessEqual(differing, late, msg=source)
+
+    @parametrize("held", list(MODES_UNFRAMED_HELD))
+    @parametrize("what", [*MODES_UNFRAMED, *MODES_UNFRAMED_MORE])
+    @parametrize("order", list(MODES_UNFRAMED_LATE_ORDERS))
+    @isolated
+    def test_read_changed_behind_the_comparisons_gives_no_region(
+        self, device, held, what, order
+    ):
+        # The trace itself holds the object until its gate: the callback
+        # runs when everything is compared already, and the gate's own
+        # comparison is what finds the change.
+        kinds = {**MODES_UNFRAMED, **MODES_UNFRAMED_MORE}
+        state, callback, reset, read, read_state = kinds[what]
+        made, where, handed, drop = MODES_UNFRAMED_HELD[held]
+        name = f"{what}_{held}_{order}"
+        source = MODES_UNFRAMED_LATE_PROGRAM.format(
+            name=name,
+            state=state,
+            callback=callback,
+            reset=reset,
+            read_state=read_state,
+            made=made,
+            where=where,
+            parameters="x" if handed is None else "x, held",
+            body=MODES_UNFRAMED_LATE_ORDERS[order].format(read=read, drop=drop),
+        )
+        names = {
+            "weakref": weakref,
+            "functools": functools,
+            "operator": operator,
+            "torch": torch,
+            "modes_work": modes_work,
+            "ModesHolder": ModesHolder,
+        }
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[name], passes=MODES_OWN_PASSES["effects"])
+        differing = 0
+        for call in range(12):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            results = []
+            for space, fn in ((mine, compiled), (theirs, theirs[name])):
+                space["before"](call)
+                more = () if handed is None else (space[handed],)
+                results.append(fn(x, *more))
+            differing += int(not torch.equal(*results))
+            self.assertEqual(mine["state"](), theirs["state"](), msg=source)
+        rows = [r for r in vm.regions(compiled) if r["function"] == name]
+        why = [str(r.get("why") or "") for r in rows if r["state"] == "refused"]
+        said = [r for r in why if MODES_UNFRAMED_PARTED in r]
+        self.assertTrue(said, msg=f"{rows}\n{source}")
+        # The traced call computes with the state of before the callback
+        # where the interpreter's read is behind the drop: that one call.
+        late = 1 if order == "dropped_then_read" else 0
+        self.assertLessEqual(differing, late, msg=source)
+
+    @parametrize("left", list(MODES_UNFRAMED_OWN))
+    @isolated
+    def test_what_the_call_itself_wrote_is_no_change_behind_the_comparisons(
+        self, device, left
+    ):
+        setup, reset, read, write, read_state = MODES_UNFRAMED_OWN[left]
+        name = f"own_write_leaves_{left}"
+        source = MODES_UNFRAMED_OWN_PROGRAM.format(
+            name=name,
+            setup=setup,
+            reset=reset,
+            read=read,
+            write=write,
+            read_state=read_state,
+        )
+        names = {"torch": torch, "modes_work": modes_work}
+        mine, theirs = dict(names), dict(names)
+        exec(source, mine)
+        exec(source, theirs)
+        compiled = vm(mine[name], passes=MODES_OWN_PASSES["effects"])
+        for call in range(13):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            results = []
+            for space, fn in ((mine, compiled), (theirs, theirs[name])):
+                space["before"](call)
+                results.append(fn(x, 1.5))
+            self.assertEqual(*results, atol=0, rtol=0, msg=f"call {call}\n{source}")
+            self.assertEqual(mine["state"](), theirs["state"](), msg=source)
+        rows = [r for r in vm.regions(compiled) if r["function"] == name]
+        said = [r for r in rows if MODES_UNFRAMED_PARTED in str(r.get("why") or "")]
+        self.assertFalse(said, msg=f"{said}\n{source}")
+        self.assertGreater(region_runs(compiled), 0, msg=f"{rows}\n{source}")
+
+
+instantiate_device_type_tests(TestVmUnframedDeaths, globals())
+
+
+if __name__ == "__main__":
+    run_tests()

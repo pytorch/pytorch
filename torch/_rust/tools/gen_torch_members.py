@@ -1,0 +1,647 @@
+"""gen_torch_members.py SWEEP_TSV [NO_OUT_TSV [SAMPLES_DIR [WITNESS_TSV]]] > torch/_rust/src/exec/rules/torch_members.tsv
+
+Makes the table of torch's C callees that the rule table of the executor
+reads (exec/rules/torch.rs) from the table of a sweep: one line per callee
+with what calls of it were measured to do to their operands. Both inputs have
+the sweep's columns (member, status, kind, n, P, W, K, V, D, S, R, A, L, ...).
+NO_OUT_TSV has, for the members whose samples pass `out=`, the same line
+computed without those samples: that line is the one kept, and the column
+`out` says so. The rule table has no row for a call that passes `out=`.
+SAMPLES_DIR has the sweep's record of every sample (<member>.json). A callee
+whose line says that its results follow data, and nothing else against it, is
+measured apart there for each FORM of its operands: which places among them
+(a position, the receiver first, or a keyword's name) hold a tensor or an
+exact list or tuple with a tensor in it. Behind its line come the lines of
+its forms, each computed from the samples of that form alone. A sample whose
+record does not tell its operands has the form `?`. A callee whose line says
+that it writes an operand or changes an operand's key in place (and that
+draws nothing) is measured apart for each form too: there a bool among the
+operands is in the form by its VALUE, unless the samples have both values and
+the calls measured do the same under both; and the line of a form says which
+operands were written and what each result is against the operands. So is a
+callee under whose calls a random generator's state changed, with the count
+and keys of its results not following data: the line of a form says whether
+the calls of that form drew (dropout draws in training only). A sample that
+hands a generator over has the form `?`: its class is none the forms name.
+
+WITNESS_TSV (made by witness_torch_members.py, beside this file) has, per
+sample of a member and device (by the sample's id), what the engine's witness
+of the dispatcher saw under the one call of the callee on that sample:
+whether an operator that hands a value out of a tensor ran (an error check on
+data, a number taken from a 0-dim tensor), and whether the witness could not
+classify what ran. The sweep compares memory and results, and a value that is
+read and only decides whether the call raises changes neither: the column X
+is that reading, per line, from the samples of the line. A callee that only X
+stands against (a value was read under some of its calls, and its line says
+nothing else against it) is measured apart for each form of its operands
+too: the lines of its forms say in which form the calls read. Without
+WITNESS_TSV the column is `-` on every line, and no callee has lines of forms
+for it.
+
+Which KEYWORDS a call passes is in a form only where it tells the calls that
+read a value from those that do not: a value was read under some samples of
+the form and not under others, nothing else was measured against the form
+(no Python frame, no generator moved, no result sized by data, no two calls
+that differ), the samples of each set of keywords (those that hold no
+tensor and no container with one: `alpha=1.0`) agree on X, AND the form is
+listed in KEYWORD_SELECTS with the reason why the presence of the keyword
+selects the overload that reads (the samples alone do not show that: a few
+of them can agree by accident). The form then has a line per set (`0:[T]
+1:T alpha:K`; `-:K` for the calls that pass none), each on the samples of
+that set alone. A form whose samples would cut it and that is not listed
+stays whole (a stop), and is named on stderr.
+
+Every line has, per device, the count of samples whose results were compared
+on other data (what S rests on), whether the operators under the call differ
+with the data (O), and the member's DOMAIN: for each place among the operands
+(a position, the receiver first, or a keyword's name) the classes that the
+samples whose call returned had there.
+
+Kept: the C callees (no Python function, no operator object of torch.ops)
+that were measured on the CPU and on CUDA, and those measured on the CPU only
+whose line shows why no region may hold them (result sizes that follow data,
+two calls that differ, Python code under the call). Nothing is decided here:
+the file has the measured verdicts, and exec/rules/torch.rs says what each
+means.
+"""
+
+import json
+import os
+import re
+import sys
+from typing import Any
+
+
+KINDS = (
+    "builtin",
+    "method_descriptor",
+    "wrapper_descriptor",
+    "classmethod_descriptor",
+    "slot",
+)
+KEPT = ("P", "W", "K", "D", "S", "R", "A", "L", "O")
+# By (member, device, sample id): (the call returned, an operator read a
+# value out of a tensor, the witness could not classify what ran).
+WITNESS: dict[tuple[str, str, str], tuple[bool, bool, bool]] = {}
+
+
+def witnessed(member, samples):
+    """The column X of a line made of `samples`, (device, sample) each."""
+    seen = [WITNESS.get((member, device, s.get("id", ""))) for device, s in samples]
+    seen = [w for w in seen if w is not None and w[0]]
+    if not seen:
+        return "-"
+    read, opaque = sum(w[1] for w in seen), sum(w[2] for w in seen)
+    said = f"yes({read})" if read else (f"opaque({opaque})" if opaque else "no")
+    return f"{said}@{len(seen)}"
+
+
+def reading(member, samples):
+    """Whether a value was read under the calls of `samples`, (device,
+    sample) each, that were witnessed: {True}, {False}, both or neither."""
+    seen = [WITNESS.get((member, device, s.get("id", ""))) for device, s in samples]
+    return {w[1] for w in seen if w is not None and w[0]}
+
+
+HEAD = """# What calls of torch's C callees do to their operands, measured: one line per callee, by the name it resolves
+# from. Generated by torch/_rust/tools/gen_torch_members.py; never edited by hand. exec/rules/torch.rs reads it.
+# A verdict is a union over the calls measured ("may") and ends with @N, the count of runs it rests on.
+# member  the qualified name of the callee (`X.__get__`: the descriptor X)
+# form    `-`: the line is of every call measured. Else the line is of the calls of one form alone: `PLACE:T` for
+#         each place among the operands (a position, the receiver first, or the name of a keyword) that holds an
+#         exact Tensor or Parameter, `PLACE:[T]` for one that holds an exact list or tuple with a tensor in it,
+#         and `PLACE:True` / `PLACE:False` for a bool of that value where the calls measured do not do the same
+#         under both values, or only one was measured; `plain`: none of those; `?`: operands the record of the
+#         sample does not tell. What else a call hands over (numbers, None, containers of numbers) is in no form,
+#         but for the KEYWORDS it is handed by, where they tell the calls that read a value (X) from those that do
+#         not and nothing else was measured against the form: `NAME:K` for each keyword that holds no tensor
+#         and no container with one, `-:K` for a call with no such keyword. A line that names keywords so is of
+#         the calls that pass exactly those
+# kind    builtin | method_descriptor | wrapper_descriptor | classmethod_descriptor | slot
+# cpu, cuda  samples whose call returned, per device; `-`: not measured there
+# scpu, scuda  of those, the samples whose results were compared on other data (what S rests on), per device
+# out     yes: the callee was also measured with `out=`, and this line is the one WITHOUT those samples; else `-`
+# P       no | warn(k) | yes(k)[+warn(j)]: a Python frame was entered under the call (warn: only to show a warning)
+# W       no | <operand>(...):k,...: the bytes of an operand's storage changed
+# K       no | <operand>(<fields>):k,...: an operand's key (class, dtype, device, sizes, strides, ...) changed in place
+# D       no | <generator>:k,...: a random generator's state changed
+# S       key | data(k;by <operands>) | no-sample: whether the count and keys of the results are the same for other
+#         data in operands of the same keys (no-sample: no tensor operand to put other data in)
+# R       yes | NO(k): two calls on the same data and generator state give the same bits
+# A       what each result tensor's storage is against the operands: fresh | view(k) | is(k); or no-tensor-result
+# L       the forms of the result (T: a tensor); pyval=key | pyval=data(k): a Python value in it follows the keys
+#         or the data; follows=<state>:k: it follows that ambient state
+# O       the operators the call dispatched; nested=key | nested=data(k): whether the operators under them are the
+#         same for other data in operands of the same keys
+# X       no | yes(k) | opaque(k) | `-`: under k of the N calls witnessed (one per sample whose call returned) an
+#         operator that hands a value out of a tensor ran (the result, or whether the call raises, may follow it);
+#         opaque: none read, and under k the witness could not classify what ran; `-`: no call was witnessed
+# domain  `-`, or for each place among the operands (a position, the receiver first, or the name of a keyword)
+#         the classes the returning samples had there, as `place=class|class ...`. T: an exact Tensor or
+#         Parameter; int, float, bool, None, Size, str, complex, dtype, device, layout, memory_format; tuple[..],
+#         list[..]: an exact container of items of the classes named; `?`: a class that is none of those
+"""
+
+
+def lines(path):
+    head = None
+    with open(path) as f:
+        for line in f:
+            if line.startswith("#") or not line.strip():
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if head is None:
+                head = parts
+                continue
+            yield dict(zip(head, parts))
+
+
+TENSOR = re.compile(
+    r"(Parameter:)?(float|int|uint|bool|complex|bfloat)\w*\[[^\[\]]*\](/[gcni]+)?"
+)
+SCALARS = (
+    ("bool", re.compile(r"True|False")),
+    ("None", re.compile(r"None")),
+    ("int", re.compile(r"-?\d+")),
+    ("float", re.compile(r"-?(\d+\.\d*(e[-+]?\d+)?|\d+e[-+]?\d+|inf|nan)")),
+    ("Size", re.compile(r"torch\.Size\(\[[\d, ]*\]\)")),
+    ("str", re.compile(r"'[^']*'")),
+    ("complex", re.compile(r"\(?-?[\d.]+(e[-+]?\d+)?([-+][\d.]+(e[-+]?\d+)?)?j\)?")),
+    ("dtype", re.compile(r"torch\.(float|int|uint|bool|complex|bfloat|q[iu]?int)\d*")),
+    (
+        "memory_format",
+        re.compile(r"torch\.(contiguous_format|channels_last(_3d)?|preserve_format)"),
+    ),
+    ("layout", re.compile(r"torch\.(strided|sparse_\w+|_mkldnn)")),
+    ("device", re.compile(r"device\([^()]*\)")),
+)
+KEYWORD = re.compile(r"(\w+):")
+
+
+def items(text, at, close, keyed=False, valued=False):
+    """The forms of the operands described from text[at] up to `close`, and
+    where the text goes on; None if one of them cannot be told. `valued`: a
+    bool among them (not inside a container) is its value."""
+    found = []
+    while not text.startswith(close, at):
+        name = KEYWORD.match(text, at) if keyed else None
+        if keyed and name is None:
+            return None
+        at = name.end() if name else at
+        got = operand(text, at, valued)
+        if got is None:
+            return None
+        found.append((name.group(1) + "=" if name else "") + got[0])
+        at = got[1]
+        if text.startswith(",", at):
+            at += 1
+        elif not text.startswith(close, at):
+            return None
+    return found, at + len(close)
+
+
+def operand(text, at, valued=False):
+    for begin, close, name in (("[", "]", "list"), ("(", ")", "tuple")):
+        if text.startswith(begin, at):
+            got = items(text, at + 1, close)
+            return got and (f"{name}[{','.join(sorted(set(got[0])))}]", got[1])
+    for name, pattern in (("T", TENSOR), *SCALARS):
+        found = pattern.match(text, at)
+        if found and (found.end() == len(text) or text[found.end()] in ",])} "):
+            return found.group() if valued and name == "bool" else name, found.end()
+    return None
+
+
+def form_of(text, valued=False):
+    """The form of a sample's operands from the sweep's description of them
+    (`[float32[5, 5],(2,4),1] {dim:1}`), or `?`. `valued`: a bool operand is
+    in it by its value."""
+    got = items(text, 1, "]", valued=valued) if text.startswith("[") else None
+    if got is None:
+        return "?"
+    positional, at = got
+    keywords = []
+    if text.startswith(" {", at):
+        got = items(text, at + 2, "}", keyed=True, valued=valued)
+        if got is None:
+            return "?"
+        keywords, at = got
+    return " ".join(positional + sorted(keywords)) if at == len(text) else "?"
+
+
+def of_samples(samples, by_device):
+    """The columns scpu, scuda and O of a line made of `samples`."""
+    compared = [
+        str(sum(s["fills"]["comparable"] > 0 for s in by_device.get(d, ())))
+        for d in ("cpu", "cuda")
+    ]
+    known = [s for s in samples if s.get("ops_follow_data") is not None]
+    differ = sum(s["ops_follow_data"] is True for s in known)
+    nested = f"nested=data({differ})" if differ else "nested=key"
+    return compared, f"{nested}@{len(known)}" if known else "no-sample"
+
+
+TENSORS = ("torch.Tensor", "torch.nn.parameter.Parameter")
+NAMED = {
+    "NoneType": "None",
+    "torch.Size": "Size",
+    "torch.dtype": "dtype",
+    "torch.device": "device",
+    "torch.layout": "layout",
+    "torch.memory_format": "memory_format",
+}
+PLAIN = ("int", "float", "bool", "str", "complex")
+
+
+def named(one):
+    """A class of the sweep's record of a sample (`classes`) as the columns
+    `form` and `domain` name it; `?` for one they have no name for."""
+    if isinstance(one, dict):
+        ((kind, items),) = one.items()
+        inside = sorted({named(item) for item in items})
+        return "?" if "?" in inside else f"{kind}[{','.join(inside)}]"
+    if one in TENSORS:
+        return "T"
+    return NAMED.get(one, one if one in PLAIN else "?")
+
+
+def places(sample):
+    """The operands of a sample by place (a position, the receiver first, or
+    a keyword's name), each as its class is named; None if the record of the
+    sample does not tell them."""
+    classes = sample.get("classes")
+    if classes is not None:
+        found = {str(at): named(one) for at, one in enumerate(classes["args"])}
+        found.update((name, named(one)) for name, one in classes["kwargs"].items())
+        return found
+    form = form_of(sample.get("operands", ""))
+    if form == "?":
+        return None
+    found = {}
+    for at, operand in enumerate(form.split(" ")):
+        name, _, one = operand.rpartition("=")
+        found[name or str(at)] = one
+    return found
+
+
+def holds_tensor(one):
+    return one == "T" or bool(re.search(r"[\[,]T[\],]", one))
+
+
+def form_key(sample, valued):
+    """The form of a sample's call: which places among its operands hold a
+    tensor (`T`) or an exact list or tuple with a tensor in it (`[T]`), and,
+    if `valued`, which hold a bool, with its value. None if the record does
+    not tell."""
+    found = places(sample)
+    if found is None or "?" in found.values():
+        return None
+    tensors = tuple(
+        sorted(
+            (place, "T" if one == "T" else "[T]")
+            for place, one in found.items()
+            if holds_tensor(one)
+        )
+    )
+    bools = ()
+    if valued and "bool" in found.values():
+        # The values are in the description of the operands only.
+        told = form_of(sample.get("operands", ""), valued=True)
+        if told == "?":
+            return None
+        values = {}
+        for at, operand in enumerate(told.split(" ")):
+            name, _, one = operand.rpartition("=")
+            if one in ("True", "False"):
+                values[name or str(at)] = one
+        if sorted(values) != sorted(k for k, one in found.items() if one == "bool"):
+            return None
+        bools = tuple(sorted(values.items()))
+    return tensors, bools
+
+
+def keywords(sample):
+    """The names of the keywords of a sample's call that hold no tensor and
+    no container with one: what a form tells of them is that they are
+    there (one that holds a tensor is a place of the form as it is)."""
+    found = places(sample) or {}
+    return tuple(
+        sorted(
+            place
+            for place, one in found.items()
+            if not place.isdigit() and not holds_tensor(one)
+        )
+    )
+
+
+# The forms that the keywords a call passes may cut (form_lines), each with
+# why the PRESENCE of the keyword tells the calls that read a value from
+# those that do not: the overloads the argument parser chooses between
+# differ in exactly that keyword. A form that is not here is never cut,
+# whatever its samples say: on a handful of samples the sets of keywords
+# can agree on X by accident (a keyword that the samples pass only with the
+# data that is read), and the lines of the sets would then be rows for calls
+# that nobody looked at. A form is added here by whoever read the
+# operator's overloads, with what they say.
+KEYWORD_SELECTS = {
+    ("torch._foreach_add_", "0:[T] 1:T"): (
+        "_foreach_add_(TensorList self, Scalar scalar) has no `alpha` and "
+        "takes a 0-dim tensor as the number it holds, which it reads; with "
+        "`alpha` the parser can only take _foreach_add_(TensorList self, "
+        "Tensor other, *, Scalar alpha), which hands the tensor on"
+    ),
+}
+
+
+def form_text(key):
+    """`0:T 1:[T] dim:T 5:True`: places in the order of their names; `plain`
+    for a call that hands no tensor and no bool that is told apart. A key
+    with a third part is of the calls with exactly those keywords
+    (keywords): `0:[T] 1:T alpha:K`, and `0:[T] 1:T -:K` for none."""
+    tensors, bools, *named = key
+    told = tensors + bools + tuple((name, "K") for names in named for name in names)
+    text = [f"{place}:{one}" for place, one in sorted(told)]
+    return " ".join(text + ["-:K"] * (named == [()])) or "plain"
+
+
+def domain(member, path, with_out):
+    """The classes the returning samples of a member had at each place among
+    their operands, or `-`; per device the count of those samples whose
+    results were compared on other data; and the column X of those samples.
+    A sample whose record does not tell its operands has none."""
+    with open(path) as f:
+        devices = json.load(f)["devices"]
+    compared: dict[str, int] = {}
+    had: dict[str, set[str]] = {}
+    kept = []
+    for device, of_device in devices.items():
+        for sample in of_device["samples"]:
+            found = places(sample)
+            out = sample.get("has_out") or (found is not None and "out" in found)
+            if (with_out and out) or sample.get("returned", 0) <= 0:
+                continue
+            kept.append((device, sample))
+            compared[device] = compared.get(device, 0) + (
+                sample["fills"]["comparable"] > 0
+            )
+            for place, one in (found or {}).items():
+                had.setdefault(place, set()).add(one)
+    text = " ".join(f"{k}={'|'.join(sorted(v))}" for k, v in sorted(had.items()))
+    counts = [str(compared.get(d, 0)) for d in ("cpu", "cuda")]
+    return counts, text or "-", witnessed(member, kept)
+
+
+def measured(samples, declared):
+    """What the calls of `samples` were measured to do, without counts: what
+    two sets of samples are compared by. `declared`: per operand written,
+    what the schema says of the write."""
+    written = {k for s in samples for k in s["writes"]}
+    rekeyed = {(k, f) for s in samples for k, fs in s["rekeys"].items() for f in fs}
+    results = {
+        (r, a) for s in samples for r, kinds in s["alias"].items() for a in kinds
+    }
+    return (
+        any(s["enters"] for s in samples),
+        tuple(sorted((k, declared.get(k, "decl?")) for k in written)),
+        tuple(sorted(rekeyed)),
+        any(s["draws"] for s in samples),
+        any(s["data_sized"] is True for s in samples),
+        any(s["repeatable"] is False for s in samples),
+        tuple(sorted(results)),
+    )
+
+
+def form_lines(member, kind, path, valued):
+    """The lines of a member's forms, from the record of its samples: the
+    returning samples of every device that share a form (form_key), without
+    those passing out=. `valued`: a bool operand is in the form by its value,
+    unless both values were measured in the same places otherwise and the
+    calls do the same under both. A sample whose record does not tell its
+    operands has the form `?`."""
+    with open(path) as f:
+        devices = json.load(f)["devices"]
+    said: dict[str, set[str]] = {}
+    for of_device in devices.values():
+        for k, w in of_device["summary"]["W"].get("writes", {}).items():
+            said.setdefault(k, set()).update(w["declared"])
+    declared = {k: "/".join(sorted(v)) for k, v in said.items()}
+    forms: dict[Any, list[Any]] = {}
+    for device, of_device in devices.items():
+        for sample in of_device["samples"]:
+            found = places(sample) or {}
+            if sample.get("has_out") or "out" in found:
+                continue
+            if sample.get("returned", 0) > 0:
+                key = form_key(sample, valued)
+                forms.setdefault(key, []).append((device, sample))
+    # A bool leaves the form where two forms differ in its value alone and
+    # the calls of both do the same.
+    for place in sorted({p for key in forms if key for p, _ in key[1]}):
+        pairs: dict[Any, list[Any]] = {}
+        for key in [key for key in forms if key]:
+            if place in dict(key[1]):
+                merged = (key[0], tuple(b for b in key[1] if b[0] != place))
+                pairs.setdefault(merged, []).append(key)
+        for merged, pair in pairs.items():
+            did = {measured([s for _, s in forms[key]], declared) for key in pair}
+            if len(pair) == 2 and len(did) == 1 and merged not in forms:
+                forms[merged] = forms.pop(pair[0]) + forms.pop(pair[1])
+    # The keywords a call passes are in a form that only a value read under
+    # some of its calls stands against, where they tell the calls that read
+    # from those that do not: the samples of each set of keywords agree.
+    for key in [key for key in forms if key]:
+        sets: dict[Any, list[Any]] = {}
+        for device, sample in forms[key]:
+            sets.setdefault(keywords(sample), []).append((device, sample))
+        only_reads = len(reading(member, forms[key])) == 2 and not any(
+            s["enters"] or s["draws"] or s["data_sized"] or s["repeatable"] is False
+            for _, s in forms[key]
+        )
+        if only_reads and all(len(reading(member, s)) < 2 for s in sets.values()):
+            if (member, form_text(key)) not in KEYWORD_SELECTS:
+                print(
+                    f"{member} ({form_text(key)}): not cut by keywords, though "
+                    f"the samples of each set agree ({sorted(sets)}): no reason "
+                    "is stated for it in KEYWORD_SELECTS",
+                    file=sys.stderr,
+                )
+                continue
+            del forms[key]
+            forms.update({(*key, names): found for names, found in sets.items()})
+    texts = sorted(("?" if key is None else form_text(key), key) for key in forms)
+    for text, key in texts:
+        found = forms[key]
+        samples = [s for _, s in found]
+        by_device = {d: [s for of, s in found if of == d] for d in ("cpu", "cuda")}
+        n = len(samples)
+        writes, rekeys, alias = {}, {}, {}
+        for s in samples:
+            for k, w in s["writes"].items():
+                writes.setdefault(k, []).append(w["version_moved"])
+            for k, fields in s["rekeys"].items():
+                rekeys.setdefault(k, []).append(fields)
+            for r, kinds in s["alias"].items():
+                for a in kinds:
+                    alias.setdefault(r, {}).setdefault(a, 0)
+                    alias[r][a] += 1
+
+        def said(found, n=n):
+            return (",".join(found) if found else "no") + f"@{n}"
+
+        def fields(found):
+            return " ".join(sorted({f for fs in found for f in fs}))
+
+        def version(moved):
+            return "ver" if all(moved) else "nover"
+
+        compared = sum(s["fills"]["comparable"] > 0 for s in samples)
+        sized = sum(s["data_sized"] is True for s in samples)
+        twice = sum(s["repeatable"] is True for s in samples)
+        differ = sum(s["repeatable"] is False for s in samples)
+        enters = sum(bool(s["enters"]) for s in samples)
+        draws = sum(bool(s["draws"]) for s in samples)
+        results = ";".join(
+            f"{r}=" + "|".join(f"{a}:{k}" for a, k in sorted(kinds.items()))
+            for r, kinds in sorted(alias.items())
+        )
+        yield "\t".join(
+            (
+                member,
+                text,
+                kind,
+                *(str(len(by_device[d])) for d in ("cpu", "cuda")),
+                *of_samples(samples, by_device)[0],
+                "-",
+                f"yes({enters})@{n}" if enters else f"no@{n}",
+                said(
+                    [
+                        f"{k}({declared.get(k, 'decl?')};{version(v)}):{len(v)}"
+                        for k, v in sorted(writes.items())
+                    ]
+                ),
+                said([f"{k}({fields(v)}):{len(v)}" for k, v in sorted(rekeys.items())]),
+                said([f"yes:{draws}"] if draws else []),
+                f"data({sized})@{compared}"
+                if sized
+                else (f"key@{compared}" if compared else "no-sample"),
+                f"NO({differ})@{n}"
+                if differ
+                else (f"yes@{twice}" if twice else "no-sample"),
+                (results or "no-tensor-result") + f"@{n}",
+                "-",
+                of_samples(samples, by_device)[1],
+                witnessed(member, found),
+                "-",
+            )
+        )
+
+
+def returning(n, device):
+    found = re.search(rf"\b{device}:(\d+)/(\d+)", n)
+    return str(int(found.group(1)) - int(found.group(2))) if found else "-"
+
+
+def main():
+    no_out = {r["member"]: r for r in lines(sys.argv[2])} if len(sys.argv) > 2 else {}
+    samples_dir = sys.argv[3] if len(sys.argv) > 3 else None
+    for w in lines(sys.argv[4]) if len(sys.argv) > 4 else ():
+        flags = (w["returned"] == "1", w["read"] == "1", w["opaque"] == "1")
+        WITNESS[w["member"], w["device"], w["id"]] = flags
+    columns = (
+        "member",
+        "form",
+        "kind",
+        "cpu",
+        "cuda",
+        "scpu",
+        "scuda",
+        "out",
+        *KEPT,
+        "X",
+        "domain",
+    )
+    out = [HEAD + "\t".join(columns)]
+    for row in lines(sys.argv[1]):
+        if row["kind"] not in KINDS or not row["status"].startswith("swept"):
+            continue
+        with_out = "(out:" in row["n"]
+        if with_out:
+            row = no_out[row["member"]]
+        cpu, cuda = returning(row["n"], "cpu"), returning(row["n"], "cuda")
+        stops = (
+            row["S"].startswith("data")
+            or row["R"].startswith("NO")
+            or row["P"].startswith("yes")
+        )
+        if cuda == "-" and not stops:
+            continue
+        path = os.path.join(samples_dir or "", row["member"] + ".json")
+        compared, places, read = (["-", "-"], "-", "-")
+        if samples_dir and os.path.exists(path):
+            compared, places, read = domain(row["member"], path, with_out)
+        out.append(
+            "\t".join(
+                (
+                    row["member"],
+                    "-",
+                    row["kind"],
+                    cpu,
+                    cuda,
+                    *compared,
+                    "yes" if with_out else "-",
+                    *(row[k].rpartition(";")[2] if k == "O" else row[k] for k in KEPT),
+                    read,
+                    places,
+                )
+            )
+        )
+        # Only what follows data stands against it: measured per form too.
+        only_sized = row["S"].startswith("data") and not (
+            row["R"].startswith("NO")
+            or row["P"].startswith("yes")
+            or any(row[k].split("@")[0] != "no" for k in "WK")
+        )
+        if only_sized and cuda != "-" and samples_dir and os.path.exists(path):
+            out.extend(form_lines(row["member"], row["kind"], path, False))
+        # It writes or re-keys an operand, and nothing else stands against
+        # it: which operand, in which form of the call, is measured per form.
+        writer = (
+            any(row[k].split("@")[0] != "no" for k in "WK")
+            and row["D"].split("@")[0] == "no"
+            and not row["S"].startswith("data")
+            and not row["P"].startswith("yes")
+        )
+        if writer and cuda != "-" and samples_dir and os.path.exists(path):
+            out.extend(form_lines(row["member"], row["kind"], path, True))
+        # Only a value read out of a tensor under some of its calls stands
+        # against it: which form of the call reads is measured per form.
+        reads = (
+            read.startswith("yes")
+            and all(row[k].split("@")[0] == "no" for k in "WKD")
+            and row["S"].split("@")[0] == "key"
+            and row["R"].split("@")[0] == "yes"
+            and not row["P"].startswith("yes")
+            and "nested=data" not in row["O"]
+            and not row["A"].startswith("no-tensor-result")
+            and "pyval=data" not in row["L"]
+            and ("follows=" not in row["L"] or "follows=none" in row["L"])
+        )
+        if reads and cuda != "-":
+            out.extend(form_lines(row["member"], row["kind"], path, False))
+        # It draws from a random generator (and may write an operand), and
+        # nothing else stands against it: in which form of the call it
+        # draws is measured per form, a bool operand by its value.
+        draws = (
+            row["D"].split("@")[0] != "no"
+            and row["S"].split("@")[0] == "key"
+            and row["R"].split("@")[0] == "yes"
+            and not row["P"].startswith("yes")
+            and "nested=data" not in row["O"]
+        )
+        if draws and cuda != "-" and samples_dir and os.path.exists(path):
+            out.extend(form_lines(row["member"], row["kind"], path, True))
+    print("\n".join(out))
+
+
+if __name__ == "__main__":
+    main()
