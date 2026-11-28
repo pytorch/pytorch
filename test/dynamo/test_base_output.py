@@ -5,6 +5,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 try:
@@ -20,6 +21,8 @@ def maybe_skip(fn):
 
 
 class TestBaseOutput(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @maybe_skip
     def test_create(self):
         def fn(a):
