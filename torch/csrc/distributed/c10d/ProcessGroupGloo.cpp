@@ -676,6 +676,25 @@ ProcessGroupGloo::ProcessGroupGloo(
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
+  shutdown();
+}
+
+namespace {
+// The process group whose worker loop is running on the current thread, if
+// any. Used to reject shutdown requests that would have a worker join itself.
+thread_local const ProcessGroupGloo* currentWorkerPg = nullptr;
+} // namespace
+
+void ProcessGroupGloo::shutdown() {
+  // A worker can reach here from a work callback (e.g. a future continuation
+  // calling destroy_process_group()). It cannot drain the queue or join
+  // itself, so fail clearly instead of deadlocking.
+  TORCH_CHECK(
+      currentWorkerPg != this,
+      "ProcessGroupGloo cannot be shut down from one of its own worker threads");
+
+  // Serialize concurrent callers so only one waits on the queue and joins.
+  std::lock_guard<std::mutex> shutdownLock(shutdownMutex_);
   std::unique_lock<std::mutex> lock(workMutex_);
   workConsumeCV_.wait(lock, [&] { return workQueue_.empty(); });
 
@@ -687,9 +706,12 @@ ProcessGroupGloo::~ProcessGroupGloo() {
 
   workProduceCV_.notify_all();
 
-  // Wait for worker threads to terminate
+  // Wait for worker threads to terminate. A thread is no longer joinable
+  // once an earlier shutdown() has joined it.
   for (auto& thread : threads_) {
-    thread.join();
+    if (thread.joinable()) {
+      thread.join();
+    }
   }
 }
 
@@ -767,6 +789,7 @@ std::shared_ptr<::gloo::Context> ProcessGroupGloo::getContext(uint32_t tag) {
 
 void ProcessGroupGloo::runLoop(int workerIndex) {
   c10::setThreadName("pt_gloo_runloop");
+  currentWorkerPg = this;
   std::unique_lock<std::mutex> lock(workMutex_);
 
   while (!stop_) {
@@ -861,6 +884,8 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::merge(
 
 void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
+  // Without worker threads the work would never run and wait() would hang.
+  TORCH_CHECK(!stop_, "ProcessGroupGloo has been shut down");
   workQueue_.push_back(std::move(work));
   lock.unlock();
 
