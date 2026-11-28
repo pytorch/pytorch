@@ -931,6 +931,37 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(reversed(range(2, 10, 3))), [8, 5, 2])
         self.assertEqual(list(reversed(range(0))), [])
 
+    @parametrize(
+        "bounds",
+        [(0, 5), (2, 6), (-5, -1), (1, 10, 2), (10, 0, -3), (0,), (5, 5), (5, 2)],
+    )
+    def test_reversed_range_return(self, bounds):
+        def fn(x):
+            return x + 1, reversed(range(*bounds))
+
+        x = torch.tensor(0)
+        expected_x, expected_it = fn(x)
+        result_x, result_it = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result_x, expected_x)
+        self.assertEqual(list(result_it), list(expected_it))
+
+    @parametrize("with_graph_break", [False, True])
+    def test_reversed_range_partial_return(self, with_graph_break):
+        def fn(x):
+            it = reversed(range(5))
+            x = x + next(it)
+            if with_graph_break:
+                torch._dynamo.graph_break()
+            return x + next(it), it
+
+        x = torch.tensor(0)
+        expected_x, expected_it = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=not with_graph_break)
+        result_x, result_it = opt_fn(x)
+        self.assertEqual(result_x, expected_x)
+        self.assertEqual(result_it.__length_hint__(), expected_it.__length_hint__())
+        self.assertEqual(list(result_it), list(expected_it))
+
     @make_dynamo_test
     def test_reversed_mappingproxy(self):
         """reversed() on types.MappingProxyType dispatches to dict.__reversed__"""
