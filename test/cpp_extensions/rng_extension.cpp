@@ -1,5 +1,6 @@
 #include <torch/extension.h>
 #include <torch/library.h>
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/native/DistributionTemplates.h>
@@ -57,6 +58,20 @@ size_t getInstanceCount() {
   return instance_count;
 }
 
+// Owns a Generator natively, plus a weak reference to its GeneratorImpl.
+struct GeneratorHolder {
+  explicit GeneratorHolder(Generator g)
+      : gen(std::move(g)), weak(gen.getIntrusivePtr()) {}
+
+  Generator lock() const {
+    auto impl = weak.lock();
+    return impl ? Generator(std::move(impl)) : Generator();
+  }
+
+  Generator gen;
+  c10::weak_intrusive_ptr<c10::GeneratorImpl> weak;
+};
+
 TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   m.impl("aten::random_.from",                 random_from_to);
   m.impl("aten::random_.to",                   random_to);
@@ -67,4 +82,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("createTestCPUGenerator", &createTestCPUGenerator);
   m.def("getInstanceCount", &getInstanceCount);
   m.def("identity", &identity);
+  py::class_<GeneratorHolder>(m, "GeneratorHolder")
+      .def(py::init<Generator>())
+      .def(py::init([](uint64_t seed) {
+        return GeneratorHolder(at::detail::createCPUGenerator(seed));
+      }))
+      .def("get", [](const GeneratorHolder& self) { return self.gen; })
+      .def("lock", &GeneratorHolder::lock)
+      .def("reset", [](GeneratorHolder& self) { self.gen = Generator(); });
 }

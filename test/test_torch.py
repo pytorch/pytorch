@@ -8890,6 +8890,41 @@ class TestTorch(TestCase):
         b = pickle.loads(serialized)
         self.assertEqual(a, b)
 
+    @skipIfTorchDynamo("relies on wrappers being deallocated at del")
+    def test_generator_python_object_preservation(self):
+        with torch.library._scoped_library("_generator_preservation", "FRAGMENT") as lib:
+            lib.define("identity(Generator g) -> Generator")
+            lib.impl("identity", lambda g: g, "CompositeExplicitAutograd")
+            identity = torch.ops._generator_preservation.identity
+
+            # Converting a GeneratorImpl back to Python returns its one wrapper.
+            gen = torch.Generator()
+            self.assertIs(identity(gen), gen)
+            default = torch.default_generator
+            self.assertIs(identity(default), default)
+
+            # A clone is a new GeneratorImpl with its own wrapper and state.
+            clone = gen.clone_state()
+            self.assertIsNot(clone, gen)
+            self.assertIs(identity(clone), clone)
+            gen.manual_seed(1)
+            clone.manual_seed(2)
+            self.assertEqual(gen.initial_seed(), 1)
+
+            class MyGenerator(torch.Generator):
+                pass
+
+            sub = MyGenerator()
+            sub.tag = "preserved"
+            self.assertIs(identity(sub), sub)
+
+            # Without native owners, a Python-only cycle is collectable.
+            sub.cycle = sub
+            ref = weakref.ref(sub)
+            del sub
+            gc.collect()
+            self.assertIsNone(ref())
+
     def test_generator_cpu(self):
         # test default generators are equal
         self.assertEqual(torch.default_generator, torch.default_generator)

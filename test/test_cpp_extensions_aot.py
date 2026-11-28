@@ -4,6 +4,7 @@ import importlib
 import os
 import re
 import unittest
+import weakref
 from itertools import repeat
 from typing import get_args, get_origin, Union
 
@@ -19,6 +20,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_WINDOWS,
+    run_concurrently,
     skipIfTorchDynamo,
     xfailIfTorchDynamo,
 )
@@ -433,6 +435,50 @@ class TestRNGExtension(common.TestCase):
         self.assertEqual(rng_extension.getInstanceCount(), 1)
         del copy2
         self.assertEqual(rng_extension.getInstanceCount(), 0)
+
+    @skipIfTorchDynamo("relies on wrappers being deallocated at del")
+    def test_native_owner_preserves_generator(self):
+        class MyGenerator(torch.Generator):
+            pass
+
+        gen = MyGenerator()
+        gen.tag = "preserved"
+        locked = []
+        ref = weakref.ref(gen, lambda _: locked.append(holder.lock()))
+        holder = rng_extension.GeneratorHolder(gen)
+        self.assertIs(holder.get(), gen)
+
+        # The native owner keeps the original wrapper and its attributes alive.
+        del gen
+        self.assertIs(holder.get(), ref())
+        self.assertEqual(holder.get().tag, "preserved")
+
+        # Releasing the last native owner frees the wrapper, and a weak native
+        # reference cannot resurrect it from a weakref callback.
+        holder.reset()
+        self.assertIsNone(ref())
+        self.assertEqual(locked, [None])
+        self.assertIsNone(holder.lock())
+
+        # A weak native reference does reach a wrapper that is still alive.
+        gen = torch.Generator()
+        holder = rng_extension.GeneratorHolder(gen)
+        holder.reset()
+        self.assertIs(holder.lock(), gen)
+
+    @skipIfTorchDynamo("relies on wrappers being deallocated at del")
+    def test_native_generator_wrapper_identity(self):
+        holder = rng_extension.GeneratorHolder(1234)
+        wrappers = run_concurrently(holder.get, num_threads=4)
+        for wrapper in wrappers:
+            self.assertIs(wrapper, wrappers[0])
+        self.assertEqual(wrappers[0].initial_seed(), 1234)
+
+        ref = weakref.ref(wrappers[0])
+        del wrapper, wrappers
+        self.assertIsNotNone(ref())
+        holder.reset()
+        self.assertIsNone(ref())
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
