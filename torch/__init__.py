@@ -168,6 +168,14 @@ __all__ = [
 if __all__ != sorted(__all__):
     raise AssertionError("__all__ must be kept sorted")
 
+
+_has_frozendict = sys.version_info >= (3, 15) and hasattr(builtins, "frozendict")
+if _has_frozendict:
+    from builtins import (
+        frozendict as _frozendict,  # pyrefly: ignore [missing-module-attribute]
+    )
+
+
 ################################################################################
 # Load the extension module
 ################################################################################
