@@ -32,7 +32,14 @@ Tensor var_dim_IntList(
     auto dims = opt_dim.value();
 
     for (const auto& d : dims) {
-      TORCH_CHECK(d >= -self.dim() || d < self.dim(), "Dimension out of range");
+      TORCH_CHECK(
+          d >= -self.dim() && d < self.dim(),
+          "Vulkan var.dim_IntList dimension out of range expected to be in range of [",
+          -self.dim(),
+          ",",
+          self.dim() - 1,
+          "], but got ",
+          d);
 
       int64_t dim_normalized = utils::normalize(d, self.dim());
       if (dims_set.contains(dim_normalized)) {
