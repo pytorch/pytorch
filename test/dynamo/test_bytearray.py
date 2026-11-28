@@ -6,6 +6,7 @@ Ported from CPython's Lib/test/test_bytes.py (BaseBytesTest class).
 
 import operator
 import sys
+import unittest
 
 import torch
 import torch._dynamo
@@ -1640,6 +1641,41 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(*args)
         self.assertEqual(torch.compile(fn, backend="eager")(*args), fn(*args))
+
+    @unittest.skipIf(sys.version_info < (3, 12), "__buffer__ needs Python 3.12+")
+    @parametrize("method", ["removeprefix", "removesuffix", "strip", "split"])
+    def test_buffer_subclass_arg_graph_break(self, method):
+        # A str subclass is traced as a constant, but its __buffer__ is user
+        # code. It must run on every call, not once at trace time.
+        calls = []
+        state = {"payload": b"he"}
+
+        class BufferStr(str):
+            __slots__ = ()
+
+            def __buffer__(self, flags):
+                calls.append(None)
+                return memoryview(state["payload"])
+
+        def fn(ba, arg, t):
+            return getattr(ba, method)(arg), t + 1
+
+        ba, t = bytearray(b"hello"), torch.ones(1)
+        arg = BufferStr("x")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            f"Dynamo does not know how to trace method `{method}` of class `bytearray`",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(ba, arg, t)
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager")
+        for payload in (b"he", b"lo"):
+            state["payload"] = payload
+            calls.clear()
+            self.assertEqual(opt_fn(ba, arg, t), fn(ba, arg, t))
+            # Once in the compiled call and once in the eager call.
+            self.assertEqual(len(calls), 2)
 
     def test_zfill_expandtabs_returns_new_bytearrays(self):
         def f(ba, x):

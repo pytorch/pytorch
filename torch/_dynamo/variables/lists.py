@@ -2500,6 +2500,17 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_search(tx, "count", args, kwargs)
 
+    @staticmethod
+    def _is_plain_constant_arg(arg: VariableTracker) -> bool:
+        # Not UserDefinedConstantVariable: an int, float or str subclass may
+        # define __buffer__, which must not run at trace time.
+        arg = arg.realize()
+        if isinstance(arg, ByteArrayVariable) or ConstantVariable.is_constant_vt(arg):
+            return True
+        if istype(arg, (ListVariable, TupleVariable)):
+            return all(ByteArrayVariable._is_plain_constant_arg(i) for i in arg.items)
+        return False
+
     def _bytearray_constant_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -2507,6 +2518,8 @@ class ByteArrayVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
         method: str,
     ) -> VariableTracker | None:
+        if not all(map(self._is_plain_constant_arg, [*args, *kwargs.values()])):
+            return None
         try:
             const_args = [arg.as_python_constant() for arg in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
