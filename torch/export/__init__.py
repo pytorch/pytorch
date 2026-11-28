@@ -374,6 +374,7 @@ def load(
 
     .. warning::
         :func:`torch.export.load()` uses pickle under the hood to load models. **Never load data from an untrusted source.**
+        It also imports the Python modules that the file names, which runs their code.
 
     Loads an :class:`ExportedProgram` previously saved with
     :func:`torch.export.save <torch.export.save>`.
