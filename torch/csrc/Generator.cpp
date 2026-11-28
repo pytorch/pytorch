@@ -3,6 +3,7 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <ATen/ATen.h>
@@ -14,27 +15,31 @@
 
 using namespace at;
 using namespace torch;
+using torch::utils::PyObjectPreservation;
 
 PyObject* THPGeneratorClass = nullptr;
 static bool generatorMetaclassSet = false;
 
 PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
-  auto type = reinterpret_cast<PyTypeObject*>(THPGeneratorClass);
-  auto self = THPObjectPtr{type->tp_alloc(type, 0)};
-  TORCH_CHECK_PYTHON(self);
-  auto self_ = reinterpret_cast<THPGenerator*>(self.get());
-  self_->cdata = cdata;
-  self_->weakreflist = nullptr;
-  return self.release();
+  auto obj = THPGenerator_Wrap(cdata);
+  TORCH_CHECK_PYTHON(obj);
+  return obj;
 }
 
 static void THPGenerator_dealloc(PyObject* _self) {
   auto self = reinterpret_cast<THPGenerator*>(_self);
-  PyObject_ClearWeakRefs(_self);
   if (self->cdata.defined()) {
-    self->cdata.set_pyobj(nullptr);
-    self->cdata.~Generator();
+    auto pyobj_slot = self->cdata.unsafeGetGeneratorImpl()->pyobj_slot();
+    // The slot only points elsewhere if this wrapper lost a race in
+    // THPGenerator_NewWithVar. Clear it before weakref callbacks run, so that
+    // weak_intrusive_ptr::lock() cannot resurrect this object.
+    if (pyobj_slot->load_pyobj() == _self) {
+      TORCH_INTERNAL_ASSERT(self->cdata.getIntrusivePtr().use_count() == 1);
+      pyobj_slot->clear();
+    }
   }
+  PyObject_ClearWeakRefs(_self);
+  self->cdata.~Generator();
   Py_TYPE(_self)->tp_free(_self);
 }
 
@@ -52,19 +57,17 @@ static PyObject* THPGenerator_pynew(
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
 
-  THPGeneratorPtr self(
-      reinterpret_cast<THPGenerator*>(type->tp_alloc(type, 0)));
-
+  Generator gen;
   c10::DeviceType device_type = device.type();
   if (device_type == at::kCPU) {
-    self->cdata = make_generator<CPUGeneratorImpl>();
+    gen = make_generator<CPUGeneratorImpl>();
   } else {
-    self->cdata = globalContext()
-                      .getAcceleratorHooksInterface(device_type)
-                      .getNewGenerator(device.index());
+    gen = globalContext()
+              .getAcceleratorHooksInterface(device_type)
+              .getNewGenerator(device.index());
   }
 
-  return reinterpret_cast<PyObject*>(self.release());
+  return THPGenerator_NewWithVar(type, std::move(gen));
   END_HANDLE_TH_ERRORS
 }
 
@@ -130,10 +133,13 @@ static PyObject* THPGenerator_graphSafeGetState(
   HANDLE_TH_ERRORS
   auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
 
-  // See Note [Acquire lock when using random generators]
-  std::scoped_lock<std::mutex> lock(gen.mutex());
-
-  return THPGenerator_Wrap(gen.graphsafe_get_state());
+  Generator state;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::scoped_lock<std::mutex> lock(gen.mutex());
+    state = gen.graphsafe_get_state();
+  }
+  return THPGenerator_Wrap(state);
   END_HANDLE_TH_ERRORS
 }
 
@@ -143,10 +149,11 @@ static PyObject* THPGenerator_graphSafeSetState(
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPGenerator*>(_self);
   auto& gen = self->cdata;
+  auto state = THPGenerator_Unwrap(_state);
 
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(gen.mutex());
-  gen.graphsafe_set_state(THPGenerator_Unwrap(_state));
+  gen.graphsafe_set_state(state);
 
   return Py_NewRef(self);
   END_HANDLE_TH_ERRORS
@@ -158,10 +165,13 @@ static PyObject* THPGenerator_cloneState(
   HANDLE_TH_ERRORS
   auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
 
-  // See Note [Acquire lock when using random generators]
-  std::scoped_lock<std::mutex> lock(gen.mutex());
-
-  return THPGenerator_Wrap(gen.clone());
+  Generator clone;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::scoped_lock<std::mutex> lock(gen.mutex());
+    clone = gen.clone();
+  }
+  return THPGenerator_Wrap(clone);
   END_HANDLE_TH_ERRORS
 }
 
@@ -424,23 +434,9 @@ bool THPGenerator_init(PyObject* module) {
   return true;
 }
 
-static void set_pyobj(const Generator& self, PyObject* pyobj) {
-  TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined generator");
-  self.set_pyobj(pyobj);
-}
-
-static PyObject* pyobj(const Generator& self) {
-  TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined generator");
-  return self.pyobj();
-}
-
 PyObject* THPGenerator_Wrap(const Generator& gen) {
   if (!gen.defined()) {
     Py_RETURN_NONE;
-  }
-
-  if (auto obj = pyobj(gen)) {
-    return Py_NewRef(obj);
   }
 
   return THPGenerator_NewWithVar(
@@ -457,14 +453,31 @@ at::Generator THPGenerator_Unwrap(PyObject* state) {
   return reinterpret_cast<THPGenerator*>(state)->cdata;
 }
 
-// Creates a new Python object for a Generator. The Generator must not already
-// have a PyObject* associated with it.
 PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen) {
-  PyObject* obj = type->tp_alloc(type, 0);
-  if (obj) {
-    auto g = reinterpret_cast<THPGenerator*>(obj);
-    new (&g->cdata) Generator(std::move(gen));
-    set_pyobj(g->cdata, obj);
+  TORCH_CHECK(
+      gen.defined(),
+      "cannot create a Python wrapper for an undefined generator");
+  try {
+    // Copy rather than move gen into the wrapper: if another thread publishes a
+    // wrapper first, gen must keep the winner alive while ours is discarded.
+    THPObjectPtr obj(
+        PyObjectPreservation::get_or_init(*gen.unsafeGetGeneratorImpl(), [&]() {
+          PyObject* wrapper = type->tp_alloc(type, 0);
+          TORCH_CHECK_PYTHON(wrapper);
+          new (&reinterpret_cast<THPGenerator*>(wrapper)->cdata) Generator(gen);
+          return wrapper;
+        }));
+    TORCH_CHECK_TYPE(
+        PyObject_TypeCheck(obj.get(), type),
+        "Creating a new ",
+        type->tp_name,
+        " but the Generator is already associated to a Python object of type ",
+        Py_TYPE(obj.get())->tp_name,
+        " which is not a subclass of the requested type");
+    return obj.release();
+  } catch (const python_error&) {
+    // tp_alloc failed. Its Python error is still set; report it by returning
+    // nullptr, as this function did before using get_or_init.
+    return nullptr;
   }
-  return obj;
 }

@@ -57,6 +57,23 @@ class TestTSan(TestCase):
             for gf in grad_fns:
                 self.assertIs(gf, y.grad_fn)
 
+    def test_concurrent_generator_wrap(self):
+        # Converting one generator to and from C++ on several threads exercises
+        # the PyObject preservation refcount transitions of its GeneratorImpl.
+        with torch.library._scoped_library("_tsan_generator", "FRAGMENT") as lib:
+            lib.define("identity(Generator g) -> Generator")
+            lib.impl("identity", lambda g: g, "CompositeExplicitAutograd")
+            identity = torch.ops._tsan_generator.identity
+            gen = torch.Generator().manual_seed(1234)
+
+            def rewrap():
+                for _ in range(500):
+                    self.assertEqual(identity(gen).initial_seed(), 1234)
+
+            run_concurrently(rewrap, num_threads=4)
+            for wrapper in run_concurrently(lambda: identity(gen), num_threads=4):
+                self.assertIs(wrapper, gen)
+
     def test_concurrent_config_flag_toggles(self):
         """Concurrently set/read process-global bool config flags.
 

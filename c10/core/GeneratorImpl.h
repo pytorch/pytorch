@@ -6,6 +6,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/core/impl/PyObjectSlot.h>
 #include <c10/macros/Export.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
@@ -95,18 +96,27 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
     return key_set_;
   }
 
-  inline void set_pyobj(PyObject* pyobj) noexcept {
-    pyobj_ = pyobj;
+  // Borrowed pointer to this generator's Python object, or nullptr.
+  inline PyObject* pyobj() const noexcept {
+    return pyobj_slot_.load_pyobj();
   }
 
-  inline PyObject* pyobj() const noexcept {
-    return pyobj_;
+  impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
   }
+
+  const impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
+  }
+
+  void incref_pyobject() const noexcept final;
+  void decref_pyobject() const noexcept final;
+  bool try_incref_pyobject() const noexcept final;
 
  protected:
   Device device_;
   DispatchKeySet key_set_;
-  PyObject* pyobj_ = nullptr;
+  impl::PyObjectSlot pyobj_slot_;
 
   virtual GeneratorImpl* clone_impl() const = 0;
 };
@@ -114,6 +124,16 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
 namespace detail {
 
 C10_API uint64_t getNonDeterministicRandom(bool is_cuda = false);
+
+#ifndef C10_MOBILE
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<
+        std::is_base_of_v<c10::GeneratorImpl, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
 
 } // namespace detail
 
