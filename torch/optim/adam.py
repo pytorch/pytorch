@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import math
 from typing import cast
 
 import torch
@@ -48,6 +49,7 @@ class Adam(Optimizer):
         differentiable: bool = False,
         fused: bool | None = None,
         decoupled_weight_decay: bool = False,
+        max_grad_norm: float | None = None,
     ) -> None:
         if isinstance(lr, Tensor):
             if foreach and not capturable:
@@ -87,6 +89,12 @@ class Adam(Optimizer):
                 raise ValueError("Tensor betas[1] must be 1-element")
         betas = (_to_scalar(betas[0]), _to_scalar(betas[1]))
 
+        if max_grad_norm is not None:
+            if not (math.isfinite(max_grad_norm) and max_grad_norm >= 0):
+                raise ValueError(f"Invalid max_grad_norm value: {max_grad_norm}")
+            if differentiable:
+                raise ValueError("max_grad_norm does not support differentiable Adam")
+
         defaults = {
             "lr": lr,
             "betas": betas,
@@ -99,6 +107,7 @@ class Adam(Optimizer):
             "differentiable": differentiable,
             "fused": fused,
             "decoupled_weight_decay": decoupled_weight_decay,
+            "max_grad_norm": max_grad_norm,
         }
         super().__init__(params, defaults)
 
@@ -122,6 +131,7 @@ class Adam(Optimizer):
             group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
             group.setdefault("decoupled_weight_decay", False)
+            group.setdefault("max_grad_norm", None)
             fused = group.setdefault("fused", None)
             for p in group["params"]:
                 p_state = self.state.get(p, [])
@@ -227,6 +237,34 @@ class Adam(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
+        max_grad_norm = self.param_groups[0].get("max_grad_norm")
+        if any(g.get("max_grad_norm") != max_grad_norm for g in self.param_groups):
+            raise ValueError("max_grad_norm must be the same for all parameter groups")
+        grad_clip_coef = None
+        if max_grad_norm is not None:
+            if not (math.isfinite(max_grad_norm) and max_grad_norm >= 0):
+                raise ValueError(f"Invalid max_grad_norm value: {max_grad_norm}")
+            if any(g["differentiable"] for g in self.param_groups):
+                raise ValueError("max_grad_norm does not support differentiable Adam")
+            if getattr(self, "grad_scale", None) is not None:
+                raise RuntimeError(
+                    "Call GradScaler.unscale_(optimizer) before step() with max_grad_norm"
+                )
+            all_grads = [
+                p.grad
+                for group in self.param_groups
+                for p in group["params"]
+                if p.grad is not None
+            ]
+            if any(
+                type(g) is not Tensor or g.layout != torch.strided or g.is_complex()
+                for g in all_grads
+            ):
+                raise RuntimeError("max_grad_norm requires dense native real tensors")
+            if all_grads:
+                total_norm = torch.nn.utils.get_total_norm(all_grads)
+                grad_clip_coef = (max_grad_norm / (total_norm + 1e-6)).clamp(max=1.0)
+
         for group in self.param_groups:
             params_with_grad: list[Tensor] = []
             grads: list[Tensor] = []
@@ -268,6 +306,7 @@ class Adam(Optimizer):
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
                 decoupled_weight_decay=group["decoupled_weight_decay"],
+                grad_clip_coef=grad_clip_coef,
             )
 
         return loss
@@ -323,6 +362,15 @@ Adam.__doc__ = (
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        max_grad_norm (float, optional): maximum L2 norm of gradients across all
+            parameter groups (default: ``None``, disables clipping). All groups
+            must use the same finite nonnegative value. Clipping supports dense
+            native real tensors and non-differentiable updates, and leaves
+            ``.grad`` unchanged. CUDA ``fused=True`` applies clipping during the
+            update; other paths use temporary clipped gradients. With AMP, call
+            ``scaler.unscale_(optimizer)`` before ``scaler.step(optimizer)``.
+            Sharded gradients require the distributed framework's global norm
+            clipping API instead.
         decoupled_weight_decay (bool, optional): if True, this optimizer is
             equivalent to AdamW and the algorithm will not accumulate weight
             decay in the momentum nor variance. (default: False)
@@ -354,6 +402,7 @@ def _single_tensor_adam(
     state_steps: list[Tensor],
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
+    grad_clip_coef: Tensor | None = None,
     *,
     amsgrad: bool,
     has_complex: bool,
@@ -395,7 +444,11 @@ def _single_tensor_adam(
         beta1_dict = None
 
     for i, param in enumerate(params):
-        grad = grads[i] if not maximize else -grads[i]
+        grad = grads[i]
+        if grad_clip_coef is not None:
+            grad = grad * grad_clip_coef.to(grad.device)
+        if maximize:
+            grad = -grad
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
@@ -560,6 +613,7 @@ def _multi_tensor_adam(
     state_steps: list[Tensor],
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
+    grad_clip_coef: Tensor | None = None,
     *,
     amsgrad: bool,
     has_complex: bool,
@@ -672,6 +726,8 @@ def _multi_tensor_adam(
                     device_params, device_grads, device_exp_avgs, device_exp_avg_sqs
                 )
 
+        if grad_clip_coef is not None:
+            device_grads = torch._foreach_mul(device_grads, grad_clip_coef.to(device))
         if maximize:
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
@@ -809,6 +865,7 @@ def _fused_adam(
     state_steps: list[Tensor],
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
+    grad_clip_coef: Tensor | None = None,
     *,
     amsgrad: bool,
     has_complex: bool,  # Needed for consistency.
@@ -824,6 +881,8 @@ def _fused_adam(
 ) -> None:
     if not params:
         return
+    if grad_clip_coef is not None and grad_scale is not None:
+        raise RuntimeError("Unscale gradients before fused Adam clipping")
     if differentiable:
         raise RuntimeError("Adam with fused=True does not support differentiable=True")
 
@@ -857,6 +916,7 @@ def _fused_adam(
         _,
     ) in grouped_tensors.items():
         device_params = cast(list[Tensor], device_params_)
+        device = device_params[0].device
         device_grads = cast(list[Tensor], device_grads_)
         device_exp_avgs = cast(list[Tensor], device_exp_avgs_)
         device_exp_avg_sqs = cast(list[Tensor], device_exp_avg_sqs_)
@@ -874,8 +934,25 @@ def _fused_adam(
         if lr_dict is not None and device not in lr_dict:
             lr_dict[device] = lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
             lr = lr_dict[device]
+        clip_kwargs = {}
+        if grad_clip_coef is not None:
+            if device.type == "cuda" and not decoupled_weight_decay:
+                clip_kwargs["grad_clip_coef"] = grad_clip_coef.to(
+                    device=device, dtype=torch.float64
+                )
+            else:
+                device_grads = torch._foreach_mul(
+                    device_grads, grad_clip_coef.to(device)
+                )
         torch._foreach_add_(device_state_steps, 1)
         func = torch._fused_adam_ if not decoupled_weight_decay else torch._fused_adamw_
+        if clip_kwargs:
+            packet = torch.ops.aten._fused_adam_
+            func = (
+                packet.grad_clip_tensor_lr
+                if isinstance(lr, Tensor)
+                else packet.grad_clip
+            )
         # pyrefly: ignore [no-matching-overload]
         func(
             device_params,
@@ -893,6 +970,7 @@ def _fused_adam(
             maximize=maximize,
             grad_scale=device_grad_scale,
             found_inf=device_found_inf,
+            **clip_kwargs,
         )
         if device_found_inf is not None:
             torch._foreach_sub_(
@@ -918,6 +996,7 @@ def adam(
     found_inf: Tensor | None = None,
     has_complex: bool = False,
     decoupled_weight_decay: bool = False,
+    grad_clip_coef: Tensor | None = None,
     *,
     amsgrad: bool,
     beta1: float | Tensor,
@@ -984,6 +1063,7 @@ def adam(
         grad_scale=grad_scale,
         found_inf=found_inf,
         decoupled_weight_decay=decoupled_weight_decay,
+        grad_clip_coef=grad_clip_coef,
     )
 
 

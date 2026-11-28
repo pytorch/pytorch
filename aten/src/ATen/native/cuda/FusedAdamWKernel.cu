@@ -7,13 +7,15 @@
 
 namespace at::native {
 
+namespace {
+
 // note(crcrpar): To observe the CI rules, i.e. 20 minutes per file to compile,
 // defensively split instantiations into _impl files. this is only for CUDA 11.3
 // for which it took about 20 minutes and 28 minutes in my workstation and CI,
 // respectively. As a data point, it took about 20 seconds for CUDA 11.7
 // installed in my environment. See
 // https://github.com/pytorch/pytorch/pull/81705 for details.
-void _fused_adamw_kernel_cuda_(
+void _fused_adamw_kernel_cuda_impl_(
     at::TensorList params,
     at::TensorList grads,
     at::TensorList exp_avgs,
@@ -28,7 +30,8 @@ void _fused_adamw_kernel_cuda_(
     const bool amsgrad,
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
-    const std::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& found_inf,
+    const std::optional<at::Tensor>& grad_clip_coef) {
   const bool is_mixed_precision =
       params[0].scalar_type() != exp_avgs[0].scalar_type();
   if (amsgrad) {
@@ -53,7 +56,8 @@ void _fused_adamw_kernel_cuda_(
         eps,
         maximize,
         grad_scale,
-        found_inf);
+        found_inf,
+        grad_clip_coef);
   } else {
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
@@ -75,12 +79,13 @@ void _fused_adamw_kernel_cuda_(
         eps,
         maximize,
         grad_scale,
-        found_inf);
+        found_inf,
+        grad_clip_coef);
   }
 }
 
 // The following overload simply has a Tensor lr
-void _fused_adamw_kernel_cuda_(
+void _fused_adamw_kernel_cuda_impl_(
     at::TensorList params,
     at::TensorList grads,
     at::TensorList exp_avgs,
@@ -95,9 +100,10 @@ void _fused_adamw_kernel_cuda_(
     const bool amsgrad,
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
-    const std::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& found_inf,
+    const std::optional<at::Tensor>& grad_clip_coef) {
   if (lr.is_cpu()) {
-    _fused_adamw_kernel_cuda_(
+    _fused_adamw_kernel_cuda_impl_(
         params,
         grads,
         exp_avgs,
@@ -112,7 +118,8 @@ void _fused_adamw_kernel_cuda_(
         amsgrad,
         maximize,
         grad_scale,
-        found_inf);
+        found_inf,
+        grad_clip_coef);
     return;
   }
 
@@ -157,7 +164,8 @@ void _fused_adamw_kernel_cuda_(
         eps,
         maximize,
         grad_scale,
-        found_inf);
+        found_inf,
+        grad_clip_coef);
   } else {
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
@@ -179,8 +187,153 @@ void _fused_adamw_kernel_cuda_(
         eps,
         maximize,
         grad_scale,
-        found_inf);
+        found_inf,
+        grad_clip_coef);
   }
+}
+
+} // namespace
+
+void _fused_adamw_kernel_cuda_(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList exp_avgs,
+    at::TensorList exp_avg_sqs,
+    at::TensorList max_exp_avg_sqs,
+    at::TensorList state_steps,
+    const double lr,
+    const double beta1,
+    const double beta2,
+    const double weight_decay,
+    const double eps,
+    const bool amsgrad,
+    const bool maximize,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
+  _fused_adamw_kernel_cuda_impl_(
+      params,
+      grads,
+      exp_avgs,
+      exp_avg_sqs,
+      max_exp_avg_sqs,
+      state_steps,
+      lr,
+      beta1,
+      beta2,
+      weight_decay,
+      eps,
+      amsgrad,
+      maximize,
+      grad_scale,
+      found_inf,
+      std::nullopt);
+}
+
+void _fused_adamw_kernel_cuda_(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList exp_avgs,
+    at::TensorList exp_avg_sqs,
+    at::TensorList max_exp_avg_sqs,
+    at::TensorList state_steps,
+    const at::Tensor& lr,
+    const double beta1,
+    const double beta2,
+    const double weight_decay,
+    const double eps,
+    const bool amsgrad,
+    const bool maximize,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
+  _fused_adamw_kernel_cuda_impl_(
+      params,
+      grads,
+      exp_avgs,
+      exp_avg_sqs,
+      max_exp_avg_sqs,
+      state_steps,
+      lr,
+      beta1,
+      beta2,
+      weight_decay,
+      eps,
+      amsgrad,
+      maximize,
+      grad_scale,
+      found_inf,
+      std::nullopt);
+}
+
+void _fused_adamw_grad_clip_kernel_cuda_(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList exp_avgs,
+    at::TensorList exp_avg_sqs,
+    at::TensorList max_exp_avg_sqs,
+    at::TensorList state_steps,
+    const double lr,
+    const double beta1,
+    const double beta2,
+    const double weight_decay,
+    const double eps,
+    const bool amsgrad,
+    const bool maximize,
+    const at::Tensor& grad_clip_coef,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
+  _fused_adamw_kernel_cuda_impl_(
+      params,
+      grads,
+      exp_avgs,
+      exp_avg_sqs,
+      max_exp_avg_sqs,
+      state_steps,
+      lr,
+      beta1,
+      beta2,
+      weight_decay,
+      eps,
+      amsgrad,
+      maximize,
+      grad_scale,
+      found_inf,
+      grad_clip_coef);
+}
+
+void _fused_adamw_grad_clip_kernel_cuda_(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList exp_avgs,
+    at::TensorList exp_avg_sqs,
+    at::TensorList max_exp_avg_sqs,
+    at::TensorList state_steps,
+    const at::Tensor& lr,
+    const double beta1,
+    const double beta2,
+    const double weight_decay,
+    const double eps,
+    const bool amsgrad,
+    const bool maximize,
+    const at::Tensor& grad_clip_coef,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
+  _fused_adamw_kernel_cuda_impl_(
+      params,
+      grads,
+      exp_avgs,
+      exp_avg_sqs,
+      max_exp_avg_sqs,
+      state_steps,
+      lr,
+      beta1,
+      beta2,
+      weight_decay,
+      eps,
+      amsgrad,
+      maximize,
+      grad_scale,
+      found_inf,
+      grad_clip_coef);
 }
 
 } // namespace at::native
