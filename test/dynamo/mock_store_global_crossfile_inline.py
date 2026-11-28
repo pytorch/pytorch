@@ -68,3 +68,11 @@ def delete_flip_value_fn():
 def delete_missing_value_fn():
     global delete_missing_value
     del delete_missing_value
+
+
+def rebound_created_then_store_read():
+    global rebound_value
+    rebound_value = 1
+    del rebound_value
+    rebound_value = 2
+    return rebound_value
