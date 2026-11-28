@@ -113,7 +113,7 @@ inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_
 }
 
 template<typename traits, typename res_t>
-static void set_result(const int index, const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
+static inline void set_result(const int index, const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
   // static_assert(std::is_same_v<res_t, typename traits::arg2_t>, "data types must match");
   if (index < num_outputs) {
     char *out = (char *) iter.data_ptr(index);
@@ -122,7 +122,7 @@ static void set_result(const int index, const res_t result, const TensorIterator
 }
 
 template<typename traits, typename res_t>
-static void set_results(const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
+static inline void set_results(const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
   AT_ASSERT(num_outputs == 1);
   set_result<traits>(0, result, iter, num_outputs);
 }
@@ -144,7 +144,7 @@ for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIteratorBase &ite
 }
 
 template<typename traits, typename... res_t>
-static void set_results(const std::tuple<res_t...>& result, const TensorIteratorBase &iter, const int num_outputs) {
+static inline void set_results(const std::tuple<res_t...>& result, const TensorIteratorBase &iter, const int num_outputs) {
   AT_ASSERT(num_outputs >= 1);
   std::size_t result_size = for_each_in_tuple<traits>(result, iter, num_outputs);
   AT_ASSERT((size_t)num_outputs == result_size);

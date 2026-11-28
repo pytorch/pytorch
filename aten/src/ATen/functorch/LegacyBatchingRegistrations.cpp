@@ -486,7 +486,7 @@ Tensor as_strided_batching_rule(
 // `xs`'s storage.
 
 template <typename F, F Func, typename... ExtraArgs>
-Tensor unwrap_and_call(const Tensor& input, ExtraArgs... args) {
+[[maybe_unused]] Tensor unwrap_and_call(const Tensor& input, ExtraArgs... args) {
   if (!participatesInCurrentLevel(input)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return Func(input, args...);
@@ -498,7 +498,7 @@ Tensor unwrap_and_call(const Tensor& input, ExtraArgs... args) {
 }
 
 template <typename F, F Func, typename... ExtraArgs>
-Tensor unwrap_and_call_method(const Tensor& input, ExtraArgs... extra_args) {
+[[maybe_unused]] Tensor unwrap_and_call_method(const Tensor& input, ExtraArgs... extra_args) {
   if (!participatesInCurrentLevel(input)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return (input.*Func)(extra_args...);
