@@ -563,6 +563,24 @@ inline T val_at_offs(P ptr, long offs, ScalarType type) {
   }
 }
 
+// Value at offset cast to T, from the compile-time dtype S, or from the
+// runtime dtype `type` when S is void
+template <typename T, typename S, typename P>
+inline ::metal::enable_if_t<::metal::is_same_v<S, void>, T> cast_at_offs(
+    P ptr,
+    long offs,
+    ScalarType type) {
+  return val_at_offs<T>(ptr, offs, type);
+}
+
+template <typename T, typename S, typename P>
+inline ::metal::enable_if_t<!::metal::is_same_v<S, void>, T> cast_at_offs(
+    P ptr,
+    long offs,
+    ScalarType) {
+  return cast_to<T>(val_at_offs<S>(ptr, offs));
+}
+
 // Store with dynamic cast to provided type. Mirrors val_at_offs's runtime
 // switch and is the store-side counterpart used by binary_*_castout kernels
 // (output dtype not known at compile time).
@@ -770,7 +788,14 @@ kernel void binary_alpha_strided(
   ref_at_offs<result_of<F, T, T, T2>>(output, offs[2]) = f(a, b, alpha);
 }
 
-template <typename T, typename F, typename om_t = opmath_t<T>>
+// TA/TB, when not void, fix the input dtypes at compile time (see
+// REGISTER_BINARY_TYPED_CAST_OP)
+template <
+    typename T,
+    typename F,
+    typename om_t = opmath_t<T>,
+    typename TA = void,
+    typename TB = void>
 kernel void binary_strided_cast(
     device void* output [[buffer(0)]],
     device const char* input [[buffer(1)]],
@@ -785,10 +810,10 @@ kernel void binary_strided_cast(
   using res_t = result_of<F, T, T>;
   const auto offs = offsets_from_thread_index(
       index, sizes, ndim_types.x, input_strides, other_strides, output_strides);
-  const auto a =
-      val_at_offs<om_t>(input, offs[0], static_cast<ScalarType>(ndim_types.y));
-  const auto b =
-      val_at_offs<om_t>(other, offs[1], static_cast<ScalarType>(ndim_types.z));
+  const auto a = cast_at_offs<om_t, TA>(
+      input, offs[0], static_cast<ScalarType>(ndim_types.y));
+  const auto b = cast_at_offs<om_t, TB>(
+      other, offs[1], static_cast<ScalarType>(ndim_types.z));
   ref_at_offs<res_t>(output, offs[2]) = static_cast<res_t>(f(a, b));
 }
 
@@ -971,7 +996,12 @@ kernel void binary_alpha_dense(
   out[tid] = f(input[tid], other[tid], alpha);
 }
 
-template <typename T, typename F, typename om_t = T>
+template <
+    typename T,
+    typename F,
+    typename om_t = T,
+    typename TA = void,
+    typename TB = void>
 kernel void binary_dense_cast(
     device result_of<F, T, T>* out [[buffer(0)]],
     device const char* input [[buffer(1)]],
@@ -980,9 +1010,9 @@ kernel void binary_dense_cast(
     uint tid [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
-  const auto a = val_at_offs<om_t>(
+  const auto a = cast_at_offs<om_t, TA>(
       input, tid * sizes_types.x, static_cast<ScalarType>(sizes_types.z));
-  const auto b = val_at_offs<om_t>(
+  const auto b = cast_at_offs<om_t, TB>(
       other, tid * sizes_types.y, static_cast<ScalarType>(sizes_types.w));
   out[tid] = static_cast<res_t>(f(a, b));
 }
@@ -1234,6 +1264,39 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant long* input_strides,                                 \
           constant long* other_strides,                                 \
           constant uint4& ndim_types,                                   \
+          uint tid)
+
+// Opt-in cast kernels for one pair of input dtypes (DTYPEA, DTYPEB), picked by
+// the host over `<NAME>_{dense,strided}_cast_<DTYPEO>_<DTYPEI>` when
+// registered. The generic cast kernels switch on each input's runtime dtype for
+// every element, which costs up to 2x on broadcast operands and on ALU-heavy
+// ops. Computes in DTYPEI, like REGISTER_BINARY_OP.
+#define REGISTER_BINARY_TYPED_CAST_OP(NAME, DTYPEI, DTYPEO, DTYPEA, DTYPEB)   \
+  static_assert(                                                              \
+      ::metal::is_same_v<                                                     \
+          DTYPEO,                                                             \
+          ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI>>,           \
+      "Output dtype mismatch for binary op " #NAME " and input " #DTYPEI);    \
+  template [[host_name(#NAME "_strided_cast_" #DTYPEO "_" #DTYPEI "_" #DTYPEA \
+                             "_" #DTYPEB)]] kernel void ::c10::metal::        \
+      binary_strided_cast<DTYPEI, NAME##_functor, DTYPEI, DTYPEA, DTYPEB>(    \
+          device void* out,                                                   \
+          device const char* input,                                           \
+          device const char* other,                                           \
+          constant DimDivider* sizes,                                         \
+          constant long* output_strides,                                      \
+          constant long* input_strides,                                       \
+          constant long* other_strides,                                       \
+          constant uint4& ndim_types,                                         \
+          uint tid);                                                          \
+  template [[host_name(#NAME "_dense_cast_" #DTYPEO "_" #DTYPEI "_" #DTYPEA   \
+                             "_" #DTYPEB)]] kernel void ::c10::metal::        \
+      binary_dense_cast<DTYPEI, NAME##_functor, DTYPEI, DTYPEA, DTYPEB>(      \
+          device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *    \
+              out_,                                                           \
+          device const char* input,                                           \
+          device const char* other,                                           \
+          constant uint4& sizes_types,                                        \
           uint tid)
 
 #define REGISTER_BINARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO)              \

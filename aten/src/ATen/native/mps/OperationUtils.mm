@@ -1501,6 +1501,14 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                                             scalarToMetalTypeString(out),
                                             scalarToMetalTypeString(input),
                                             alpha_suffix);
+    // Prefer a cast kernel registered for this exact pair of input dtypes (REGISTER_BINARY_TYPED_CAST_OP)
+    if (cast_needed && !alpha) {
+      auto typed_name =
+          fmt::format("{}_{}_{}", kernel_name, scalarToMetalTypeString(input), scalarToMetalTypeString(other));
+      if (hasFunction(typed_name)) {
+        kernel_name = std::move(typed_name);
+      }
+    }
   }
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
