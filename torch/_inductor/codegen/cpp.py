@@ -3533,7 +3533,7 @@ class CppVecKernel(CppKernel):
             # Vertical reduction
             if out_dtype != dtype:
                 converted_value = (
-                    f"{DTYPE_TO_CPP[out_dtype].replace('::', '_')}_{value}"
+                    f"{DTYPE_TO_CPP[out_dtype].replace('::', '_')}_{value}_{var}"
                 )
                 if out_dtype == torch.bool:
                     convert = f"{value}.template cast<bool,{self._get_num_vectors(torch.bool)}>()"

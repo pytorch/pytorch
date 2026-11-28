@@ -4351,6 +4351,47 @@ class CPUReproTests(TestCase):
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
+    def test_store_lowp_reduction_to_multiple_outputs(self):
+        def fn(x):
+            return x.sum(0), x.sum(0)
+
+        for dtype in _lowp_fp_dtypes:
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (torch.randn(64, 768, dtype=dtype),))
+            check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_parallel_residual_lowp_backward(self):
+        class ParallelResidual(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attn_out = nn.Linear(768, 768)
+                self.mlp_out = nn.Linear(768, 768)
+
+            def forward(self, a, b):
+                return self.attn_out(a) + self.mlp_out(b)
+
+        for dtype in _lowp_fp_dtypes:
+            torch._dynamo.reset()
+            model = ParallelResidual().to(dtype)
+            a = torch.randn(2, 32, 768, dtype=dtype, requires_grad=True)
+            b = torch.randn(2, 32, 768, dtype=dtype, requires_grad=True)
+
+            self.common(
+                lambda a, b: model(a, b).float().pow(2).sum(),
+                (a, b),
+                reference_in_float=False,
+                check_gradient=True,
+                atol=1e-1,
+                rtol=1e-3,
+                grad_atol=1e-1,
+                grad_rtol=1e-2,
+            )
+
+    @requires_vectorization
+    @patch("torch.cuda.is_available", lambda: False)
     def test_sign_cpu_only(self):
         def fn(x):
             return torch.sign(x)
