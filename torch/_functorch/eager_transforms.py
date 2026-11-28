@@ -1128,6 +1128,12 @@ def jvp(
         You may see this API error out with "forward-mode AD not implemented
         for operator X". If so, please file a bug report and we will prioritize it.
 
+    .. note::
+        :func:`torch.no_grad` does not disable forward-mode autodiff. A
+        ``no_grad`` block inside ``func`` does not stop :func:`jvp` from
+        differentiating its operations. Use :meth:`torch.Tensor.detach` on
+        values that should not contribute to the derivative.
+
     jvp is useful when you wish to compute gradients of a function R^1 -> R^N
 
         >>> from torch.func import jvp
@@ -1291,6 +1297,12 @@ def jacfwd(
         You may see this API error out with "forward-mode AD not implemented
         for operator X". If so, please file a bug report and we will prioritize it.
         An alternative is to use :func:`jacrev`, which has better operator coverage.
+
+    .. note::
+        :func:`torch.no_grad` does not disable forward-mode autodiff. Unlike
+        :func:`jacrev`, :func:`jacfwd` differentiates operations inside a
+        ``no_grad`` block in ``func``. Use :meth:`torch.Tensor.detach` on
+        values that should not contribute to the Jacobian.
 
     A basic usage with a pointwise, unary operation will give a diagonal array
     as the Jacobian
