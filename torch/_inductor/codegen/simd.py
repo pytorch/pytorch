@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
+from torch.utils._sympy.numbers import is_infinite
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
@@ -80,7 +81,13 @@ from ..utils import (
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
-from .multi_kernel import MultiKernel, SizeHintMultiKernel
+from .multi_kernel import (
+    ConditionalMultiKernel,
+    leaf_kernels,
+    MultiKernel,
+    MultiKernelBase,
+    SizeHintMultiKernel,
+)
 from .simd_kernel_features import (
     DisableReduction,
     EnableReduction,
@@ -546,6 +553,17 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         tiling_scores: dict[str, sympy.Expr] | None = None,
         mix_order_reduction: bool = False,
         split_as_grid_reduction: int | None = None,
+        # Force the index dtype (int32 or int64) instead of choosing it from the
+        # sizes. Choosing int32 normally adds a guard that every size fits in int32;
+        # forcing it adds no guard, so the caller has to check the sizes before
+        # launching the kernel (ConditionalMultiKernel does).
+        override_index_dtype: torch.dtype | None = None,
+        # Optimization hints to generate the kernel with instead of the example
+        # inputs' (see SizeVarAllocator.optimization_hint_overrides). Set only for the
+        # int64 kernel that config.dual_index_dtype_kernels builds next to an int32
+        # one: it only runs on sizes past int32, so it is tuned for those
+        # (_int64_kernel_hint_overrides).
+        optimization_hint_overrides: dict[sympy.Symbol, int] | None = None,
     ) -> None:
         if pid_cache is None:
             pid_cache = {}
@@ -612,7 +630,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.min_xblock: int | None = None
         self.min_rblock: int | None = None
         self.saved_partial_accumulate: list[PartialAccumulate] = []
-        self._index_dtype = self.features.select_index_dtype()
+        self._index_dtype = (
+            override_index_dtype
+            if override_index_dtype is not None
+            else self.features.select_index_dtype()
+        )
+        self.optimization_hint_overrides = optimization_hint_overrides
 
     def codegen_template_body(
         self,
@@ -2979,6 +3002,37 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         return None
 
 
+def _int64_kernel_hint_overrides(
+    int32_conditions: list[sympy.Expr],
+) -> dict[sympy.Symbol, int] | None:
+    """Hints for the int64 kernel of a dual int32/int64 pair: every symbol in
+    int32_conditions (SIMDKernelFeatures.int32_index_conditions) scaled by the
+    smallest power of two at which a condition fails, i.e. the smallest input with
+    the example's proportions that launches that kernel. None if there is none.
+
+    The symbols are scaled together because which dimension grows past int32 is
+    unknown; dimensions that are static in the graph are not symbols, so when only
+    the batch is dynamic, only the batch is scaled."""
+    sizevars = V.graph.sizevars
+    symbols = sorted(
+        OrderedSet(s for cond in int32_conditions for s in cond.free_symbols), key=str
+    )
+    hints = {s: sizevars.optimization_hint(s) for s in symbols}
+    uppers = {s: sizevars.shape_env.bound_sympy(s).upper for s in symbols}
+    factor = 2
+    while factor <= 2**32:
+        values = {
+            s: hint * factor
+            if is_infinite(uppers[s])
+            else min(hint * factor, int(uppers[s]))
+            for s, hint in hints.items()
+        }
+        if any(cond.xreplace(values) is sympy.false for cond in int32_conditions):
+            return values
+        factor *= 2
+    return None
+
+
 class SIMDScheduling(BaseScheduling):
     """
     Single Instruction Multiple Data parent class used for fusion across
@@ -4761,35 +4815,145 @@ class SIMDScheduling(BaseScheduling):
                     merged_patches.update(patches)
         return merged_patches
 
+    @staticmethod
+    def _union_must_keep_buffers(kernels: list[Any]) -> OrderedSet[str] | None:
+        """Versions of a kernel built under different hints can make different
+        persistent or cooperative reduction choices, and so keep different stored
+        buffers (must_keep_buffers) and remove the others. Every version must write
+        the same buffers. If they remove different ones, return every buffer some
+        version keeps, to rebuild the versions that remove one of them; else None."""
+        first = kernels[0]
+        if all(
+            k.removed_buffers == first.removed_buffers
+            and k.inplaced_to_remove == first.inplaced_to_remove
+            for k in kernels[1:]
+        ):
+            return None
+        return OrderedSet(
+            name
+            for kernel in kernels
+            for leaf in leaf_kernels(kernel)
+            for name in leaf.must_keep_buffers
+        )
+
+    @staticmethod
+    def _keeps_all(kernel: Any, buffers: OrderedSet[str]) -> bool:
+        kept = OrderedSet(
+            name for leaf in leaf_kernels(kernel) for name in leaf.must_keep_buffers
+        )
+        return all(name in kept for name in buffers)
+
+    @staticmethod
+    def _check_same_graph_effects(kernels: list[Any]) -> None:
+        for kernel in kernels[1:]:
+            for attr in (
+                "removed_buffers",
+                "inplaced_to_remove",
+                "inplace_update_buffers",
+            ):
+                if getattr(kernel, attr) != getattr(kernels[0], attr):
+                    raise AssertionError(f"kernel versions differ in {attr}")
+
+    def _should_build_int32_and_int64(
+        self, kernel_features: SIMDKernelFeatures
+    ) -> bool:
+        """Whether config.dual_index_dtype_kernels applies to this kernel: build an
+        int32 and an int64 variant and launch the int32 one only when the sizes fit,
+        instead of a single kernel with a size guard."""
+        from .triton import TritonScheduling
+
+        if not config.dual_index_dtype_kernels:
+            return False
+        skipped_for = (
+            # ConditionalMultiKernel emits Triton launches.
+            "a non-Triton backend"
+            if not isinstance(self, TritonScheduling)
+            # TODO: remove to cover all kernels, with tests for them.
+            else "a non-reduction kernel"
+            if not kernel_features.is_reduction()
+            # TODO: support the cpp and FX wrappers (they cannot emit the conditional
+            # launch yet).
+            else "the cpp wrapper"
+            if V.graph.cpp_wrapper
+            else "the FX wrapper"
+            if config.fx_wrapper
+            # TODO: support compile-time autotuning (needed for AOTInductor, where it
+            # is on by default): its block launches every captured kernel without
+            # checking the branch conditions.
+            else "triton.autotune_at_compile_time"
+            if config.triton.autotune_at_compile_time
+            # The user asked for int32 indexing (with a guard).
+            else "config.assume_32bit_indexing"
+            if config.assume_32bit_indexing
+            else None
+        )
+        if skipped_for is not None:
+            log.debug("dual_index_dtype_kernels: single kernel for %s", skipped_for)
+        return skipped_for is None
+
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
         """
         Generate code for one fused scheduler node. kernel_features holds its
         SchedulerNodes in codegen order (node_schedule) and its sizes; every kernel
         built below computes all of them, and one is launched. In three steps:
 
-        1. Build (_create_node_schedule_kernel): pick the tiling, create the kernels
-           (one, or several variants with triton.multi_kernel) and generate each
-           one's body: the Triton lines for the nodes' loads, compute and stores. A
-           kernel has no signature, decorator or name yet, and nothing is written to
-           the wrapper, so this can run more than once.
-        2. Define (_define_node_schedule_kernels), on the kernels from step 1:
-           merge their workspaces, then turn each one into its complete Triton source
+        1. Build (_create_node_schedule_kernel): pick the tiling, create the kernel
+           objects (one, or a multi-kernel wrapping several leaf kernels) and generate
+           each leaf's body: the Triton lines for the nodes' loads, compute and stores.
+           A leaf has no signature, decorator or name yet, and nothing is written to
+           the wrapper, so this can run more than once; the dual index dtype path
+           builds an int32 and an int64 kernel, the int64 one with hints past int32,
+           and wraps them in a ConditionalMultiKernel.
+        2. Define (_define_node_schedule_kernels), on the leaf kernels from step 1:
+           merge their workspaces, then turn each leaf into its complete Triton source
            (decorator with size_hints, signature, setup lines, body) and write its
            definition (`name = async_compile.triton(...)`) into the output module,
-           which sets its kernel_name. This runs once, after every kernel exists,
+           which sets its kernel_name. This runs once, after every leaf exists,
            because the merged workspace size is part of each source.
-        3. Emit: wrap several variants in a MultiKernel, allocate the nodes' output
-           buffers in the wrapper (mark_run) and write the launch.
+        3. Emit: allocate the nodes' output buffers in the wrapper (mark_run) and
+           write the launch of the kernel from step 1.
         """
         node_schedule = kernel_features.node_schedule
-        kernels = self._create_node_schedule_kernel(kernel_features)
-        self._define_node_schedule_kernels(kernels, node_schedule)
-
-        final_kernel: SIMDKernel | MultiKernel
-        if len(kernels) > 1:
-            final_kernel = MultiKernel(kernels)
+        final_kernel: SIMDKernel | MultiKernelBase
+        # Empty or None conditions: select_index_dtype picks int32 or int64 without a
+        # guard, so a single kernel suffices.
+        if self._should_build_int32_and_int64(kernel_features) and (
+            int32_conditions := kernel_features.int32_index_conditions()
+        ):
+            int64_hints = _int64_kernel_hint_overrides(int32_conditions)
+            build = functools.partial(
+                self._create_node_schedule_kernel, kernel_features
+            )
+            int32_kernel = build(torch.int32)
+            int64_kernel = build(torch.int64, optimization_hint_overrides=int64_hints)
+            keep = self._union_must_keep_buffers([int32_kernel, int64_kernel])
+            if keep is not None:
+                # Rebuild only the kernels that remove a buffer in keep; a discarded
+                # build is not a generated kernel.
+                discarded = 0
+                if not self._keeps_all(int32_kernel, keep):
+                    discarded += len(leaf_kernels(int32_kernel))
+                    int32_kernel = build(torch.int32, must_keep_buffers=keep)
+                if not self._keeps_all(int64_kernel, keep):
+                    discarded += len(leaf_kernels(int64_kernel))
+                    int64_kernel = build(
+                        torch.int64,
+                        optimization_hint_overrides=int64_hints,
+                        must_keep_buffers=keep,
+                    )
+                # pyrefly: ignore [bad-assignment]
+                metrics.generated_kernel_count -= discarded
+            self._check_same_graph_effects([int32_kernel, int64_kernel])
+            final_kernel = ConditionalMultiKernel(
+                [
+                    (sympy.And(*int32_conditions), int32_kernel),
+                    (sympy.true, int64_kernel),
+                ]
+            )
         else:
-            (final_kernel,) = kernels
+            final_kernel = self._create_node_schedule_kernel(kernel_features)
+        kernels = leaf_kernels(final_kernel)
+        self._define_node_schedule_kernels(kernels, node_schedule)
 
         with V.set_kernel_handler(final_kernel):
             for node in kernel_features.scheduler_nodes():
@@ -4829,38 +4993,63 @@ class SIMDScheduling(BaseScheduling):
         return final_kernel
 
     def _create_node_schedule_kernel(
-        self, kernel_features: SIMDKernelFeatures
-    ) -> list[SIMDKernel]:
-        """Build step of codegen_node_schedule: pick the tiling, create the kernels
-        (one, or several variants with triton.multi_kernel) and generate each one's
-        body: the Triton source lines for the nodes' loads, compute and stores, kept
-        in buffers on the kernel.
+        self,
+        kernel_features: SIMDKernelFeatures,
+        index_dtype: torch.dtype | None = None,
+        *,
+        optimization_hint_overrides: dict[sympy.Symbol, int] | None = None,
+        must_keep_buffers: OrderedSet[str] | None = None,
+    ) -> SIMDKernel | MultiKernel:
+        """Build step of codegen_node_schedule: pick the tiling, create the kernel
+        objects (one kernel, or a multi-kernel over several leaf kernels) and generate
+        each leaf's body: the Triton source lines for the nodes' loads, compute and
+        stores, kept in buffers on the leaf.
 
-        Returns those kernels. Nothing is written to the wrapper and no graph state
-        changes, so this can run more than once for one schedule.
+        Returns the kernel (or multi-kernel) whose leaves hold those bodies. Nothing
+        is written to the wrapper and no graph state changes, so this can run more
+        than once for one schedule.
+
+        index_dtype forces the index dtype instead of deriving it (and its guard)
+        from the sizes. optimization_hint_overrides replaces the hints that the
+        heuristics read, here and when _define_node_schedule_kernels renders the
+        kernels: tiling scores included, but not the memory-coalescing analysis, which
+        is computed before codegen. must_keep_buffers are buffers the kernels must
+        write even if they could remove them (_union_must_keep_buffers).
         """
-        node_schedule = kernel_features.node_schedule
-        tiling, tiling_score = self.get_tiling_and_scores(
-            node_schedule,
-            kernel_features.numel,
-            kernel_features.reduction_numel,
-            kernel_features.coalesce_analysis,
-        )
-        kernels = self.create_kernel_choices(
-            kernel_features,
-            [tiling],
-            {"features": kernel_features, "tiling_scores": tiling_score},
-        )
-        for kernel in kernels:
-            self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-        return kernels
+        with V.graph.sizevars.optimization_hint_overrides(optimization_hint_overrides):
+            tiling, tiling_score = self.get_tiling_and_scores(
+                kernel_features.node_schedule,
+                kernel_features.numel,
+                kernel_features.reduction_numel,
+                kernel_features.coalesce_analysis,
+            )
+            kernel_kwargs: dict[str, Any] = {
+                "features": kernel_features,
+                "tiling_scores": tiling_score,
+            }
+            if index_dtype is not None:
+                kernel_kwargs["override_index_dtype"] = index_dtype
+            if optimization_hint_overrides is not None:
+                kernel_kwargs["optimization_hint_overrides"] = (
+                    optimization_hint_overrides
+                )
+            kernels = self.create_kernel_choices(
+                kernel_features, [tiling], kernel_kwargs
+            )
+            for kernel in kernels:
+                if must_keep_buffers is not None:
+                    kernel.must_keep_buffers.update(must_keep_buffers)
+                self.codegen_node_schedule_with_kernel(
+                    kernel_features.node_schedule, kernel
+                )
+        return MultiKernel(kernels) if len(kernels) > 1 else kernels[0]
 
     def _define_node_schedule_kernels(
         self, kernels: list[SIMDKernel], node_schedule: list[NodeScheduleEntry]
     ) -> None:
-        """Define step of codegen_node_schedule, on every kernel built by
+        """Define step of codegen_node_schedule, on every leaf kernel built by
         _create_node_schedule_kernel for one launch: merge their workspaces, then
-        turn each one into its complete Triton source (codegen_kernel adds the
+        turn each leaf into its complete Triton source (codegen_kernel adds the
         decorator with size_hints, the signature and the setup lines around the
         body) and write its definition (`name = async_compile.triton(...)`) into the
         output module, setting its kernel_name and code_hash.
@@ -4875,12 +5064,40 @@ class SIMDScheduling(BaseScheduling):
         config_patches = self._collect_config_patches(node_schedule)
 
         for kernel in kernels:
-            with V.set_kernel_handler(kernel), config.patch(**config_patches):
+            # Reapply the hints the kernel was built with: codegen_kernel reads hints
+            # too (e.g. for size_hints).
+            with (
+                V.set_kernel_handler(kernel),
+                config.patch(**config_patches),
+                V.graph.sizevars.optimization_hint_overrides(
+                    kernel.optimization_hint_overrides
+                ),
+            ):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
             kernel.kernel_name = kernel_name
             kernel.code_hash = code_hash(src_code)
+
+    @staticmethod
+    def _record_other_choices_provenance(kernel, node_schedule) -> None:
+        """codegen_comment records the kernel's provenance under its kernel_name,
+        which for a ConditionalMultiKernel names its first choice. Record the other
+        choices too: they compute the same nodes."""
+        if not isinstance(kernel, ConditionalMultiKernel):
+            return
+        from ..debug import set_kernel_post_grad_provenance_tracing
+
+        wrapper = V.graph.wrapper_code
+        for choice in kernel.kernels[1:]:
+            handle = set_kernel_post_grad_provenance_tracing(
+                node_schedule, choice.kernel_name
+            )
+            if handle is not None:
+                wrapper.make_comment(
+                    f"{wrapper.comment} [Provenance debug handles] "
+                    f"{choice.kernel_name}:{handle}"
+                )
 
     def _launch_kernel_and_cleanup(
         self,
@@ -4890,6 +5107,7 @@ class SIMDScheduling(BaseScheduling):
         free_buffers: bool = True,
     ) -> None:
         self.codegen_comment(base_scheduler_nodes, kernel.kernel_name)
+        self._record_other_choices_provenance(kernel, base_scheduler_nodes)
         with V.graph.wrapper_code.kernel_profile_scope(
             kernel.kernel_name, base_scheduler_nodes
         ):
@@ -5877,7 +6095,16 @@ class SIMDScheduling(BaseScheduling):
 
     @classmethod
     @functools.lru_cache(32)
-    def candidate_tilings(cls, node, numel, reduction_numel) -> list[CandidateTiling]:
+    def candidate_tilings(
+        cls,
+        node,
+        numel,
+        reduction_numel,
+        hint_overrides_key: frozenset[tuple[sympy.Symbol, int]] | None = None,
+    ) -> list[CandidateTiling]:
+        """Candidate tilings of node, scored from optimization hints.
+        hint_overrides_key is only part of the cache key, so that scores computed
+        under some overrides are not reused under others."""
         is_pointwise = reduction_numel == 1
 
         def tile_ranges(is_pointwise: bool, ranges, rw) -> list[CandidateTiling]:
@@ -6642,15 +6869,15 @@ class SIMDScheduling(BaseScheduling):
                 node_schedule, numel, reduction_numel, coalesce_analysis
             )
 
+        hint_overrides_key = V.graph.sizevars.optimization_hint_overrides_key
         if (not is_pointwise and not config.triton.tile_reductions) or get_max_tiles(
             default=2
         ) <= 1:
             # Emit a perf hint in case we miss an opportunity to tile a reduction.
             if perf_hint_log.level <= logging.WARNING:
                 for node in EnableReduction.filter(node_schedule):
-                    if (
-                        not config.triton.tile_reductions
-                        and len(cls.candidate_tilings(node, numel, reduction_numel)) > 0
+                    if not config.triton.tile_reductions and cls.candidate_tilings(
+                        node, numel, reduction_numel, hint_overrides_key
                     ):
                         perf_hint_log.info(
                             textwrap.dedent(
@@ -6667,7 +6894,9 @@ class SIMDScheduling(BaseScheduling):
         seen_names: OrderedSet[str] = OrderedSet()
         candidate_tiles: Counter[CandidateTiling] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
-            for candidate_tiling in cls.candidate_tilings(node, numel, reduction_numel):
+            for candidate_tiling in cls.candidate_tilings(
+                node, numel, reduction_numel, hint_overrides_key
+            ):
                 if candidate_tiling.name in seen_names:
                     continue
                 elif candidate_tiling.name is not None:
