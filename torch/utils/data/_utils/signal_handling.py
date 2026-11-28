@@ -26,6 +26,12 @@ Additionally, at the beginning of each worker's `_utils.worker._worker_loop`,
 message to stderr before triggering the default handler. So a message will also
 be printed from the worker process when it is killed by such signals.
 
+Worker initialization code can call `_set_worker_signal_message_affixes(prefix,
+suffix)` to add process-local str or bytes around these messages. Configuration
+can be replaced or cleared with empty strings, is inherited through fork, and
+has no effect on Windows. New calls are rejected once fatal signal handling
+starts. Call it from `worker_init_fn` to also support workers started with spawn.
+
 See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for the reasoning of
 this signal handling design and other mechanism we implement to make our
 multiprocessing data loading robust to errors.
@@ -41,6 +47,7 @@ from torch._C import (  # noqa: F401
     _remove_worker_pids,
     _set_worker_pids,
     _set_worker_signal_handlers,
+    _set_worker_signal_message_affixes,
 )
 
 from . import IS_WINDOWS
