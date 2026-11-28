@@ -808,6 +808,57 @@ class TestDecomp(TestCase):
         res_p = res.sum() / torch.prod(torch.tensor(res.size()))
         self.assertEqual(ref_p, res_p, atol=0.06 * p, rtol=0.06)
 
+    def test_index_add_copy_dtype_check(self, device):
+        # The index_add/index_copy decompositions must reject mixed
+        # self/source dtypes the way the eager kernels do, instead of
+        # silently rounding the source
+        # (https://github.com/pytorch/pytorch/issues/205291).
+        idx = torch.tensor([0, 0, 1], device=device)
+        x0 = torch.zeros(2, dtype=torch.int32, device=device)
+        s = torch.ones(3, dtype=torch.float64, device=device)
+
+        def add(x=x0, src=s):
+            return x.index_add(0, idx, src)
+
+        def copy(x=x0, src=s):
+            return x.index_copy(0, idx, src)
+
+        for fn, msg in ((add, "same scalar type"), (copy, "same dtype")):
+            with self.assertRaisesRegex(RuntimeError, msg):
+                fn()
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, backend="aot_eager_decomp_partition")
+            with self.assertRaisesRegex(Exception, msg):
+                compiled()
+
+        # index_fill takes a 0-d tensor value of another dtype and casts it,
+        # both eagerly and through the decomposition chain
+        x0i = torch.zeros(2, dtype=torch.int32, device=device)
+        for value in (
+            torch.tensor(3.7, dtype=torch.float64, device=device),
+            torch.tensor(2, dtype=torch.int64, device=device),
+        ):
+            ref = torch.zeros(2, dtype=torch.int32, device=device).index_fill(
+                0, idx, value
+            )
+            torch._dynamo.reset()
+            got = torch.compile(
+                lambda x=x0i, v=value: x.index_fill(0, idx, v),
+                backend="aot_eager_decomp_partition",
+            )()
+            self.assertEqual(ref, got)
+
+        # a complex 0-d value into a real tensor is rejected eagerly, and the
+        # compiled path must agree rather than silently drop the imaginary part
+        def fill_complex(x=x0i, v=torch.tensor(1 + 2j, device=device)):
+            return x.index_fill(0, idx, v)
+
+        with self.assertRaisesRegex(RuntimeError, "Converting complex"):
+            fill_complex()
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Exception, "Converting complex"):
+            torch.compile(fill_complex, backend="aot_eager_decomp_partition")()
+
     def test_broadcasting_index_copy(self, device):
         x = torch.zeros([1, 10], device=device)
         xs = torch.ones([2, 10], device=device)
