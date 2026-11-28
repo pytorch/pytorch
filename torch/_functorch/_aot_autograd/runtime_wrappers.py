@@ -67,6 +67,7 @@ from .descriptors import (
     AOTOutput,
     DummyAOTInput,
     MetadataMutationAOTOutput,
+    PlainAOTInput,
     SyntheticBaseAOTInput,
     ViewBaseAOTInput,
 )
@@ -1889,6 +1890,51 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         default_factory=lambda: collections.defaultdict(list)
     )
     other_arg_indices: list[int] = field(default_factory=list)
+    # Source indices (into aot_config.aot_autograd_arg_pos_to_source) of aliased
+    # inputs whose concrete int storage_offset is baked into synthetic-base views.
+    # Reused in post_compile so both cache misses and AOTAutogradCache hits
+    # install Dynamo STORAGE_OFFSET guards.
+    concrete_storage_offset_source_indices: list[int] = field(default_factory=list)
+
+    def _install_synthetic_base_storage_offset_guards(
+        self,
+        aot_config: AOTConfig,
+    ) -> None:
+        # When aliased inputs are merged into a synthetic base, gen_alias_from_base
+        # bakes concrete int storage offsets into as_strided / as_strided_scatter.
+        # Dynamo's TENSOR_MATCH guard does not check storage_offset, so guard it
+        # explicitly to avoid reusing a cached graph across different overlap geometries.
+        sources = aot_config.aot_autograd_arg_pos_to_source
+        if (
+            not self.concrete_storage_offset_source_indices
+            or TracingContext.try_get() is None
+            or not sources
+        ):
+            return
+
+        from torch._dynamo.guards import GuardBuilder, install_guard
+        from torch._dynamo.source import (
+            is_constant_source,
+            TensorProperty,
+            TensorPropertySource,
+        )
+
+        for source_idx in self.concrete_storage_offset_source_indices:
+            if source_idx >= len(sources):
+                continue
+            source = sources[source_idx]
+            if (
+                source is None
+                or not source.subguards_allowed()
+                or is_constant_source(source)
+            ):
+                continue
+            install_guard(
+                TensorPropertySource(source, TensorProperty.STORAGE_OFFSET).make_guard(
+                    GuardBuilder.EQUALS_MATCH
+                ),
+                recompile_hint="storage_offset changed for aliased mutated input",
+            )
 
     def pre_compile(
         self,
@@ -1974,6 +2020,22 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 self.base_groups[base_idx].append(orig_idx)
         other_arg_entries.sort()
         self.other_arg_indices = [orig_idx for _, orig_idx in other_arg_entries]
+
+        self.concrete_storage_offset_source_indices = []
+        for group in self.base_groups.values():
+            for orig_idx in group:
+                view_tensor = flat_args[orig_idx]
+                if not isinstance(view_tensor, Tensor) or not isinstance(
+                    view_tensor.storage_offset(), int
+                ):
+                    continue
+                desc = flat_args_descs[orig_idx]
+                source_idx = (
+                    desc.idx + aot_config.num_params_buffers
+                    if isinstance(desc, PlainAOTInput)
+                    else orig_idx
+                )
+                self.concrete_storage_offset_source_indices.append(source_idx)
 
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
@@ -2064,6 +2126,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     ) -> Callable[..., Any]:
         if not self.needs_post_compile:
             return compiled_fn
+
+        self._install_synthetic_base_storage_offset_guards(aot_config)
 
         from .codegen import PySourceBuilder
 

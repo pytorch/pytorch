@@ -1668,6 +1668,127 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         self._test_no_storage_overlap_guards(f, non_overlapping_args)
 
+    def test_synthetic_base_storage_offset_guard(self):
+        def f(x, y, c):
+            x.add_(1)
+            return y + c
+
+        cases = [
+            ("full_to_partial", slice(0, 4), slice(0, 4), slice(0, 4), slice(2, 6)),
+            ("partial_to_full", slice(0, 4), slice(2, 6), slice(0, 4), slice(0, 4)),
+            ("shifted_both", slice(1, 5), slice(3, 7), slice(2, 6), slice(4, 8)),
+        ]
+        for dynamic in (False, True):
+            for name, s1x, s1c, s2x, s2c in cases:
+                with self.subTest(dynamic=dynamic, case=name):
+                    torch._dynamo.reset()
+                    cnt = CompileCounterWithBackend("aot_eager")
+                    opt_f = torch.compile(
+                        f, backend=cnt, fullgraph=True, dynamic=dynamic
+                    )
+
+                    b1 = torch.arange(10.0)
+                    b1_ref = b1.clone()
+                    out1 = opt_f(b1[s1x], torch.zeros(4), b1[s1c])
+                    ref1 = f(b1_ref[s1x], torch.zeros(4), b1_ref[s1c])
+                    self.assertEqual(out1, ref1)
+                    self.assertEqual(b1, b1_ref)
+                    self.assertEqual(cnt.frame_count, 1)
+
+                    # Same overlap geometry should hit the compiled cache.
+                    b1_again = torch.arange(10.0)
+                    b1_again_ref = b1_again.clone()
+                    out1_again = opt_f(b1_again[s1x], torch.zeros(4), b1_again[s1c])
+                    ref1_again = f(b1_again_ref[s1x], torch.zeros(4), b1_again_ref[s1c])
+                    self.assertEqual(out1_again, ref1_again)
+                    self.assertEqual(b1_again, b1_again_ref)
+                    self.assertEqual(cnt.frame_count, 1)
+
+                    # Different overlap geometry must match eager results and mutations.
+                    b2 = torch.arange(10.0)
+                    b2_ref = b2.clone()
+                    out2 = opt_f(b2[s2x], torch.zeros(4), b2[s2c])
+                    ref2 = f(b2_ref[s2x], torch.zeros(4), b2_ref[s2c])
+                    self.assertEqual(out2, ref2)
+                    self.assertEqual(b2, b2_ref)
+                    self.assertEqual(cnt.frame_count, 2)
+
+    def test_synthetic_base_storage_offset_guard_with_lifted_param(self):
+        w = torch.full((4,), 10.0)
+        torch._dynamo.mark_static_address(w, guard=True)
+
+        def f(x, c):
+            x.add_(1)
+            return c + w
+
+        torch._dynamo.reset()
+        cnt = CompileCounterWithBackend("aot_eager")
+        opt_f = torch.compile(f, backend=cnt, fullgraph=True)
+
+        b1 = torch.arange(8.0)
+        b1_ref = b1.clone()
+        self.assertEqual(opt_f(b1[:4], b1[0:4]), f(b1_ref[:4], b1_ref[0:4]))
+        self.assertEqual(b1, b1_ref)
+        self.assertEqual(cnt.frame_count, 1)
+
+        b2 = torch.arange(8.0)
+        b2_ref = b2.clone()
+        self.assertEqual(opt_f(b2[:4], b2[2:6]), f(b2_ref[:4], b2_ref[2:6]))
+        self.assertEqual(b2, b2_ref)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_synthetic_base_storage_offset_guard_inductor(self):
+        from torch._inductor.utils import fresh_cache
+
+        def f(x, y, c):
+            x.add_(1)
+            return y + c
+
+        with (
+            fresh_cache(),
+            torch._functorch.config.patch(
+                enable_autograd_cache=True, strict_autograd_cache=True
+            ),
+        ):
+            torch._dynamo.reset()
+            opt_f = torch.compile(f, backend="inductor", fullgraph=True)
+
+            b1 = torch.arange(8.0)
+            b1_ref = b1.clone()
+            self.assertEqual(
+                opt_f(b1[:4], torch.zeros(4), b1[0:4]),
+                f(b1_ref[:4], torch.zeros(4), b1_ref[0:4]),
+            )
+            self.assertEqual(b1, b1_ref)
+
+            b2 = torch.arange(8.0)
+            b2_ref = b2.clone()
+            self.assertEqual(
+                opt_f(b2[:4], torch.zeros(4), b2[2:6]),
+                f(b2_ref[:4], torch.zeros(4), b2_ref[2:6]),
+            )
+            self.assertEqual(b2, b2_ref)
+
+            # Reset Dynamo so the next call loads from AOTAutogradCache, and
+            # verify the cached entry re-installs the STORAGE_OFFSET guard.
+            torch._dynamo.reset()
+            opt_f = torch.compile(f, backend="inductor", fullgraph=True)
+            b1_hit = torch.arange(8.0)
+            b1_hit_ref = b1_hit.clone()
+            self.assertEqual(
+                opt_f(b1_hit[:4], torch.zeros(4), b1_hit[0:4]),
+                f(b1_hit_ref[:4], torch.zeros(4), b1_hit_ref[0:4]),
+            )
+            self.assertEqual(b1_hit, b1_hit_ref)
+
+            b2_after_hit = torch.arange(8.0)
+            b2_after_hit_ref = b2_after_hit.clone()
+            self.assertEqual(
+                opt_f(b2_after_hit[:4], torch.zeros(4), b2_after_hit[2:6]),
+                f(b2_after_hit_ref[:4], torch.zeros(4), b2_after_hit_ref[2:6]),
+            )
+            self.assertEqual(b2_after_hit, b2_after_hit_ref)
+
     def test_inputs_overlapping_with_mutation_stress(self):
         # Stress test for StorageOverlap guard.
         #
