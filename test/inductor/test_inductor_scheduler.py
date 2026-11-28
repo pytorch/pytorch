@@ -2694,6 +2694,18 @@ class TestSchedulerGeneric(TestCase):
 class TestSchedulerAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    def _mock_base_snode(self, name, device=None):
+        node = Mock()
+        node.get_name.return_value = name
+        node.get_first_name.return_value = name
+        node.get_device.return_value = device
+        node.get_nodes.return_value = [node]
+        node.get_buffer_names.return_value = OrderedSet()
+        node.used_buffer_names.return_value = OrderedSet()
+        node.is_template.return_value = False
+        node.is_reduction.return_value = False
+        return node
+
     @xfailIfNoAcceleratorTriton
     @inductor_config.patch({"triton.coalesce_tiling_analysis": False})
     def test_candidate_tilings_cache_cleared_after_codegen(self, device):
