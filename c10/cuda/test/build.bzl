@@ -6,6 +6,7 @@ dsa_tests = [
     "impl/CUDAAssertionsTest_multiple_writes_from_blocks_and_threads.cu",
     "impl/CUDAAssertionsTest_multiple_writes_from_multiple_blocks.cu",
     "impl/CUDAAssertionsTest_multiple_writes_from_same_block.cu",
+    "impl/CUDAAssertionsTest_stacktracing_message.cu",
 ]
 
 def define_targets(rules, gtest_deps):
