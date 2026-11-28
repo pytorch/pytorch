@@ -1128,6 +1128,13 @@ class TestInductorDynamic(DynamicShapesTestCase):
         def fn(x):
             return x.sum(-1), x.argmax(-1), torch.softmax(x, -1)
 
+        def make(shape):
+            # A cooperative kernel sums its long rows in a different order than eager;
+            # integer values keep the float sums exact in any order.
+            if cooperative:
+                return torch.randint(-8, 8, shape, device=device).float()
+            return torch.randn(shape, device=device)
+
         counter = CompileCounterWithBackend("inductor")
         compiled = torch.compile(fn, backend=counter, dynamic=True)
         with (
@@ -1139,7 +1146,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
             ),
             _lowered_int32_limit(),
         ):
-            x = torch.randn(8 if cooperative else 64, 512, device=device)
+            x = make((8 if cooperative else 64, 512))
             actual, (code, *_) = run_and_get_code(compiled, x)
             self.assertEqual(actual, fn(x))
             # Both sides of the limit, in either order, without recompiling.
@@ -1149,7 +1156,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
                 else [(512, 512), (3, 7), (300, 1000), (64, 512)]
             )
             for shape in shapes:
-                y = torch.randn(shape, device=device)
+                y = make(shape)
                 self._assert_dual_launch(compiled, fn, (y,), y.numel())
         self.assertEqual(counter.frame_count, 1)
 
