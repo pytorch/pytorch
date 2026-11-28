@@ -70,7 +70,7 @@ class TestCutlassFallback(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS,ATen",
-                "cuda.cutlass_max_profiling_configs": 4,
+                "cutlass.cutlass_max_profiling_configs": 4,
             }
         ):
             with patch.object(CUTLASSTemplateCaller, "benchmark", mock_cuda_benchmark):
@@ -113,8 +113,8 @@ class TestCutlassFallback(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS,ATen",
-                "cuda.cutlass_max_profiling_configs": 40,
-                "cuda.cutlass_prescreening": True,
+                "cutlass.cutlass_max_profiling_configs": 40,
+                "cutlass.cutlass_prescreening": True,
             }
         ):
             with patch.object(
@@ -163,7 +163,7 @@ class TestCutlassFallback(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS,ATen",
-                "cuda.cutlass_max_profiling_configs": 4,
+                "cutlass.cutlass_max_profiling_configs": 4,
             }
         ):
             with patch.object(CUTLASSTemplateCaller, "benchmark", mock_cuda_benchmark):
@@ -196,7 +196,7 @@ class TestCutlassFallback(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS,ATen",
-                "cuda.cutlass_max_profiling_configs": 4,
+                "cutlass.cutlass_max_profiling_configs": 4,
             }
         ):
             torch._dynamo.reset()
@@ -372,8 +372,8 @@ class TestCutlassSubprocessRouting(TestCase):
 
         with config.patch(
             {
-                "cuda.cutlass_prescreening": True,
-                "cuda.cutlass_max_profiling_swizzle_options": [1, 2],
+                "cutlass.cutlass_prescreening": True,
+                "cutlass.cutlass_max_profiling_swizzle_options": [1, 2],
             }
         ):
             result = AlgorithmSelectorCache.prescreen_choices(
@@ -403,8 +403,8 @@ class TestCutlassSubprocessRouting(TestCase):
 
         with config.patch(
             {
-                "cuda.cutlass_prescreening": True,
-                "cuda.cutlass_max_profiling_swizzle_options": [1, 2],
+                "cutlass.cutlass_prescreening": True,
+                "cutlass.cutlass_max_profiling_swizzle_options": [1, 2],
             }
         ):
             result = AlgorithmSelectorCache.prescreen_choices(

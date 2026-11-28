@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
+    skipCUDAIf,
     toleranceOverride,
     tol,
 )
@@ -679,7 +680,7 @@ class TestScatterGatherDevice(TestCase):
 
     @onlyAccelerator
     @skipCUDAIf(
-        not (torch.version.hip is not None or SM80OrLater),
+        torch.version.hip is None and not SM80OrLater,
         "requires CUDA sm80+; ROCm runs the generic kernel",
     )
     @dtypes(torch.float16, torch.bfloat16)
