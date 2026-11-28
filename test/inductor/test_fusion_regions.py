@@ -3,17 +3,100 @@
 """Tests for fusion region detection."""
 
 import unittest
+from unittest.mock import patch
 
 import torch
+from torch._inductor import config
+from torch._inductor.fx_passes import fusion_regions
+from torch._inductor.fx_passes.fusion_regions import (
+    build_fusion_regions,
+    estimate_fused_node_costs,
+)
+from torch._inductor.fx_passes.overlap_scheduling import gather_node_runtime_estimations
+from torch._inductor.fx_utils import get_storage
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
-from torch.testing._internal.common_utils import xfailIfNoAcceleratorTriton
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    xfailIfNoAcceleratorTriton,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 HAS_GPU = torch.cuda.is_available() or torch.xpu.is_available()
+
+
+@instantiate_parametrized_tests
+class TestFusionCandidates(InductorTestCase):
+    def _make_graph(self, fn, *shapes):
+        with FakeTensorMode():
+            return make_fx(fn)(*(torch.ones(shape) for shape in shapes))
+
+    @parametrize(
+        "kind", ("mm", "bmm", "addmm", "baddbmm", "row_reduction", "horizontal")
+    )
+    @config.patch(prologue_fusion=True, epilogue_fusion=True)
+    @config.patch({"triton.native_matmul": True})
+    def test_matmul_candidates(self, kind):
+        def fn(x, w, bias):
+            op = kind if kind in ("mm", "bmm", "addmm", "baddbmm") else "mm"
+            args = (x.sin(), w)
+            if kind in ("addmm", "baddbmm"):
+                args = (bias, *args)
+            result = getattr(torch, op)(*args)
+            if kind == "row_reduction":
+                return result.sum(-1).abs()
+            if kind == "horizontal":
+                result = result + x @ w
+            return result.relu()
+
+        prefix = (2,) if kind in ("bmm", "baddbmm") else ()
+        gm = self._make_graph(fn, (*prefix, 4, 8), (*prefix, 8, 4), (*prefix, 4, 4))
+        regions = build_fusion_regions(gm, prioritize=True)
+        calls = [n for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertTrue(all(regions[n] is regions[calls[0]] for n in calls))
+
+    @parametrize("prioritize", (False, True))
+    def test_gemm_costs_and_mutable_destination_writes(self, prioritize):
+        def fn(x, w, buffer):
+            result = (x.sin() @ w).relu()
+            buffer.copy_(torch.cat((result, result)))
+            return result, buffer
+
+        gm = self._make_graph(fn, (4, 8), (8, 4), (8, 4))
+        buffer = list(gm.graph.find_nodes(op="placeholder"))[-1]
+        writer = next(n for n in gm.graph.nodes if n.target is aten.copy_.default)
+        output = next(n for n in gm.graph.nodes if n.op == "output")
+        output.replace_input_with(writer, buffer)
+        cat = next(n for n in gm.graph.nodes if n.target is aten.cat.default)
+        compute = next(n for n in gm.graph.nodes if n.target is aten.mm.default)
+        regions = build_fusion_regions(gm, prioritize=prioritize)
+        self.assertIs(regions[cat], regions[writer])
+        with (
+            patch.object(
+                fusion_regions, "estimate_roofline_runtime_ms", return_value=17.0
+            ),
+            patch.object(
+                fusion_regions, "get_transfer_time", return_value=1.0
+            ) as transfer,
+        ):
+            costs = estimate_fused_node_costs(regions, prioritize=prioritize)
+            custom = gather_node_runtime_estimations(
+                gm,
+                custom_runtime_estimation=lambda n, _: 42.0,
+                enable_fusion_regions=True,
+                prioritize_fusion_regions=prioritize,
+            )
+        self.assertEqual(costs.get(compute), 17.0 if prioritize else None)
+        self.assertEqual(costs[cat], 0.0)
+        self.assertGreater(costs[writer], 0.0)
+        outputs = [t for call in transfer.call_args_list for t in call.args[1]]
+        storage = get_storage(buffer.meta["val"])
+        self.assertEqual(any(get_storage(t) == storage for t in outputs), prioritize)
+        self.assertEqual(custom[cat], 42.0 if prioritize else 0.0)
 
 
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -172,10 +255,19 @@ class TestFusionRegionDetection(InductorTestCase):
         self.assertIsNotNone(add_node)
         self.assertTrue(is_fusible_node(add_node))
 
-        # aten.mm - has flop counter, should NOT be fusible
+        # aten.mm - requires enabled GEMM fusion support
         mm_node = find_node(aten.mm.default)
         self.assertIsNotNone(mm_node)
-        self.assertFalse(is_fusible_node(mm_node))
+        with config.patch(
+            {
+                "prologue_fusion": False,
+                "epilogue_fusion": False,
+                "triton.native_matmul": False,
+            }
+        ):
+            self.assertFalse(is_fusible_node(mm_node))
+        with config.patch(prologue_fusion=True):
+            self.assertTrue(is_fusible_node(mm_node))
 
         # aten.linalg_qr - fallback op, should NOT be fusible
         qr_node = find_node(aten.linalg_qr.default)
