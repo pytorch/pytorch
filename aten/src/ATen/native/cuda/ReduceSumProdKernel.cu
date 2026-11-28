@@ -38,7 +38,7 @@ struct sum_functor<c10::complex<at::Half>> {
 #if AT_USE_JITERATOR() && !defined(_MSC_VER)
   void operator()(TensorIterator& iter) {
     using scalar_t = c10::complex<at::Half>;
-    std::string func = jiterator_stringify(
+    const auto func = jiterator_stringify(
     arg_t combine(arg_t a, arg_t b) {
       return a + b;
     }
@@ -71,7 +71,7 @@ template <typename scalar_t>
 struct nansum_functor_complex {
 #if AT_USE_JITERATOR()
   void operator()(TensorIterator& iter) {
-    std::string func = jiterator_stringify(
+    const auto func = jiterator_stringify(
         arg_t combine(arg_t a, arg_t b) {
           return a + (std::isnan(b) ? arg_t{0.} : b);
         }
@@ -95,7 +95,7 @@ struct prod_functor {
   // Ref: https://github.com/pytorch/pytorch/issues/77305
   #if AT_USE_JITERATOR() && !defined(_MSC_VER)
   void operator()(TensorIterator& iter) {
-    std::string func = jiterator_stringify(
+    const auto func = jiterator_stringify(
     arg_t combine(arg_t a, arg_t b) {
       return a * b;
     }
@@ -132,7 +132,7 @@ struct prod_functor<c10::complex<at::Half>> {
 #if AT_USE_JITERATOR() && !defined(_MSC_VER)
   void operator()(TensorIterator& iter) {
     using scalar_t = c10::complex<at::Half>;
-    std::string func =
+    const auto func =
         jiterator_stringify(arg_t combine(arg_t a, arg_t b) { return a * b; });
     jitted_gpu_reduce_kernel<prod_name, scalar_t, scalar_t>(iter, func, 1.);
   }

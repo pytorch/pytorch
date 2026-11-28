@@ -1302,7 +1302,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 //TODO this is 100 lines of almost-copy-paste, because we have to have different template args for this function
 //try unifying with gpu_reduce_kernel
 template <char const* name, typename scalar_t, typename out_scalar_t, int vt0=4, typename ident_t=double>
-inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& func, ident_t ident=0,
+inline void jitted_gpu_reduce_kernel(TensorIterator& iter, std::string_view func, ident_t ident=0,
                               AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
 
@@ -1408,7 +1408,7 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   constexpr int nInputs = 1;
   constexpr int nOutputs = 1;
   static auto desc = at::cuda::jit::make_kernel_descriptor<
-    out_scalar_t, scalar_t>(name, func, nInputs, nOutputs);
+    out_scalar_t, scalar_t>(name, std::string(func), nInputs, nOutputs);
 
   static std::mutex jiterator_mutex;
   static std::vector<std::array<at::cuda::jit::NvrtcFunction, 3>> fn_cache(c10::cuda::device_count());

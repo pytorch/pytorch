@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/cuda/CUDAConfig.h>
 #include <string>
+#include <string_view>
 
 // AT_USE_JITERATOR(), controls whether we jit some elementwise kernels.
 // AT_DISABLE_JITERATOR is set by CMake when jiterator should be off.
@@ -11,4 +12,4 @@
 #else
 #define AT_USE_JITERATOR() true
 #endif
-#define jiterator_stringify(...) std::string(#__VA_ARGS__);
+#define jiterator_stringify(...) std::string_view(#__VA_ARGS__)
