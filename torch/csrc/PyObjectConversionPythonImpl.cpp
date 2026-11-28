@@ -15,6 +15,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
 #include <utility>
@@ -252,6 +253,30 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
       TORCH_CHECK_PYTHON(py != nullptr);
       return py;
     });
+  }
+
+  std::string string_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_string_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        THPUtils_checkString(obj),
+        "torch_string_from_pyobject: expected str or bytes, got ",
+        Py_TYPE(obj)->tp_name);
+    return THPUtils_unpackString(obj);
+  }
+
+  PyObject* string_to_pyobject(std::string_view str) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_string_to_pyobject requires the GIL to be held");
+    TORCH_CHECK(
+        str.size() <= static_cast<size_t>(PY_SSIZE_T_MAX),
+        "torch_string_to_pyobject: string is too long");
+    PyObject* py = THPUtils_packString(str);
+    TORCH_CHECK_PYTHON(py != nullptr);
+    return py;
   }
 };
 
