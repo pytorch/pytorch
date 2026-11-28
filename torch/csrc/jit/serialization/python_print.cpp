@@ -1561,26 +1561,25 @@ struct PythonPrintImpl {
       }
       {
         auto guard = WithIndented();
-        for (const FunctionSchema& method : interfaceType->methods()) {
-          indent();
-          body_ << "def " << method.name() << "(self";
-          TORCH_INTERNAL_ASSERT(
-              !method.arguments().empty() &&
-              method.arguments().at(0).name() == "self");
-          for (const Argument& arg :
-               at::ArrayRef<Argument>(method.arguments()).slice(1)) {
-            const auto& arg_type = arg.type();
-            registerClassDependencies(arg_type);
-            body_ << ", " << arg.name() << ": "
-                  << arg_type->annotation_str(type_printer_);
-          }
-          auto return_type = method.returns().at(0).type();
-          registerClassDependencies(return_type);
-          body_ << ") -> " << return_type->annotation_str(type_printer_)
-                << ":\n";
-          indent();
-          body_ << "  pass\n";
-        }
+        interfaceType->forEachMethodSignature(
+            [&](const std::string& name,
+                at::ArrayRef<Argument> arguments,
+                at::ArrayRef<Argument> returns) {
+              indent();
+              body_ << "def " << name << "(self";
+              for (const Argument& arg : arguments) {
+                const auto& arg_type = arg.type();
+                registerClassDependencies(arg_type);
+                body_ << ", " << arg.name() << ": "
+                      << arg_type->annotation_str(type_printer_);
+              }
+              const auto& return_type = returns.at(0).type();
+              registerClassDependencies(return_type);
+              body_ << ") -> " << return_type->annotation_str(type_printer_)
+                    << ":\n";
+              indent();
+              body_ << "  pass\n";
+            });
       }
     } else if (auto enumType = type->cast<EnumType>()) {
       body_ << "class " << enumType->qualifiedClassName().name() << "(Enum):\n";

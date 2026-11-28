@@ -456,6 +456,12 @@ struct TORCH_API FunctionSchema {
         is_vararg(),
         is_varret());
   }
+  FunctionSchema withArgumentType(size_t index, const TypePtr& new_type) && {
+    auto& argument = arguments_.at(index);
+    argument = argument.cloneWithType(new_type);
+    checkSchema();
+    return std::move(*this);
+  }
   FunctionSchema cloneWithReturns(std::vector<Argument> new_returns) const {
     return FunctionSchema(
         name(),

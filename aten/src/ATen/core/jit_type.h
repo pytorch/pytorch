@@ -7,6 +7,8 @@
 #include <ATen/core/symbol.h>
 #include <ATen/core/type_factory.h>
 #include <ATen/core/qualified_name.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/FunctionRef.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Exception.h>
 #include <optional>
@@ -31,6 +33,8 @@ namespace c10 {
 template<class Key, class Value>
 class Dict;
 struct IValue;
+struct Argument;
+struct ClassType;
 struct FunctionSchema;
 struct NamedType;
 using OptNameList = std::optional<std::vector<std::string>>;
@@ -2174,21 +2178,39 @@ struct TORCH_API InterfaceType : public NamedType {
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
-  // try to find a method of this interface,
-  // returns nullptr if not found.
-  const FunctionSchema* getMethod(const std::string& name) const;
+  bool isImplementedBy(const ClassType& cls, std::ostream* why_not) const;
+  bool hasMethod(const std::string& name) const;
+  std::vector<std::string> getMethodNames() const;
+  // Owning schema copies keep their receiver alive and require shared ownership
+  // of this interface. Keep the returned owner while borrowing from a schema.
+  // getMethodCopy returns nullptr if the method is not found.
+  std::unique_ptr<FunctionSchema> getMethodCopy(const std::string& name) const;
+  std::vector<FunctionSchema> methodCopies() const;
+  // Visits borrowed signatures, excluding self. Do not retain the views or
+  // modify the interface during the callback.
+  void forEachMethodSignature(function_ref<void(
+      const std::string&, ArrayRef<Argument>, ArrayRef<Argument>)> visitor) const;
+  // Requires a self argument whose type and real_type are this interface.
   void addMethod(FunctionSchema schema);
-  const std::vector<FunctionSchema>& methods() const {
-    return *methods_;
-  }
 
   bool is_module() const override{
     return is_module_;
   }
   static const TypeKind Kind = TypeKind::InterfaceType;
+  // Copy the method list even from rvalues; schemas may still hold the source.
+  InterfaceType(const InterfaceType& other);
+  InterfaceType(InterfaceType&& other) noexcept(false);
+  InterfaceType& operator=(const InterfaceType&) = delete;
+  InterfaceType& operator=(InterfaceType&&) = delete;
   ~InterfaceType() override = default;
  private:
+  struct CopyMethodsTag {};
+  InterfaceType(const InterfaceType& other, CopyMethodsTag tag);
   InterfaceType(QualifiedName name, bool is_module);
+  std::vector<FunctionSchema>::const_iterator findMethodSchema(
+      const std::string& name) const;
+  FunctionSchema schemaWithSelf(const FunctionSchema& schema) const;
+  FunctionSchema schemaForDiagnostic(const FunctionSchema& schema) const;
   static bool isSubTypeImpl(
       const InterfaceType& lhs,
       const InterfaceType& rhs,
@@ -2200,8 +2222,9 @@ struct TORCH_API InterfaceType : public NamedType {
     return name()->qualifiedName();
   }
 
-  // shared_ptr so that this header does not have to depend on
-  // FunctionSchema.h
+  // Stored schemas erase the receiver to Any to avoid owning this interface.
+  // Compare them with as_method=true; restore self before returning or printing.
+  // The indirection keeps FunctionSchema incomplete in this header.
   std::shared_ptr<std::vector<FunctionSchema>> methods_;
   // flag to distinguish if it's an interface type from a module or not
   bool is_module_;
