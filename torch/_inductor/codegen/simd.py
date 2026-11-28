@@ -4821,7 +4821,7 @@ class SIMDScheduling(BaseScheduling):
         persistent or cooperative reduction choices, and so keep different stored
         buffers (must_keep_buffers) and remove the others. Every version must write
         the same buffers. If they remove different ones, return every buffer some
-        version keeps, to rebuild all versions keeping it; else None."""
+        version keeps, to rebuild the versions that remove one of them; else None."""
         first = kernels[0]
         if all(
             k.removed_buffers == first.removed_buffers

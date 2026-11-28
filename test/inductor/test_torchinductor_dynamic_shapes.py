@@ -1121,7 +1121,9 @@ class TestInductorDynamic(DynamicShapesTestCase):
         recompile, correct results, and no 2**31 guard. To reach both kernels with small
         inputs, the int32 limit is lowered from 2**31 to 64K elements (the generated
         check becomes `size <= 65536`). cooperative=True repeats this with cooperative
-        reductions, whose two kernels share one scratch workspace."""
+        reductions, whose two kernels share one scratch workspace. Its shapes keep rows
+        <= the example's 8: a cooperative kernel launches rows * RSPLIT co-resident
+        blocks, with RSPLIT picked from the row hint."""
 
         def fn(x):
             return x.sum(-1), x.argmax(-1), torch.softmax(x, -1)
@@ -1137,11 +1139,16 @@ class TestInductorDynamic(DynamicShapesTestCase):
             ),
             _lowered_int32_limit(),
         ):
-            x = torch.randn(64, 512, device=device)
+            x = torch.randn(8 if cooperative else 64, 512, device=device)
             actual, (code, *_) = run_and_get_code(compiled, x)
             self.assertEqual(actual, fn(x))
             # Both sides of the limit, in either order, without recompiling.
-            for shape in [(512, 512), (3, 7), (300, 1000), (64, 512)]:
+            shapes = (
+                [(8, 16384), (3, 7), (4, 30000), (8, 512)]
+                if cooperative
+                else [(512, 512), (3, 7), (300, 1000), (64, 512)]
+            )
+            for shape in shapes:
                 y = torch.randn(shape, device=device)
                 self._assert_dual_launch(compiled, fn, (y,), y.numel())
         self.assertEqual(counter.frame_count, 1)
@@ -1215,8 +1222,8 @@ class TestInductorDynamic(DynamicShapesTestCase):
     @onlyAccelerator
     @config.patch({"trace.provenance_tracking_level": 1, "force_disable_caches": True})
     def test_dual_index_dtype_provenance(self, device):
-        """The provenance mapping (kernel -> post-grad nodes) has both the int32 and
-        the int64 kernel of a dual pair, each mapped to the nodes it computes."""
+        """The provenance mapping (kernel -> post-grad nodes) and the wrapper's
+        provenance comments have both the int32 and the int64 kernel of a dual pair."""
         from torch._inductor import debug
 
         def fn(x):
@@ -1236,14 +1243,16 @@ class TestInductorDynamic(DynamicShapesTestCase):
                 debug, "dump_inductor_provenance_info", recording_dump
             ),
         ):
-            torch.compile(fn, dynamic=True)(torch.randn(64, 512, device=device))
+            _, (code, *_) = run_and_get_code(
+                torch.compile(fn, dynamic=True), torch.randn(64, 512, device=device)
+            )
         (mapping,) = (d["cppCodeToPost"] for d in dumps if d.get("cppCodeToPost"))
         # Keys are "<kernel name>:<debug handle>".
         kernels = {key.rsplit(":", 1)[0]: nodes for key, nodes in mapping.items()}
         self.assertEqual(len(kernels), 2)
-        (nodes0, nodes1) = kernels.values()
-        self.assertTrue(nodes0)
-        self.assertEqual(nodes0, nodes1)
+        self.assertTrue(all(kernels.values()))
+        for name in kernels:
+            self.assertIn(f"[Provenance debug handles] {name}:", code)
 
     @onlyAccelerator
     def test_dual_index_dtype_same_buffers(self, device):
