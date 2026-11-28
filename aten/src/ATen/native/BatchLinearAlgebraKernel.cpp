@@ -8,7 +8,12 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cpu/zmath.h>
 
+#include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
+
+#if AT_MKL_ENABLED()
+#include <mkl.h>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1005,6 +1010,21 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
   auto leading_dimension = std::max<int64_t>(1, m);
 
   const auto loop = [&](int64_t start, int64_t end) {
+#if AT_MKL_ENABLED()
+    // When the batch is split across threads, each ?getrf call must run on a
+    // single thread. at::set_num_threads() turns MKL's dynamic threading off,
+    // and MKL would then run its multithreaded ?getrf on every thread of the
+    // parallel region at once, which gives wrong factors and pivots, or hangs,
+    // for larger matrices. See https://github.com/pytorch/pytorch/issues/142815
+    const bool in_parallel = at::in_parallel_region();
+    const int saved_mkl_threads =
+        in_parallel ? mkl_set_num_threads_local(1) : 0;
+    const auto restore_mkl_threads = c10::make_scope_exit([&] {
+      if (in_parallel) {
+        mkl_set_num_threads_local(saved_mkl_threads);
+      }
+    });
+#endif
     for (const auto i : c10::irange(start, end)) {
       scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
       int* pivots_working_ptr = &pivots_data[i * pivots_stride];

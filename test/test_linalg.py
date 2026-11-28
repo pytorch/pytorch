@@ -6372,6 +6372,37 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                     f(torch.empty(1, 2, 2), pivot=False)
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_lu_factor_batched_set_num_threads(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/142815
+        # The CPU kernel splits a batch of matrices across threads. After
+        # torch.set_num_threads(), MKL used to run a multithreaded getrf on each
+        # of those threads, which gave wrong factors from 150 x 150 on.
+        # torch.set_num_threads() also turns MKL's dynamic threading off for the
+        # rest of the process, so the check runs in a subprocess to keep that
+        # setting out of the other tests.
+        import subprocess
+        import sys
+        import textwrap
+
+        atol = 1e-3 if dtype in (torch.float32, torch.complex64) else 1e-7
+        script = textwrap.dedent(f"""
+            import torch
+
+            torch.manual_seed(0)
+            torch.set_num_threads(4)
+            A = torch.randn(4, 256, 256, device={device!r}, dtype={dtype})
+            LU, pivots, info = torch.linalg.lu_factor_ex(A)
+            torch.testing.assert_close(info, torch.zeros_like(info))
+            P, L, U = torch.lu_unpack(LU, pivots)
+            torch.testing.assert_close(P @ L @ U, A, rtol=0, atol={atol})
+        """)
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
