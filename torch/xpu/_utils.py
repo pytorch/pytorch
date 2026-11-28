@@ -12,12 +12,19 @@ from torch.types import Device
 class XPUCodename(enum.Enum):
     PVC = "PVC"  # Intel® Data Center GPU Max Series
     BMG = "BMG"  # Intel® Arc™ Pro Battlemage Graphics
+    LNL = "LNL"  # Lunar Lake
+    PTL = "PTL"  # Panther Lake
+    WCL = "WCL"  # Wildcat Lake
+    CRI = "CRI"
+    NVL_P = "NVL-P"
 
 
 class XPUArch(enum.IntEnum):
     Unknown = 0
     Xe = 1  # Xe HPC
     Xe2 = 2
+    Xe3 = 3
+    Xe3P = 4
 
 
 # device_id -> GPU codename
@@ -47,11 +54,55 @@ _DEVICE_ID_TO_CODENAME = {
     0xE221: XPUCodename.BMG,
     0xE222: XPUCodename.BMG,
     0xE223: XPUCodename.BMG,
+    # LNL/PTL/WCL/CRI/NVL-P ids: intel/compute-runtime device_ids_configs_*.h
+    0x6420: XPUCodename.LNL,
+    0x64A0: XPUCodename.LNL,
+    0x64B0: XPUCodename.LNL,
+    0xB080: XPUCodename.PTL,
+    0xB081: XPUCodename.PTL,
+    0xB082: XPUCodename.PTL,
+    0xB083: XPUCodename.PTL,
+    0xB084: XPUCodename.PTL,
+    0xB085: XPUCodename.PTL,
+    0xB086: XPUCodename.PTL,
+    0xB087: XPUCodename.PTL,
+    0xB08F: XPUCodename.PTL,
+    0xB090: XPUCodename.PTL,
+    0xB0A0: XPUCodename.PTL,
+    0xB0A1: XPUCodename.PTL,
+    0xB0B0: XPUCodename.PTL,
+    0xFD80: XPUCodename.WCL,
+    0xFD81: XPUCodename.WCL,
+    0x674C: XPUCodename.CRI,
+    0x674D: XPUCodename.CRI,
+    0x674E: XPUCodename.CRI,
+    0x674F: XPUCodename.CRI,
+    0x6750: XPUCodename.CRI,
+    0x6751: XPUCodename.CRI,
+    0x6754: XPUCodename.CRI,
+    0x6755: XPUCodename.CRI,
+    0x6756: XPUCodename.CRI,
+    0xD74A: XPUCodename.NVL_P,
+    0xD74B: XPUCodename.NVL_P,
+    0xD750: XPUCodename.NVL_P,
+    0xD751: XPUCodename.NVL_P,
+    0xD752: XPUCodename.NVL_P,
+    0xD753: XPUCodename.NVL_P,
+    0xD754: XPUCodename.NVL_P,
+    0xD755: XPUCodename.NVL_P,
+    0xD756: XPUCodename.NVL_P,
+    0xD757: XPUCodename.NVL_P,
+    0xD75F: XPUCodename.NVL_P,
 }
 
 _CODENAME_TO_ARCH = {
     XPUCodename.PVC: XPUArch.Xe,
     XPUCodename.BMG: XPUArch.Xe2,
+    XPUCodename.LNL: XPUArch.Xe2,
+    XPUCodename.PTL: XPUArch.Xe3,
+    XPUCodename.WCL: XPUArch.Xe3,
+    XPUCodename.CRI: XPUArch.Xe3P,
+    XPUCodename.NVL_P: XPUArch.Xe3P,
 }
 
 
