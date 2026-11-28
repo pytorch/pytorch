@@ -756,7 +756,7 @@ class TestAvgPool(TestCaseMPS):
         # complex input should raise NotImplementedError instead of
         # an opaque Metal RuntimeError on MPS.
         x = torch.randn(5, 1, 5, 2, 6, dtype=torch.complex64, device="mps")
-        with self.assertRaisesRegex(NotImplementedError, "complex"):
+        with self.assertRaisesRegex(NotImplementedError, "ComplexFloat"):
             F.local_response_norm(x, size=4)
 
     def test_channels_last_storage_offset(self):
@@ -9164,6 +9164,49 @@ class TestMPS(TestCaseMPS):
         print(f"Recommended Max Memory : {max_memory / 1024 ** 3} GB")
         self.assertGreater(max_memory, 0)
 
+    def test_large_alloc_threshold(self):
+        def heap_growth(threshold_mb):
+            torch._C._accelerator_setAllocatorSettings(f"mps_large_alloc_threshold_mb:{threshold_mb}")
+            torch.mps.empty_cache()
+            baseline = torch.mps.driver_allocated_memory()
+            x = torch.ones(50 * 1024 * 1024 // 4, device="mps")
+            growth = torch.mps.driver_allocated_memory() - baseline
+            self.assertEqual(x.sum().item(), x.numel())
+            del x
+            return growth
+
+        self.addCleanup(torch.mps.empty_cache)
+        self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
+        # By default a 50 MB tensor is placed in a shared 1 GiB XLARGE heap
+        self.assertGreater(heap_growth(0), 900 * 1024 * 1024)
+        self.assertLess(heap_growth(10), 100 * 1024 * 1024)
+
+    def test_large_alloc_threshold_keeps_heaps_separate(self):
+        self.addCleanup(torch.mps.empty_cache)
+        self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:64")
+        torch.mps.empty_cache()
+        baseline = torch.mps.driver_allocated_memory()
+        # Below the threshold: a shared 1 GiB heap. At or above it: a heap of its own,
+        # even though the shared heap has room, so freeing the small one releases 1 GiB.
+        small = torch.empty(50 * 1024 * 1024, dtype=torch.uint8, device="mps")
+        large = torch.empty(100 * 1024 * 1024, dtype=torch.uint8, device="mps")
+        del small
+        torch.mps.empty_cache()
+        self.assertLess(torch.mps.driver_allocated_memory() - baseline, 200 * 1024 * 1024)
+        del large
+
+    def test_large_alloc_threshold_config_keys(self):
+        self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
+        with self.assertRaisesRegex(ValueError, "Unrecognized key 'mps_larg_alloc_threshold_mb'"):
+            torch._C._accelerator_setAllocatorSettings("mps_larg_alloc_threshold_mb:64")
+        with self.assertRaisesRegex(ValueError, "at most 512"):
+            torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:1024")
+        # Keys of other backends in the shared env var must not break MPS
+        env = {**os.environ, "PYTORCH_ALLOC_CONF": "backend:native,mps_large_alloc_threshold_mb:64"}
+        cmd = [sys.executable, "-c", "import torch; print(torch.ones(1, device='mps').item())"]
+        self.assertEqual(subprocess.check_output(cmd, env=env, text=True).strip(), "1.0")
+
     def test_host_alias_storage(self):
         n = 1024
         dtype = torch.float32
@@ -12778,6 +12821,24 @@ class TestSDPA(TestCaseMPS):
         for order in ([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION], [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
             with sdpa_kernel(order, set_priority=True):
                 self.assertEqual(torch._fused_sdp_choice(q, q, q), order[0].value)
+        for order in ([SDPBackend.MATH, SDPBackend.FLASH_ATTENTION], [SDPBackend.FLASH_ATTENTION, SDPBackend.MATH]):
+            expected = SDPBackend.MATH if order[0] == SDPBackend.MATH else SDPBackend.EFFICIENT_ATTENTION
+            with sdpa_kernel(order, set_priority=True):
+                self.assertEqual(torch._fused_sdp_choice(q, q, q), expected.value)
+
+    def test_flash_attention_runs_efficient_kernels(self):
+        # MPS has no flash attention kernels, so sdpa_kernel(FLASH_ATTENTION) runs the Metal ones
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+        q = torch.randn(1, 4, 8, 16, device="mps", requires_grad=True)
+        with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+            self.assertEqual(torch._fused_sdp_choice(q, q, q), SDPBackend.EFFICIENT_ATTENTION.value)
+            with _RecordOpsMode() as ops:
+                y = F.scaled_dot_product_attention(q, q, q)
+        self.assertIn(torch.ops.aten._scaled_dot_product_efficient_attention.default, ops.ops)
+        with sdpa_kernel([SDPBackend.MATH]):
+            y_ref = F.scaled_dot_product_attention(q, q, q)
+        self.assertEqual(y, y_ref)
+        self.assertEqual(torch.autograd.grad(y.sum(), q), torch.autograd.grad(y_ref.sum(), q))
 
     def test_efficient_attention_unsupported_shapes(self):
         from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -12809,10 +12870,15 @@ class TestSDPA(TestCaseMPS):
         from torch.nn.attention import sdpa_kernel, SDPBackend
         for name, (qkv, kwargs) in self._efficient_attention_cases(dtype).items():
             with self.subTest(name):
+                # Cases reuse one tensor for q, k and v; separate leaves give separate gradients.
+                # clone() keeps the strides, so layout cases stay non-contiguous.
                 mask = kwargs.get("attn_mask")
-                inputs = [t.requires_grad_() for t in qkv]
+                inputs = [t.clone().requires_grad_() for t in qkv]
                 if mask is not None and mask.is_floating_point():
-                    inputs.append(mask.requires_grad_())
+                    mask = mask.clone().requires_grad_()
+                    inputs.append(mask)
+                    kwargs = {**kwargs, "attn_mask": mask}
+                qkv = inputs[:3]
                 ref_inputs = [t.detach().cpu().double().requires_grad_() for t in inputs]
                 ref_qkv, ref_kwargs = ref_inputs[:3], dict(kwargs)
                 if len(ref_inputs) > 3:
@@ -12835,9 +12901,10 @@ class TestSDPA(TestCaseMPS):
                     )
                     errors[backend] = [(g.cpu().double() - r).abs().max().item() for g, r in zip(grads, ref)]
                 # P = exp(scores - logsumexp) from the forward is not renormalized, which costs
-                # a few ulps over math; the gradient bound follows test_transformers' fudge factors.
+                # fp32 gradients up to 12x math's error; test_transformers allows CUDA memory
+                # efficient attention 8.5x to 150x depending on the gradient.
                 for eff, math_err, r in zip(errors[SDPBackend.EFFICIENT_ATTENTION], errors[SDPBackend.MATH], ref):
-                    self.assertLessEqual(eff, 10 * math_err + torch.finfo(dtype).eps * r.abs().max().item())
+                    self.assertLessEqual(eff, 25 * math_err + torch.finfo(dtype).eps * r.abs().max().item())
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_efficient_attention_logsumexp(self, dtype):

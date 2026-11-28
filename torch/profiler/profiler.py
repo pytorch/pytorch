@@ -472,6 +472,19 @@ class _KinetoProfile:
     def stop(self) -> None:
         self.stop_trace()
 
+    def _stop_trace_collection(self) -> None:
+        if self.profiler is None:
+            raise AssertionError(
+                "Profiler must be initialized before stopping collection"
+            )
+        if self._use_cuspy:
+            raise ValueError(
+                "_stop_collection() is not supported with the cuspy backend"
+            )
+        if self.execution_trace_observer:
+            self.execution_trace_observer.stop()
+        self.profiler._stop_collection()
+
     def prepare_trace(self) -> None:
         if hasattr(torch, "_inductor"):
             import torch._inductor.config as inductor_config
@@ -1009,9 +1022,10 @@ class ProfilerAction(Enum):
     Profiler actions that can be taken at the specified intervals.
 
     NONE, WARMUP, RECORD, and RECORD_AND_SAVE are user-facing values that may
-    be returned from a user-provided schedule. DEVICE_STOPPED is set
-    internally by the profiler when device collection stops early due to
-    errors; it must not be returned from a user-provided schedule.
+    be returned from a user-provided schedule. The profiler sets the others
+    internally, and a user-provided schedule must not return them:
+    DEVICE_STOPPED when device collection stops early due to errors, and
+    PENDING_FINALIZE from ``_stop_collection()`` until the trace is processed.
     """
 
     NONE = 0
@@ -1019,6 +1033,10 @@ class ProfilerAction(Enum):
     RECORD = 2
     RECORD_AND_SAVE = 3
     DEVICE_STOPPED = 4
+    PENDING_FINALIZE = 5
+
+
+_INTERNAL_ACTIONS = (ProfilerAction.DEVICE_STOPPED, ProfilerAction.PENDING_FINALIZE)
 
 
 def _unreachable_transition(prev: str, current: str) -> None:
@@ -1339,9 +1357,9 @@ class profile(_KinetoProfile):
         self.step_rec_fn: prof.record_function | None = None
 
         schedule_action = self.schedule(self.step_num)
-        if schedule_action == ProfilerAction.DEVICE_STOPPED:
+        if schedule_action in _INTERNAL_ACTIONS:
             raise ValueError(
-                "ProfilerAction.DEVICE_STOPPED is set internally by the "
+                f"ProfilerAction.{schedule_action.name} is set internally by the "
                 "profiler and must not be returned by a user-provided schedule"
             )
         self.current_action = schedule_action
@@ -1435,6 +1453,16 @@ class profile(_KinetoProfile):
                 self.prepare_trace,
                 self.start_trace,
             ],
+            # PENDING_FINALIZE: entered by _stop_collection() while recording.
+            # Collection has stopped, steps are absorbed, and stop() or
+            # _finalize() processes the trace.
+            (ProfilerAction.RECORD, ProfilerAction.PENDING_FINALIZE): [
+                self._stop_trace_collection,
+            ],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.PENDING_FINALIZE): [
+                self._stop_trace_collection,
+            ],
+            (ProfilerAction.PENDING_FINALIZE, ProfilerAction.PENDING_FINALIZE): [],
             # Unreachable transitions:
             # - prev=NONE: step()'s entry guard excludes it, and start() and
             #   __init__ both reject DEVICE_STOPPED from a user schedule.
@@ -1454,6 +1482,7 @@ class profile(_KinetoProfile):
                 self._finalize_trace,
             ],
             (ProfilerAction.DEVICE_STOPPED, None): [],
+            (ProfilerAction.PENDING_FINALIZE, None): [self._finalize_trace],
         }
         # Start tracking increments to profiler step, this will be used
         # by Kineto
@@ -1492,6 +1521,41 @@ class profile(_KinetoProfile):
             )
         self.current_action = self._prev_schedule_action
 
+    def _stop_collection(self) -> None:
+        """Stop collecting and end the trace now, but leave processing it, and
+        ``on_trace_ready``, to a later :meth:`_finalize` or :meth:`stop`.
+
+        .. warning::
+            This is a private, experimental API. It may change or be removed
+            without notice.
+
+        This keeps that work out of a region being timed. Steps until then do
+        nothing. Does nothing if the profiler is not recording.
+        """
+        _warn_once(
+            "profile._stop_collection() is a private, experimental API and "
+            "may change or be removed without notice."
+        )
+        if self.current_action in (
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD_AND_SAVE,
+        ):
+            self._transit_action(self.current_action, ProfilerAction.PENDING_FINALIZE)
+            self.current_action = ProfilerAction.PENDING_FINALIZE
+
+    def _finalize(self) -> None:
+        """Process a trace stopped with :meth:`_stop_collection`.
+
+        .. warning::
+            This is a private, experimental API. It may change or be removed
+            without notice.
+
+        The trace still ends where collection stopped. Does nothing if no such
+        stop is pending.
+        """
+        if self.current_action == ProfilerAction.PENDING_FINALIZE:
+            self.stop()
+
     def step(self) -> None:
         """
         Signals the profiler that the next profiling step has started.
@@ -1509,9 +1573,9 @@ class profile(_KinetoProfile):
         # Note that we check schedule validity BEFORE changing the profiler's
         # internal state. This prevents the profiler from being in an invalid
         # state.
-        if schedule_action == ProfilerAction.DEVICE_STOPPED:
+        if schedule_action in _INTERNAL_ACTIONS:
             raise ValueError(
-                "ProfilerAction.DEVICE_STOPPED is set internally by the "
+                f"ProfilerAction.{schedule_action.name} is set internally by the "
                 "profiler and must not be returned by a user-provided schedule"
             )
 
@@ -1549,7 +1613,9 @@ class profile(_KinetoProfile):
         #   transitions already call prepare_trace, so overriding here would
         #   skip the reset and waste the next cycle.
 
-        if prev_action == ProfilerAction.DEVICE_STOPPED:
+        if prev_action == ProfilerAction.PENDING_FINALIZE:
+            self.current_action = ProfilerAction.PENDING_FINALIZE
+        elif prev_action == ProfilerAction.DEVICE_STOPPED:
             at_cycle_boundary = (
                 prev_schedule_action == ProfilerAction.RECORD_AND_SAVE
                 or self.current_action == ProfilerAction.NONE

@@ -97,6 +97,12 @@ class MetalExprPrinter(ExprPrinter_):
             return f"c10::metal::floor_divide({x}, {div})"
         return f"metal::floor({x}) / ({div})"
 
+    def _print_PythonMod(self, expr: sympy.Expr) -> str:
+        x, div = expr.args
+        if x.is_nonnegative and div.is_nonnegative:
+            return f"({self.doprint(x)}) % ({self.doprint(div)})"
+        return f"c10::metal::remainder({self.doprint(x)}, {self.doprint(div)})"
+
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
         x, div, mod = expr.args
         # Workaround for Metal compiler bug with fused (x / A) % B, see PR 175481
@@ -171,6 +177,8 @@ class MetalExprPrinter(ExprPrinter_):
             raise AssertionError(f"expected 2 args, got {len(expr.args)}")
         x, y = map(self.doprint, expr.args)
         return f"metal::precise::pow(static_cast<float>({x}), static_cast<float>({y}))"
+
+    _print_FloatPow = _print_PowByNatural
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:

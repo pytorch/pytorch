@@ -716,6 +716,49 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
                 with self.assertRaises(torch._dynamo.exc.Unsupported):
                     torch.compile(fn, backend="eager", fullgraph=True)()
 
+    def test_classmethod_descriptor_call_none_owner(self):
+        descr = dict.__dict__["fromkeys"]
+
+        def fn():
+            try:
+                return descr(None, "ab")
+            except TypeError as e:
+                return str(e)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_slot_wrapper_bound_to_none_instance(self):
+        # None is a real instance here, not C NULL, so these bind to it.
+        def fn():
+            return (
+                None.__ne__(None),
+                None.__eq__(None),
+                None.__ne__(1),
+                None.__repr__(),
+                None.__bool__(),
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_descriptor_get_none_obj_returns_unbound(self):
+        # __get__(None, owner) maps None to C NULL: class access, unbound.
+        def f(self):
+            return 1
+
+        class C:
+            g = f
+
+        def fn():
+            return (
+                f.__get__(None, C) is f,
+                C.g is f,
+                C().g(),
+                int.__add__(1, 2),
+                str.upper("ab"),
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
     def test_staticmethod_constructor_func_attr(self):
         def fn():
             def f():

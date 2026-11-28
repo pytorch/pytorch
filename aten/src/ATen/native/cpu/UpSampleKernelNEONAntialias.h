@@ -604,8 +604,8 @@ void upsample_neon_bilinear_bicubic_uint8(const at::Tensor& input_,
 
   auto input = input_.contiguous(at::MemoryFormat::ChannelsLast);
 
-  auto need_horizontal = xout != xin;
-  auto need_vertical = yout != yin;
+  auto need_horizontal = F::needs_pass(xin, xout, scales[1]);
+  auto need_vertical = F::needs_pass(yin, yout, scales[0]);
 
   int ksize_horiz = 0, ksize_vert = 0;
   std::vector<at::Tensor> horiz_indices_weights, vert_indices_weights;

@@ -734,6 +734,7 @@
   - dolpm
   - sanrise
   - NicolasHug
+  - thomasywang
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -808,6 +809,7 @@
   - '**sycl**'
   - '**SYCL**'
   - torch/_C/__init__.pyi.in
+  - test/test_transformers.py
   approved_by:
   - EikanWang
   - gujinghui
@@ -932,6 +934,7 @@
   - jdonald
   - jeanschmidt
   - jerryzh168
+  - jhou-jpg
   - jijunyan
   - joshuuuasu
   - kapilsh
@@ -946,6 +949,7 @@
   - NicolasHug
   - Nicoshev
   - njriasan
+  - nullplay
   - pdesupinski
   - pianpwk
   - ryanzhang22
