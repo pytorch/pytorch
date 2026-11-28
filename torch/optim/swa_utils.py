@@ -61,7 +61,7 @@ def get_ema_multi_avg_fn(decay=0.999):
         Callable: A function that updates EMA parameters given current model parameters
     """
 
-    if decay < 0.0 or decay > 1.0:
+    if not 0.0 <= decay <= 1.0:
         raise ValueError(
             f"Invalid decay value {decay} provided. Please provide a value in [0,1] range."
         )
@@ -138,7 +138,7 @@ def get_ema_avg_fn(decay=0.999):
         Callable: A function that updates EMA parameters given current model parameters
     """
 
-    if decay < 0.0 or decay > 1.0:
+    if not 0.0 <= decay <= 1.0:
         raise ValueError(
             f"Invalid decay value {decay} provided. Please provide a value in [0,1] range."
         )

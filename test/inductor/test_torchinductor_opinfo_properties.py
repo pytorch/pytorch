@@ -708,7 +708,6 @@ XPU_EAGER_EQUIV_XFAILS = {
     },
     "inductor_default": {
         "exp": {fp32},
-        "exp2": {fp32},
         "expm1": {fp32},
         "log1p": {fp32},
         "log2": {fp32},
@@ -726,7 +725,6 @@ XPU_EAGER_EQUIV_XFAILS = {
     },
     "inductor_numerics": {
         "exp": {fp32},
-        "exp2": {fp32},
         "expm1": {fp32},
         "log1p": {fp32},
         "log2": {fp32},
@@ -750,7 +748,6 @@ XPU_DETERMINISM_XFAILS = {}
 XPU_UNARY_NUMERICAL_XFAILS = {
     "inductor_default": {
         "exp": {fp32},
-        "exp2": {fp32},
         "log1p": {fp32},
         "log2": {fp32},
         "sigmoid": {fp32},
@@ -759,7 +756,6 @@ XPU_UNARY_NUMERICAL_XFAILS = {
     },
     "inductor_numerics": {
         "exp": {fp32},
-        "exp2": {fp32},
         "log1p": {fp32},
         "log2": {fp32},
         "sigmoid": {fp32},

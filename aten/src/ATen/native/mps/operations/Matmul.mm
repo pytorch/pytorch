@@ -690,6 +690,16 @@ void metal_mm_out(const Tensor& a, const Tensor& b, const Tensor& out) {
   });
 }
 
+void check_matmul_dtype(ScalarType dtype, std::string_view op_name) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      supportedFloatingOrComplexType(dtype) || (isIntegralType(dtype, false) && !isBarebonesUnsignedType(dtype)),
+      "\"",
+      op_name,
+      "\" not implemented for '",
+      dtype,
+      "'");
+}
+
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
   using CachedGraph = MPSBinaryCachedGraph;
@@ -710,6 +720,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
   if (output.numel() == 0 || self.size(1) == 0) {
     return output.zero_();
   }
+  check_matmul_dtype(self.scalar_type(), "mm");
 
   // Rank-1 (M==1 xor N==1): route mm/mv to the metal GEMV kernels.
   if (try_mps_gemv(self, other, output, std::nullopt, 1, 0, GemmEpilogue::None)) {
@@ -776,9 +787,6 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
   TORCH_CHECK(batch2.is_mps());
   TORCH_CHECK(result.is_mps());
 
-  TORCH_CHECK(supportedFloatingOrComplexType(batch1) || c10::isIntegralType(batch1.scalar_type(), true),
-              "MPS device does not support addbmm or baddbmm for this input type");
-
   // Reject what the reference rejects; MPSGraph would abort rather than raise. baddbmm is already
   // covered by its meta function.
   TORCH_CHECK(batch1.scalar_type() == batch2.scalar_type(),
@@ -834,6 +842,7 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     }
     return result;
   }
+  check_matmul_dtype(batch1.scalar_type(), opType == ADDBMM_OP_TYPE ? "addbmm" : "baddbmm");
 
   // Use Metal kernels for integer and complex types
   if (c10::isIntegralType(batch1.scalar_type(), true) || c10::isComplexType(batch1.scalar_type())) {
@@ -957,6 +966,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     }
     return output;
   }
+  check_matmul_dtype(self.scalar_type(), "addmm");
 
   // Rank-1 (M==1 xor N==1): route addmm/addmv to the metal GEMV kernels.
   if (try_mps_gemv(self, other, output, *bias_, alpha, beta, GemmEpilogue::Bias)) {
@@ -1177,6 +1187,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     result.zero_();
     return result;
   }
+  check_matmul_dtype(batch1.scalar_type(), "bmm");
 
   if (c10::isIntegralType(batch1.scalar_type(), true)) {
     return do_metal_bmm(batch1, batch2, result);

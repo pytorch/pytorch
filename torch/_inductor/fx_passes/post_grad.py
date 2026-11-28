@@ -7,7 +7,7 @@ import math
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any, cast, TypeVar
+from typing import Any, cast, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -15,6 +15,7 @@ import torch._inductor as inductor
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
+from torch._decomp.decompositions import _normalize_start_end
 from torch._dynamo.utils import counters, detect_fake_mode
 from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._higher_order_ops.user_kernel_hop import (
@@ -35,11 +36,17 @@ from torch._prims_common import (
     is_integer_dtype,
     make_contiguous_strides_for,
 )
-from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.experimental.symbolic_shapes import (
+    _iterate_exprs,
+    free_symbols,
+    statically_known_true,
+    sym_eq,
+)
 from torch.fx.passes.graph_transform_observer import (
     GraphTransformObserver as GraphTransformObserverBase,
 )
 from torch.fx.passes.reinplace import _is_view_op
+from torch.fx.passes.runtime_assert import _get_sym_val
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, inductor_prims, ir, pattern_matcher  # noqa: F401
@@ -91,12 +98,16 @@ from .b2b_gemm import B2B_GEMM_PASS
 from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
-from .micro_pipeline_tp import is_micro_pipeline_tp_candidate, micro_pipeline_tp_pass
+from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
 from .slice_scatter_chunking import slice_scatter_chunking_pass
 from .split_cat import POST_GRAD_PATTERNS
+
+
+if TYPE_CHECKING:
+    import sympy
 
 
 _T = TypeVar("_T")
@@ -764,6 +775,40 @@ def prepare_softmax_extra_check(match):
     )
 
 
+def _unbound_shape_symbol_bindings(graph: fx.Graph, node: fx.Node) -> list[fx.Node]:
+    """
+    Return nodes of graph that compute the shape symbols the while_loop replacing node needs but
+    none of node's inputs provides. An input provides a symbol if it is that SymInt or has it as a
+    size or stride.
+
+    The while_loop carries the whole xs and ys, not per-step slices, so the outer graph has to
+    allocate ys and cond_fn/body_fn have to bind every symbol in these shapes. Dynamo only lifts
+    the symbols the combine_fn sees on a slice: for xs of shape (s0//64, 64, 64) the inputs give
+    s0//64 but not s0. A symbol that is only known as a tensor's size gets a new sym_size node.
+    """
+    vals = [n.meta["val"] for n in node.all_input_nodes if "val" in n.meta]
+    dims = [(v.size(), v.stride()) if isinstance(v, torch.Tensor) else v for v in vals]
+    provided = OrderedSet(e for e in _iterate_exprs(dims) if e.is_Symbol)
+    missing = free_symbols([*vals, node.meta["val"]]) - provided
+
+    defs: dict[sympy.Symbol, fx.Node] = {}
+    size_defs: dict[sympy.Symbol, tuple[fx.Node, int]] = {}
+    for n in graph.nodes:
+        if n is node:
+            break
+        if (sym := _get_sym_val(n)) in missing:
+            defs.setdefault(sym, n)
+        elif isinstance(v := n.meta.get("val"), torch.Tensor):
+            for dim, size in enumerate(v.size()):
+                if isinstance(size, torch.SymInt) and size.node.expr in missing:
+                    size_defs.setdefault(size.node.expr, (n, dim))
+    with graph.inserting_before(node):
+        for sym, (n, dim) in size_defs.items():
+            if sym not in defs:
+                defs[sym] = graph.create_size_node(n, dim)
+    return [defs[s] for s in sorted(defs, key=lambda s: s.name)]
+
+
 def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
     """This is similar to decompose_scan_to_while_loop."""
     graph_pass = PatternMatcherPass()
@@ -786,7 +831,9 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
         def lower_to_while_loop(*args, **kwargs):
             if len(kwargs) != 0:
                 raise AssertionError(f"expected no kwargs, got {kwargs}")
-            xs, additional_inputs = pytree.tree_unflatten(args, tree_spec)
+            xs, additional_inputs, shape_symbols = pytree.tree_unflatten(
+                args, tree_spec
+            )
             if not (
                 isinstance(xs, (tuple, list))
                 and isinstance(additional_inputs, (tuple, list))
@@ -817,20 +864,20 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
             while_loop_flat_operands, operands_spec = pytree.tree_flatten(
                 while_loop_operands
             )
-            while_loop_additional_inputs = additional_inputs
+            while_loop_additional_inputs = (*additional_inputs, *shape_symbols)
             _, operands_and_additional_inputs_spec = pytree.tree_flatten(
-                (*while_loop_operands, additional_inputs)
+                (*while_loop_operands, additional_inputs, shape_symbols)
             )
 
             def cond_fn(*flat_args):
-                loop_idx, _, _, _ = pytree.tree_unflatten(
+                loop_idx, _, _, _, _ = pytree.tree_unflatten(
                     flat_args,
                     operands_and_additional_inputs_spec,
                 )
                 return loop_idx < map_length
 
             def body_fn(*flat_args):
-                loop_idx, out_bufs, xs, additional_inputs = pytree.tree_unflatten(
+                loop_idx, out_bufs, xs, additional_inputs, _ = pytree.tree_unflatten(
                     flat_args,
                     operands_and_additional_inputs_spec,
                 )
@@ -857,8 +904,9 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
             )
             return (final_out,)
 
+        fx_shape_symbols = _unbound_shape_symbol_bindings(gm.graph, cur_node)
         lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
-            (fx_xs, fx_additional_inputs)
+            (fx_xs, fx_additional_inputs, fx_shape_symbols)
         )
         match.replace_by_example(
             lower_to_while_loop, lower_to_while_loop_args, run_functional_passes=False
@@ -998,6 +1046,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 init,
                 xs,
                 additional_inputs,
+                shape_symbols,
             ) = pytree.tree_unflatten(args, tree_spec)
             scan_length = xs[0].size(0)
             if scan_length == 0:
@@ -1041,20 +1090,22 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
             while_loop_operands = (loop_idx, ys_outs, init, xs)
             flat_operands, operands_spec = pytree.tree_flatten(while_loop_operands)
             _, operands_and_additional_inputs_spec = pytree.tree_flatten(
-                (*while_loop_operands, additional_inputs)
+                (*while_loop_operands, additional_inputs, shape_symbols)
             )
 
             # Step 2: create the cond_fn and body_fn for while_loop
             def cond_fn(*flat_args):
-                loop_idx, _, _, _, _ = pytree.tree_unflatten(
+                loop_idx, _, _, _, _, _ = pytree.tree_unflatten(
                     flat_args, operands_and_additional_inputs_spec
                 )  # type: ignore[has-type]
                 return loop_idx < scan_length  # type: ignore[has-type]
 
             def body_fn(*flat_args):
-                loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
-                    flat_args,
-                    operands_and_additional_inputs_spec,  # type: ignore[has-type]
+                loop_idx, ys_outs, carry, xs, additional_inputs, _ = (
+                    pytree.tree_unflatten(
+                        flat_args,
+                        operands_and_additional_inputs_spec,  # type: ignore[has-type]
+                    )
                 )
 
                 idx_int = loop_idx.item()
@@ -1076,7 +1127,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                     cond_fn,
                     body_fn,
                     tuple(flat_operands),
-                    tuple(additional_inputs),
+                    (*additional_inputs, *shape_symbols),
                 ),
                 operands_spec,
             )
@@ -1087,6 +1138,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 fx_init,
                 fx_xs,
                 fx_additional_inputs,
+                _unbound_shape_symbol_bindings(gm.graph, cur_node),
             )
         )
         match.replace_by_example(
@@ -1521,67 +1573,94 @@ def slice_noop(self, dim=0, start=None, end=None, step=1):
     return False
 
 
+def _clamp_slice_range(x, dim, start, end):
+    """(start, end) of a step-1 slice of ``x`` along ``dim`` with None filled
+    in. When the bounds and the dim size are static, negative and out-of-range
+    bounds are clamped as slicing does."""
+    if all(isinstance(v, (int, type(None))) for v in (start, end)) and isinstance(
+        x.shape[dim], int
+    ):
+        return _normalize_start_end(x, dim, start, end)
+    start = 0 if start is None else start
+    end = 2**63 - 1 if end is None else end
+    return start, end
+
+
+def _src_range_of_self(self, src):
+    """The (dim, start, end) of ``self`` that ``src`` is an unmodified view of,
+    when ``src`` is ``split_with_sizes(self)[i]`` or ``slice(self)`` with step
+    1, else None."""
+    if src.target is operator.getitem and isinstance(src.args[0], torch.fx.Node):
+        split = src.args[0]
+        if (
+            split.target is not aten.split_with_sizes.default
+            or split.args[0] is not self
+        ):
+            return None
+        split_sizes = get_arg_value(split, 1, "split_sizes")
+        dim = get_arg_value(split, 2, "dim")
+        index = get_arg_value(src, 1)
+        if (
+            not isinstance(split_sizes, (list, tuple))
+            or not all(isinstance(size, int) for size in split_sizes)
+            or not isinstance(index, int)
+            or not 0 <= index < len(split_sizes)
+        ):
+            return None
+        start = sum(split_sizes[:index])
+        return dim, start, start + split_sizes[index]
+    if src.target is aten.slice.Tensor and src.args and src.args[0] is self:
+        step = get_arg_value(src, 4, "step")
+        if step not in (None, 1):
+            return None
+        return (
+            get_arg_value(src, 1, "dim"),
+            get_arg_value(src, 2, "start"),
+            get_arg_value(src, 3, "end"),
+        )
+    return None
+
+
 def _slice_scatter_noop_replacement(node):
     """Return ``self`` when ``src`` is exactly the slice being overwritten.
 
-    Functionalization can produce split/getitem/slice_scatter chains that copy
-    an unmodified view back to the same range of its base.  Replacing such a
-    scatter with the base avoids materializing the whole tensor.  Fall back to
-    the historical full-replacement behavior (replace with ``src``).
+    User code that copies an unmodified view of a tensor onto itself
+    (``v.copy_(v)``) is functionalized into a scatter of
+    ``split_with_sizes(self)[i]`` or ``self.slice(dim, a, b)`` back onto the
+    same range of ``self``. Replacing such a scatter with the base avoids
+    materializing the whole tensor. Fall back to the historical
+    full-replacement behavior (replace with ``src``).
     """
     self = get_arg_value(node, 0)
     src = get_arg_value(node, 1)
     if not isinstance(self, torch.fx.Node) or not isinstance(src, torch.fx.Node):
         return src
-    if src.target is not operator.getitem or not isinstance(src.args[0], torch.fx.Node):
+    src_range = _src_range_of_self(self, src)
+    if src_range is None:
         return src
-
-    split = src.args[0]
-    if split.target is not aten.split_with_sizes.default or split.args[0] is not self:
-        return src
-    split_sizes = get_arg_value(split, 1, "split_sizes")
-    split_dim = get_arg_value(split, 2, "dim")
-    index = get_arg_value(src, 1)
+    src_dim, src_start, src_end = src_range
     scatter_dim = get_arg_value(node, 2, "dim")
     start = get_arg_value(node, 3, "start")
     end = get_arg_value(node, 4, "end")
     step = get_arg_value(node, 5, "step")
-    if split_dim is None:
-        split_dim = 0
-    if scatter_dim is None:
-        scatter_dim = 0
-    if step is None:
-        step = 1
-    if (
-        not isinstance(split_sizes, (list, tuple))
-        or not all(isinstance(size, int) for size in split_sizes)
-        or not isinstance(index, int)
-        or not isinstance(split_dim, int)
-        or not isinstance(scatter_dim, int)
-        or (start is not None and not isinstance(start, int))
-        or (end is not None and not isinstance(end, int))
-        or (step is not None and not isinstance(step, int))
-    ):
-        return src
     self_val = self.meta.get("val")
-    if not isinstance(self_val, torch.Tensor):
+    if not isinstance(self_val, torch.Tensor) or self_val.dim() == 0:
         return src
     ndim = self_val.dim()
-    if ndim == 0:
+
+    def normalize(dim, start, end):
+        if not all(isinstance(v, (int, type(None))) for v in (dim, start, end)):
+            return None
+        dim = _canonicalize_dim_arg(ndim, dim)
+        if not 0 <= dim < ndim:
+            return None
+        return (dim, *_clamp_slice_range(self_val, dim, start, end))
+
+    src_key = normalize(src_dim, src_start, src_end)
+    scatter_key = normalize(scatter_dim, start, end)
+    if step not in (None, 1) or src_key is None or src_key != scatter_key:
         return src
-    split_dim %= ndim
-    scatter_dim %= ndim
-    if split_dim != scatter_dim or step != 1 or not 0 <= index < len(split_sizes):
-        return src
-    expected_start = sum(split_sizes[:index])
-    expected_end = expected_start + split_sizes[index]
-    if start is None:
-        start = 0
-    if end is None:
-        end = 2**63 - 1
-    if start == expected_start and end == expected_end:
-        return self
-    return src
+    return self
 
 
 @register_noop_decomp(aten.slice_scatter, _slice_scatter_noop_replacement)
@@ -1589,11 +1668,8 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
     if not -self.dim() <= dim < self.dim():
         return False
     dim %= self.dim()
-    if start is None:
-        start = 0
-    if end is None:
-        end = 2**63 - 1
     slice_scatter_dim_size = self.shape[dim]
+    start, end = _clamp_slice_range(self, dim, start, end)
     full_replacement = (
         statically_known_true(sym_eq(self.shape, src.shape))
         and (
@@ -3054,7 +3130,7 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
     normalized = _normalized_scaled_mm(match)
     if normalized is None:
         return False
-    scaled_mm, normalized_kwargs = normalized
+    _, normalized_kwargs = normalized
 
     # The native alpha argument is currently implemented only by the vendored
     # NVFP4 provider.  The packed FP4 dtype is shared with MXFP4, so include the
@@ -3083,8 +3159,6 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
     ):
         return False
 
-    if config._micro_pipeline_tp and is_micro_pipeline_tp_candidate(scaled_mm):
-        return False
     # Leave a fully lowerable pointwise chain to scheduler epilogue fusion.
     # Fold early when that chain reaches an opaque/non-pointwise consumer,
     # since the scheduler cannot carry the scale across that boundary.

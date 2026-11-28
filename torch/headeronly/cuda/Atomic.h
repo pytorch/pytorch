@@ -11,6 +11,7 @@
 #endif
 
 #if defined(USE_ROCM)
+#include <hip/hip_version.h>
 #include <torch/headeronly/cuda/detail/ROCmMacros.h>
 #endif
 
@@ -314,11 +315,9 @@ inline __device__ void atomicAdd(bool* address, bool val) {
 
 /* Note [explicitly non-returning atomics]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * AMD's MI100 (gfx908) provides an optimized fp32 atomicAdd, exposed via
- * atomicAddNoRet(). Due to compiler limitations, callers must opt-in to
- * guarantee the optimized instruction. This non-returning atomicAddNoRet cannot
- * be used to implement the returning atomicAdd, therefore we need a new API
- * 'gpuAtomicAddNoReturn'.
+ * On gfx908, HIP < 7 has the fast fp32 no-return atomic only as
+ * atomicAddNoRet (deprecated since ROCm 6.0; aliases unsafeAtomicAdd
+ * from ROCm 7). That cannot implement atomicAdd, hence gpuAtomicAddNoReturn.
  */
 template <typename T>
 inline __device__ void gpuAtomicAddNoReturn(
@@ -366,9 +365,16 @@ inline __device__ void gpuAtomicAddNoReturn(
  */
 #if defined(USE_ROCM)
 inline __device__ void gpuAtomicAddNoReturn(float* address, float val) {
-  if (__builtin_amdgcn_processor_is("gfx908"))
-    return atomicAddNoRet(address, val);
+  // HIP_VERSION comes from hip/hip_version.h, so cpp extensions see it.
+  // From ROCm 7, atomicAddNoRet only aliases unsafeAtomicAdd.
+#if HIP_VERSION_MAJOR >= 7
   (void)unsafeAtomicAdd(address, val);
+#else
+  if (__builtin_amdgcn_processor_is("gfx908"))
+    atomicAddNoRet(address, val);
+  else
+    (void)unsafeAtomicAdd(address, val);
+#endif
 }
 inline __device__ void gpuAtomicAddNoReturn(double* address, double val) {
   (void)unsafeAtomicAdd(address, val);
