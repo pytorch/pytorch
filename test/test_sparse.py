@@ -20,9 +20,9 @@ from typing import Any
 from torch.testing._internal.common_cuda import \
     (ROCM_VERSION, SM80OrLater)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, dtypesIfXPU, onlyCPU, precisionOverride,
-     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS,
-     onlyAccelerator, largeTensorTest, onlyCUDA, skipCUDAIfRocm)
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, dtypesIfXPU, precisionOverride,
+     deviceCountAtLeast, OpDTypes, skipCUDAIf, expectedFailureMPS,
+     onlyAccelerator, largeTensorTest, skipCUDAIfRocm)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
@@ -569,6 +569,32 @@ class TestSparseOnlyCPU(TestSparseBase):
         test_shape(0, 100, 100, 0)
         test_shape(1000, 0, 100, 0)
         test_shape(1000, 100, 0, 0)
+
+
+class TestSparseOnlyCUDA(TestSparseBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_mm_deterministic(self, device, dtype):
+        # gh-202030; values in deterministic mode are checked by the @deterministiconoff tests.
+        # The dtypes are all that the CUDA COO kernel (csrmm2) supports.
+        a, b = hub_sparse_mm_inputs(device, dtype)
+        c = torch.randn_like(b)
+        b1 = b[:, :1].contiguous()  # cuSPARSE: "For n == 1, the routine may use cusparseSpMV()"
+
+        def mm_backward():
+            d = b.detach().requires_grad_()
+            torch.sparse.mm(a, d).backward(c)
+            return d.grad
+
+        check_sparse_mm_deterministic(self, [
+            ("mm", lambda: torch.mm(a, b)),
+            ("mm column-major", lambda: torch.mm(a, b.t().contiguous().t())),
+            ("mm n=1", lambda: torch.mm(a, b1)),
+            ("addmm", lambda: torch.addmm(c, a, b, beta=0.5, alpha=2)),
+            ("mm backward", mm_backward),
+        ])
 
 class TestSparse(TestSparseBase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1956,29 +1982,6 @@ class TestSparse(TestSparseBase):
         test_shape(10, 10, 100, 0, 0)
         test_shape(10, 10, 100, 0, 20)
         test_shape(10, 10, 100, 0, 20)
-
-    @onlyCUDA
-    @skipCUDAIfRocm
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_mm_deterministic(self, device, dtype):
-        # gh-202030; values in deterministic mode are checked by the @deterministiconoff tests.
-        # The dtypes are all that the CUDA COO kernel (csrmm2) supports.
-        a, b = hub_sparse_mm_inputs(device, dtype)
-        c = torch.randn_like(b)
-        b1 = b[:, :1].contiguous()  # cuSPARSE: "For n == 1, the routine may use cusparseSpMV()"
-
-        def mm_backward():
-            d = b.detach().requires_grad_()
-            torch.sparse.mm(a, d).backward(c)
-            return d.grad
-
-        check_sparse_mm_deterministic(self, [
-            ("mm", lambda: torch.mm(a, b)),
-            ("mm column-major", lambda: torch.mm(a, b.t().contiguous().t())),
-            ("mm n=1", lambda: torch.mm(a, b1)),
-            ("addmm", lambda: torch.addmm(c, a, b, beta=0.5, alpha=2)),
-            ("mm backward", mm_backward),
-        ])
 
     @onlyAccelerator
     def test_bmm_oob(self, device):
@@ -5012,213 +5015,8 @@ class _SparseDataset(torch.utils.data.Dataset):
 
 
 class TestSparseAny(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyCPU
-    @all_sparse_layouts('layout', include_strided=False)
-    @torch.sparse.check_sparse_tensor_invariants(enable=False)
-    def test_check_sparse_tensor_invariants(self, layout):
-
-        if layout is torch.sparse_coo:
-
-            def create_invalid_tensor(check_invariants=None):
-                shape = (2, 2)
-                invalid_indices = torch.tensor([[0], [3]])  # column index is out of range
-                values = torch.tensor([1])
-                if check_invariants is None:
-                    return torch.sparse_coo_tensor(invalid_indices, values, shape)
-                else:
-                    return torch.sparse_coo_tensor(invalid_indices, values, shape, check_invariants=check_invariants)
-
-            expected_exception_message = 'size is inconsistent with indices: for dim 1, size is 2 but found index 3'
-
-        elif layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
-
-            def create_invalid_tensor(check_invariants=None):
-                shape = (2, 2)
-                compressed_indices = torch.tensor([0, 0, 1])
-                invalid_plain_indices = torch.tensor([3])  # index is out of range
-                if layout in {torch.sparse_bsr, torch.sparse_bsc}:
-                    values = torch.tensor([[[1]]])
-                else:
-                    values = torch.tensor([1])
-                if check_invariants is None:
-                    return torch.sparse_compressed_tensor(compressed_indices, invalid_plain_indices, values, shape, layout=layout)
-                else:
-                    return torch.sparse_compressed_tensor(compressed_indices, invalid_plain_indices, values, shape, layout=layout,
-                                                          check_invariants=check_invariants)
-
-            if layout in {torch.sparse_csr, torch.sparse_bsr}:
-                expected_exception_message = r'`0 <= col_indices < ncols` is not satisfied.'
-            else:
-                expected_exception_message = r'`0 <= row_indices < nrows` is not satisfied.'
-
-        else:
-            raise NotImplementedError(layout)
-
-        # First, consider the case where invariant checks are disabled
-        # "globally" (read: within the context of this test method
-        # caller) as defined by check_sparse_tensor_invariants(False)
-        # decorator:
-        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-
-        # Enable the invariant checks in a local context:
-        with torch.sparse.check_sparse_tensor_invariants():
-            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-
-        # Leaving the local context must restore the "global" state of
-        # the invariant check feature:
-        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-
-        # Since invariant checks are disabled by default, we can
-        # create an invalid sparse tensor without raising an
-        # exception:
-        r = create_invalid_tensor()
-        self.assertEqual(r.layout, layout)
-
-        # Or, when disabling the invariants check explicitly:
-        r = create_invalid_tensor(check_invariants=False)
-        self.assertEqual(r.layout, layout)
-
-        # Enabling invariant check via constructor's optional argument
-        # will raise an exception when sparse tensor invariants are
-        # violated:
-        with self.assertRaisesRegex(RuntimeError, expected_exception_message):
-            create_invalid_tensor(check_invariants=True)
-
-        # Check that the global invariant check flag has been restored
-        # after raising the exception above:
-        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-
-        # Next, consider the case where invariant checks are enabled
-        # within a local context:
-        with torch.sparse.check_sparse_tensor_invariants():
-            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-
-            # Since invariant checks are now enabled by default, an
-            # attempt to create an invalid sparse tensor will lead to
-            # an exception:
-            with self.assertRaisesRegex(RuntimeError, expected_exception_message):
-                create_invalid_tensor()
-
-            # Similarly, when enabling the invariant checks
-            # explicitly, invalid sparse tensor construction will lead
-            # to an exception:
-            with self.assertRaisesRegex(RuntimeError, expected_exception_message):
-                create_invalid_tensor(check_invariants=True)
-
-            # However, invariants check can be disabled via
-            # constructor's optional argument so that the invalid
-            # tensor is successfully constructed:
-            r = create_invalid_tensor(check_invariants=False)
-            self.assertEqual(r.layout, layout)
-
-            # Check that the invariant check flag has been restored
-            # when leaving the constructor:
-            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-
-        # Double-check restoring the global state when leaving the
-        # local context:
-        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-
-        # Test nesting of pre-defined context managers
-        check_ctx = torch.sparse.check_sparse_tensor_invariants(True)
-        no_check_ctx = torch.sparse.check_sparse_tensor_invariants(False)
-        with check_ctx:
-            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-            with no_check_ctx:
-                self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-
-        # Test an attempt to reuse an activate context manager instance
-        check_ctx2 = torch.sparse.check_sparse_tensor_invariants(True)
-        with check_ctx:
-            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-            with no_check_ctx:
-                self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-                with self.assertRaisesRegex(RuntimeError, "This context manager instance is already activated."
-                                            " Use a different context manager instance for context nesting"):
-                    with check_ctx:
-                        self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-                self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-                with check_ctx2:
-                    self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-                self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
-
-    def test_generate_simple_inputs(self):
-        layouts = [torch.strided, torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc]
-
-        tested_combinations = set()
-        for tensors in zip(*map(self.generate_simple_inputs, layouts)):
-            for i, t in enumerate(tensors):
-                self.assertEqual(t.layout, layouts[i])
-
-                # all layouts must produce semantically the same tensors
-                self.assertEqual(t, tensors[0])
-
-                if t.layout is torch.strided:
-                    is_hybrid = None
-                else:
-                    is_hybrid = t.dense_dim() > 0
-                if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                    is_batch = t.crow_indices().ndim > 1
-                elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
-                    is_batch = t.ccol_indices().ndim > 1
-                else:
-                    is_batch = None
-                if t.layout in {torch.sparse_bsr, torch.sparse_bsc}:
-                    blocksize = t.values().shape[1:3]
-                    nontrivial_blocksize = 1 not in blocksize
-                else:
-                    nontrivial_blocksize = None
-                if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                    contiguous_indices = t.crow_indices().is_contiguous() and t.col_indices().is_contiguous()
-                    contiguous_values = t.values().is_contiguous()
-                elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
-                    contiguous_indices = t.ccol_indices().is_contiguous() and t.row_indices().is_contiguous()
-                    contiguous_values = t.values().is_contiguous()
-                elif t.layout is torch.sparse_coo:
-                    contiguous_indices = t._indices().is_contiguous()
-                    contiguous_values = t._values().is_contiguous()
-                else:
-                    contiguous_indices = None
-                    contiguous_values = t.is_contiguous()
-
-                tested_combinations.add((t.layout, is_hybrid, is_batch, nontrivial_blocksize,
-                                         contiguous_indices, contiguous_values))
-
-        # Ensure that the inputs generation covers all layout,
-        # non-hybrid/hybrid, non-batch/batch, and contiguity
-        # combinations:
-        untested_combinations = set()
-        for layout in layouts:
-            for is_hybrid in [False, True]:
-                if layout is torch.strided:
-                    is_hybrid = None
-                for is_batch in [False, True]:
-                    if layout in {torch.sparse_coo, torch.strided}:
-                        is_batch = None
-                    for nontrivial_blocksize in [False, True]:
-                        if layout not in {torch.sparse_bsr, torch.sparse_bsc}:
-                            nontrivial_blocksize = None
-                        for contiguous_indices in [False, True]:
-                            if layout is torch.strided:
-                                contiguous_indices = None
-                            elif not is_batch:
-                                # indices are contiguous per-patch
-                                contiguous_indices = True
-                            for contiguous_values in [False, True]:
-                                key = (layout, is_hybrid, is_batch, nontrivial_blocksize,
-                                       contiguous_indices, contiguous_values)
-                                if key not in tested_combinations:
-                                    untested_combinations.add(
-                                        f'layout={layout}, is_hybrid={is_hybrid}, is_batch={is_batch},'
-                                        f' nontrivial_blocksize={nontrivial_blocksize},'
-                                        f' contiguous_indices{contiguous_indices}, contiguous_values={contiguous_values}')
-        if untested_combinations:
-            raise AssertionError(f"untested combinations: {untested_combinations}")
 
     @all_sparse_layouts('layout', include_strided=False)
     def test_constructor_autograd(self, device, layout):
@@ -5486,7 +5284,6 @@ class TestSparseAny(TestCase):
             torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, r.values(), r.shape, r.layout)
             self.assertEqual(r, t)
 
-    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(reduction_ops_with_sparse_support)
     @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-3})
@@ -5507,7 +5304,6 @@ class TestSparseAny(TestCase):
             # we count samples to avoid false-positive test reports
             self.skipTest('no sample inputs')
 
-    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(reduction_ops_with_sparse_support, allowed_dtypes=(torch.float32, torch.float64, torch.complex64, torch.complex128))
     @all_sparse_layouts('layout', include_strided=False)
@@ -5530,7 +5326,6 @@ class TestSparseAny(TestCase):
             # we count samples to avoid false-positive test reports
             self.skipTest('no sample inputs')
 
-    @onlyNativeDeviceTypes
     @suppress_warnings
     @parametrize("mth", [subtest(mth, name=mth.__name__)
                          for mth in [torch.Tensor.is_coalesced,
@@ -5576,7 +5371,6 @@ class TestSparseAny(TestCase):
             with self.assertRaisesRegex(RuntimeError, expected_behaviour[1]):
                 mth(inp)
 
-    @onlyNativeDeviceTypes
     @all_sparse_layouts('layout', include_strided=not True)
     @dtypes(torch.float64, torch.cdouble)
     @parametrize("masked", [subtest(False, name='sparse'), subtest(True, name='masked')])
@@ -5623,7 +5417,6 @@ class TestSparseAny(TestCase):
         else:
             torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
 
-    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(binary_ufuncs_with_sparse_support)
     @all_sparse_layouts('layout', include_strided=False)
@@ -5663,26 +5456,6 @@ class TestSparseAny(TestCase):
                 raise
             self.assertEqual(result, dense)
 
-    @onlyCPU
-    @all_sparse_layouts('layout', include_strided=True)
-    @dtypes(torch.double)
-    def test_to_sparse_identity(self, device, layout, dtype):
-        for dense_dim in range(4):
-            x_dense = torch.eye(dense_dim, dtype=dtype, device=device)
-            for sparse_dim_in in range(1, dense_dim):
-                x_sparse = x_dense.to_sparse(sparse_dim_in)
-                for sparse_dim_out in range(dense_dim):
-                    if sparse_dim_out == sparse_dim_in:
-                        self.assertTrue(x_sparse.to_sparse(sparse_dim_out).sparse_dim() == sparse_dim_out)
-                    else:
-                        with self.assertRaisesRegex(
-                                RuntimeError,
-                                r"to_sparse: conversion from Sparse to Sparse with sparse_dim argument !=self.sparse_dim\(\)"
-                                " is not supported"):
-                            x_sparse.to_sparse(sparse_dim_out)
-
-
-    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(like_fns_with_sparse_support)
     @all_sparse_layouts('layout', include_strided=False)
@@ -5739,7 +5512,6 @@ class TestSparseAny(TestCase):
                                                               result.shape, result.layout)
 
     @all_sparse_layouts('mask_layout', include_strided=False)
-    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_mask(self, mask_layout, device, dtype):
         input_layout = torch.strided
@@ -5822,44 +5594,13 @@ class TestSparseAny(TestCase):
 
                 gradcheck(func, x.requires_grad_(True), masked=masked, fast_mode=fast_mode)
 
-    @onlyCPU
-    @all_sparse_layouts('layout', include_strided=False)
-    @dtypes(torch.double)
-    def test_dataloader(self, device, layout, dtype):
-
-        data = list(self.generate_simple_inputs(layout, device=device, dtype=dtype))
-
-        dataset = _SparseDataset(data)
-        loader = torch.utils.data.DataLoader(dataset, batch_size=None, num_workers=2)
-
-        loaded_data = list(loader)
-        self.assertEqual(data, loaded_data)
-
-    @onlyCPU
-    def test_invalid_blocksize(self):
-        # Blocksize should be a tuple/list/torch.Size containing two values
-        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
-            torch.randn(1).to_sparse(blocksize=(1,))
-        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
-            torch.randn(1).to_sparse(blocksize=[1])
-        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
-            torch.randn(1).to_sparse(blocksize=torch.Size((1,)))
-        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
-            torch.randn(1).to_sparse(blocksize=(1, 1, 1))
-        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
-            torch.randn(1).to_sparse(blocksize=[1, 1, 1])
-        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
-            torch.randn(1).to_sparse(blocksize=torch.Size((1, 1, 1)))
-
-    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
-    @onlyCPU
+    @onlyAccelerator
     @all_sparse_layouts('layout', include_strided=True)
     def test_constructor_pin_memory(self, device, layout):
         """Tests sparse_xyz_tensor(indices, values, pin_memory=True)
         """
-        self.assertEqual(device, "cpu")
         for t in self.generate_simple_inputs(
-                layout, device=device, dtype=torch.float64,
+                layout, device="cpu", dtype=torch.float64,
                 enable_zero_sized=False,  # pinning zero-sized tensors is a no-op
                 pin_memory=True,
         ):
@@ -5880,15 +5621,14 @@ class TestSparseAny(TestCase):
                 raise AssertionError(f"unreachable: layout={layout}")
             self.assertTrue(t.is_pinned())
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
-    @onlyCPU
+    @onlyAccelerator
     @all_sparse_layouts('layout', include_strided=True)
     def test_method_pin_memory(self, device, layout):
         """Tests sparse_xyz_tensor(indices, values, pin_memory=False).pin_memory()
         """
 
         for t_ in self.generate_simple_inputs(
-                layout, device=device, dtype=torch.float64,
+                layout, device="cpu", dtype=torch.float64,
                 enable_zero_sized=False,  # pinning zero-sized tensors is a no-op
                 pin_memory=False,         # no pinning
         ):
@@ -5928,16 +5668,13 @@ class TestSparseAny(TestCase):
             else:
                 raise AssertionError(f"unreachable: layout={layout}")
 
-
-    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
-    @onlyCPU
+    @onlyAccelerator
     @all_sparse_layouts('layout', include_strided=True)
     def test_constructor_pinned_memory(self, device, layout):
         """Tests sparse_xyz_tensor(indices.pin_memory(device), values.pin_memory(device))
         """
-        pin_memory_device = "cuda"
         for t in self.generate_simple_inputs(
-                layout, device=device, dtype=torch.float64,
+                layout, device="cpu", dtype=torch.float64,
                 enable_zero_sized=False,     # pinning zero-sized tensors is a no-op
                 pin_memory=None,             # constructor does not specify pin_memory=...
                 members_pin_memory=True,     # indices and values are pinned
@@ -5959,8 +5696,7 @@ class TestSparseAny(TestCase):
                 raise AssertionError(f"unreachable: layout={layout}")
             self.assertTrue(t.is_pinned())
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
-    @onlyCPU
+    @onlyAccelerator
     @all_sparse_layouts('layout', include_strided=False)
     def test_constructor_mismatched_pinned_memory(self, device, layout):
         """Test the failure to construct sparse tensor from indices and values
@@ -5976,7 +5712,7 @@ class TestSparseAny(TestCase):
                 raise NotImplementedError(layout)
 
         for args, kwargs in self.generate_simple_inputs(
-                layout, device=device, dtype=torch.float64,
+                layout, device="cpu", dtype=torch.float64,
                 enable_zero_sized=False,     # pinning zero-sized tensors is a no-op
                 output_tensor=False):
 
@@ -5994,7 +5730,6 @@ class TestSparseAny(TestCase):
                     RuntimeError, r"memory pinning of \w*indices \(=0\) must match memory pinning of values \(=1\)"):
                 generic_constructor(*args2, **kwargs)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.complex32, torch.complex64, torch.complex128)
     def test_view_as_real(self, device, dtype):
         for xs in self.generate_simple_inputs(torch.sparse_coo, device=device, dtype=dtype):
@@ -6012,7 +5747,6 @@ class TestSparseAny(TestCase):
                 self.assertEqual(res.to_dense(), torch.view_as_real(xs.to_dense()))
             self.assertEqual(torch.view_as_complex(torch.view_as_real(xs)), xs)
 
-    @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.float32, torch.float64)
     def test_view_as_complex(self, device, dtype):
         for xs in self.generate_simple_inputs(torch.sparse_coo, device=device, dtype=dtype):
@@ -6038,20 +5772,280 @@ class TestSparseAny(TestCase):
                 self.assertEqual(res.to_dense(), torch.view_as_complex(xs.to_dense()))
             self.assertEqual(torch.view_as_real(torch.view_as_complex(xs)), xs)
 
+
+class TestSparseAnyGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_generate_simple_inputs(self):
+        layouts = [torch.strided, torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc]
+
+        tested_combinations = set()
+        for tensors in zip(*map(self.generate_simple_inputs, layouts)):
+            for i, t in enumerate(tensors):
+                self.assertEqual(t.layout, layouts[i])
+
+                # all layouts must produce semantically the same tensors
+                self.assertEqual(t, tensors[0])
+
+                if t.layout is torch.strided:
+                    is_hybrid = None
+                else:
+                    is_hybrid = t.dense_dim() > 0
+                if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                    is_batch = t.crow_indices().ndim > 1
+                elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
+                    is_batch = t.ccol_indices().ndim > 1
+                else:
+                    is_batch = None
+                if t.layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                    blocksize = t.values().shape[1:3]
+                    nontrivial_blocksize = 1 not in blocksize
+                else:
+                    nontrivial_blocksize = None
+                if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                    contiguous_indices = t.crow_indices().is_contiguous() and t.col_indices().is_contiguous()
+                    contiguous_values = t.values().is_contiguous()
+                elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
+                    contiguous_indices = t.ccol_indices().is_contiguous() and t.row_indices().is_contiguous()
+                    contiguous_values = t.values().is_contiguous()
+                elif t.layout is torch.sparse_coo:
+                    contiguous_indices = t._indices().is_contiguous()
+                    contiguous_values = t._values().is_contiguous()
+                else:
+                    contiguous_indices = None
+                    contiguous_values = t.is_contiguous()
+
+                tested_combinations.add((t.layout, is_hybrid, is_batch, nontrivial_blocksize,
+                                         contiguous_indices, contiguous_values))
+
+        # Ensure that the inputs generation covers all layout,
+        # non-hybrid/hybrid, non-batch/batch, and contiguity
+        # combinations:
+        untested_combinations = set()
+        for layout in layouts:
+            for is_hybrid in [False, True]:
+                if layout is torch.strided:
+                    is_hybrid = None
+                for is_batch in [False, True]:
+                    if layout in {torch.sparse_coo, torch.strided}:
+                        is_batch = None
+                    for nontrivial_blocksize in [False, True]:
+                        if layout not in {torch.sparse_bsr, torch.sparse_bsc}:
+                            nontrivial_blocksize = None
+                        for contiguous_indices in [False, True]:
+                            if layout is torch.strided:
+                                contiguous_indices = None
+                            elif not is_batch:
+                                # indices are contiguous per-patch
+                                contiguous_indices = True
+                            for contiguous_values in [False, True]:
+                                key = (layout, is_hybrid, is_batch, nontrivial_blocksize,
+                                       contiguous_indices, contiguous_values)
+                                if key not in tested_combinations:
+                                    untested_combinations.add(
+                                        f'layout={layout}, is_hybrid={is_hybrid}, is_batch={is_batch},'
+                                        f' nontrivial_blocksize={nontrivial_blocksize},'
+                                        f' contiguous_indices{contiguous_indices}, contiguous_values={contiguous_values}')
+        if untested_combinations:
+            raise AssertionError(f"untested combinations: {untested_combinations}")
+
+
+class TestSparseAnyOnlyCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    @all_sparse_layouts('layout', include_strided=False)
+    @torch.sparse.check_sparse_tensor_invariants(enable=False)
+    def test_check_sparse_tensor_invariants(self, layout):
+
+        if layout is torch.sparse_coo:
+
+            def create_invalid_tensor(check_invariants=None):
+                shape = (2, 2)
+                invalid_indices = torch.tensor([[0], [3]])  # column index is out of range
+                values = torch.tensor([1])
+                if check_invariants is None:
+                    return torch.sparse_coo_tensor(invalid_indices, values, shape)
+                else:
+                    return torch.sparse_coo_tensor(invalid_indices, values, shape, check_invariants=check_invariants)
+
+            expected_exception_message = 'size is inconsistent with indices: for dim 1, size is 2 but found index 3'
+
+        elif layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+
+            def create_invalid_tensor(check_invariants=None):
+                shape = (2, 2)
+                compressed_indices = torch.tensor([0, 0, 1])
+                invalid_plain_indices = torch.tensor([3])  # index is out of range
+                if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                    values = torch.tensor([[[1]]])
+                else:
+                    values = torch.tensor([1])
+                if check_invariants is None:
+                    return torch.sparse_compressed_tensor(compressed_indices, invalid_plain_indices, values, shape, layout=layout)
+                else:
+                    return torch.sparse_compressed_tensor(compressed_indices, invalid_plain_indices, values, shape, layout=layout,
+                                                          check_invariants=check_invariants)
+
+            if layout in {torch.sparse_csr, torch.sparse_bsr}:
+                expected_exception_message = r'`0 <= col_indices < ncols` is not satisfied.'
+            else:
+                expected_exception_message = r'`0 <= row_indices < nrows` is not satisfied.'
+
+        else:
+            raise NotImplementedError(layout)
+
+        # First, consider the case where invariant checks are disabled
+        # "globally" (read: within the context of this test method
+        # caller) as defined by check_sparse_tensor_invariants(False)
+        # decorator:
+        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+        # Enable the invariant checks in a local context:
+        with torch.sparse.check_sparse_tensor_invariants():
+            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+        # Leaving the local context must restore the "global" state of
+        # the invariant check feature:
+        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+        # Since invariant checks are disabled by default, we can
+        # create an invalid sparse tensor without raising an
+        # exception:
+        r = create_invalid_tensor()
+        self.assertEqual(r.layout, layout)
+
+        # Or, when disabling the invariants check explicitly:
+        r = create_invalid_tensor(check_invariants=False)
+        self.assertEqual(r.layout, layout)
+
+        # Enabling invariant check via constructor's optional argument
+        # will raise an exception when sparse tensor invariants are
+        # violated:
+        with self.assertRaisesRegex(RuntimeError, expected_exception_message):
+            create_invalid_tensor(check_invariants=True)
+
+        # Check that the global invariant check flag has been restored
+        # after raising the exception above:
+        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+        # Next, consider the case where invariant checks are enabled
+        # within a local context:
+        with torch.sparse.check_sparse_tensor_invariants():
+            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+            # Since invariant checks are now enabled by default, an
+            # attempt to create an invalid sparse tensor will lead to
+            # an exception:
+            with self.assertRaisesRegex(RuntimeError, expected_exception_message):
+                create_invalid_tensor()
+
+            # Similarly, when enabling the invariant checks
+            # explicitly, invalid sparse tensor construction will lead
+            # to an exception:
+            with self.assertRaisesRegex(RuntimeError, expected_exception_message):
+                create_invalid_tensor(check_invariants=True)
+
+            # However, invariants check can be disabled via
+            # constructor's optional argument so that the invalid
+            # tensor is successfully constructed:
+            r = create_invalid_tensor(check_invariants=False)
+            self.assertEqual(r.layout, layout)
+
+            # Check that the invariant check flag has been restored
+            # when leaving the constructor:
+            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+        # Double-check restoring the global state when leaving the
+        # local context:
+        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+        # Test nesting of pre-defined context managers
+        check_ctx = torch.sparse.check_sparse_tensor_invariants(True)
+        no_check_ctx = torch.sparse.check_sparse_tensor_invariants(False)
+        with check_ctx:
+            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+            with no_check_ctx:
+                self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+        # Test an attempt to reuse an activate context manager instance
+        check_ctx2 = torch.sparse.check_sparse_tensor_invariants(True)
+        with check_ctx:
+            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+            with no_check_ctx:
+                self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+                with self.assertRaisesRegex(RuntimeError, "This context manager instance is already activated."
+                                            " Use a different context manager instance for context nesting"):
+                    with check_ctx:
+                        self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+                self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+                with check_ctx2:
+                    self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+                self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+            self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+        self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
+
+    @all_sparse_layouts('layout', include_strided=True)
+    @dtypes(torch.double)
+    def test_to_sparse_identity(self, device, layout, dtype):
+        for dense_dim in range(4):
+            x_dense = torch.eye(dense_dim, dtype=dtype, device=device)
+            for sparse_dim_in in range(1, dense_dim):
+                x_sparse = x_dense.to_sparse(sparse_dim_in)
+                for sparse_dim_out in range(dense_dim):
+                    if sparse_dim_out == sparse_dim_in:
+                        self.assertTrue(x_sparse.to_sparse(sparse_dim_out).sparse_dim() == sparse_dim_out)
+                    else:
+                        with self.assertRaisesRegex(
+                                RuntimeError,
+                                r"to_sparse: conversion from Sparse to Sparse with sparse_dim argument !=self.sparse_dim\(\)"
+                                " is not supported"):
+                            x_sparse.to_sparse(sparse_dim_out)
+
+    @all_sparse_layouts('layout', include_strided=False)
+    @dtypes(torch.double)
+    def test_dataloader(self, device, layout, dtype):
+
+        data = list(self.generate_simple_inputs(layout, device=device, dtype=dtype))
+
+        dataset = _SparseDataset(data)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=None, num_workers=2)
+
+        loaded_data = list(loader)
+        self.assertEqual(data, loaded_data)
+
+    def test_invalid_blocksize(self):
+        # Blocksize should be a tuple/list/torch.Size containing two values
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
+            torch.randn(1).to_sparse(blocksize=(1,))
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
+            torch.randn(1).to_sparse(blocksize=[1])
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
+            torch.randn(1).to_sparse(blocksize=torch.Size((1,)))
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
+            torch.randn(1).to_sparse(blocksize=(1, 1, 1))
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
+            torch.randn(1).to_sparse(blocksize=[1, 1, 1])
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
+            torch.randn(1).to_sparse(blocksize=torch.Size((1, 1, 1)))
+
 # e.g., TestSparseUnaryUfuncsCPU, TestSparseUnaryUfuncsCUDA, and TestSparseUnaryUfuncsXPU
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_mps=True, allow_xpu=True, except_for='meta')
 
 instantiate_device_type_tests(TestSparseMaskedReductions, globals(), allow_xpu=True, except_for='meta')
 
 instantiate_device_type_tests(TestSparseOnlyCPU, globals(), only_for="cpu")
+instantiate_device_type_tests(TestSparseOnlyCUDA, globals(), only_for="cuda")
 
 # e.g., TestSparseCPU, TestSparseCUDA, and TestSparseXPU
 instantiate_device_type_tests(TestSparse, globals(), allow_mps=True, allow_xpu=True, except_for='meta')
 
 instantiate_device_type_tests(TestSparseAny, globals(), allow_xpu=True, except_for='meta')
+instantiate_device_type_tests(TestSparseAnyOnlyCPU, globals(), only_for="cpu")
 
 instantiate_device_type_tests(
-    TestSparseOneOff, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestSparseOneOff, globals(), except_for="cpu", allow_xpu=True
 )
 
 instantiate_parametrized_tests(TestSparseMeta)
