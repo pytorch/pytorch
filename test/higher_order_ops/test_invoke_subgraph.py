@@ -3905,15 +3905,16 @@ class TestInvokeSubgraphReuse(TestCase):
         run = self._reuse_runner(fn, Holder(child=a), Holder(child=b))
         run(orphan, traces=1 if case == "collision" else 2)
 
-    @parametrize("mode", ["hint", "range", "reject"])
+    @parametrize("mode", ["hint", "max", "min", "reject"])
     def test_reused_region_dynamic_capture_branch(self, mode):
         @_map_nested_region
         def fn(x, holder):
             return x + holder.tensor.sum() + (17 if holder.tensor.shape[0] >= 6 else 0)
 
-        holders = [Holder(tensor=_dynamic_capture(5)) for _ in range(2)]
-        if mode == "range":
-            mark_dynamic(holders[0].tensor, 0, max=5)
+        sizes = (6, 7, 5, 2) if mode == "min" else (5, 2, 6, 7)
+        holders = [Holder(tensor=_dynamic_capture(sizes[0])) for _ in range(2)]
+        if mode in ("min", "max"):
+            mark_dynamic(holders[0].tensor, 0, **{mode: sizes[0]})
 
         def reject(match, *args):
             tx = match.tx
@@ -3933,7 +3934,7 @@ class TestInvokeSubgraphReuse(TestCase):
         run(holders, traces=2 if mode == "reject" else 1)
         holders[-1].tensor.add_(3)
         run(holders)
-        for size, frames in ((2, 1), (5, 1), (6, 2), (7, 2)):
+        for size, frames in zip(sizes, (1, 1, 2, 2)):
             holders[-1] = Holder(tensor=_dynamic_capture(size))
             run(holders, frames=frames)
 
