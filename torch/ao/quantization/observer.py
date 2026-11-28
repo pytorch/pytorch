@@ -562,6 +562,8 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         x = x_orig.detach()  # avoid keeping autograd tape
         x = x.to(self.min_val.dtype)
         min_val_cur, max_val_cur = torch.aminmax(x)
+        if not (torch.isfinite(min_val_cur) & torch.isfinite(max_val_cur)):
+            raise ValueError("Observer input must contain only finite values")
         min_val = torch.min(min_val_cur, self.min_val)
         max_val = torch.max(max_val_cur, self.max_val)
         self.min_val.copy_(min_val)
@@ -670,12 +672,14 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
             return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
         x = x.to(self.min_val.dtype)
+        min_val_cur, max_val_cur = torch.aminmax(x)
+        if not (torch.isfinite(min_val_cur) & torch.isfinite(max_val_cur)):
+            raise ValueError("Observer input must contain only finite values")
         min_val = self.min_val
         max_val = self.max_val
         if min_val == float("inf") and max_val == float("-inf"):
-            min_val, max_val = torch.aminmax(x)
+            min_val, max_val = min_val_cur, max_val_cur
         else:
-            min_val_cur, max_val_cur = torch.aminmax(x)
             min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
             max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
         self.min_val.copy_(min_val)
