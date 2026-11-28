@@ -89,7 +89,7 @@ AOTIDelegateExecutor::AOTIDelegateExecutor(
 
   std::optional<std::string> model_name = std::nullopt;
   for (const auto& record : packageReader->getAllRecords()) {
-    if (c10::starts_with(record, path) && c10::ends_with(record, ".so")) {
+    if (record.starts_with(path) && record.ends_with(".so")) {
       model_name = record.substr(record.find_last_of("/\\") + 1);
       break;
     }

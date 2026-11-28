@@ -168,8 +168,14 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
       }
       tags_.emplace_back(Tag::TERMINATOR);
     } else if (isSupportedScalarList(value)) {
+      // Storing the elements lets the boxed list be freed when the op returns.
       tags_.emplace_back(Tag::ScalarList);
-      ivalues_.emplace_back(value);
+      scalar_list_types_.emplace_back(value.toList().elementType());
+      const auto elements = value.toListRef();
+      ivalues_.emplace_back(static_cast<int64_t>(elements.size()));
+      for (const auto& element : elements) {
+        ivalues_.emplace_back(element);
+      }
     } else {
       tags_.emplace_back(Tag::Other);
     }
@@ -207,13 +213,13 @@ bool InputOutputEncoder::isSupportedScalarList(
     return false;
   }
   auto list_ref = list_candidate.toListRef();
-  if (C10_UNLIKELY(list_ref.empty())) {
+  if (list_ref.empty()) [[unlikely]] {
     return true;
   }
-  if (C10_UNLIKELY(!list_ref[0].isScalar())) {
+  if (!list_ref[0].isScalar()) [[unlikely]] {
     return false;
   }
-  if (C10_UNLIKELY(list_ref.size() > SCALAR_LIST_LENGTH_LIMIT)) {
+  if (list_ref.size() > SCALAR_LIST_LENGTH_LIMIT) [[unlikely]] {
     return false;
   }
   return true;
@@ -224,7 +230,8 @@ auto InputOutputEncoder::getInputDecoder() {
           tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_strides_it = tensor_sizes_strides_.begin(),
-          ivals_it = ivalues_.begin()]() mutable {
+          ivals_it = ivalues_.begin(),
+          scalar_list_types_it = scalar_list_types_.begin()]() mutable {
     auto decode_tensor = [&]() -> TensorMetadata {
       std::vector<int64_t> sizes;
       std::vector<int64_t> strides;
@@ -289,9 +296,14 @@ auto InputOutputEncoder::getInputDecoder() {
           }
         } break;
 
-        case Tag::ScalarList:
-          push_value(std::nullopt, *ivals_it++);
-          break;
+        case Tag::ScalarList: {
+          c10::impl::GenericList list(*scalar_list_types_it++);
+          const auto n = (*ivals_it++).toInt();
+          for ([[maybe_unused]] const auto _ : c10::irange(n)) {
+            list.push_back(*ivals_it++);
+          }
+          push_value(std::nullopt, c10::IValue(list));
+        } break;
 
         case Tag::Scalar:
           push_value(*ivals_it++, std::nullopt);
@@ -321,6 +333,7 @@ void InputOutputEncoder::clear() {
   tensor_metadata_.clear();
   tensor_sizes_strides_.clear();
   ivalues_.clear();
+  scalar_list_types_.clear();
 }
 
 // ---------------------------------------------------
@@ -428,10 +441,6 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   event->start_time_ = c10::getApproximateTime();
-  event->allow_tf32_cublas_ =
-      at::globalContext().float32Precision(
-          at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
-      at::Float32Precision::TF32;
   if (!config_.experimental_config.performance_events.empty()) {
     const size_t n = config_.experimental_config.performance_events.size();
     event->counters_ = std::make_unique<perf_counters_t>(n, 0);
@@ -525,7 +534,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         collective_meta(),
         kwinputs(),
         gpu_fallback(),
-        event->allow_tf32_cublas_,
+        allow_tf32_cublas_,
         std::move(event->counters_)};
 
     out.emplace_back(Result::create(
@@ -729,6 +738,8 @@ RecordQueue::RecordQueue(
     }
   }
 }
+
+RecordQueue::~RecordQueue() = default;
 
 bool RecordQueue::tracePython() const {
   return config_.with_stack && activities_.contains(ActivityType::CPU);
@@ -1022,11 +1033,10 @@ void passEventsToKineto(
   // Generate Kineto events for each event recorded by the PyTorch profiler.
   for (const auto i : c10::irange(results.size())) {
     const auto& e = results[i];
-    // Here we are essentially setting the duration to -1 if the event never
-    // ends. This way Kineto will extend the event to the end of the trace. This
-    // is useful so that we can still have 0 duration events if necessary
-    // without extension
-    int64_t act_end_time = std::max(e->endTimeNS(), e->start_time_ns_ - 1);
+    // Only genuinely unfinished events use the negative-duration sentinel.
+    const int64_t act_end_time = std::max(
+        std::min(e->endTimeNS(), static_cast<int64_t>(end_time_ns)),
+        e->start_time_ns_ - 1);
     std::string name = e->name();
     if (!e->overload_name().empty()) {
       name = fmt::format("{}.{}", e->name(), e->overload_name());
@@ -1483,12 +1493,22 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
       return;
     }
 
+    // A Python frame can end before a TorchOp it contains that never ended,
+    // e.g. when the Python tracer stops mid-session. Leave such an op
+    // unfinished so it gets the session end, as in the exported trace, instead
+    // of borrowing the frame's end.
+    const bool python_event =
+        event->tag() == EventType::PyCall || event->tag() == EventType::PyCCall;
     auto start_tid = event->start_tid_;
     auto frame = stacks.at(start_tid);
 
     while (frame.get() != event.get()) {
       TORCH_INTERNAL_ASSERT(frame != nullptr);
-      mark_finished(frame);
+      const auto* op = std::get_if<op_fields>(&frame->extra_fields_);
+      if (!python_event || !op ||
+          op->end_time_ns_ != std::numeric_limits<c10::time_t>::min()) {
+        mark_finished(frame);
+      }
       TORCH_INTERNAL_ASSERT(!frame->parent_.expired());
       frame = frame->parent_.lock();
     }
@@ -1736,6 +1756,16 @@ RecordQueue::getRecords(
     out.insert(out.end(), ev.begin(), ev.end());
     python_tracer_.reset();
   }
+
+  // A worker thread can still start an event after a trace stopped early.
+  out.erase(
+      std::remove_if(
+          out.begin(),
+          out.end(),
+          [end_time_ns](const auto& r) {
+            return r->start_time_ns_ > static_cast<c10::time_t>(end_time_ns);
+          }),
+      out.end());
 
   if (config_.experimental_config.adjust_timestamps) {
     std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {

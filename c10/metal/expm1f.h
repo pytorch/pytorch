@@ -52,7 +52,8 @@ inline float expm1f_scaled_unchecked(float a, float b) {
   j = ::metal::fma(1.442695f, a, 12582912.f); // 0x1.715476p0, 0x1.8p23
   j = j - 12582912.0f; // 0x1.8p23
   i = (int)j;
-  f = ::metal::fma(j, -6.93145752e-1f, a);
+  f = ::metal::fma(j, -6.93145752e-1f, a); // -0x1.62e400p-1 (log2_hi)
+  f = ::metal::fma(j, -1.42860677e-6f, f); // -0x1.7f7d1cp-20 (log2_lo)
 
   // approximate r = exp(f)-1 on interval [-log(2)/2, +log(2)/2]
   s = f * f;

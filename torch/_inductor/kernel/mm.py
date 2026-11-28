@@ -77,6 +77,7 @@ from ..utils import (
     use_triton_tdm_template,
     use_triton_template,
     use_triton_tma_template,
+    use_triton_xpu_template,
 )
 from .decompose_k import decompose_k_subgraph_template
 from .mm_common import (
@@ -143,6 +144,20 @@ persistent_mm_template = TritonTemplate(
     name="mm_persistent",
     grid=persistent_mm_grid,
     source=load_kernel_template("triton_persistent_mm"),
+)
+
+# Intel XPU: the persistent descriptor template above with Xe2-tuned configs from
+# its own heuristics; mm_xpu_non_persistent runs it with one tile per work-group.
+xpu_persistent_mm_template = TritonTemplate(
+    name="mm_xpu_persistent",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_tma_mm"),
+)
+
+xpu_non_persistent_mm_template = TritonTemplate(
+    name="mm_xpu_non_persistent",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_tma_mm"),
 )
 
 
@@ -600,7 +615,10 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
             args = [make_pointwise(_to_dtype)(x) for x in args]
         mul_pointwise = make_pointwise(ops.dot)(*args)
-        dot_reduction = make_reduction("dot")(mul_pointwise, 1)
+        # Else mm(x_bf16, y_bf16, out_dtype=torch.float32) would return bf16.
+        dot_reduction = make_reduction("dot", override_return_dtype=out_dtype)(
+            mul_pointwise, 1
+        )
 
         return dot_reduction
 
@@ -685,6 +703,10 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         )
         if keep_triton_mm:
             templates_to_use.append(mm_template)
+
+            if use_triton_xpu_template(mat1, mat2, layout=layout):
+                templates_to_use.append(xpu_persistent_mm_template)
+                templates_to_use.append(xpu_non_persistent_mm_template)
 
             if use_triton_blackwell_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True
@@ -966,17 +988,23 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
             )
 
     if use_native_matmul(mat1, mat2):
-        if beta == 0:
-            arg1 = 0
-        else:
-            arg1 = lowerings[aten.mul](beta, inp)
-
         if alpha == 0:
-            arg2 = 0
+            # Skip mat1 @ mat2 but keep its [M, N] shape: inp may be a [N] bias.
+            product = lowerings[aten.full](
+                [mat1.get_size()[0], mat2.get_size()[1]],
+                0,
+                dtype=mat1.get_dtype(),
+                device=mat1.get_device(),
+            )
         else:
-            arg2 = lowerings[aten.mul](alpha, lowerings[aten.mm](mat1, mat2))
-
-        return lowerings[aten.add](arg1, arg2)
+            product = lowerings[aten.mm](mat1, mat2)
+            if alpha != 1:
+                product = lowerings[aten.mul](alpha, product)
+        if beta == 0:
+            return product
+        if beta != 1:
+            inp = lowerings[aten.mul](beta, inp)
+        return lowerings[aten.add](inp, product)
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(
@@ -1526,6 +1554,7 @@ def scaled_mm_v2_constraint(
             if (
                 device == "cuda"
                 and not torch.version.hip
+                and scale.get_dtype() == torch.float32
                 and recipe in (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128)
             ):
                 matrix = operands["self" if side == "a" else "mat2"]

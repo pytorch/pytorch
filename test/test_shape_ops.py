@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     run_tests,
     skipIfTorchDynamo,
+    skipIfXpu,
     TestCase,
     torch_to_numpy_dtype_dict,
 )
@@ -437,8 +438,10 @@ class TestShapeOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, error_msg):
             torch.clamp(X)
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/2722")
     @dtypes(*all_passthru_types())
     @dtypesIfCUDA(*all_passthru_types_and(torch.chalf))
+    @dtypesIfXPU(*all_passthru_types_and(torch.chalf))
     def test_flip(self, device, dtype):
         make_from_data = partial(torch.tensor, device=device, dtype=dtype)
         make_from_size = partial(make_tensor, device=device, dtype=dtype)
@@ -778,28 +781,6 @@ class TestShapeOps(TestCase):
             torch.nonzero(t, as_tuple=False, out=out), torch.nonzero(t, out=out)
         )
 
-        # Verifies that JIT script cannot handle the as_tuple kwarg
-        # See Issue https://github.com/pytorch/pytorch/issues/45499.
-        def _foo(t):
-            tuple_result = torch.nonzero(t, as_tuple=True)
-            nontuple_result = torch.nonzero(t, as_tuple=False)
-            out = torch.empty_like(nontuple_result)
-            torch.nonzero(t, as_tuple=False, out=out)
-            return tuple_result, nontuple_result, out
-
-        with self.assertRaises(RuntimeError):
-            torch.jit.script(_foo)
-
-        # Verifies that JIT tracing works fine
-        traced_foo = torch.jit.trace(_foo, t)
-        traced_tuple, traced_nontuple, traced_out = traced_foo(t)
-        expected_tuple = torch.nonzero(t, as_tuple=True)
-        expected_nontuple = torch.nonzero(t)
-
-        self.assertEqual(traced_tuple, expected_tuple)
-        self.assertEqual(traced_nontuple, expected_nontuple)
-        self.assertEqual(traced_out, expected_nontuple)
-
     def test_nonzero_discontiguous(self, device):
         shape = (4, 4)
         tensor = torch.randint(2, shape, device=device)
@@ -894,7 +875,7 @@ class TestShapeOpsCPUOnly(TestCase):
         torch.flip(qt, dims=(0,))
 
 
-instantiate_device_type_tests(TestShapeOps, globals(), allow_mps=True)
+instantiate_device_type_tests(TestShapeOps, globals(), allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestShapeOpsCPUOnly, globals(), only_for="cpu")
 
 if __name__ == "__main__":

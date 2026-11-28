@@ -16,6 +16,7 @@ from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
@@ -1406,7 +1407,12 @@ class _NestedReductionBase:
         self.check_fusion()
         # One split of the lane source and one of the per-group scale, which
         # is lifted to the parent tile and split like the data.
-        FileCheck().check_count("tl.split(", 2, exactly=True).run("\n".join(sources))
+        source = "\n".join(sources)
+        FileCheck().check_count("tl.split(", 2, exactly=True).run(source)
+        self.assertEqual(
+            source.count("tl.load("),
+            3 if self.force_persistent_outer_reduction is False else 2,
+        )
 
     def test_producer_consumer_lane_fold_splits_computed_value(self):
         """Lanes split the normalized value once, not the raw x and w loads."""
@@ -1760,6 +1766,12 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x,))
         self.check_fusion()
 
+    add_skip_condition(
+        test_looped_standalone_sub_parent_large_group,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+
     def test_standalone_sub_parent_declines_benchmark_fusion(self):
         # benchmark_fusion re-expands a group through generic scheduling, which
         # cannot represent the epilogue's derived group. The group must decline
@@ -1878,6 +1890,12 @@ class _NestedReductionBase:
 
         self._check_looped_internal_source(f, (B, D), expected_passes=2)
 
+    add_skip_condition(
+        test_looped_internal_source_uses_second_pass,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+
     def test_looped_internal_source_uses_reduced_output(self):
         B, D = 8, 16384
 
@@ -1891,6 +1909,12 @@ class _NestedReductionBase:
             return pairs[..., 0] + 1, pairs[..., 1] + 2
 
         self._check_looped_internal_source(f, (B, D), expected_passes=2)
+
+    add_skip_condition(
+        test_looped_internal_source_uses_reduced_output,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
 
     def test_looped_internal_source_reuses_final_reduction_pass(self):
         B, D = 8, 16384
@@ -1906,6 +1930,12 @@ class _NestedReductionBase:
 
         self._check_looped_internal_source(f, (B, D), expected_passes=2)
 
+    add_skip_condition(
+        test_looped_internal_source_reuses_final_reduction_pass,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+
     def test_looped_internal_source_closes_final_reduction_pass(self):
         B, D = 8, 16384
 
@@ -1920,6 +1950,12 @@ class _NestedReductionBase:
             return pairs[..., 0] / scale, pairs[..., 1] / scale
 
         self._check_looped_internal_source(f, (B, D), expected_passes=3)
+
+    add_skip_condition(
+        test_looped_internal_source_closes_final_reduction_pass,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
 
     @parametrize("shifted", [False, True])
     def test_producer_consumer_mxfp6_preshuffled_four_to_three_pack(self, shifted):
@@ -2099,6 +2135,12 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x,))
         self.check_no_fusion()
 
+    add_skip_condition(
+        test_looped_mxfp6_rejects_source_before_reduction,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+
     def test_looped_mxfp6_rejects_source_chain_used_by_reduction(self):
         if self.force_persistent_outer_reduction is not False:
             self.skipTest("requires a looped reduction")
@@ -2116,6 +2158,12 @@ class _NestedReductionBase:
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         self.check_nested_matches_unnested(f, (x,))
         self.check_no_fusion()
+
+    add_skip_condition(
+        test_looped_mxfp6_rejects_source_chain_used_by_reduction,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
 
     def test_standalone_sub_parent_rejects_output_fullres_reader(self):
         B, D, G = 32, 1024, 16
@@ -2337,8 +2385,9 @@ class _NestedReductionBase:
 
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         self.check_numeric(f, (x,))
-        self.check_no_fusion()
-        self.assertGreater(metrics.generated_kernel_count, 1)
+        # A persistent tile can fuse the fixed-lane side output, but the
+        # incompatible even/odd consumers must retain a separate kernel.
+        self.check_non_leaf_epilogue_fallback()
 
     def test_standalone_sub_parent_rejects_shifted_reduction_output(self):
         B, D = 4, 512
@@ -2682,6 +2731,42 @@ class _NestedReductionBase:
         # A looped kernel has no persistent alternative to offer.
         expected_kernels = 1 if self.force_persistent_outer_reduction is False else 2
         self.check_fusion(expected_kernels)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_half_grouped_reduction_bitcast_epilogue(self, dtype):
+        # The grouped amin over half precision reduces in fp32; a bitcast of its
+        # result must see the half-precision value, not the fp32 tile.
+        group = 8
+
+        def f(x):
+            total = x.sum(-1, keepdim=True)
+            peak = x.abs().amax(-1, keepdim=True)
+            value = (x * x.shape[1] - total) * 2.0**-8 + peak * 0.25
+            value = torch.ops._inductor_test.realize(value.to(dtype))
+            return value.view(x.shape[0], -1, group).amin(-1).view(torch.int16) + 1
+
+        x = torch.randint(-64, 64, (37, 48 * group), device=GPU_TYPE).float() / 8
+        self.check_nested_matches_unnested(f, (x,), tol=0)
+        self.check_fusion(expected_kernels=None)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("reduction", ["amin", "sum"])
+    @inductor_config.patch("triton.codegen_upcast_to_fp32", False)
+    def test_half_grouped_reduction_without_fp32_upcast(self, reduction, dtype):
+        # Loaded half-precision values stay half precision, but the grouped
+        # reduction still accumulates in fp32 and hands it back, so it matches
+        # eager exactly.
+        group = 8
+
+        def f(x):
+            total = x.sum(-1, keepdim=True)
+            value = torch.ops._inductor_test.realize((x - total).to(dtype))
+            groups = value.view(x.shape[0], -1, group)
+            return getattr(groups, reduction)(-1).view(torch.int16) + 1
+
+        x = torch.randint(-64, 64, (37, 48 * group), device=GPU_TYPE).to(dtype) / 8
+        self.assertEqual(torch.compile(f)(x), f(x), atol=0, rtol=0)
+        self.check_fusion(expected_kernels=None)
 
 
 @inductor_config.patch("force_disable_caches", True)
@@ -3214,6 +3299,7 @@ class _InternalsBase:
 
     def setUp(self):
         super().setUp()
+        self.enterContext(inductor_config.patch("loop_ordering_after_fusion", True))
         metrics.reset()
         torch._dynamo.utils.clear_compilation_metrics()
 
@@ -3412,6 +3498,12 @@ class _InternalsBase:
 
         FileCheck().check_not("rsplit").check_not("RSPLIT").run(kernel_code)
         self.check_axis_classification_contract(kernel_code, min_rblock=16)
+
+    add_skip_condition(
+        test_nested_kernel_disables_cooperative_reduction,
+        lambda cls: cls.force_persistent_outer_reduction is False,
+        "cooperative reduction only applies to persistent kernels",
+    )
 
     def test_producer_consumer_amax_kernel_form(self):
         self.assert_single_kernel_form(

@@ -1,6 +1,12 @@
-#include <c10/core/impl/GPUTrace.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/xpu/XPUFunctions.h>
+
+#ifdef _WIN32
+#include <c10/util/win32-headers.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <vector>
 
@@ -122,7 +128,11 @@ inline void initGlobalDevicePoolState() {
   // the officially supported range (Intel GPUs starting from Arc (Alchemist)
   // series).
   namespace syclex = sycl::ext::oneapi::experimental;
-  for (const auto& device : gDevicePool.devices) {
+  for (const auto i : c10::irange(gDevicePool.devices.size())) {
+    const auto& device = gDevicePool.devices[i];
+    TORCH_CHECK(
+        device->ext_oneapi_index_within_platform() == i,
+        "Device index within platform does not match the expected index.");
     auto architecture = device->get_info<syclex::info::device::architecture>();
     if (architecture < syclex::architecture::intel_gpu_acm_g10) {
       TORCH_WARN(
@@ -243,16 +253,8 @@ DeviceIndex get_device_idx_from_pointer(void* ptr) {
       type == sycl::usm::alloc::device, "ptr is not a device type pointer.");
 
   sycl::device raw_device = sycl::get_pointer_device(ptr, get_device_context());
-  auto match_device = [raw_device](const auto& device) -> bool {
-    return raw_device == *device;
-  };
-  auto it = std::find_if(
-      gDevicePool.devices.begin(), gDevicePool.devices.end(), match_device);
-  TORCH_CHECK(
-      it != gDevicePool.devices.end(),
-      "Can't find the pointer from XPU devices.");
   return static_cast<DeviceIndex>(
-      std::distance(gDevicePool.devices.begin(), it));
+      raw_device.ext_oneapi_index_within_platform());
 }
 
 DeviceIndex device_count() {
@@ -295,7 +297,6 @@ c10::DeviceIndex maybe_exchange_device(c10::DeviceIndex to_device) {
 // `ext_oneapi_device_wait` is widely deployed across all supported platforms,
 // deprecate syncStreamsOnDevice and route callers to device_synchronize.
 void device_synchronize(c10::DeviceIndex device) {
-#if SYCL_COMPILER_VERSION >= 20260100
   initDevicePoolCallOnce();
   if (device == -1) {
     device = c10::xpu::current_device();
@@ -306,11 +307,60 @@ void device_synchronize(c10::DeviceIndex device) {
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_device_synchronization(c10::kXPU);
   }
+}
+
+void register_host_memory(void* ptr, size_t size) {
+#if SYCL_COMPILER_VERSION >= 20260200
+  TORCH_CHECK_VALUE(ptr, "ptr is an invalid pointer.");
+  TORCH_CHECK_VALUE(size > 0, "size must be greater than 0.");
+  TORCH_CHECK(
+      get_device_context().get_platform().has(
+          sycl::aspect::ext_oneapi_register_host_memory),
+      "Requires the ext_oneapi_register_host_memory extension, "
+      "which is not supported on this device. ",
+      "Please upgrade to a newer driver.");
+#ifdef _WIN32
+  SYSTEM_INFO si;
+  GetSystemInfo(&si);
+  const size_t page_size = si.dwPageSize;
+#else
+  const auto ret = sysconf(_SC_PAGESIZE);
+  TORCH_CHECK(ret > 0, "Failed to query the system page size.");
+  const auto page_size = static_cast<size_t>(ret);
+#endif
+  TORCH_CHECK_VALUE(
+      (reinterpret_cast<uintptr_t>(ptr) % page_size) == 0,
+      "ptr must be aligned to the system page size.");
+  TORCH_CHECK_VALUE(
+      (size % page_size) == 0,
+      "size must be a multiple of the system page size.");
+
+  sycl::ext::oneapi::experimental::register_host_memory(
+      ptr, size, get_device_context());
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
-      "device_synchronize is not supported for the current SYCL compiler version. ",
-      "Please upgrade to SYCL compiler version 2026.1 or newer.");
+      "register_host_memory is not supported for the current SYCL compiler version. ",
+      "Please upgrade to SYCL compiler version 2026.2 or newer.");
+#endif
+}
+
+void unregister_host_memory(void* ptr) {
+#if SYCL_COMPILER_VERSION >= 20260200
+  TORCH_CHECK_VALUE(ptr, "ptr is an invalid pointer.");
+  TORCH_CHECK(
+      get_device_context().get_platform().has(
+          sycl::aspect::ext_oneapi_register_host_memory),
+      "Requires the ext_oneapi_register_host_memory extension, "
+      "which is not supported on this device. ",
+      "Please upgrade to a newer driver.");
+  sycl::ext::oneapi::experimental::unregister_host_memory(
+      ptr, get_device_context());
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "unregister_host_memory is not supported for the current SYCL compiler version. ",
+      "Please upgrade to SYCL compiler version 2026.2 or newer.");
 #endif
 }
 

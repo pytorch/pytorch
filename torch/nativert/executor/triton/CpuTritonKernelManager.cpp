@@ -104,7 +104,7 @@ CpuTritonKernelManager::CpuTritonKernelManager(
       kernel_launcher_bin_path_(std::move(kernel_launcher_bin_path)) {}
 
 void CpuTritonKernelManager::load() {
-  if (C10_LIKELY(kernel_fn_ != nullptr)) {
+  if (kernel_fn_ != nullptr) [[likely]] {
     return;
   }
 

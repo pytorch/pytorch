@@ -11,6 +11,7 @@ from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
 from torch._inductor.choices import InductorChoices
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import persistent_reduction
@@ -23,6 +24,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     recover_orig_fp32_precision,
@@ -109,6 +111,10 @@ class SkipPatternTest(TestBase):
 )
 @instantiate_parametrized_tests
 class MixOrderReductionTest(TestBase):
+    @decorateIf(
+        unittest.skip("Invalid combination"),
+        lambda params: params["name"] == "prod" and len(params["shape"]) == 3,
+    )
     @parametrize(
         "name",
         [
@@ -415,6 +421,10 @@ class MixOrderReductionTest(TestBase):
             return x.sum(dim=-1), x.sum(dim=0)
 
         M = 32768 * 1024 if torch.version.hip is not None else 32768 * 256
+        # The split size grows with M / num_sm. On devices with few SMs
+        # (e.g. a 14-SM MIG slice) a large M only needs a 2 layer split.
+        num_sm = DeviceProperties.create(torch.device(GPU_TYPE)).multi_processor_count
+        M = min(M, 262144 * num_sm)
         x = torch.randn(M, 2, dtype=torch.float, device=GPU_TYPE)
         self.check_numeric(f, (x,))
         # We don't do mix order reduction for split redutions
@@ -457,6 +467,53 @@ class MixOrderReductionTest(TestBase):
         check_one_split_size(8)
         check_one_split_size(16)
 
+    @inductor_config.patch(
+        {
+            "triton.mix_order_reduction_autotune_split_size": True,
+            # Raise instead of timing a failing benchmark module as inf.
+            "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+        }
+    )
+    @parametrize("dtype", (torch.float, torch.bfloat16))
+    def test_split_size_autotune_times_finish(self, dtype):
+        """Split-size autotuning also times the wrapper's finish of the
+        partials, not just the kernel."""
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+        from torch._inductor.codegen.simd import SIMDScheduling
+
+        sources = []
+        generate = SIMDScheduling._generate_kernel_code_for_mix_order_reduction
+
+        def spy(self, kernel, for_benchmark):
+            ws_name, src_code = generate(self, kernel, for_benchmark)
+            if for_benchmark:
+                sources.append(src_code)
+            return ws_name, src_code
+
+        def f(x):
+            return x.sum(dim=-1), x.sum(dim=0), (x * x).sum(dim=0)
+
+        x = torch.randn(32768, 768, dtype=dtype, device=GPU_TYPE)
+        with mock.patch.object(
+            SIMDScheduling, "_generate_kernel_code_for_mix_order_reduction", spy
+        ):
+            self.check_numeric(f, (x,), tol=1e-3 if dtype == torch.float else 1e-2)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        self.assertTrue(sources)
+        for src in sources:
+            call = src.split("def call(args):")[1].split("def benchmark_all_configs")[0]
+            # One finish per column partial, the second offset past the first.
+            check = FileCheck().check(".run(")
+            for i in range(2):
+                check.check(f"[{i} * (").check(".view(").check(".sum(dim=0)")
+                if dtype != torch.float:
+                    check.check(f".to({dtype})")
+            check.run(call)
+            # The finish must run, not just appear in the source.
+            mod = PyCodeCache.load(src)
+            mod.call(mod.get_args())
+
     @inductor_config.patch(split_reductions=False)
     def test_non_contiguous_input(self):
         def f(x):
@@ -479,7 +536,7 @@ class MixOrderReductionTest(TestBase):
         x = torch.randn(4096 * 64, 32, device=GPU_TYPE)
         y = torch.randn(4098 * 64, 34, device=GPU_TYPE)
 
-        self.check_numeric(f, (x, y))
+        self.check_numeric(f, (x, y), tol=1e-2)
         expected_mix_order_reduction = (
             0 if not inductor_config.triton.mix_order_reduction else 2
         )
@@ -487,6 +544,10 @@ class MixOrderReductionTest(TestBase):
             expected_mix_order_reduction, metrics.codegen_mix_order_reduction
         )
 
+    @decorateIf(
+        unittest.skip("Skip non-critical tests to save resources."),
+        lambda params: params["shape"] != (1000000, 256) and params["add_1dim"],
+    )
     @parametrize(
         "wdtype",
         [

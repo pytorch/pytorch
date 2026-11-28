@@ -10,8 +10,7 @@ from os import environ
 from pathlib import Path
 from random import randint
 from tempfile import gettempdir
-from typing import Any, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, Self, TYPE_CHECKING
 from unittest.mock import patch
 
 import torch._inductor.config as inductor_config

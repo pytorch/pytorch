@@ -2,7 +2,7 @@ import typing
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Generic, overload, TypeAlias, TypeVar
-from typing_extensions import ParamSpec, TypeIs, TypeVarTuple, Unpack
+from typing_extensions import ParamSpec, TypeIs, TypeVarTuple
 
 import torch
 import torch.fx.node
@@ -51,9 +51,7 @@ def to_graphable(stuff: pytree.PyTree) -> tuple[list[object], pytree.TreeSpec]:
     return flat_args, spec
 
 
-def from_graphable(
-    flat_args: tuple[Unpack[_Ts]], spec: pytree.TreeSpec
-) -> pytree.PyTree:
+def from_graphable(flat_args: tuple[*_Ts], spec: pytree.TreeSpec) -> pytree.PyTree:
     """The inverse of to_graphable."""
     stuff = pytree.tree_unflatten(flat_args, spec)
     return stuff
@@ -100,7 +98,7 @@ class FlatApply(HigherOrderOperator):
         self,
         func: _OpTypes | pytree.TreeSpec,
         in_spec: pytree.TreeSpec,
-        *flat_args: Unpack[_Ts],
+        *flat_args: *_Ts,
         # If True then the output is checked to be valid. If False then it is up
         # to the caller to ensure the output is appropriate.
         checked_output: bool = True,
@@ -157,7 +155,7 @@ def is_valid_output(x: object) -> bool:
 def impl(
     func: _OpTypes | pytree.TreeSpec,
     in_spec: pytree.TreeSpec,
-    flat_args: tuple[Unpack[_Ts]],
+    flat_args: tuple[*_Ts],
     checked_output: bool,
 ) -> _FXOutput:
     if isinstance(func, pytree.TreeSpec):

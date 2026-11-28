@@ -1015,7 +1015,7 @@ def _check_no_differentiable_outputs_fast(
         for jvp in jvps:
             if jvp.numel() == 0:
                 continue
-            if (jvp - torch.zeros_like(jvp)).abs().max() > nondet_tol:
+            if jvp.abs().max() > nondet_tol:
                 raise GradcheckError(
                     "Numerical gradient for function expected to be zero"
                 )

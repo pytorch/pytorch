@@ -78,19 +78,16 @@ TEST(MtiaActivityFilterTest, CollectiveSelectionUsesFiltersAndAvailability) {
   libkineto::api().registerProfilerFactory([configured_activities]() {
     return std::make_unique<CapturingProfiler>(configured_activities);
   });
+  // Register without device support to keep the test hardware-independent
+  // while exercising the same activity selection logic passed to registered
+  // profilers.
+  libkineto_init(/*cpuOnly=*/true, /*logOnError=*/true);
 
   const auto prepareAndCapture = [&](const ActivitySet& activities,
                                      const ActivityFilter& activity_filter,
                                      const ExperimentalConfig& config) {
     configured_activities->clear();
-    // Keep the test hardware-independent while exercising the same activity
-    // selection logic passed to registered profilers.
-    prepareTrace(
-        /*cpuOnly=*/true,
-        activities,
-        config,
-        /*trace_id=*/"",
-        activity_filter);
+    prepareTrace(activities, config, /*trace_id=*/"", activity_filter);
   };
 
   const std::set<libkineto::ActivityType> default_cpu_activities{

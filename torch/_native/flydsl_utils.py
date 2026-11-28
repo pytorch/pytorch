@@ -32,6 +32,10 @@ _FLYDSL_DSL_NAME = "flydsl"
 # written against the FlyDSL 0.3.x flydsl.expr.gpu.shuffle_xor interface. Other
 # versions fall back to ATen unless a developer explicitly sets
 # TORCH_NATIVE_SKIP_VERSION_CHECK=1.
+# TODO: Remove the TopK compatibility cache tag once FlyDSL 0.3.x is no
+# longer an allowed release. Adding 0.5 still leaves 0.3.x accepted, and
+# 0.3.x still needs the tag. See Note [FlyDSL 0.3.x cache tag] in
+# ops/topk/flydsl_kernels.py.
 _FLYDSL_SUPPORTED_RELEASES = ((0, 3),)
 
 
@@ -153,6 +157,7 @@ def _fits_int32_buffer_span(rows_m: int, n: int, itemsize: int) -> bool:
     return (
         0 < rows_m <= int32_max
         and 0 < n <= int32_max
+        and rows_m * n <= int32_max
         and rows_m * n * itemsize <= uint32_max
     )
 

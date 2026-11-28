@@ -223,7 +223,7 @@ void nll_loss2d_forward_out_frame(
       const int64_t linear_idx = b * map_size + elem;
       for (int64_t j = 0; j + 1 < cascade_sum_num_levels; ++j) {
         const auto mask = (level_mask << (j * level_power));
-        if (C10_LIKELY((linear_idx & mask) != 0)) {
+        if ((linear_idx & mask) != 0) [[likely]] {
           break;
         }
 

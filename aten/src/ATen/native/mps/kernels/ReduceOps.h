@@ -57,6 +57,27 @@ C10_METAL_CONSTEXPR uint32_t ARG_SPLIT_MIN_TGS = 512;
 C10_METAL_CONSTEXPR uint32_t ARG_SPLIT_MIN_SEG_LEN = 512;
 C10_METAL_CONSTEXPR uint32_t ARG_SPLIT_TARGET_PARTIALS = 16384;
 
+// dot_reduce grid-strides thread_reduce_flat over blocks of
+// DOT_BLOCK_ELEMS_PER_THREAD elements per thread (one quad per chain), uint
+// indexed inside a block and long offset across blocks. Fewer than DOT_MAX_TGS
+// threadgroups leave DRAM bandwidth unused on large inputs.
+C10_METAL_CONSTEXPR uint32_t DOT_BLOCK_ELEMS_PER_THREAD = 4 * SUM_NCHAINS;
+C10_METAL_CONSTEXPR uint32_t DOT_MAX_TGS = 2048;
+
+// segment_reduce reduces a segment with an INNER_TG_SIZE threadgroup once every
+// lane has an element to read; shorter segments get one thread each.
+C10_METAL_CONSTEXPR uint32_t SEGMENT_PARALLEL_MIN_LEN = INNER_TG_SIZE;
+
+template <typename index_t = int64_t>
+struct DotParams {
+  index_t numel;
+  index_t num_tgs;
+  index_t a_stride;
+  index_t b_stride;
+  bool a_conj;
+  bool b_conj;
+};
+
 template <unsigned N = c10::metal::max_ndim>
 struct NormParams {
   float p;
@@ -68,4 +89,13 @@ struct NormParams {
 
   ::c10::metal::array<uint32_t, N> output_sizes;
   ::c10::metal::array<uint32_t, N> output_strides;
+};
+
+template <typename index_t>
+struct SegmentReduceParams {
+  index_t inner;
+  index_t segments;
+  index_t axis_size;
+  float initial;
+  bool has_initial;
 };

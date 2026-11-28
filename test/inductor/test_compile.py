@@ -23,7 +23,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs, run_and_get_code
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU
 
 
 _IS_MACOS = sys.platform.startswith("darwin")
@@ -102,14 +102,16 @@ class TestStandaloneInductor(TestCase):
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
-    @unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
+    @unittest.skipUnless(
+        torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
+    )
     @config.patch(cpp_wrapper=True)
     def test_compiled_conv_rejects_mixed_input_weight_devices(self):
         mod = torch.nn.Conv2d(3, 3, kernel_size=3, padding=1).eval()
         inp = torch.randn(1, 3, 8, 8)
         mod_opt = torch.compile(mod, backend="inductor")
 
-        mod.to("cuda")
+        mod.to(GPU_TYPE)
         with self.assertRaisesRegex(
             RuntimeError, "Expected all tensors to be on the same device"
         ):
@@ -438,6 +440,35 @@ class TestStandaloneInductor(TestCase):
             self.assertEqual(compile_utils._aoti_cuda_target_arch(), "90a")
         with config.patch({"cuda.arch": "90a"}):
             self.assertEqual(compile_utils._aoti_cuda_target_arch(), "90a")
+
+    def test_is_datacenter_blackwell_arch(self):
+        from torch._inductor.codegen.cuda import cuda_env
+
+        def clear_caches():
+            cuda_env.get_cuda_arch.cache_clear()
+            cuda_env.is_datacenter_blackwell_arch.cache_clear()
+
+        self.addCleanup(clear_caches)
+        cases = {
+            "90": False,
+            "100": True,
+            "103": True,
+            "110": True,
+            "120": False,
+            "121": False,
+        }
+        for arch, expected in cases.items():
+            clear_caches()
+            with (
+                self.subTest(arch=arch),
+                config.patch({"cuda.arch": arch}),
+                mock.patch("torch.version.hip", None),
+            ):
+                self.assertEqual(cuda_env.is_datacenter_blackwell_arch(), expected)
+
+        clear_caches()
+        with config.patch({"cuda.arch": "110"}), mock.patch("torch.version.hip", "7.0"):
+            self.assertFalse(cuda_env.is_datacenter_blackwell_arch())
 
     @mock.patch.dict(os.environ, {"TORCH_CUDA_ARCH_LIST": "8.0;8.6"})
     @mock.patch(

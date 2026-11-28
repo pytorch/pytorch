@@ -12,6 +12,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
+    dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
@@ -28,6 +29,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     slowTest,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -248,6 +250,27 @@ class TestSortAndSelectDevice(TestCase):
         self.assertEqual(vm, torch.arange(8192, dtype=dtype, device=device))
         self.assertEqual(im, t0.sort().indices, exact_dtype=False)
 
+    @onlyAccelerator
+    def test_sort_expanded_bool(self, device):
+        # https://github.com/pytorch/pytorch/issues/202005
+        # The short row takes the in-place small sort, the long one the segmented sort.
+        # On ROCm also use non-standard bools (true stored as 2), which ROCm sort normalizes.
+        true_byte = 2 if TEST_WITH_ROCM else 1
+        for n, descending, stable in product((68, 5000), (True, False), (True, False)):
+            row = (torch.arange(n, device=device) % 7 == 0).to(torch.uint8) * true_byte
+            x = row.view(torch.bool)[None, :].expand(64, n)
+            values, indices = x.sort(dim=-1, descending=descending, stable=stable)
+            ref_values, ref_indices = (
+                (row != 0)
+                .cpu()[None, :]
+                .expand(64, n)
+                .sort(dim=-1, descending=descending, stable=stable)
+            )
+            self.assertEqual(values, ref_values)
+            self.assertEqual(x.gather(-1, indices), values)
+            if stable:
+                self.assertEqual(indices, ref_indices)
+
     @dtypes(torch.float32)
     def test_sort_restride(self, device, dtype):
         # Input: non-contiguous (stride: 5) 3-element array
@@ -294,7 +317,7 @@ class TestSortAndSelectDevice(TestCase):
                     )
 
                     # assert stride is preserved
-                    if self.device_type == "cuda":
+                    if self.device_type in ("cuda", "xpu"):
                         # FIXME: this behavior should be true for all cases, not
                         # just the one specified in if condition
                         self.assertEqual(r1.values.stride(), t.stride())
@@ -409,7 +432,7 @@ class TestSortAndSelectDevice(TestCase):
                 # binary strings
                 yield (torch.tensor([0, 1] * size, dtype=dtype, device=device), 0)
 
-            if self.device_type == "cuda":
+            if self.device_type in ("cuda", "xpu"):
                 return
 
             yield (torch.tensor([0, 1] * 100, dtype=dtype, device=device), 0)
@@ -925,6 +948,7 @@ class TestSortAndSelectDevice(TestCase):
             self._test_topk_dtype(device, dtype, False, curr_size)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     def test_topk_nonfinite(self, device, dtype):
         x = torch.tensor(
@@ -961,6 +985,7 @@ class TestSortAndSelectDevice(TestCase):
             self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
     @dtypesIfCUDA(*all_types_and(torch.bfloat16))
+    @dtypesIfXPU(*all_types_and(torch.bfloat16))
     @dtypes(*all_types_and(torch.bfloat16, torch.half))
     def test_topk_zero(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/49205
@@ -1224,6 +1249,7 @@ class TestSortAndSelectDevice(TestCase):
 
     @dtypes(*all_types())
     @dtypesIfCUDA(*all_types_and(torch.half))
+    @dtypesIfXPU(*all_types_and(torch.half))
     def test_isin(self, device, dtype):
         def assert_isin_equal(a, b):
             # Compare to the numpy reference implementation.
@@ -1742,7 +1768,7 @@ class TestSortAndSelectCUDA(TestCase):
         self.assertEqual(data[indices[tail]], values[tail])
 
 
-instantiate_device_type_tests(TestSortAndSelectDevice, globals())
+instantiate_device_type_tests(TestSortAndSelectDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestSortAndSelectCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import operator
 from typing import Any, overload, SupportsIndex, TYPE_CHECKING, TypeVar
-from typing_extensions import TypeVarTuple, Unpack
+from typing_extensions import TypeVarTuple
 
 from ..decorators import substitute_in_graph
 from . import import_fresh_module
@@ -77,7 +77,7 @@ def attrgetter(attr: str, /) -> Callable[[Any], _U]: ...
 # pyrefly: ignore [inconsistent-overload]
 def attrgetter(
     attr1: str, attr2: str, /, *attrs: str
-) -> Callable[[Any], tuple[_U1, _U2, Unpack[_Us]]]: ...
+) -> Callable[[Any], tuple[_U1, _U2, *_Us]]: ...
 
 
 # Reference: https://docs.python.org/3/library/operator.html#operator.attrgetter
@@ -135,8 +135,8 @@ def itemgetter(item: _T, /) -> Callable[[Any], _U]: ...
 @overload
 # pyrefly: ignore [inconsistent-overload]
 def itemgetter(
-    item1: _T1, item2: _T2, /, *items: Unpack[_Ts]
-) -> Callable[[Any], tuple[_U1, _U2, Unpack[_Us]]]: ...
+    item1: _T1, item2: _T2, /, *items: *_Ts
+) -> Callable[[Any], tuple[_U1, _U2, *_Us]]: ...
 
 
 # Reference: https://docs.python.org/3/library/operator.html#operator.itemgetter

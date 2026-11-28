@@ -23,6 +23,7 @@ from torch.autograd import (
     _kineto_step,
     _prepare_profiler,
     _ProfilerResult,
+    _stop_profiler_collection,
     _supported_activities,
     _toggle_collection_dynamic,
     DeviceType,
@@ -57,6 +58,13 @@ __all__ = [
     "FunctionEvent",
     "MemRecordsAcc",
 ]
+
+_WITH_MODULES_DEPRECATION_MSG = (
+    "with_modules is deprecated and will be removed in a future release; "
+    "stop passing it. It only collects data for TorchScript models, which "
+    "are themselves deprecated, and does nothing in eager mode. Use "
+    "with_stack=True, which records nn.Module events for eager models."
+)
 
 try:
     # Available in Python >= 3.2
@@ -154,8 +162,9 @@ class profile:
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
 
-            .. deprecated::
+            .. deprecated:: 2.15
                 ``with_modules`` is deprecated and will be removed in a future version.
+                Passing it with any value, including ``False``, warns.
                 It only collects data for TorchScript models, which are themselves
                 deprecated, and does nothing in eager mode. Use ``with_stack=True``,
                 which records ``nn.Module`` events for eager models.
@@ -221,7 +230,7 @@ class profile:
         with_flops=False,
         profile_memory=False,
         with_stack=False,
-        with_modules=False,
+        with_modules=None,
         use_kineto=False,
         use_cpu=True,
         experimental_config=None,
@@ -231,6 +240,8 @@ class profile:
         activity_filters: dict[ProfilerActivity, set[str]] | None = None,
         _profiler_extensions: dict[str, str] | None = None,
     ):
+        if with_modules is not None:
+            warn(_WITH_MODULES_DEPRECATION_MSG, FutureWarning, stacklevel=2)
         self.enabled: bool = enabled
         if not self.enabled:
             return
@@ -246,7 +257,7 @@ class profile:
         self.record_shapes |= self.with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
-        self.with_modules = with_modules
+        self.with_modules = bool(with_modules)
         self.use_cpu = use_cpu
         self.acc_events = acc_events
         if experimental_config is None:
@@ -259,22 +270,6 @@ class profile:
             )
             experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False
-        if experimental_config.adjust_profiler_step:
-            warn(
-                "adjust_profiler_step is deprecated and ignored. It will be "
-                "removed in a future release.",
-                FutureWarning,
-                stacklevel=2,
-            )
-        if with_modules:
-            warn(
-                "with_modules is deprecated and will be removed in a future release. "
-                "It only collects data for TorchScript models, which are themselves "
-                "deprecated, and does nothing in eager mode. Use with_stack=True, "
-                "which records nn.Module events for eager models.",
-                FutureWarning,
-                stacklevel=2,
-            )
         self.experimental_config = experimental_config
         self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0
@@ -425,6 +420,11 @@ class profile:
         self._stats.profiler_enable_call_duration_us = int((t1 - t0) / 1000)
         self.profiling_start_time_ns = t1
 
+    def _stop_collection(self) -> None:
+        self.profiling_end_time_ns = perf_counter_ns()
+        _stop_profiler_collection()
+        _run_on_profiler_stop()
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
@@ -443,7 +443,9 @@ class profile:
         self.kineto_results = _disable_profiler()
         t1 = perf_counter_ns()
         self._stats.profiler_disable_call_duration_us = int((t1 - t0) / 1000)
-        self.profiling_end_time_ns = t0
+        # A window that _stop_collection() ended keeps its end.
+        if self.profiling_end_time_ns <= self.profiling_start_time_ns:
+            self.profiling_end_time_ns = t0
 
         _run_on_profiler_stop()
 

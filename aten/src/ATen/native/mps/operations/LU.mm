@@ -3,11 +3,11 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/native/Pool.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TransposeType.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -320,11 +320,16 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
   const auto uB = static_cast<uint32_t>(Bnum);
   const auto N = un + uk;
 
+  using namespace std::string_view_literals;
   auto pivotPSO = lib.getPipelineStateForFunc(fmt::format("luApplyPivotsRHS_{}", tname));
   auto fwdPSO = lib.getPipelineStateForFunc(
       fmt::format("trsmDiagSolveLU_{}_{}", tname, adjoint ? "lower_nonunit" : "lower_unit"));
   auto backPSO = lib.getPipelineStateForFunc(
       fmt::format("trsmDiagSolveLU_{}_{}", tname, adjoint ? "upper_unit" : "upper_nonunit"));
+  auto fwdTailPSO = lib.getPipelineStateForFunc(
+      fmt::format("trsmDiagSolveLU_{}_{}_direct", tname, adjoint ? "lower_nonunit"sv : "lower_unit"sv));
+  auto backTailPSO = lib.getPipelineStateForFunc(
+      fmt::format("trsmDiagSolveLU_{}_{}_direct", tname, adjoint ? "upper_unit"sv : "upper_nonunit"sv));
   auto gemmBigPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_64_64_4") : nil;
   auto gemmSmallPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_32_64_2") : nil;
   auto gemmSimdPSO = (!useMpp && !isComplex) ? lib.getPipelineStateForFunc("gemmSimdLU") : nil;
@@ -385,15 +390,15 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
       if (!adjoint) {
         pivotApply(false);
       }
-      for (auto p0 = 0u; p0 < un; p0 += 32) {
-        const auto pw = std::min(32u, un - p0);
-        trsm(fwdPSO, p0, pw);
+      for (auto p0 = 0u; p0 < un; p0 += kLUSolveTS) {
+        const auto pw = std::min(kLUSolveTS, un - p0);
+        trsm(pw > kLUSolveDirectMaxRows ? fwdPSO : fwdTailPSO, p0, pw);
         gemm(p0 + pw, un, p0, pw);
       }
-      for (auto pb = un ? (static_cast<int64_t>(un) - 1) / 32 * 32 : int64_t{0}; pb >= 0; pb -= 32) {
+      for (auto pb = (static_cast<int64_t>(un) - 1) / kLUSolveTS * kLUSolveTS; pb >= 0; pb -= kLUSolveTS) {
         const auto p0 = static_cast<uint32_t>(pb);
-        const auto pw = std::min(32u, un - p0);
-        trsm(backPSO, p0, pw);
+        const auto pw = std::min(kLUSolveTS, un - p0);
+        trsm(pw > kLUSolveDirectMaxRows ? backPSO : backTailPSO, p0, pw);
         gemm(0, p0, p0, pw);
       }
       if (adjoint) {
@@ -461,7 +466,7 @@ static void lu_inv_small_encode(const Tensor& A, const Tensor& result, const Ten
   const auto batch = c10::multiply_integers(A.sizes().begin(), A.sizes().end() - 2);
   const auto A_ = A.reshape({batch, n, n});
   const auto X = result.view({batch, n, n});
-  const auto threads = c10::checked_convert<uint32_t>(batch, "uint32_t");
+  const auto threads = c10::safe_conv<uint32_t>(batch, "number of matrices in A");
   const LUSmallInvParams<> params{.A_bstride = A_.stride(0),
                                   .A_rstride = A_.stride(1),
                                   .A_cstride = A_.stride(2),
@@ -527,9 +532,11 @@ static void unpack_pivots_stub_impl(TensorIterator& iter, const int64_t dim_size
   MPSStream* stream = getCurrentMPSStream();
 
   UnpackPivotsParams params;
-  params.perm_batch_stride = safe_downcast<uint32_t, int64_t>((perm.dim() > 1) ? perm.stride(-2) : 0);
-  params.pivots_batch_stride = safe_downcast<uint32_t, int64_t>((pivots.dim() > 1) ? pivots.stride(-2) : 0);
-  params.dim_size = safe_downcast<uint32_t, int64_t>(dim_size);
+  params.perm_batch_stride =
+      c10::safe_conv<uint32_t>((perm.dim() > 1) ? perm.stride(-2) : 0, "permutation batch stride");
+  params.pivots_batch_stride =
+      c10::safe_conv<uint32_t>((pivots.dim() > 1) ? pivots.stride(-2) : 0, "pivots batch stride");
+  params.dim_size = c10::safe_conv<uint32_t>(dim_size, "permutation dimension size");
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {

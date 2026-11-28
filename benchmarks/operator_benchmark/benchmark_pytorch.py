@@ -62,23 +62,8 @@ class TorchBenchmarkBase(torch.nn.Module):
     def extract_inputs_tuple(self):
         self.inputs_tuple = tuple(self.inputs.values())
 
-    @torch.jit.export
     def get_inputs(self):
-        # Need to convert the inputs to tuple outside of JIT so that
-        # JIT can infer the size of the inputs.
         return self.inputs_tuple
-
-    @torch.jit.export
-    def forward_impl(self):
-        # This is to supply the inputs to the forward function which
-        # will be called in both the eager and JIT mode of local runs
-        return self.forward(*self.get_inputs())
-
-    @torch.jit.export
-    def forward_consume(self, iters: int):
-        #  _consume is used to avoid the dead-code-elimination optimization
-        for _ in range(iters):
-            torch.ops.operator_benchmark._consume(self.forward_impl())
 
     def forward_impl_eager(self):
         # This is to supply the inputs to the forward function which
@@ -86,7 +71,7 @@ class TorchBenchmarkBase(torch.nn.Module):
         return self.forward(*self.get_inputs())
 
     def forward_consume_eager(self, iters: int):
-        # Eager version of forward_consume without decorators (compilation handled by torch.compile)
+        # _consume prevents dead-code elimination in compiled loops.
         for _ in range(iters):
             torch.ops.operator_benchmark._consume(self.forward_impl_eager())
 
@@ -173,13 +158,7 @@ class PyTorchOperatorTestCase:
         self.place_holder_tensor = torch.ones(1)
         self.framework = "PyTorch"
         self.time_series = []
-        self._jit_forward_graph = None
         self._compile_forward_graph = None
-
-    def _generate_jit_forward_graph(self):
-        """generate a graph for the forward function via scripting"""
-        scripted_op_bench = torch.jit.script(self.op_bench)
-        return scripted_op_bench.forward_consume
 
     def _generate_compile_forward_graph(self):
         """generate a compiled graph for the forward function via torch.compile"""
@@ -187,12 +166,6 @@ class PyTorchOperatorTestCase:
             self.op_bench.forward_consume_eager, backend="inductor"
         )
         return compiled_forward_consume
-
-    def run_jit_forward(self, num_runs, print_per_iter=False, gpu_sync=False):
-        """Run the forward path of an op with JIT mode"""
-        if self._jit_forward_graph is None:
-            self._jit_forward_graph = self._generate_jit_forward_graph()
-        self._jit_forward_graph(num_runs)
 
     def run_compile_forward(self, num_runs, print_per_iter=False, gpu_sync=False):
         """Run the forward path of an op with compile mode"""
@@ -246,7 +219,6 @@ class PyTorchOperatorTestCase:
 
     def run_backward(self, num_runs, print_per_iter=False, gpu_sync=False):
         """Run the backward path of an op in many iterations"""
-        # TODO: can we use JIT here to reduce python overhead?
         for _ in range(num_runs):
             self.mean.backward(retain_graph=True)
         if gpu_sync:

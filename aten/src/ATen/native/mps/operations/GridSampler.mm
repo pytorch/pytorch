@@ -379,7 +379,7 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
 
   Tensor grad_input;
   if (input_requires_grad) {
-    grad_input = at::zeros_like(input);
+    grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   // Always allocate grad_grid, matching CPU/CUDA and the 2D MPS backward.
   // Autograd requires a defined tensor for every output declared in the

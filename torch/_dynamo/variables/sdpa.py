@@ -35,13 +35,15 @@ class SDPAParamsVariable(VariableTracker):
     def create(
         tx: "InstructionTranslatorBase", value: Any, source: Source
     ) -> VariableTracker:
-        from .torch import TorchInGraphFunctionVariable
+        from .builder import SourcelessBuilder
 
         params = [
             VariableTracker.build(tx, getattr(value, p), AttrSource(source, p))
             for p in PARAM_NAMES
         ]
-        return TorchInGraphFunctionVariable(SDPAParams).call_function(tx, params, {})
+        return SourcelessBuilder.create_internal_torch_function(
+            SDPAParams
+        ).call_function(tx, params, {})
 
     def __init__(
         self, proxy: Proxy, param_vars: list[VariableTracker], **kwargs: Any

@@ -112,6 +112,43 @@ def get_pr_number() -> int | None:
     return None
 
 
+def td_enabled_workflow(workflow: str) -> bool:
+    """Whether run_test.py's --enable-td default allows TD under GITHUB_WORKFLOW `workflow`."""
+    rocm = workflow.startswith(("rocm-", "periodic-rocm-"))
+    return workflow in ("trunk", "pull") or rocm
+
+
+NO_TD_BUILD_ENVS = ("xpu", "onnx")
+
+
+def td_enabled_job(build_environment: str, *, macos: bool, no_td: bool) -> bool:
+    """The job-level rest of run_test.py's --enable-td default: TD is not
+    allowed on macOS, in NO_TD_BUILD_ENVS builds or under NO_TD."""
+    no_td_env = any(e in build_environment for e in NO_TD_BUILD_ENVS)
+    return not (no_td or macos or no_td_env)
+
+
+def td_enabled_default(
+    *,
+    build_environment: str,
+    workflow: str,
+    is_ci: bool,
+    pr_number: int | None,
+    macos: bool,
+    no_td: bool,
+) -> bool:
+    """run_test.py's --enable-td argparse default: whether TD is allowed on a
+    CI PR job that td_enabled_job and td_enabled_workflow allow. It does not
+    promise TD runs: main() still turns TD off when TESTS_TO_INCLUDE names
+    tests or import_results() returns no tests."""
+    return (
+        is_ci
+        and pr_number is not None
+        and td_enabled_job(build_environment, macos=macos, no_td=no_td)
+        and td_enabled_workflow(workflow)
+    )
+
+
 @cache
 def get_merge_base() -> str:
     pr_number = get_pr_number()
