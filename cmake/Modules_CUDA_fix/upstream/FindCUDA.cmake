@@ -815,7 +815,10 @@ macro(cuda_find_library_local_first_with_path_ext _var _names _doc _path_ext )
   if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     # CUDA 3.2+ on Windows moved the library directories, so we need the new
     # and old paths.
-    set(_cuda_64bit_lib_dir "${_path_ext}lib/x64" "${_path_ext}lib64" "${_path_ext}libx64" )
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _cuda_lib_arch)
+    string(REGEX REPLACE "^(amd64|x86_64)$" "x64" _cuda_lib_arch "${_cuda_lib_arch}")
+    string(REGEX REPLACE "^aarch64$" "arm64" _cuda_lib_arch "${_cuda_lib_arch}")
+    set(_cuda_64bit_lib_dir "${_path_ext}lib/${_cuda_lib_arch}" "${_path_ext}lib64" "${_path_ext}libx64")
   endif()
   # CUDA 3.2+ on Windows moved the library directories, so we need to new
   # (lib/Win32) and the old path (lib).
