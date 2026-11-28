@@ -3303,6 +3303,7 @@
 
 - func: _fused_rms_norm(Tensor input, int[] normalized_shape, Tensor? weight, float? eps) -> (Tensor, Tensor)
   dispatch:
+    CPU: _fused_rms_norm_cpu
     CUDA: _fused_rms_norm_cuda
     MPS: _fused_rms_norm_mps
     XPU: _fused_rms_norm_xpu
@@ -3310,6 +3311,7 @@
 
 - func: _fused_rms_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor rstd, Tensor? weight, bool[2] output_mask) -> (Tensor, Tensor)
   dispatch:
+    CPU: _fused_rms_norm_backward_cpu
     CUDA: _fused_rms_norm_backward_cuda
     XPU: _fused_rms_norm_backward_xpu
 

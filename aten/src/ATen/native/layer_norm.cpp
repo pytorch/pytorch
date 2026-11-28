@@ -16,6 +16,8 @@
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/layer_norm_native.h>
 #include <ATen/ops/_fused_rms_norm.h>
+#include <ATen/ops/_fused_rms_norm_backward_native.h>
+#include <ATen/ops/_fused_rms_norm_native.h>
 #include <ATen/ops/native_batch_norm.h>
 #include <ATen/ops/native_layer_norm.h>
 #include <ATen/ops/native_layer_norm_backward_native.h>
@@ -31,6 +33,7 @@
 #endif
 
 #include <array>
+#include <limits>
 #include <tuple>
 #include <vector>
 
@@ -190,6 +193,116 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
+std::tuple<Tensor, Tensor> _fused_rms_norm_cpu(
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    std::optional<double> eps) {
+  const c10::MaybeOwned<Tensor> weight_maybe_owned{at::borrow_from_optional_tensor(weight_opt)};
+  const Tensor& weight{*weight_maybe_owned};
+
+  // The kernel reads weight as the input dtype. Public rms_norm sends mixed
+  // dtypes to the composite, so only direct calls can reach this check.
+  TORCH_CHECK(
+      !weight.defined() || weight.scalar_type() == input.scalar_type(),
+      "_fused_rms_norm: expected weight to have the same dtype as the input, but got input of dtype ",
+      input.scalar_type(), " and weight of dtype ", weight.scalar_type());
+
+  const auto [M, N]{_check_layer_norm_inputs(input, normalized_shape, weight, weight)};
+  const auto X{input.expect_contiguous()};
+  const auto gamma{weight.expect_contiguous()};
+
+  // rstd and the default eps use the opmath dtype (float for reduced types), as
+  // CUDA and the decomposition that serves as the meta function do.
+  const auto opmath_type{at::toOpMathType(input.scalar_type())};
+  const double eps_val{eps.value_or(
+      opmath_type == kDouble ? std::numeric_limits<double>::epsilon()
+                             : std::numeric_limits<float>::epsilon())};
+
+  Tensor Y{at::native::empty_like(
+      *X,
+      std::nullopt /* dtype */,
+      std::nullopt /* layout */,
+      std::nullopt /* device */,
+      std::nullopt /* pin_memory */,
+      at::MemoryFormat::Contiguous)};
+  Tensor rstd{at::empty({M}, X->options().dtype(opmath_type))};
+  if (M > 0) {
+    RMSNormKernel(kCPU, *X, *gamma, M, N, eps_val, &Y, &rstd);
+  }
+
+  // rstd is returned with the input's shape, the normalized dims set to 1.
+  const auto input_shape{input.sizes()};
+  const auto axis{input.dim() - static_cast<int64_t>(normalized_shape.size())};
+  DimVector stat_shape(input_shape.begin(), input_shape.begin() + axis);
+  stat_shape.resize(input.dim(), 1);
+
+  return std::make_tuple(std::move(Y), rstd.view(stat_shape));
+}
+
+std::tuple<Tensor, Tensor> _fused_rms_norm_backward_cpu(
+    const Tensor& dY,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& rstd,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    std::array<bool, 2> grad_input_mask) {
+  const c10::MaybeOwned<Tensor> weight_maybe_owned{at::borrow_from_optional_tensor(weight_opt)};
+  const Tensor& weight{*weight_maybe_owned};
+
+  // The kernel reads dY with input's layout and one rstd value per row.
+  const auto [M, N]{_check_layer_norm_inputs(input, normalized_shape, weight, weight)};
+  TORCH_CHECK(
+      dY.sizes().equals(input.sizes()),
+      "_fused_rms_norm_backward: expected grad_out of size ", input.sizes(), ", but got ", dY.sizes());
+  TORCH_CHECK(
+      rstd.numel() == M,
+      "_fused_rms_norm_backward: expected rstd with ", M, " elements, but got ", rstd.numel());
+
+  // Autograd often passes expanded gradients, e.g. from .sum(), whose strides are 0.
+  const auto X{input.expect_contiguous()};
+  const auto gamma{weight.expect_contiguous()};
+  const auto dY_contig{dY.expect_contiguous()};
+  const auto rstd_contig{rstd.expect_contiguous()};
+
+  Tensor dX;
+  if (grad_input_mask[0]) {
+    dX = at::native::empty_like(
+        *X,
+        std::nullopt /* dtype */,
+        std::nullopt /* layout */,
+        std::nullopt /* device */,
+        std::nullopt /* pin_memory */,
+        at::MemoryFormat::Contiguous);
+  }
+
+  // With no rows the kernel does not run, and the weight gradient is an empty sum.
+  Tensor dgamma;
+  if (grad_input_mask[1] && weight.defined()) {
+    dgamma = M > 0 ? at::native::empty_like(
+                         *gamma,
+                         std::nullopt /* dtype */,
+                         std::nullopt /* layout */,
+                         std::nullopt /* device */,
+                         std::nullopt /* pin_memory */,
+                         at::MemoryFormat::Contiguous)
+                   : at::native::zeros_like(
+                         *gamma,
+                         std::nullopt /* dtype */,
+                         std::nullopt /* layout */,
+                         std::nullopt /* device */,
+                         std::nullopt /* pin_memory */,
+                         at::MemoryFormat::Contiguous);
+  }
+
+  if (M > 0 && N > 0) {
+    RMSNormBackwardKernel(
+        kCPU, *dY_contig, *X, *rstd_contig, *gamma, M, N, &dX, &dgamma);
+  }
+
+  return std::make_tuple(std::move(dX), std::move(dgamma));
+}
+
 Tensor layer_norm_symint(
     const Tensor& input,
     c10::SymIntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */,
@@ -200,6 +313,8 @@ Tensor layer_norm_symint(
 
 DEFINE_DISPATCH(LayerNormKernel);
 DEFINE_DISPATCH(LayerNormBackwardKernel);
+DEFINE_DISPATCH(RMSNormKernel);
+DEFINE_DISPATCH(RMSNormBackwardKernel);
 
 // Ported from pytorch/xla repo
 std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
@@ -351,6 +466,13 @@ Tensor rms_norm_symint(
       "Mismatch dtype between input and weight: input dtype = ", input.dtype(),
       ", weight dtype = ", weight_opt.value().dtype(), ", Cannot dispatch to fused implementation."
     );
+    return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
+  }
+
+  // _fused_rms_norm takes int[], so symbolic sizes (e.g. traced with dynamic
+  // shapes) go to the composite. It reads only normalized_shape.size(), so the
+  // reinterpret_cast never exposes a symbolic value as an int.
+  if (!c10::asIntArrayRefSlowOpt(normalized_shape).has_value()) {
     return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
   }
 
