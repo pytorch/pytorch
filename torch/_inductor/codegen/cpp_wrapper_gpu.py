@@ -31,6 +31,7 @@ from ..runtime.hints import (
     TRITON_DEFAULT_RSPLIT_SIZE,
     TritonMeta,
 )
+from ..runtime.tiling import get_z_blocks
 from ..stream_utils import (
     AOTI_SUPPORTED_STREAM_OP_NAMES,
     AOTI_UNSUPPORTED_STREAM_OP_REASONS,
@@ -196,7 +197,9 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
                 cast("InductorMeta", inductor_meta), config_dict
             )
 
-        # Per-subkernel block sizes for combo kernels, or single-element lists.
+        # Combo kernels store one block size per subkernel.
+        # Single kernels store one X/Y/R0 block, but Z blocks are per-axis,
+        # ordered from Z0 (innermost) outward.
         num_kernels = combo_grid_meta.get("num_kernels", 1) if combo_grid_meta else 1
         if num_kernels > 1 and "XBLOCK_0" in config_dict:
             xblocks = [
@@ -218,9 +221,7 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         else:
             xblocks = [config_dict.get("XBLOCK", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])]
             yblocks = [config_dict.get("YBLOCK", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])]
-            zblocks = [
-                config_dict.get("Z0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["Z0_BLOCK"])
-            ]
+            zblocks = get_z_blocks(config_dict)
             r0blocks = [
                 config_dict.get("R0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])
             ]
@@ -298,6 +299,41 @@ def _unpack_tma_descriptor_args(var_name: str, sig_type: str) -> list[str]:
 def _tma_dtype_device_to_host(elem_type: int) -> int:
     """Map Triton's device TMA dtype enum to CUtensorMapDataType."""
     return {8: 10, 9: 8, 10: 9}.get(elem_type, elem_type)
+
+
+def _host_tma_cpp_dim(
+    dim: int | str,
+    launch_args: list[str],
+    arg_names: OrderedSet[str],
+    constants: dict[str, Any],
+) -> str:
+    """C++ source for one host-side TMA descriptor dim.
+
+    A dim is an int, or the cexpr of an integer expression over the kernel's size
+    args (launch_args, such as ks0). The kernel wrapper takes those args as
+    parameters, except ones Triton specialized to constants.
+    """
+    if isinstance(dim, int):
+        return str(dim)
+    values: dict[str, str] = {}
+    for name in launch_args:
+        if name in constants:
+            value = constants[name]
+            if not isinstance(value, int):
+                raise NotImplementedError(
+                    f"host-side TMA descriptor dim {dim!r} names {name}, "
+                    f"a non-integer constant {value!r}"
+                )
+            values[name] = str(int(value))
+        elif name not in arg_names:
+            raise NotImplementedError(
+                f"host-side TMA descriptor dim {dim!r} names {name}, "
+                "which is not a kernel arg"
+            )
+    if not values:
+        return dim
+    names = "|".join(map(re.escape, values))
+    return re.sub(rf"\b(?:{names})\b", lambda m: values[m.group(0)], dim)
 
 
 class _LazyTritonCompileKickoffLine(DeferredLineBase):
@@ -414,6 +450,70 @@ class DeferredTritonCallWrapper:
             )
             prefix.writeline(f"initTMADescriptorWithMetadata({args});")
 
+    def _host_tma_template_args(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Template TMA formals the caller passes as tensors, by name.
+
+        A template's host-side TMA operand (host_tma_descriptor_args) reaches
+        this wrapper as its tensor; the wrapper builds the StableTMADescriptor.
+        User-defined kernels pass a StableTMADescriptor instead.
+        """
+        signature = (params.get("triton_meta") or self.triton_meta or {}).get(
+            "signature", {}
+        )
+        host_args = (params.get("inductor_meta") or {}).get(
+            "host_tma_descriptor_args"
+        ) or {}
+        return {
+            name: desc
+            for name, desc in host_args.items()
+            if isinstance(desc, dict)
+            and isinstance(signature.get(name), str)
+            and signature[name].startswith("tensordesc<")
+        }
+
+    def _generate_host_tma_template_descriptors(
+        self,
+        prefix: IndentedBuffer,
+        wrapper: CppWrapperGpu,
+        def_args: list[str],
+        params: dict[str, Any],
+    ) -> None:
+        """Build each template TMA formal's StableTMADescriptor from its tensor.
+
+        Shapes and strides may be dynamic sizes the kernel takes as args (ks0),
+        which are parameters of this wrapper, so they are read at launch.
+        _generate_tma_descriptor_initializers then encodes the CUtensorMap.
+        """
+        arg_names = OrderedSet(def_args)
+        constants = (params.get("triton_meta") or {}).get("constants", {})
+        device_ptr_type = wrapper.device_codegen.cpp_device_ptr()
+        for name, desc in self._host_tma_template_args(params).items():
+            launch_args = desc.get("launch_args", [])
+            # cpp_shape/cpp_strides are set whenever a dim is symbolic.
+            shape, strides = (
+                [
+                    _host_tma_cpp_dim(d, launch_args, arg_names, constants)
+                    for d in desc.get(f"cpp_{key}", desc[key])
+                ]
+                for key in ("shape", "strides")
+            )
+            prefix.writeline(f"StableTMADescriptor {name}{{}};")
+            prefix.writeline(
+                f"{name}.global_address = reinterpret_cast<void*>("
+                f"reinterpret_cast<{device_ptr_type}>({name}_tma_tensor_.data_ptr()));"
+            )
+            for i, (dim, stride) in enumerate(zip(shape, strides)):
+                prefix.writeline(
+                    f"{name}.global_shape[{i}] = static_cast<uint64_t>({dim});"
+                )
+                prefix.writeline(
+                    f"{name}.kernel_shape[{i}] = "
+                    f"static_cast<int32_t>({name}.global_shape[{i}]);"
+                )
+                prefix.writeline(
+                    f"{name}.strides[{i}] = static_cast<int64_t>({stride});"
+                )
+
     def _generate_lazy_tma_descriptor_initializers(
         self,
         prefix: IndentedBuffer,
@@ -481,10 +581,16 @@ class DeferredTritonCallWrapper:
         arg_names: list[str],
         arg_types: list[Any] | None = None,
         signature: dict[str, str] | None = None,
+        tma_tensor_formals: OrderedSet[str] | None = None,
     ) -> None:
-        """Write the wrapper function signature including template and parameters."""
+        """Write the wrapper function signature including template and parameters.
+
+        tma_tensor_formals are TMA formals the caller passes as tensors; the
+        wrapper builds their descriptors (_generate_host_tma_template_descriptors).
+        """
         if arg_types is None:
             arg_types = self.arg_types
+        tma_tensor_formals = tma_tensor_formals or OrderedSet()
 
         template_types = [
             f"typename {name}_type_"
@@ -501,7 +607,9 @@ class DeferredTritonCallWrapper:
         kernels_param = "kernels_type_& kernels_"
 
         shared_params = [
-            self._get_cpp_param_type(name, arg_type, signature)
+            f"const {name}_type_& {name}_tma_tensor_"
+            if name in tma_tensor_formals
+            else self._get_cpp_param_type(name, arg_type, signature)
             for name, arg_type in zip(arg_names, arg_types)
         ]
         shared_params.append("int32_t device_idx_")
@@ -572,8 +680,18 @@ class DeferredTritonCallWrapper:
         signature = (params.get("triton_meta") or self.triton_meta or {}).get(
             "signature", {}
         )
+        tma_tensor_formals = OrderedSet(self._host_tma_template_args(params))
+        if tma_tensor_formals:
+            # Call wrappers are generated after the header is emitted, so the
+            # first one that builds a descriptor brings the helpers along.
+            wrapper.write_tma_descriptor_helpers_once(prefix)
         self._write_wrapper_signature(
-            prefix, wrapper, def_args, arg_types, signature=signature
+            prefix,
+            wrapper,
+            def_args,
+            arg_types,
+            signature=signature,
+            tma_tensor_formals=tma_tensor_formals,
         )
 
         with prefix.indent():
@@ -584,6 +702,9 @@ class DeferredTritonCallWrapper:
                 prefix.writeline("*/")
             self.generate_grid(prefix, inductor_meta, params)
             self.generate_load_kernel(prefix, kernel_var_name, params)
+            self._generate_host_tma_template_descriptors(
+                prefix, wrapper, def_args, params
+            )
             self._generate_tma_descriptor_initializers(prefix, def_args, params)
             self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
         prefix.writeline("}")
@@ -1310,6 +1431,7 @@ class CppWrapperGpu(CppWrapperCpu):
         self._declared_aux_stream_slots: OrderedSet[int] = OrderedSet()
         self._aoti_current_stream_guard_declared = False
         self._aoti_stream_helpers_emitted = False
+        self._tma_descriptor_helpers_written = False
 
     def generate_debug_sync(self, buffer):
         if self.device == "cuda":
@@ -1382,9 +1504,14 @@ class CppWrapperGpu(CppWrapperCpu):
         self._aoti_current_stream_guard_declared = False
         return super()._generate(is_inference)
 
-    @cache_on_self
-    def write_tma_descriptor_helpers_once(self):
-        self.header.splice(self.device_codegen.tma_descriptor_helpers())
+    def write_tma_descriptor_helpers_once(
+        self, buffer: IndentedBuffer | None = None
+    ) -> None:
+        if self._tma_descriptor_helpers_written:
+            return
+        self._tma_descriptor_helpers_written = True
+        target = self.header if buffer is None else buffer
+        target.splice(self.device_codegen.tma_descriptor_helpers())
 
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
         # Pure AOTI receives the stream as a function parameter. JIT and

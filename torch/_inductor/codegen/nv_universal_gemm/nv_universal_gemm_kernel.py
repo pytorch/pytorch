@@ -76,6 +76,7 @@ def _local_reduce_source_constant(field: str) -> str:
 
 def _normalize_epilogue_input_tensor(value: Any, permute=None) -> Any:
     import torch
+    from torch._subclasses.fake_tensor import is_fake_tensor
 
     if not isinstance(value, torch.Tensor):
         return value
@@ -88,6 +89,8 @@ def _normalize_epilogue_input_tensor(value: Any, permute=None) -> Any:
         value = value.expand(8, 1).contiguous()
     elif not value.is_contiguous():
         value = value.contiguous()
+    if not is_fake_tensor(value) and value.data_ptr() % 16:
+        value = value.clone()
     return value
 
 
@@ -640,9 +643,15 @@ def _create_gemm_arguments(
             )
 
         case "SCALED_GEMM":
+            from cutlass.operators import ScaleSwizzleMode
             from cutlass.operators.arguments import ScaledOperand
 
             a, b, scale_a, scale_b = input_tensors
+            # Swizzled scales have a flat ABI; the matrix shapes determine their logical layout.
+            if swizzle_mode_a == ScaleSwizzleMode.Swizzle32x4x4:
+                scale_a = scale_a.reshape(-1)
+            if swizzle_mode_b == ScaleSwizzleMode.Swizzle32x4x4:
+                scale_b = scale_b.reshape(-1)
             scaled_a = ScaledOperand(a, scale_a, scale_mode_a, swizzle_mode_a)
             scaled_b = ScaledOperand(b, scale_b, scale_mode_b, swizzle_mode_b)
             kwargs: dict[str, Any] = {"accumulator_type": accumulator_type}
@@ -889,9 +898,9 @@ def _update_reuse_args_tensors(
     if variant_name == "SCALED_GEMM":
         a, b, scale_a, scale_b = input_tensors
         redirect(args.A.quantized.tensor, a)
-        redirect(args.A.scale.tensor, scale_a)
+        redirect(args.A.scale.tensor, scale_a.reshape(args.A.scale.shape))
         redirect(args.B.quantized.tensor, b)
-        redirect(args.B.scale.tensor, scale_b)
+        redirect(args.B.scale.tensor, scale_b.reshape(args.B.scale.shape))
         redirect(args.out.tensor, out)
     else:
         # GEMM: dense mm and the EFC bias/epilogue addmm path.
