@@ -1011,6 +1011,9 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                         self.assertEqual(opt_fn(x), expected(x))
                         self.assertNotIn("_dg_a", globals())
 
+    # The dict-alias shapes take the alias before the delete, so they break
+    # when the lazy alias is realized by the write instead of at the
+    # post-delete __dict__ load. The write itself is still not traced.
     @parametrize("shape", ("attr", "setitem", "update", "setdefault"))
     def test_delete_global_module_write_after(self, shape):
         me = sys.modules[__name__]
@@ -1023,20 +1026,23 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
 
         def fn_setitem(x):
             global _dg_a
+            d = me.__dict__
             del _dg_a
-            me.__dict__["_dg_a"] = 5
+            d["_dg_a"] = 5
             return x + 1
 
         def fn_update(x):
             global _dg_a
+            d = me.__dict__
             del _dg_a
-            me.__dict__.update(_dg_a=5)
+            d.update(_dg_a=5)
             return x + 1
 
         def fn_setdefault(x):
             global _dg_a
+            d = me.__dict__
             del _dg_a
-            me.__dict__.setdefault("_dg_a", 5)
+            d.setdefault("_dg_a", 5)
             return x + 1
 
         fn, expected, g_after = {
