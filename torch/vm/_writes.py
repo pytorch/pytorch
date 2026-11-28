@@ -22,7 +22,10 @@ Given (by ``torch._rust_inductor.trace_region``)
 
 Guarantees
   - ``take`` leaves the program's state as eager leaves it after the traced
-    call: no stand-in of the tracer's stays where the run wrote one.
+    call: no stand-in of the tracer's stays where the run wrote one. Every
+    write is tried whatever became of one before it, and ``finish`` goes on
+    where ``take`` was interrupted: the tracer calls one of them on every
+    way out of a body whose run stands.
   - ``plan`` gives one call template per write that outlives the run, in the
     run's order, or raises ``Unrepeatable``. The target is an argument, a
     container inside one (found by its path on every run), or the object
@@ -149,6 +152,10 @@ class Written:
         self.text: list[str] = []
         # The targets the region holds itself.
         self.pinned: list[Any] = []
+        # Whether the recorder's list was taken, and the writes of it whose
+        # places still wait for their plain values.
+        self.taken = False
+        self.pending: list[tuple[Any, Any, tuple[Any, ...]]] = []
 
     @property
     def targets(self) -> set[int]:
@@ -160,10 +167,27 @@ class Written:
         holds one is given the plain value; a place written again since is
         left."""
         self.recorded = recorded
-        for how, target, values in recorded:
-            real = [plain(v) for v in values]
-            if any(r is not v for r, v in zip(real, values)):
-                _put_plain(how, target, values, real)
+        self.pending = list(recorded)
+        self.taken = True
+        self.finish(plain)
+
+    def finish(self, plain) -> None:
+        """Gives the places of the writes that still wait their plain
+        values. A write that fails does not keep the ones behind it from
+        theirs: the first failure is raised when all were tried."""
+        failed = None
+        while self.pending:
+            how, target, values = self.pending.pop(0)
+            try:
+                real = [plain(v) for v in values]
+                if any(r is not v for r, v in zip(real, values)):
+                    _put_plain(how, target, values, real)
+            except BaseException as e:
+                # (An interrupt too: the writes behind it get their floats
+                # first, and it is raised then.)
+                failed = failed or e
+        if failed is not None:
+            raise failed
 
     def plan(self, outs, args, old, objects, describe, shared, made) -> None:
         """Fills ``templates``, ``text`` and ``pinned`` (appending what the

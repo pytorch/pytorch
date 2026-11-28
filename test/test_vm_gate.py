@@ -17884,12 +17884,12 @@ main()
 # instruction of the body called is no region.
 RELEASE_KNOWN = r"""
 == operator: binary
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == operator: binary, reflected
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == operator: binary, in place
 alone views .LTR b@body:3{v=T(a),x=tensor} | b@body:3{x=tensor}
@@ -17900,16 +17900,16 @@ alone deaths .LTR in -b -a mid -sum out RET DROP GC | in -a -b mid -sum out RET 
 between deaths .LTR in -b -a mid -sum out RET DROP GC | in -a -b mid -sum out RET DROP GC
 inside deaths .LTR -b -a mid -sum RET DROP GC | -a -b mid -sum RET DROP GC
 == operator: unary
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == operator: not
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == operator: compare
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == operator: compare, chained
 alone deaths ..T. in -a -b -c out RET DROP GC | in -a -c -b out RET DROP GC
@@ -17917,28 +17917,24 @@ between deaths ..TR in -a -b -c out RET DROP GC | in -a -c -b out RET DROP GC
 inside deaths ..T. -a -b -c RET DROP GC | -a -c -b RET DROP GC
 inside views .L.R a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == operator: compare, chained, cut short
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == operator: contains
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == operator: is
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == operator: or, discarded
 alone views FLTR b@body:?{x=tensor} | b@body:2{x=tensor}
 between views FLTR b@body:?{x=tensor,y=tensor} | b@body:3{x=tensor,y=tensor}
 inside views FLTR b@body:?{x=tensor,y=tensor} | b@body:2{x=tensor,y=tensor}
 == operator: conditional expression
-alone views ..T. c@body:2{x=tensor} | c@body
-between views ..TR c@body:3{x=tensor,y=tensor} | c@body
 inside views .LTR c@body:2{x=tensor,y=tensor} | c@body:2{x=tensor}
 == subscript: load
-alone views ..T. c@body:2{x=tensor} | c@body
-between views ..TR c@body:3{x=tensor,y=tensor} | c@body
+alone views ..T. c@body:2{x=tensor} | c@body:3{x=tensor}
+between views ..TR c@body:3{x=tensor,y=tensor} | c@body:4{x=tensor,y=tensor}
 inside views .LTR c@body:2{x=tensor,y=tensor} | c@body:2{x=tensor}
 == subscript: slice load
 alone deaths ..T. in -lo -hi -c out RET DROP GC | in -c -lo -hi out RET DROP GC
@@ -17971,24 +17967,24 @@ alone deaths .LTR in -c -b -a out RET DROP GC | in -a -b -c out RET DROP GC
 between deaths .LTR in -c -b -a out RET DROP GC | in -a -b -c out RET DROP GC
 inside deaths .LTR -c -b -a RET DROP GC | -a -b -c RET DROP GC
 == container: dict built and dropped
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == container: dict with object keys built and dropped
-alone views ..T. k@body:2{x=tensor} | k@body
-between views ..TR k@body:3{x=tensor,y=tensor} | k@body
+alone views ..T. k@body:2{x=tensor} | k@body:3{x=tensor}
+between views ..TR k@body:3{x=tensor,y=tensor} | k@body:4{x=tensor,y=tensor}
 inside views .LTR k@body:2{x=tensor,y=tensor} | k@body:2{x=tensor}
 == C call: keyword
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == C call: ** dict
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == C call: positional and ** dict
-alone views ..T. c@body:2{x=tensor} | c@body
-between views ..TR c@body:3{x=tensor,y=tensor} | c@body
+alone views ..T. c@body:2{x=tensor} | c@body:3{x=tensor}
+between views ..TR c@body:3{x=tensor,y=tensor} | c@body:4{x=tensor,y=tensor}
 inside views .LTR c@body:2{x=tensor,y=tensor} | c@body:2{x=tensor}
 == C call: raises
 inside views .LTR a@body:3{x=tensor,y=tensor} | a@body:3{x=tensor}
@@ -18017,8 +18013,8 @@ alone cpythons FLTR in -a after rebind out RET DROP GC | in after rebind -a out 
 between cpythons FLTR in -a after rebind out RET DROP GC | in after rebind -a out RET DROP GC
 inside cpythons FLTR -a after rebind RET DROP GC | after rebind -a RET DROP GC
 == call: positional, returned and dropped
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == call: the callee raises after it deleted the argument
 alone cpythons FLTR in -a after del caught out RET DROP GC | in after del -a caught out RET DROP GC
@@ -18121,16 +18117,16 @@ alone cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DR
 between cpythons FLTR in -a after del out RET DROP GC | in after del -a out RET DROP GC
 inside cpythons FLTR -a after del RET DROP GC | after del -a RET DROP GC
 == class: __init__ keeps the argument
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == function: decorator's operand
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:5{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:6{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == function: a free variable of a called closure
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == frame: parameters and locals at exit
 alone cpythons FLTR in made -p -q -r out RET DROP GC | in made -r -p -q out RET DROP GC
@@ -18173,22 +18169,20 @@ between deaths .L.R in -a -b out RET DROP GC | in -b -a out RET DROP GC
 between views F.TR a@body:4{a=None,b=T(b),x=tensor,y=tensor} | a@body:3{a=None,b=T(b),x=tensor,y=tensor}
 inside views F... a@body:3{a=None,b=T(b),x=tensor,y=tensor} | a@body:2{a=None,b=T(b),x=tensor,y=tensor}
 == statement: unpacking an iterator
-alone views ..T. it@body:2{x=tensor} | it@body
-between views ..TR it@body:3{x=tensor,y=tensor} | it@body
+alone views ..T. it@body:2{x=tensor} | it@body:3{x=tensor}
+between views ..TR it@body:3{x=tensor,y=tensor} | it@body:4{x=tensor,y=tensor}
 inside views .LTR it@body:2{x=tensor,y=tensor} | it@body:2{x=tensor}
 == statement: unpacking fails
 inside views .LTR a@body:3{x=tensor,y=tensor} | a@body:3{x=tensor}
 == statement: f-string
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == statement: % formatting
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == statement: assert that fails
-alone views ..T. a@body:3{x=tensor} | a@body
-between views ..TR a@body:4{x=tensor,y=tensor} | a@body
 inside views .LTR a@body:3{x=tensor,y=tensor} | a@body:3{x=tensor}
 == statement: import of a name
 alone views .LTR a@body:3{p=module,x=tensor} | a@body:3{x=tensor}
@@ -18343,28 +18337,26 @@ inside views ..TR a@body:2{x=tensor,y=tensor} | a@body:3{x=tensor,y=tensor}
 == row: LOAD_SUPER_ATTR plain
 inside views .LTR s@body:2{x=tensor,y=tensor} | s@body:2{x=tensor}
 == row: LOAD_SUPER_ATTR method
-alone views ..T. s@body:2{x=tensor} | s@body
-between views ..TR s@body:3{x=tensor,y=tensor} | s@body
+alone views ..T. s@body:2{x=tensor} | s@body:3{x=tensor}
+between views ..TR s@body:3{x=tensor,y=tensor} | s@body:4{x=tensor,y=tensor}
 inside views .LTR s@body:2{x=tensor,y=tensor} | s@body:2{x=tensor}
 == row: LOAD_SUPER_ATTR under a temporary
 alone deaths .LTR in -s -w -u out RET DROP GC | in -u -s -w out RET DROP GC
 between deaths .LTR in -s -w -u out RET DROP GC | in -u -s -w out RET DROP GC
 inside deaths .LTR -s -w -u RET DROP GC | -u -s -w RET DROP GC
 == row: binop, every operator
-alone views ..T. a1@body:2{x=tensor} | a1@body
-between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body
+alone views ..T. a1@body:2{x=tensor} | a1@body:15{x=tensor}
+between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body:16{x=tensor,y=tensor}
 inside views .LTR a1@body:2{x=tensor,y=tensor} | a1@body:2{x=tensor}
 == row: binop, in place
-alone views ..T. a1@body:2{x=tensor} | a1@body
-between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body
 inside views .LTR a1@body:2{x=tensor,y=tensor} | a1@body:2{x=tensor}
 == row: binop, reflected
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:6{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:7{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == row: compare, every operator
-alone views ..T. a1@body:2{x=tensor} | a1@body
-between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body
+alone views ..T. a1@body:2{x=tensor} | a1@body:9{x=tensor}
+between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body:10{x=tensor,y=tensor}
 inside views .LTR a1@body:2{x=tensor,y=tensor} | a1@body:2{x=tensor}
 == row: is and in
 alone deaths ..T. in -a -b -c -d -e -f -g -h -i -k -j out RET DROP GC | in -a -b -c -d -e -g -i -j -k -f -h out RET DROP GC
@@ -18372,8 +18364,8 @@ between deaths ..TR in -a -b -c -d -e -f -g -h -i -k -j out RET DROP GC | in -a 
 inside deaths ..T. -a -b -c -d -e -f -g -h -i -k -j RET DROP GC | -a -b -c -d -e -g -i -j -k -f -h RET DROP GC
 inside views .L.R a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == row: subscr, load store delete
-alone views ..T. c1@body:2{x=tensor} | c1@body
-between views ..TR c1@body:3{x=tensor,y=tensor} | c1@body
+alone views ..T. c1@body:2{x=tensor} | c1@body:3{x=tensor}
+between views ..TR c1@body:3{x=tensor,y=tensor} | c1@body:4{x=tensor,y=tensor}
 inside views .LTR c1@body:2{x=tensor,y=tensor} | c1@body:2{x=tensor}
 == row: slice, forms
 alone deaths ..T. in -lo1 -hi1 -c1 -c2 -st2 -lo2 -hi2 -c3 -lo3 -hi3 -lo4 -c4 -hi5 -c5 -lo6 -hi6 -v6 -c6 -v7 -c7 -st7 -lo7 -hi7 -c8 -lo8 -hi8 out RET DROP GC | in -lo2 -hi2 -st2 -lo3 -hi3 -c1 -lo1 -hi1 -c2 -c3 -c4 -lo4 -c5 -hi5 -lo6 -hi6 -v6 -c6 -v7 -c7 -st7 -lo7 -hi7 -c8 -lo8 -hi8 out RET DROP GC
@@ -18385,16 +18377,16 @@ alone deaths ..T. in -v1 -o1 -o2 -o3 -a4 -a5 out RET DROP GC | in -v1 -o1 -o2 -a
 between deaths ..TR in -v1 -o1 -o2 -o3 -a4 -a5 out RET DROP GC | in -v1 -o1 -o2 -a4 -a5 -o3 out RET DROP GC
 inside deaths ..T. -v1 -o1 -o2 -o3 -a4 -a5 RET DROP GC | -v1 -o1 -o2 -a4 -a5 -o3 RET DROP GC
 == row: call, python callee
-alone views ..T. a1@body:2{x=tensor} | a1@body
+alone views ..T. a1@body:2{x=tensor} | a1@body:5{x=tensor}
 alone cpythons FLTR in -a1 -b1 -a2 -b2 -b3 -a3 -c3 out RET DROP GC | in -a1 -b1 -a2 -b2 -a3 -b3 -c3 out RET DROP GC
-between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body
+between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body:6{x=tensor,y=tensor}
 between cpythons FLTR in -a1 -b1 -a2 -b2 -b3 -a3 -c3 out RET DROP GC | in -a1 -b1 -a2 -b2 -a3 -b3 -c3 out RET DROP GC
 inside views .LTR a1@body:2{x=tensor,y=tensor} | a1@body:2{x=tensor}
 inside cpythons FLTR -a1 -b1 -a2 -b2 -b3 -a3 -c3 RET DROP GC | -a1 -b1 -a2 -b2 -a3 -b3 -c3 RET DROP GC
 == row: call, C callee
-alone views ..T. k2@body:3{x=tensor} | k2@body
-between views ..TR k2@body:4{x=tensor,y=tensor} | k2@body
-inside views ..T. k2@body:3{x=tensor,y=tensor} | k2@body
+alone views ..T. k2@body:3{x=tensor} | k2@body:5{x=tensor}
+between views ..TR k2@body:4{x=tensor,y=tensor} | k2@body:6{x=tensor,y=tensor}
+inside views ..T. k2@body:3{x=tensor,y=tensor} | k2@body:5{x=tensor,y=tensor}
 == row: call, method and class
 alone deaths ..T. in -m1 -a1 -b1 -a2 -b2 -a3 -b3 out RET DROP GC | in -a1 -b1 -a2 -b2 -a3 -b3 -m1 out RET DROP GC
 alone cpythons FLTR in -m1 -b1 -a1 -a2 -b2 -a3 -b3 out RET DROP GC | in -m1 -a1 -b1 -a2 -b2 -a3 -b3 out RET DROP GC
@@ -18411,12 +18403,10 @@ between calls .LTR in -d -a -b out RET DROP GC | in -a -d -b out RET DROP GC
 inside deaths .LTR -a -d -b RET DROP GC | -d -a -b RET DROP GC
 inside calls .LTR -d -a -b RET DROP GC | -a -d -b RET DROP GC
 == row: call ex, iterable and mapping
-alone views ..T. m2@body:2{x=tensor} | m2@body
-between views ..TR m2@body:3{x=tensor,y=tensor} | m2@body
 inside views .LTR m2@body:2{x=tensor,y=tensor} | m2@body:2{x=tensor}
 == row: build, map and const key map
-alone views ..T. k1@body:2{x=tensor} | k1@body
-between views ..TR k1@body:3{x=tensor,y=tensor} | k1@body
+alone views ..T. k1@body:2{x=tensor} | k1@body:4{x=tensor}
+between views ..TR k1@body:3{x=tensor,y=tensor} | k1@body:5{x=tensor,y=tensor}
 inside views .LTR k1@body:2{x=tensor,y=tensor} | k1@body:2{x=tensor}
 == row: build, list tuple string
 alone deaths .LTR in -b1 -a1 -b2 -a2 -a3 -b3 out RET DROP GC | in -a1 -b1 -a2 -b2 -a3 -b3 out RET DROP GC
@@ -18445,16 +18435,12 @@ between deaths ..TR in -a1 -b1 -c1 -a2 -b2 out RET DROP GC | in -a1 -c1 -b1 -a2 
 inside deaths ..T. -a1 -b1 -c1 -a2 -b2 RET DROP GC | -a1 -c1 -b1 -a2 -b2 RET DROP GC
 inside views .L.R a1@body:2{x=tensor,y=tensor} | a1@body:2{x=tensor}
 == row: augmented
-alone views ..T. v1@body:2{x=tensor} | v1@body
-between views ..TR v1@body:3{x=tensor,y=tensor} | v1@body
 inside views .LTR v1@body:2{x=tensor,y=tensor} | v1@body:2{x=tensor}
 == row: intrinsic 1 and unary
-alone views ..T. a1@body:2{x=tensor} | a1@body
-between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body
+alone views ..T. a1@body:2{x=tensor} | a1@body:7{x=tensor}
+between views ..TR a1@body:3{x=tensor,y=tensor} | a1@body:8{x=tensor,y=tensor}
 inside views .LTR a1@body:2{x=tensor,y=tensor} | a1@body:2{x=tensor}
 == row: assert
-alone views ..T. x@body:3{x=tensor} | x@body
-between views ..TR x@body:4{x=tensor,y=tensor} | x@body
 inside views .LTR x@body:3{x=tensor,y=tensor} | x@body:3{x=tensor}
 == row: bool ops
 alone deaths ..T. in -a1 -b1 -a2 -b2 -c3 -b3 out RET DROP GC | in -a1 -b1 -b2 -b3 -a2 -c3 out RET DROP GC
@@ -18486,8 +18472,8 @@ alone deaths .LTR in -a -b -u out RET DROP GC | in -u -a -b out RET DROP GC
 between deaths .LTR in -a -b -u out RET DROP GC | in -u -a -b out RET DROP GC
 inside deaths .LTR -a -b -u RET DROP GC | -u -a -b RET DROP GC
 == instruction: build string
-alone views ..T. a@body:2{x=tensor} | a@body
-between views ..TR a@body:3{x=tensor,y=tensor} | a@body
+alone views ..T. a@body:2{x=tensor} | a@body:3{x=tensor}
+between views ..TR a@body:3{x=tensor,y=tensor} | a@body:4{x=tensor,y=tensor}
 inside views .LTR a@body:2{x=tensor,y=tensor} | a@body:2{x=tensor}
 == instruction: swapped three and a store that raises
 alone deaths .LTR in -q -r h -p -o out RET DROP GC | in -r -q h -p -o out RET DROP GC
@@ -18531,22 +18517,10 @@ inside deaths FLTR -q -a -b RET DROP GC | -q -b -a RET DROP GC
 alone deaths ..T. in -m -a out RET DROP GC | in -a -m out RET DROP GC
 between deaths ..T. in -m -a out RET DROP GC | in -a -m out RET DROP GC
 inside deaths ..T. -m -a RET DROP GC | -a -m RET DROP GC
-== two places: call, adjacent
-alone views ..T. m@p2:1{} | m@body
-between views ..T. m@p2:1{} | m@body
-inside views ..T. m@p2:1{} | m@body
-== two places: binary
-alone views ..T. a@p3:1{} | a@body
-between views ..T. a@p3:1{} | a@body
-inside views ..T. a@p3:1{} | a@body
 == two places: slice
 alone deaths ..T. in -a -c -a -c out RET DROP GC | in -c -a -a -c out RET DROP GC
 between deaths ..T. in -a -c -a -c out RET DROP GC | in -c -a -a -c out RET DROP GC
 inside deaths ..T. -a -c -a -c RET DROP GC | -c -a -a -c RET DROP GC
-== two places: inlined callee
-alone views ..T. m@g1:1{p=T(a1)} | m@body
-between views ..T. m@g1:1{p=T(a1)} | m@body
-inside views ..T. m@g1:1{p=T(a1)} | m@body
 == two places: a local read twice
 alone views .LTR m@body:3{p=T(a),x=tensor} | m@body:3{x=tensor}
 between views .LTR m@body:4{p=T(a),x=tensor,y=tensor} | m@body:4{x=tensor,y=tensor}
@@ -18579,16 +18553,12 @@ between deaths ..TR in -m -u out RET DROP GC | in -u -m out RET DROP GC
 inside deaths ..T. -m -u RET DROP GC | -u -m RET DROP GC
 inside views .L.R m@body:2{x=tensor,y=tensor} | m@body:2{x=tensor}
 == kept: DICT_MERGE
-alone views ..T. m@body:2{x=tensor} | m@body
-between views ..TR m@body:3{x=tensor,y=tensor} | m@body
 inside views .LTR m@body:2{x=tensor,y=tensor} | m@body:2{x=tensor}
 == kept: LIST_APPEND duplicate-free
 alone deaths FLTR in -i -e2 -e1 out RET DROP GC | in -e2 -e1 -i out RET DROP GC
 between deaths FLTR in -i -e2 -e1 out RET DROP GC | in -e2 -e1 -i out RET DROP GC
 inside deaths FLTR -i -e2 -e1 RET DROP GC | -e2 -e1 -i RET DROP GC
 == kept: call star
-alone views ..T. i@body:2{x=tensor} | i@body
-between views ..TR i@body:3{x=tensor,y=tensor} | i@body
 inside views .LTR i@body:2{x=tensor,y=tensor} | i@body:2{x=tensor}
 == kept: tuple star
 alone deaths ..T. in -i -u out RET DROP GC | in -u -i out RET DROP GC
@@ -23727,6 +23697,475 @@ class TestVmFloatsHanded(TestCase):
         self.assertTrue(tracer._decomposes(aten.where.self))
         self.assertFalse(tracer._decomposes(aten.clamp.default))
         self.assertFalse(tracer._decomposes(aten.mul.Tensor))
+
+
+EFFECTS_RELEASES_PROGRAM = '''
+import json
+import sys
+import weakref
+
+import torch
+
+vm = torch.vm
+WITH = (*vm.DEFAULT_PASSES, vm.passes.Effects())
+# (The default list, for the cells that say so: no write is a region's.)
+PASSES = vm.DEFAULT_PASSES if sys.argv[3:] == ["default"] else WITH
+UNRAISABLE = []
+sys.unraisablehook = lambda u: UNRAISABLE.append(repr(u.exc_value)[:160])
+CALLS = 40
+
+
+def note(box):
+    """What code of the program's that a death runs finds: how many modes
+    are on, what the float attribute holds, and whether a tensor's value
+    can be read."""
+    try:
+        value = float(box.buf.sum())
+    except Exception as e:
+        value = type(e).__name__
+    c = torch._C
+    modes = c._len_torch_dispatch_stack() + c._len_torch_function_stack()
+    box.seen.append((modes, type(box.scale).__name__, value))
+
+
+class Probe:
+    """An object of the program's whose death runs code of the program's."""
+
+    def __init__(self, box):
+        self.box = box
+
+    def __del__(self):
+        note(self.box)
+
+
+class Plain:
+    pass
+
+
+class Box(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = torch.nn.Linear(8, 8)
+        self.register_buffer("buf", torch.zeros(4, 8))
+        self.seen = []
+        self.scale = 1.0
+        self.a = None
+        self.refs = []
+        self.stop = False
+
+
+def watched(o):
+    if o.a is not None:
+        o.refs.append(weakref.ref(o.a, lambda r, o=o: note(o)))
+
+
+# How a traced call lets go of an object whose death runs code of the
+# program's: what the caller puts there before each call, and the write of
+# the compiled code that lets go of it.
+RELEASES = {
+    "attr": ("o.a = Probe(o)", "o.a = y"),
+    "tensor_with_finalize": ("o.a is None or weakref.finalize(o.a, note, o)", "o.a = y"),
+    "tensor_with_a_callback": ("watched(o)", "o.a = y"),
+    "inside_a_list": ("o.a = [Probe(o)]", "o.a = y"),
+    "inside_a_cell": ("o.a = (lambda p: lambda: p)(Probe(o))", "o.a = y"),
+    "inside_an_object": ("o.a = Plain(); o.a.p = Probe(o)", "o.a = y"),
+    "own_target": ("pass", "Probe(o).y = y"),
+    "own_temporary": ("pass", "Probe(o)"),
+}
+BODY = """
+def fill(o):
+    {fill}
+
+def fn(o, x, s):
+    y = o.net(x).tanh().sin().cos().exp() * s
+    o.scale = s * 2.0
+    {write}
+    return (y * 2).sin().cos().sum(0)
+"""
+
+
+def body(o, x, s):
+    return o.net(x).tanh().sin().cos().exp() * s
+
+
+def rows(g):
+    shown = [r for r in vm.regions(g) if r["kind"] != "call"]
+    return [(r["state"], r["runs"], str(r["why"])) for r in shown if r["state"] != "too small"]
+
+
+def pair():
+    torch.manual_seed(0)
+    mine, theirs = Box(), Box()
+    theirs.load_state_dict(mine.state_dict())
+    return mine, theirs
+
+
+def releases(name):
+    fill, write = RELEASES[name]
+    space = dict(globals())
+    exec(BODY.format(fill=fill, write=write), space)
+    fn, fill = space["fn"], space["fill"]
+    mine, theirs = pair()
+    g = vm(fn, passes=PASSES)
+    same = []
+    for call in range(CALLS):
+        fill(mine)
+        fill(theirs)
+        x = torch.randn(4, 8)
+        got, want = g(mine, x, 0.5 + call), fn(theirs, x, 0.5 + call)
+        plain = type(mine.scale) is float and mine.scale == theirs.scale
+        same.append(bool(torch.equal(got, want)) and plain)
+        del got, want
+    seen = {"seen": mine.seen, "eager": theirs.seen}
+    return {"same": same, **seen, "rows": rows(g), "unraisable": UNRAISABLE}
+
+
+# ---- An object held only through what the trace has parked: still a region --
+class State:
+    pass
+
+
+def through_a_cell(o, x, s):
+    # The write is to an object the call makes and lets go of. When the body
+    # is over the object is held by a cell, and the cell by a read of the
+    # trace alone: the write is none a region makes, and this is one region.
+    st = State()
+    st.h = body(o, x, s)
+
+    def step(v):
+        return v + st.h
+
+    return step(x).sum(0)
+
+
+def regions(name):
+    fn = globals()[name]
+    mine, theirs = pair()
+    g = vm(fn, passes=WITH)
+    same = []
+    for call in range(CALLS):
+        x = torch.randn(4, 8)
+        got, want = g(mine, x, 2.0), fn(theirs, x, 2.0)
+        same.append(bool(torch.equal(got, want)))
+        del got, want
+    return {"same": same, "rows": rows(g), "unraisable": UNRAISABLE}
+
+
+# ---- Code that a death runs at a trace's gate calls a compiled function ------
+X0 = torch.ones(4, 8)
+BAD = torch.zeros(3, 3)
+CURRENT = [None]
+
+
+def clean_region(x):
+    # Only computes: a region where it is traced.
+    return x.tanh().sin().cos().exp().sum()
+
+
+def clean_given_up(x):
+    # Raises under a trace as it does without one, and goes on.
+    try:
+        return (x.tanh().sin().cos().exp() @ BAD).sum()
+    except RuntimeError:
+        return 0.0
+
+
+def clean_not_yet(x):
+    # Runs a line on some calls that the calls before did not run.
+    y = x.tanh().sin().cos().exp()
+    if len(CURRENT[0].seen) % 7 == 3:
+        y = y.neg().abs()
+    return y.sum()
+
+
+def clean_raises(x):
+    y = x.tanh().sin().cos().exp()
+    raise ValueError(float(y.sum()))
+
+
+class Dying:
+    k = 2
+
+    def __del__(self):
+        o = CURRENT[0]
+        o.seen.append("died")
+        try:
+            o.clean(X0)
+        except ValueError:
+            o.seen.append("raised")
+
+
+# How the block comes to hold the object until its trace is over: by a
+# read of its class's attribute, or by a write to it.
+NESTED = {"default": "z = Dying().k", "effects": "Dying().y = y; z = 2"}
+NESTED_BODY = """
+def fn(o, x):
+    y = o.net(x).tanh().sin().cos().exp()
+    {held}
+    return (y * z).sin().cos().sum(0)
+"""
+
+
+def nested(name):
+    # The object dies at the gate of the block's trace, and its __del__
+    # calls a function torch.vm compiled: once per call, as on eager.
+    space = dict(globals())
+    exec(NESTED_BODY.format(held=NESTED[sys.argv[3]]), space)
+    fn, clean = space["fn"], globals()["clean_" + name]
+    mine, theirs = pair()
+    mine.clean, theirs.clean = vm(clean, passes=PASSES), clean
+    g = vm(fn, passes=PASSES)
+    same = []
+    for call in range(CALLS):
+        x = torch.randn(4, 8)
+        CURRENT[0] = mine
+        got = g(mine, x)
+        CURRENT[0] = theirs
+        want = fn(theirs, x)
+        same.append(bool(torch.equal(got, want)) and mine.seen == theirs.seen)
+        del got, want
+    mine_rows = [r for r in vm.regions(g) if r["kind"] != "call" and r["function"] == "fn"]
+    found = [(r["state"], r["runs"], str(r["why"])) for r in mine_rows if r["state"] != "too small"]
+    seen = {"seen": mine.seen, "eager": theirs.seen}
+    return {"same": same, **seen, "rows": found, "unraisable": UNRAISABLE}
+
+
+# ---- A trace that is given up behind a write --------------------------------
+class Stop(Exception):
+    pass
+
+
+def halt(o):
+    if o.stop:
+        raise Stop
+
+
+def given_up(o, x, s):
+    y = body(o, x, s)
+    o.scale = s * 2.0
+    o.a = y
+    halt(o)
+    return (y * 2).sin().cos().sum(0)
+
+
+def given_up_with_a_list(o, x, s, acc):
+    y = body(o, x, s)
+    o.scale = s * 2.0
+    o.a = y
+    acc.append(1)
+    halt(o)
+    return (y * 2).sin().cos().sum(0)
+
+
+def undo(name):
+    # From call 20 on the code raises behind its writes, on eager and on the
+    # traced call alike: the trace is given up, what it wrote is taken back
+    # and the code runs again as written.
+    fn = globals()[name]
+    mine, theirs = pair()
+    g = vm(fn, passes=WITH)
+    same, lists = [], ([], [])
+    for call in range(CALLS):
+        x = torch.randn(4, 8)
+        out = []
+        for o, f, acc in ((mine, g, lists[0]), (theirs, fn, lists[1])):
+            o.a = Probe(o)
+            o.stop = call >= 20
+            extra = (acc,) if name == "given_up_with_a_list" else ()
+            try:
+                out.append(f(o, x, 0.5 + call, *extra))
+            except Stop:
+                out.append(None)
+        if out[0] is None or out[1] is None:
+            value = out[0] is None and out[1] is None
+        else:
+            value = bool(torch.equal(*out))
+        plain = type(mine.scale) is float and mine.scale == theirs.scale
+        state = plain and lists[0] == lists[1] and bool(torch.equal(mine.a, theirs.a))
+        same.append(value and state)
+        del out
+    seen = {"seen": mine.seen, "eager": theirs.seen}
+    return {"same": same, **seen, "rows": rows(g), "unraisable": UNRAISABLE}
+
+
+# ---- A trace whose own code fails behind the body ---------------------------
+def fails_behind(name):
+    import torch._rust_inductor  # noqa: F401
+    import torch.vm._writes as writes
+
+    rust = torch._rust
+    mine, theirs = pair()
+
+    def fn(o, x, s):
+        y = body(o, x, s)
+        o.scale = s * 2.0
+        o.buf.add_(1)
+        o.a = y
+        return (y * 2).sin().cos().sum(0)
+
+    failed = []
+
+    def fail():
+        failed.append(1)
+        raise RuntimeError("the tracer's own code fails behind the body")
+
+    if name == "settled":
+        rust._region_settled = lambda *a: fail()
+    elif name == "plan":
+        writes.Written.plan = lambda self, *a: fail()
+    else:
+        real = writes._put_plain
+
+        def failing(how, target, values, plain):
+            if how.__name__ == "__setattr__" and values[0] == "scale" and not failed:
+                fail()
+            return real(how, target, values, plain)
+
+        writes._put_plain = failing
+    g = vm(fn, passes=WITH)
+    same, kinds, raised = [], [], []
+    for call in range(CALLS):
+        x = torch.randn(4, 8)
+        want = fn(theirs, x, 0.5 + call)
+        try:
+            got = g(mine, x, 0.5 + call)
+        except RuntimeError as e:
+            # The engine's own error: the state is compared all the same.
+            raised.append((call, str(e)[:60], type(e.__cause__).__name__))
+            got = want
+        state = mine.scale == theirs.scale and bool(torch.equal(mine.buf, theirs.buf))
+        same.append(bool(torch.equal(got, want)) and state and bool(torch.equal(mine.a, theirs.a)))
+        kinds.append(type(mine.scale).__name__)
+        del got, want
+    found = {"same": same, "kinds": kinds, "failed": len(failed), "raised": raised}
+    return {**found, "rows": rows(g), "unraisable": UNRAISABLE}
+
+
+if __name__ == "__main__":
+    kinds = {"releases": releases, "regions": regions, "undo": undo, "fails": fails_behind}
+    kinds["nested"] = nested
+    print(json.dumps(kinds[sys.argv[1]](sys.argv[2])))
+'''
+
+EFFECTS_RELEASES = [
+    "attr",
+    "tensor_with_finalize",
+    "tensor_with_a_callback",
+    "inside_a_list",
+    "inside_a_cell",
+    "inside_an_object",
+    "own_target",
+]
+
+
+@unittest.skipUnless(
+    CHECKS_HAS_VM, "torch.vm needs the Rust extension and CPython 3.12"
+)
+@instantiate_parametrized_tests
+class TestVmEffectsReleases(TestCase):
+    """With the Effects pass a traced call keeps what its stores replaced,
+    the writes nothing can see and what it read from its own temporaries
+    until its trace is over. It lets go of none of that while the tracer's
+    dispatch modes are on or its stand-ins for floats sit in the program's
+    objects: code that the death of such an object runs (a ``__del__``,
+    ``weakref.finalize``, the callback of a weak reference; the object held
+    directly, or through a list, a cell or another object) runs once per
+    call, as on eager, with no mode on, a float where the program stored
+    one and tensors whose values can be read. The trace it ran under is no
+    region. A trace that is given up behind a write leaves what eager
+    leaves, and so does one whose own code fails behind the body: no
+    stand-in of the tracer's stays in the program's state, or the call
+    raises. Such code may call a function torch.vm compiled: no trace
+    begins while a trace is being closed, the function runs as written.
+    (What such code sees of the state is that of the end of the traced
+    code, not of the store: a limit of the pass, which its docstring
+    states.)"""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def walk(self, kind, name, *more):
+        command = [sys.executable, "-c", EFFECTS_RELEASES_PROGRAM, kind, name, *more]
+        ran = subprocess.run(command, capture_output=True, text=True, timeout=1200)
+        self.assertEqual(ran.returncode, 0, ran.stderr[-3000:])
+        found = json.loads(ran.stdout.splitlines()[-1])
+        self.assertEqual(found["unraisable"], [])
+        self.assertTrue(all(found["same"]), msg=str(found["same"]))
+        return found
+
+    def plain(self, found):
+        self.assertEqual(len(found["seen"]), len(found["eager"]))
+        for modes, kind, value in found["seen"]:
+            state = (modes, kind, type(value))
+            self.assertEqual(state, (0, "float", float), msg=str(found["seen"]))
+
+    @parametrize("name", EFFECTS_RELEASES)
+    def test_code_a_death_runs_finds_the_state_of_the_program(self, name):
+        found = self.walk("releases", name)
+        self.plain(found)
+        # The death was of something the trace itself let go of, and the
+        # trace is no region for it.
+        refused = [why for state, _, why in found["rows"] if state == "refused"]
+        self.assertEqual(len(refused), 1, msg=str(found["rows"]))
+        self.assertIn("a frame that is not the body's ran under it", refused[0])
+        self.assertIn("when the trace let go of what it held", refused[0])
+
+    def test_an_object_a_call_makes_and_drops_dies_in_the_state_of_the_program(self):
+        # Under the default list too: the object is held by the trace's
+        # record of the store its __init__ made, until the trace is over.
+        found = self.walk("releases", "own_temporary", "default")
+        self.plain(found)
+        refused = [why for state, _, why in found["rows"] if state == "refused"]
+        self.assertEqual(len(refused), 1, msg=str(found["rows"]))
+        self.assertIn("when the trace let go of what it held", refused[0])
+
+    @parametrize("clean", ["region", "given_up", "not_yet", "raises"])
+    @parametrize("passes", ["default", "effects"])
+    def test_code_a_death_runs_at_the_gate_begins_no_trace(self, clean, passes):
+        # The __del__ calls a compiled function. A trace begun there would
+        # reset what the trace being closed has found (the frame of the
+        # __del__ itself), and that trace would be handed over as a region
+        # that leaves the object and its __del__ out.
+        found = self.walk("nested", clean, passes)
+        self.assertEqual(found["seen"], found["eager"])
+        self.assertEqual(found["seen"].count("died"), 40)
+        states = [state for state, _, _ in found["rows"]]
+        self.assertNotIn("region", states, msg=str(found["rows"]))
+        refused = [why for state, _, why in found["rows"] if state == "refused"]
+        self.assertEqual(len(refused), 1, msg=str(found["rows"]))
+        # (For the __del__ itself, not for a frame of the engine's own
+        # that a trace begun inside it would leave behind.)
+        self.assertIn("a frame that is not the body's ran under it", refused[0])
+        self.assertIn("Dying.__del__", refused[0])
+
+    def test_a_write_to_what_the_trace_alone_holds_is_none_of_a_region(self):
+        found = self.walk("regions", "through_a_cell")
+        self.assertEqual([state for state, _, _ in found["rows"]], ["region"])
+        self.assertGreater(found["rows"][0][1], 0)
+
+    @parametrize("name", ["given_up", "given_up_with_a_list"])
+    def test_a_trace_given_up_behind_a_write_leaves_what_eager_leaves(self, name):
+        found = self.walk("undo", name)
+        self.plain(found)
+        self.assertIn("gave up", [state for state, _, _ in found["rows"]])
+
+    @parametrize("name", ["settled", "plan"])
+    def test_a_trace_that_fails_behind_its_body_leaves_no_stand_in(self, name):
+        found = self.walk("fails", name)
+        self.assertGreater(found["failed"], 0)
+        self.assertEqual(set(found["kinds"]), {"float"})
+        self.assertEqual(found["raised"], [])
+
+    def test_a_stand_in_that_cannot_be_replaced_is_an_error(self):
+        found = self.walk("fails", "put")
+        self.assertEqual(found["failed"], 1)
+        self.assertEqual(len(found["raised"]), 1, msg=str(found))
+        call, text, cause = found["raised"][0]
+        self.assertIn("torch.vm: a traced call stored a float", text)
+        self.assertEqual(cause, "RuntimeError")
+        # The one call that raised left the stand-in; the store of the next
+        # call, which runs as written, puts a float.
+        stand_ins = [i for i, k in enumerate(found["kinds"]) if k != "float"]
+        self.assertEqual(stand_ins, [call])
 
 
 if __name__ == "__main__":

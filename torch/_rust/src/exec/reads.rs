@@ -117,6 +117,7 @@ use super::asked;
 use super::exact;
 use super::ffi::*;
 use super::overlap::Overlap;
+use super::parked;
 use super::pin::{self, Pin};
 use super::special;
 use crate::bindings::ffi as tffi;
@@ -487,7 +488,12 @@ pub fn begin() {
 
 pub fn end() {
     super::made::clear();
-    TRACE.set(None);
+    // (The reads of a trace that came to nothing: parked like every record
+    // of a trace, and let go of at its gate.)
+    if let Some(mut t) = TRACE.take() {
+        parked::park(std::mem::take(&mut t.entries));
+        parked::park(std::mem::take(&mut t.wrote));
+    }
     ON.set(false);
     OWNER.set(Owner::Nobody);
 }
@@ -2389,19 +2395,28 @@ unsafe fn sweep(e: &mut Entries) {
     for _ in 0..SWEEP_ROUNDS {
         let mut mine: HashMap<usize, isize> = HashMap::new();
         held(e, &mut |o: &Py<PyAny>| *mine.entry(o.as_ptr() as usize).or_insert(0) += 1);
-        // Judged before any entry is dropped: dropping one lets go of what
-        // it holds, and the counts above would no longer be the entries'
-        // (an object with as many other owners as entries dropped before it
-        // would pass for gone, and the checks on it would be lost).
-        let gone: HashSet<usize> = mine.iter().filter(|(o, n)| ffi::Py_REFCNT(**o as *mut PyObject) == **n).map(|(o, _)| *o).collect();
+        // Judged before any entry goes: one that goes lets go of what it
+        // holds, and the counts above would no longer be the entries' (an
+        // object with as many other owners as entries that went before it
+        // would pass for gone, and the checks on it would be lost). The
+        // count of an object is the one it would have had everything the
+        // trace parked so far been dropped (parked.rs).
+        parked::settle();
+        let gone: HashSet<usize> = mine.iter().filter(|(o, n)| parked::refs(**o as *mut PyObject) == **n).map(|(o, _)| *o).collect();
         let gone = |o: &Pin| gone.contains(&(o.as_ptr() as usize));
-        let before = (e.typed.len(), e.reads.len(), e.groups.len(), e.functions.len() + e.dicted.len());
-        e.typed.retain(|t| !gone(&t.obj));
-        e.reads.retain(|r| !gone(&r.obj));
-        e.groups.retain(|g| !gone(&g.holder) && !g.empty());
-        e.functions.retain(|f| !gone(&f.func));
-        e.dicted.retain(|d| !gone(&d.obj));
-        if before == (e.typed.len(), e.reads.len(), e.groups.len(), e.functions.len() + e.dicted.len()) {
+        // What goes is parked, not dropped: this runs inside the tracer,
+        // and an object the entries alone held dies at the trace's gate.
+        // (Each kind by itself, in the order they went in when they were
+        // dropped here: the gate lets go of them in that order.)
+        let typed = Entries { typed: parked::part(&mut e.typed, |t| gone(&t.obj)), ..Entries::default() };
+        let reads = Entries { reads: parked::part(&mut e.reads, |r| gone(&r.obj)), ..Entries::default() };
+        let groups = Entries { groups: parked::part(&mut e.groups, |g| gone(&g.holder) || g.empty()), ..Entries::default() };
+        let functions = Entries { functions: parked::part(&mut e.functions, |f| gone(&f.func)), ..Entries::default() };
+        let dicted = Entries { dicted: parked::part(&mut e.dicted, |d| gone(&d.obj)), ..Entries::default() };
+        let swept = [typed, reads, groups, functions, dicted];
+        let none = swept.iter().all(|s| s.typed.len() + s.reads.len() + s.groups.len() + s.functions.len() + s.dicted.len() == 0);
+        swept.into_iter().for_each(parked::park);
+        if none {
             break;
         }
     }
@@ -2514,6 +2529,12 @@ unsafe fn unfound(e: &mut Entries) -> bool {
     let before = e.keyed.iter().filter(|k| !k.ours).count();
     e.keyed.retain(|k| led.contains(&(k.obj.as_ptr() as usize)));
     e.keyed.iter().filter(|k| !k.ours).count() != before
+}
+
+impl parked::Holds for Entries {
+    fn each(&self, f: &mut dyn FnMut(*mut PyObject)) {
+        held(self, &mut |o: &Py<PyAny>| f(o.as_ptr()));
+    }
 }
 
 // Every reference the entries count, reported to `hold`.
@@ -3101,13 +3122,16 @@ pub fn _region_settled(ours: Vec<Bound<'_, PyAny>>) {
     // reference, the deallocator of a C type). What such code changes
     // behind this moment is compared by nothing: the entry stays as it was
     // read, and a later call that finds it so enters the region.
-    // The stores' replaced values, and the log of the writes below, are let
-    // go of here: a frame that runs for it is seen (foreign.rs).
+    // THE TRACER'S MODES ARE ON HERE and its stand-ins are in place: nothing
+    // of the program's may die. What this function lets go of (what the
+    // stores replaced, the log of the writes, what it asked the slots for)
+    // is parked and dies at the trace's gate (parked.rs); what a finalizer
+    // changes there is found by the gate's own comparison (Variant::parted),
+    // and a frame it runs makes the trace no region.
     let _releasing = super::foreign::Releasing::start();
-    // The run stands: what its stores replaced is let go of first. The
-    // finalizer of an object that dies of it is the last thing the run's
-    // own writes set off, and what it changes is compared below.
+    // The run stands: its records no longer count what its stores replaced.
     super::writes::let_go();
+    parked::settle();
     // A slot, or another attribute a descriptor of C gives, is asked for
     // where the trace is not borrowed (were the descriptor replaced by one
     // of Python, its frame runs here and is seen as any frame under a
@@ -3130,7 +3154,12 @@ pub fn _region_settled(ours: Vec<Bound<'_, PyAny>>) {
         unsafe {
             for a in t.asked_of.iter_mut() {
                 let o = ffi::PyWeakref_GetObject(a.weak.as_ptr());
-                a.changed = o != ffi::Py_None() && a.key.as_ref().is_some_and(|k| !k.holds(o));
+                // (One that only parked records hold died with the run:
+                // parked::dead says so where the weak reference, which
+                // answers for the object as it is until the gate, does
+                // not. Pin::live is the same answer as the weak reference:
+                // see region_reads for where the two meet.)
+                a.changed = o != ffi::Py_None() && !parked::dead(o) && a.key.as_ref().is_some_and(|k| !k.holds(o));
             }
         }
         for o in &ours {
@@ -3215,7 +3244,9 @@ pub fn _region_settled(ours: Vec<Bound<'_, PyAny>>) {
         unsafe { t.entries.leave(&log) };
         Some(log)
     });
-    drop(log);
+    if let Some(log) = log {
+        parked::park(log);
+    }
     // A slot that is not as the run left it is asked once more: one that is
     // another object on every read is one no check can compare, and is
     // named as that.
@@ -3236,6 +3267,7 @@ pub fn _region_settled(ours: Vec<Bound<'_, PyAny>>) {
             }
         }
     });
+    parked::park((slots, (given, again)));
 }
 
 /// What the trace on this thread has itself bound on classes of the
@@ -3288,13 +3320,16 @@ fn region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(Optio
     // frame that runs for it is seen (foreign.rs).
     let _releasing = super::foreign::Releasing::start();
     let Some(mut t) = TRACE.take() else { return Ok((None, None)) };
+    // This runs inside the tracer (its modes are off, what it set aside of
+    // the program's is not back yet): every entry that goes here, however
+    // this function is left, is parked and goes at the trace's gate.
+    let mut e = parked::Parks(std::mem::take(&mut t.entries));
     if let Some(why) = t.refused {
         return Ok((None, Some(why)));
     }
     if let Some((d, at)) = given.iter().find_map(|x| t.filled.get(&(x.as_ptr() as usize)).map(|at| (x, at))) {
         return Ok((None, Some(format!("it asks a {} it is handed for a key it does not have, which stores the key{at}", unsafe { type_name(d.as_ptr()) }))));
     }
-    let mut e = t.entries;
     unsafe {
         // The trace has taken off what it bound on classes (_region_bound):
         // where the run read one of those, what the class has now is what
@@ -3316,7 +3351,8 @@ fn region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(Optio
         // What the run read from a container it made is no entry: every
         // run of the region makes its own, and the trace's is the traced
         // call's result, which its caller may change or keep.
-        e.groups.retain(|g| !super::made::is(g.holder.as_ptr()));
+        let made = Entries { groups: parked::part(&mut e.groups, |g| super::made::is(g.holder.as_ptr())), ..Entries::default() };
+        parked::park(made);
         // The traced run's own temporaries first: what was read from them
         // is no entry (so a getset that gives another object on every read
         // of one of them is nothing to refuse).
@@ -3359,7 +3395,8 @@ fn region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(Optio
         // the run's, and what changed since the body ended is a later call's
         // to find changed (the floats the trace puts back into the
         // arguments' containers are the region's own to check: see forget).
-        e.reads.retain(|r| r.name.is_some() || !t.restored.contains(&(r.obj.as_ptr() as usize)));
+        let restored = Entries { reads: parked::part(&mut e.reads, |r| r.name.is_none() && t.restored.contains(&(r.obj.as_ptr() as usize))), ..Entries::default() };
+        parked::park(restored);
         sweep(&mut e);
         // The tensors asked about that a read found: each with the key it
         // had when it was first asked. One that no read leads to is the
@@ -3367,10 +3404,20 @@ fn region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(Optio
         // from somewhere no entry stands for, and nothing would say on a
         // later call that it is the one, or as it was.
         let found = led(&e, Start::Entries);
+        parked::settle();
         for a in t.asked_of {
-            // None: it died with the run.
+            // None: it died with the run. So did one that only parked
+            // records hold: it dies at the trace's gate. TWO ANSWERS to "is
+            // it dead" live side by side until then: parked::dead (it would
+            // have died of what the trace let go of) and the weak
+            // reference, which is also what Pin::live reads (pin.rs): it
+            // says alive until the gate has drained. Behind `weaken` below
+            // the walks over the entries (led, Reads.knows) ask Pin::live,
+            // so they can pass through an object that dies at the gate;
+            // sweep has dropped every entry read FROM such an object
+            // before, and Variant::parted compares behind the drain.
             let o = ffi::PyWeakref_GetObject(a.weak.as_ptr());
-            if o == ffi::Py_None() || (a.ours && !found.contains(&(o as usize))) {
+            if o == ffi::Py_None() || parked::dead(o) || (a.ours && !found.contains(&(o as usize))) {
                 continue;
             }
             if !found.contains(&(o as usize)) {
@@ -3384,10 +3431,15 @@ fn region_reads(py: Python<'_>, given: Vec<Bound<'_, PyAny>>) -> PyResult<(Optio
             }
             e.keyed.push(Keyed { obj: counted(o), key, ours: a.ours });
         }
+        // An object the entries alone held would die where they let go of
+        // it: every reference they count is parked first.
+        let mut counted_now: Vec<Py<PyAny>> = vec![];
+        held(&e, &mut |o: &Py<PyAny>| counted_now.push(o.clone_ref(py)));
         weaken(&mut e);
+        parked::park(counted_now);
     }
     let reads = Reads {
-        entries: GilCell::new(e),
+        entries: GilCell::new(e.keep()),
         consts: GilCell::new(vec![]),
         rebind: GilCell::new(None),
         moved: Cell::new(false),

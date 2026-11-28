@@ -8382,7 +8382,8 @@ def modes_own_refused(passes, read, order, write, changed):
 # writes, by name: `setup` (it defines `state()`, and `before(call)` if the
 # state is set between calls), the lines of the body (they bind `k`), whether
 # the trace is refused for a stale read under the Effects pass (None: it is
-# refused, for that or for something else), and `late`:
+# refused, for that or for something else; "frame": it is refused for the
+# frame a death ran when the trace let go of what it held), and `late`:
 # the call's own store drops an object the program put into state and reads
 # behind it what the finalizer changes.
 MODES_SETTLE_DROPPED = """
@@ -8494,8 +8495,11 @@ def modes_settle_programs():
     out = {}
     for name, (holder, put, store, held) in MODES_SETTLE_HOLDERS.items():
         setup = MODES_SETTLE_DROPPED.format(holder=holder, put=put, held=held)
-        out[f"{name}_then_read"] = (setup, [store, "k = S['a']"], True, True)
-        out[f"read_then_{name}"] = (setup, ["k = S['a']", store], True, False)
+        # (What the store replaced dies when the trace lets go of it, at
+        # its gate and behind the comparison of its reads: the trace is
+        # refused for the frame that death runs.)
+        out[f"{name}_then_read"] = (setup, [store, "k = S['a']"], "frame", True)
+        out[f"read_then_{name}"] = (setup, ["k = S['a']", store], "frame", False)
     # The call writes the item it read under a key that is the same item to
     # the dict: an equal number of another class. Under a str, which is no
     # number, it writes another item.
@@ -8731,7 +8735,13 @@ class TestVmOwnWrites(TestCase):
         )
         if passes == "effects" and refused is not None:
             stale = any(MODES_OWN_STALE in r for r in reasons)
-            self.assertEqual(stale, refused, msg=f"{reasons}\n{source}")
+            if refused == "frame":
+                foreign = [r for r in reasons if MODES_FOREIGN in r]
+                self.assertEqual(len(foreign), 1, msg=f"{reasons}\n{source}")
+                self.assertIn("when the trace let go", foreign[0])
+                self.assertFalse(stale, msg=f"{reasons}\n{source}")
+            else:
+                self.assertEqual(stale, refused, msg=f"{reasons}\n{source}")
         self.assertGreater(region_runs(compiled), 0, msg=source)
 
 

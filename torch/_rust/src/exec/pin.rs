@@ -114,6 +114,9 @@ impl Pin {
         true
     }
 
+    // (While a trace is being closed an object that only the trace's
+    // parked records hold is alive to this, and dead to parked::dead:
+    // reads.rs's region_reads says where the two answers meet.)
     // None: the object died. Otherwise the object (borrowed), which for a
     // dict found through its owner is NULL while the owner has none, and for
     // one pinned `at` its owner also while the owner has another.

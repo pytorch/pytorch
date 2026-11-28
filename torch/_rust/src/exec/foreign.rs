@@ -34,7 +34,13 @@
 //   - what was kept is counted until the gate and let go of there, under a
 //     `Releasing`: no object the tracer's Python code holds through it can
 //     die while that code runs, where a frame run by a death cannot be told
-//     from a frame that code calls.
+//     from a frame that code calls;
+//   - the gate is also where the trace lets go of the records it parked
+//     (parked.rs: everything writes.rs and reads.rs would have dropped
+//     between the body's last instruction and here, while the tracer's
+//     modes were on or its stand-ins in place), the first parked first, and
+//     then of what was kept: a finalizer that runs for either runs as code
+//     of the program's in the program's own state, and is seen.
 // What it may not assume, and does not see
 //   - C code run by a death (a C callable as the callback of a weak
 //     reference, a C type's deallocator): no frame is entered;
@@ -62,6 +68,41 @@ thread_local! {
     static CALLBACKS: RefCell<Vec<Py<PyAny>>> = const { RefCell::new(Vec::new()) };
     // What the tracer's Python code holds of the program's, until the gate.
     static KEPT: RefCell<Vec<Py<PyAny>>> = const { RefCell::new(Vec::new()) };
+    // How many `Closing` live on this thread.
+    static CLOSING: Cell<u32> = const { Cell::new(0) };
+}
+
+// Lives while a trace is traced and closed: from its begin until the
+// executor has read everything the trace left for it (the gate's answer,
+// whether it was refused, the error of a write that could not be taken
+// back or of a stand-in that stayed: region::trace hands the guard to its
+// caller). And while a gate drains, whoever asked it (the call-list
+// recorder asks one too). NO TRACE BEGINS WHILE ONE LIVES, and no region is
+// entered: what a death at the gate runs is code of the program's, which
+// may call a function torch.vm compiled, and a trace begun there would
+// reset what the trace being closed has not handed over yet (`begin` here,
+// reads::begin, writes::begin, region::trace's own cells). Such a call runs
+// as written (run.rs asks region::engaged at every place that begins a
+// trace or enters a region).
+pub struct Closing(());
+
+impl Closing {
+    pub fn start() -> Closing {
+        CLOSING.set(CLOSING.get() + 1);
+        Closing(())
+    }
+}
+
+impl Drop for Closing {
+    fn drop(&mut self) {
+        CLOSING.set(CLOSING.get() - 1);
+    }
+}
+
+// Whether a trace is being closed on this thread (or traced: see Closing).
+#[inline]
+pub fn closing() -> bool {
+    CLOSING.get() > 0
 }
 
 // A trace begins on this thread.
@@ -69,6 +110,7 @@ pub fn begin() {
     let _releasing = Releasing::start();
     FOUND.set(None);
     drop(CALLBACKS.take());
+    super::parked::begin();
     drop(KEPT.take());
 }
 
@@ -157,12 +199,28 @@ pub unsafe fn keep(o: *mut PyObject) {
     }
 }
 
-// The one gate of a trace: lets go of what was kept, and says why the trace
-// is no region if a frame that was not the body's ran under it. Nothing the
-// trace holds may be released behind it.
+// The one gate of a trace: lets go of what was parked and of what was kept,
+// and says why the trace is no region if a frame that was not the body's ran
+// under it. Nothing a region's trace holds is released behind it: what the
+// region keeps, it keeps. (A trace that is no region lets go of the rest
+// right behind it, in region::trace: there is no region to leave anything
+// out of, and the thread is in the program's own state.)
 pub fn gate() -> Option<String> {
+    // (What the drain runs begins no trace: nothing resets FOUND, or what
+    // the caller reads behind this, before it is read.)
+    let _closing = Closing::start();
     {
         let _releasing = Releasing::start();
+        // What the trace would have dropped while its tracer's modes were
+        // on, in that order (what its stores replaced first, in the order
+        // of the stores): before what the tracer's code was handed. An
+        // object the trace judged dead that something refers to again is
+        // one its judgments were wrong about: no region.
+        if !super::parked::drain() {
+            FOUND.with_borrow_mut(|found| {
+                found.get_or_insert_with(|| "an object its trace took for one nothing else refers to was referred to again before the trace was over".into());
+            });
+        }
         // One at a time, the borrow given back first: a finalizer may run.
         while let Some(o) = KEPT.with_borrow_mut(Vec::pop) {
             drop(o);

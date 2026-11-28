@@ -42,6 +42,7 @@ use std::collections::{HashMap, HashSet};
 use pyo3::ffi::{self, PyObject};
 use pyo3::prelude::*;
 
+use super::parked::Holds;
 use super::exact;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -142,6 +143,15 @@ pub struct Log {
 
 fn ptr(o: &Option<Py<PyAny>>) -> *mut PyObject {
     o.as_ref().map_or(std::ptr::null_mut(), |o| o.as_ptr())
+}
+
+impl Holds for Log {
+    fn each(&self, f: &mut dyn FnMut(*mut PyObject)) {
+        for w in &self.all {
+            w.key.each(f);
+            w.value.each(f);
+        }
+    }
 }
 
 impl Log {

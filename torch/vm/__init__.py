@@ -551,7 +551,10 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
 
     A block that only computes and was never traced is listed too, with no
     traces: ``"too small"`` when one torch operation ran in it, ``"refused"``
-    when it stores into something that outlives it (it runs as it is).
+    when it stores into something that outlives it (it runs as it is),
+    ``"not yet"`` when it was only ever entered while another trace was being
+    closed, from code that the death of an object ran (a ``__del__`` that
+    calls a compiled function): no trace begins there.
 
     A call that keeps the code around it out of a region has ``state``
     ``"not movable"``, ``kind`` ``"call"``, ``where`` (``"QUALNAME line N"``),

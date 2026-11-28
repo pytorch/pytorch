@@ -26,6 +26,7 @@ mod made;
 pub mod order;
 pub mod overlap;
 pub mod own;
+mod parked;
 pub mod pin;
 mod raises;
 pub mod reads;

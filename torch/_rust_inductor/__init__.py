@@ -1505,6 +1505,9 @@ def _hand_back(as_given: list[tuple[Any, list[Any]]]) -> None:
     filled = set(_rust()._region_given_up()) if as_given else ()
     for x, items in as_given:
         now = _in_order(x)
+        # (What the body put there is counted until the trace's gate: it
+        # does not die in here.)
+        _rust()._region_keep(now)
         if id(x) not in filled or (
             len(now) == len(items) and all(map(operator.is_, now, items))
         ):
@@ -3374,7 +3377,12 @@ def _trace_region(
             # are the trace's own, while it still knows: its inputs and the
             # results of the operators it recorded.
             _rust()._region_settled(list(fx_tracers[-1].tensor_tracker.keys()))
-            written.take(_rust()._region_writes(), _plain_result)
+            try:
+                written.take(_rust()._region_writes(), _plain_result)
+            except BaseException as e:
+                # (An interrupt too: a place then keeps its stand-in.)
+                _rust()._region_not_plain(e)
+                raise
             # A comprehension's loop body adds to a container it was given
             # (which purity doesn't see): a region would skip that, unless
             # the change is one of the writes it makes again.
@@ -3429,14 +3437,29 @@ def _trace_region(
             return tensor_outs
         finally:
             _scalar_state = None
-            for container, k, v, stand_in in reversed(restore):
-                # Only where the stand-in still is: a slot the body wrote to
-                # (or took out) keeps what the body left there.
-                try:
-                    if container[k] is stand_in:
-                        container[k] = v
-                except (KeyError, IndexError):
-                    pass
+            try:
+                # A body that ran to its end stands, whatever becomes of the
+                # trace (an error of the code above, an interrupt): on every
+                # way out, what it wrote holds plain values.
+                if _rust()._region_stood():
+                    if written.taken:
+                        written.finish(_plain_result)
+                    else:
+                        written.take(_rust()._region_writes(), _plain_result)
+            except BaseException as e:
+                # A place that keeps a stand-in: the executor raises this
+                # in the program (exec/writes.rs's stood).
+                _rust()._region_not_plain(e)
+                raise
+            finally:
+                for container, k, v, stand_in in reversed(restore):
+                    # Only where the stand-in still is: a slot the body wrote
+                    # to (or took out) keeps what the body left there.
+                    try:
+                        if container[k] is stand_in:
+                            container[k] = v
+                    except (KeyError, IndexError):
+                        pass
 
     applying = classmethod(_tracing_apply)
     Backward.__init__ = _refusing_init
@@ -3451,8 +3474,11 @@ def _trace_region(
         # The executor runs the block again from its start: what the trace
         # wrote in place and drew is taken back first, the last first (the
         # block's writes and draws are then the ones eager makes, once).
-        undo.back()
-        _hand_back(as_given)
+        # Not for a body that ran to its end: its run stands, and the
+        # executor goes on behind it, whatever failed here afterwards.
+        if not _rust()._region_stood():
+            undo.back()
+            _hand_back(as_given)
         if isinstance(e, _Refused):
             _traced(name, "not yet" if e.later else "refused", str(e))
         else:

@@ -55,10 +55,16 @@
 //     made itself, whose write is then not recorded: it needs no undo and
 //     no region makes it again. (The read of a defaultdict, which records
 //     no write, asks as the reads do: load_item.)
-//   - undo() takes back what the trace wrote, the last write first, for the
-//     executor to run the code again as it is; a write that cannot be taken
-//     back is an error raised in the program, never a run over what is
-//     half taken back.
+//   - take_back() takes back what a trace that is given up wrote, the last
+//     write first, before the trace's gate, for the executor to run the code
+//     again as it is; a write that cannot be taken back is an error raised
+//     in the program (undo), never a run over what is half taken back.
+//   - No record of a write is dropped between the body's last instruction
+//     and the trace's gate: what a store replaced, a write nothing can see
+//     and a write that was taken back are parked (parked.rs) and let go of
+//     at the gate, behind the tracer's modes. An object the program gave a
+//     finalizer therefore never dies of this module while the tracer's
+//     dispatch modes are on.
 //   - replay() builds what every write takes before it makes the first: a
 //     region that raises before then has written nothing.
 //
@@ -89,6 +95,7 @@ use super::reads;
 use super::covered;
 use super::keys;
 use super::made;
+use super::parked;
 use super::wrote::How;
 use super::{Prepared, types};
 use crate::cfg::ir::{Instr, Op, RegionOut, ValueId};
@@ -378,6 +385,15 @@ struct Write {
     undo: Option<(Py<PyAny>, Vec<Py<PyAny>>)>,
 }
 
+impl parked::Holds for Write {
+    fn each(&self, f: &mut dyn FnMut(*mut PyObject)) {
+        self.how.each(f);
+        self.target.each(f);
+        self.args.each(f);
+        self.undo.each(f);
+    }
+}
+
 thread_local! {
     // The writes of the trace on this thread, in order: from begin() until
     // _region_writes takes them or undo() takes them back.
@@ -385,6 +401,10 @@ thread_local! {
     // The first error of a write that could not be taken back, until the
     // executor raises it (undo).
     static NOT_UNDONE: RefCell<Option<PyErr>> = const { RefCell::new(None) };
+    // The first error of a place the run wrote a stand-in of the tracer's
+    // to that could not be given the plain value, until the executor raises
+    // it (stood).
+    static NOT_PLAIN: RefCell<Option<PyErr>> = const { RefCell::new(None) };
 }
 
 // A token of a write recorded before it is made: 0 for none; REFUSED for a
@@ -398,6 +418,7 @@ pub fn begin() {
     writers();
     WRITES.with_borrow_mut(|w| w.clear());
     NOT_UNDONE.set(None);
+    NOT_PLAIN.set(None);
 }
 
 fn recording() -> bool {
@@ -754,30 +775,32 @@ pub unsafe fn writes_call(callee: *mut PyObject) -> bool {
 // something that is no recorded write changed the target since (a callee
 // the pass list declares pure that writes, a finalizer). Every write is
 // tried, whatever one before it did; the first failure is kept for undo().
+// Called before the trace's gate (region::trace; and by the tracer in front
+// of what it gives its arguments' containers back: _region_given_up). The
+// records are parked: a value the trace stored, which its record alone
+// holds once the store is taken back, dies at the gate.
 pub(super) fn take_back() {
     let ws = WRITES.take();
     let py = unsafe { Python::assume_attached() };
     for w in ws.into_iter().rev() {
-        if let Some((f, args)) = w.undo {
-            let mut all = vec![w.target.clone_ref(py)];
-            all.extend(args);
+        if let Some((f, args)) = &w.undo {
+            let all: Vec<Py<PyAny>> = std::iter::once(&w.target).chain(args).map(|x| x.clone_ref(py)).collect();
             if let Err(err) = pyo3::types::PyTuple::new(py, all).and_then(|t| f.bind(py).call1(t)) {
                 NOT_UNDONE.with_borrow_mut(|first| {
                     first.get_or_insert(err);
                 });
             }
         }
+        parked::park(w);
     }
 }
 
-// The trace gave up and the executor is about to run its code again: what
-// it wrote is taken back (take_back; the tracer may have asked for that
-// already, see _region_given_up). Err: a write could not be taken back.
-// What the trace wrote to is then neither as the call found it nor as the
-// code leaves it, and the code is not run again over it: the error is
-// raised in the program, in the place of the code.
+// The trace gave up and the executor is about to run its code again. What
+// the trace wrote was taken back before its gate (take_back). Err: a write
+// could not be taken back. What the trace wrote to is then neither as the
+// call found it nor as the code leaves it, and the code is not run again
+// over it: the error is raised in the program, in the place of the code.
 pub fn undo() -> PyResult<()> {
-    take_back();
     let Some(cause) = NOT_UNDONE.take() else { return Ok(()) };
     let py = unsafe { Python::assume_attached() };
     let err = pyo3::exceptions::PyRuntimeError::new_err(
@@ -788,14 +811,41 @@ pub fn undo() -> PyResult<()> {
     Err(err)
 }
 
+/// The run of the trace on this thread stands, and a place it wrote one of
+/// the tracer's stand-ins for a float to could not be given the float
+/// (torch/vm/_writes.py): ``error`` says why. The executor raises it in the
+/// program when the trace is over, in the place of going on with an object
+/// of the tracer's in the program's state.
+#[pyfunction]
+pub fn _region_not_plain(error: Bound<'_, PyAny>) {
+    NOT_PLAIN.with_borrow_mut(|first| {
+        first.get_or_insert_with(|| PyErr::from_value(error));
+    });
+}
+
+// The trace is over and the run of its body stands. Err: a place the run
+// wrote to still holds a stand-in of the tracer's (_region_not_plain). The
+// error is raised in the program behind the traced code.
+pub fn stood() -> PyResult<()> {
+    let Some(cause) = NOT_PLAIN.take() else { return Ok(()) };
+    let py = unsafe { Python::assume_attached() };
+    let err = pyo3::exceptions::PyRuntimeError::new_err(
+        "torch.vm: a traced call stored a float it computed from a float argument, and the object of the tracer's that stood for the float while the call was traced could not be replaced by the float: the object it was stored into still holds it.",
+    );
+    err.set_cause(py, Some(cause));
+    Err(err)
+}
+
 // The body is over and its run stands: nothing is taken back from here on,
-// and what the stores replaced is let go of. An object that dies of it may
-// have a finalizer (code of the program): no record is borrowed while it
-// runs, and reads.rs compares what the run read only afterwards
-// (_region_settled, which calls this).
+// and the records no longer count what the stores replaced. The tracer's
+// modes are still on: a replaced value is parked, in the order of the
+// stores, and dies at the trace's gate (parked.rs), where the finalizer the
+// program may have given it runs as the program's code.
 pub(super) fn let_go() {
     let replaced: Vec<_> = WRITES.with_borrow_mut(|ws| ws.iter_mut().filter_map(|w| w.undo.take()).collect());
-    drop(replaced);
+    if !replaced.is_empty() {
+        parked::park(replaced);
+    }
 }
 
 /// The writes of the traced run that a region is to make again, once the
@@ -806,7 +856,9 @@ pub(super) fn let_go() {
 #[pyfunction]
 pub fn _region_writes(py: Python<'_>) -> PyResult<Vec<(Py<PyAny>, Py<PyAny>, Py<pyo3::types::PyTuple>)>> {
     // The records of writes nothing can see, and the entries swept with
-    // them, go here: a frame that runs for it is seen (foreign.rs).
+    // them, are parked here and go at the trace's gate (parked.rs): this
+    // runs under the tracer's modes. What an object's count would be had
+    // they gone is asked of parked::refs.
     let _releasing = super::foreign::Releasing::start();
     // (Already done where the reads were compared first; the counts below
     // are of the records without what the stores replaced.)
@@ -827,11 +879,14 @@ pub fn _region_writes(py: Python<'_>) -> PyResult<Vec<(Py<PyAny>, Py<PyAny>, Py<
             }
             reads::held_by_trace(&mut hold);
         }
-        let dead: HashSet<usize> = ws.iter().map(|w| w.target.as_ptr() as usize).filter(|p| unsafe { ffi::Py_REFCNT(*p as *mut PyObject) } == mine[p]).collect();
+        parked::settle();
+        let dead: HashSet<usize> = ws.iter().map(|w| w.target.as_ptr() as usize).filter(|p| unsafe { parked::refs(*p as *mut PyObject) } == mine[p]).collect();
         if dead.is_empty() {
             break;
         }
-        ws.retain(|w| !dead.contains(&(w.target.as_ptr() as usize)));
+        let (gone, stay): (Vec<Write>, Vec<Write>) = ws.into_iter().partition(|w| dead.contains(&(w.target.as_ptr() as usize)));
+        ws = stay;
+        parked::park(gone);
     }
     // What the tracer's Python code is handed stays counted until the
     // trace's gate (a value the run stored and then replaced is held by its

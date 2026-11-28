@@ -1237,6 +1237,13 @@ impl Act<'_> {
                 None => {
                     // The params as they are before a version is selected
                     // (select drops those its version does not use).
+                    // (A recorded list that runs again need not ask whether
+                    // a trace is being closed, region::engaged: it begins
+                    // nothing. calls/again.rs checks the list and runs its
+                    // entries; it never begins reads or writes, which is
+                    // what resets the state of a trace that is being closed
+                    // (reads::begin_for_recorder is reached from
+                    // record::begin alone, behind shadow_due.))
                     if super::calls::record::on() && self.shadow == 0 && self.c.is_some() && super::calls::record::again_due(place) {
                         let params: Vec<*mut PyObject> = blk.params.iter().map(|p| self.val(*p)).collect();
                         again = super::calls::record::again_begin(place, &params, self.f);
@@ -1268,7 +1275,7 @@ impl Act<'_> {
             // region version's, if it comes next.
             while first == 0 && let Some(&head) = blk.versions[vi].body.first() && let Op::Region(r) = self.cfg[head].op {
                 let args: Vec<*mut PyObject> = self.cfg[head].args.iter().map(|a| self.val(*a)).collect();
-                let called = if super::region::tracing() { Ok(None) } else { self.place_call(&self.cfg.regions[r as usize].variants, &args) };
+                let called = if super::region::engaged() { Ok(None) } else { self.place_call(&self.cfg.regions[r as usize].variants, &args) };
                 match called {
                     Ok(Some(outs)) => {
                         if std::env::var_os("TORCH_RUST_REGION_CHECK").is_some() {
@@ -1281,7 +1288,7 @@ impl Act<'_> {
                         i = 1;
                         break;
                     }
-                    Ok(None) if super::region::tracing() || vi + 2 == blk.versions.len() => {
+                    Ok(None) if super::region::engaged() || vi + 2 == blk.versions.len() => {
                         vi = blk.versions.len() - 1;
                         self.drop_all(&self.p.live.versions[b.idx()][vi].entry_kill);
                         break;
@@ -1303,7 +1310,16 @@ impl Act<'_> {
             let code = &self.p.code[b.idx()][vi];
             let fast = self.rec.is_null();
             let counted = self.reading && super::hist::on();
-            if first == 0 && vi + 1 == blk.versions.len() && blk.origin.is_some() && self.c.is_some() && !super::region::tracing() {
+            let traceable = first == 0 && vi + 1 == blk.versions.len() && blk.origin.is_some() && self.c.is_some();
+            if traceable && !super::region::tracing() && super::foreign::closing() {
+                // A trace is being closed on this thread, and this is code
+                // that the death of an object ran from its gate: no trace
+                // begins (foreign::Closing), the block runs as written, and
+                // says so should no later call trace it.
+                let c = self.c.expect("a place has its code");
+                super::note_untraced(self.block_name(c, b, vi), "not yet", "it was entered while another trace was being closed, from code that the death of an object ran: it ran as written".into());
+            }
+            if traceable && !super::region::engaged() {
                 if super::region::observing() {
                     self.region_observe(b, vi);
                 }
@@ -1553,7 +1569,7 @@ impl Act<'_> {
         let sp = &cfg.spans[si];
         // (TORCH_RUST_CALLS=1: no trace of today's engine begins, a span's
         // neither; its blocks run, and are recorded, one by one.)
-        if super::region::tracing() || self.c.is_none() || super::calls::record::replaces() {
+        if super::region::engaged() || self.c.is_none() || super::calls::record::replaces() {
             return None;
         }
         if !super::region::enabled() {
@@ -1704,7 +1720,9 @@ impl Act<'_> {
         if super::calls::record::on() {
             super::calls::record::yields();
         }
-        let traced = super::outside_executor(|| super::region::trace(&sp.name, args, &types, &passed, true, sp.asked, self.f, &mut body));
+        // (`_closing`: no trace begins on this thread until this function
+        // has read what the trace left: foreign::Closing.)
+        let (traced, _closing) = super::outside_executor(|| super::region::trace(&sp.name, args, &types, &passed, true, sp.asked, self.f, &mut body));
         for (cell, old) in cells {
             PyCell_Set(cell, old);
             ffi::Py_XDECREF(old);
@@ -1729,7 +1747,9 @@ impl Act<'_> {
         };
         let Some(leave) = leave else {
             // What the run wrote before it gave up is written again by the
-            // blocks, which run from the span's entry.
+            // blocks, which run from the span's entry: it was taken back in
+            // front of the trace's gate (region::trace), and this is the
+            // error of a write that could not be.
             let undone = writes::undo();
             if debug {
                 let at = match &ended {
@@ -1771,6 +1791,21 @@ impl Act<'_> {
             return None;
         };
         held.into_iter().for_each(|o| ffi::Py_XDECREF(o));
+        // The run stands. A place it wrote a stand-in of the tracer's to
+        // that could not be given its float is an error raised here, behind
+        // the span's code, never a program that goes on with the stand-in.
+        if let Err(e) = writes::stood() {
+            if let Err(Outcome::Return(v)) = &leave {
+                ffi::Py_XDECREF(*v);
+            }
+            pyo3::ffi::PyErr_Clear();
+            e.restore(pyo3::Python::assume_attached());
+            return Some(match self.unwind(sp.entry, 0, 0, Exc::Error) {
+                Unwound::Block(h) => Ok(h),
+                Unwound::Outer(k, args) => Err(Outcome::Outer(k, args)),
+                Unwound::Propagate => Err(Outcome::Error),
+            });
+        }
         // What the traced run leaves to the program holds floats, not the
         // float subclass the trace computes with (see region::plain).
         for s in &sp.live_out {
@@ -1875,7 +1910,7 @@ impl Act<'_> {
         self.shadow == 0
             && self.c.is_some()
             && self.p.origins[b.idx()].is_some()
-            && !super::region::tracing()
+            && !super::region::engaged()
             && !super::calls::record::recording()
             && !self.p.region_off[b.idx()].load(relaxed)
             && if super::calls::record::replaces() {
@@ -1926,6 +1961,8 @@ impl Act<'_> {
     // as run_blocks' steps would leave them; false: run it as usual. Err,
     // with an exception set: the trace was given up and a write it had made
     // could not be taken back (writes::undo); the block is not run again.
+    // Or its run stands and a stand-in it wrote could not be replaced
+    // (writes::stood).
     unsafe fn region_trace(&mut self, b: BlockId, vi: usize) -> Result<bool, ()> {
         let cfg = self.cfg;
         let blk = &cfg[b];
@@ -1988,7 +2025,9 @@ impl Act<'_> {
         let later = &self.p.region_later[b.idx()];
         super::covered::place(later.load(std::sync::atomic::Ordering::Relaxed));
         super::value_reads::begin(c.code, c as *const super::Compiled as usize);
-        let traced = super::outside_executor(|| super::region::trace(&name, &args, &types, &unread, false, false, self.f, &mut body));
+        // (`_closing`: no trace begins on this thread until this function
+        // has read what the trace left: foreign::Closing.)
+        let (traced, _closing) = super::outside_executor(|| super::region::trace(&name, &args, &types, &unread, false, false, self.f, &mut body));
         // Refused for code no call ran before: the block runs it now, as
         // written, and is traced again (see covered.rs).
         let again = super::covered::later();
@@ -2004,7 +2043,9 @@ impl Act<'_> {
                 eprintln!("region {name}: the body raised under tracing: {e}");
             }
             // What it wrote before it raised is written again by the run
-            // that follows.
+            // that follows: it was taken back in front of the trace's gate
+            // (region::trace), and this is the error of a write that could
+            // not be.
             let undone = writes::undo();
             if again {
                 self.p.region_runs[b.idx()].store(0, std::sync::atomic::Ordering::Relaxed);
@@ -2029,6 +2070,14 @@ impl Act<'_> {
             return Ok(false);
         }
         held.into_iter().for_each(|o| ffi::Py_XDECREF(o));
+        // The run stands. A place it wrote a stand-in of the tracer's to
+        // that could not be given its float is an error raised here, behind
+        // the block's code (see writes::stood).
+        if let Err(e) = writes::stood() {
+            pyo3::ffi::PyErr_Clear();
+            e.restore(pyo3::Python::assume_attached());
+            return Err(());
+        }
         if ran {
             // The program gets floats, not the float subclass the trace
             // computes with (see region::plain).

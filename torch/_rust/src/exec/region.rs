@@ -187,6 +187,9 @@ pub type Body<'a> = dyn FnMut(&[*mut PyObject]) -> Result<Vec<*mut PyObject>, ()
 thread_local! {
     static BODY: Cell<Option<*mut Body<'static>>> = const { Cell::new(None) };
     static TRACING: Cell<bool> = const { Cell::new(false) };
+    // Whether the body of the trace on this thread ran to its end: its run
+    // stands, whatever becomes of the trace (see _region_body, trace).
+    static STOOD: Cell<bool> = const { Cell::new(false) };
     // The exception by which the trace running on this thread was refused
     // while its body ran (see _region_refuse).
     static REFUSAL: std::cell::RefCell<Option<Py<PyAny>>> = const { std::cell::RefCell::new(None) };
@@ -206,16 +209,27 @@ pub fn _region_refuse(why: Py<PyAny>) {
 
 /// The trace running on this thread is given up and the executor runs its
 /// code again: takes back what the body stored or appended (see writes.rs;
-/// the executor's own call of writes::undo that follows finds nothing
-/// left to take back, and raises the error of a write that could not be),
-/// and returns the addresses of the containers its instructions
-/// filled in place (see covered.rs), for the tracer to give those among
-/// its args back what they held (torch._rust_inductor._hand_back), which
-/// must come after the writes are taken back.
+/// region::trace, which does so for every trace that is given up, then
+/// finds nothing left to take back; the executor raises the error of a
+/// write that could not be), and returns the addresses of the containers
+/// its instructions filled in place (see covered.rs), for the tracer to
+/// give those among its args back what they held
+/// (torch._rust_inductor._hand_back), which must come after the writes are
+/// taken back. Nothing dies here: the records of the writes are parked
+/// until the trace's gate.
 #[pyfunction]
 pub fn _region_given_up() -> Vec<usize> {
     super::writes::take_back();
     super::covered::filled()
+}
+
+/// Whether the body of the trace running on this thread ran to its end:
+/// its run then stands, whatever becomes of the trace, and what it wrote
+/// with the tracer's stand-ins in it is the tracer's to make plain
+/// (torch/vm/_writes.py) on every way out of its code.
+#[pyfunction]
+pub fn _region_stood() -> bool {
+    STOOD.get()
 }
 
 // Refuses the trace running on this thread from the executor, in place of
@@ -260,11 +274,21 @@ pub fn raise_refusal(py: Python<'_>) {
     }
 }
 
-// Whether a trace is running on this thread. Regions don't run then (the
-// trace wouldn't see their ops), nor are others traced.
+// Whether a trace is running on this thread: its tracer records what the
+// body does.
 #[inline]
 pub fn tracing() -> bool {
     TRACING.get()
+}
+
+// Whether a trace is running or being closed on this thread. No region is
+// entered then (a running trace wouldn't see its ops) and no other trace
+// begins: one that began while a trace is being closed would reset what
+// that trace has not handed over yet (foreign::Closing says what and until
+// when). Asked by run.rs wherever a trace begins or a region is entered.
+#[inline]
+pub fn engaged() -> bool {
+    TRACING.get() || super::foreign::closing()
 }
 
 // While a region is traced, the floats it computes with are instances of a
@@ -316,6 +340,7 @@ pub fn _region_body<'py>(py: Python<'py>, args: &Bound<'py, PyTuple>) -> PyResul
         let _recording = super::reads::Recording::start();
         unsafe { (*body)(&objs) }
     };
+    STOOD.set(outs.is_ok());
     match outs {
         Ok(outs) => {
             // (Counted until the trace's gate, like everything the tracer's
@@ -845,8 +870,17 @@ unsafe fn parse_facts(keys: &[Bound<'_, PyTuple>]) -> PyResult<(Vec<(Pos, u64)>,
 // not worth a region. With `span` (a span's run, which no guard checks
 // first), the region makes all its checks itself; with `asked` (a span a cfg
 // pass asked for) it is a region however few ops it runs.
+// With the result, the guard under which no trace begins: the caller keeps
+// it until it has read what the trace left for it (whether it was refused,
+// covered::later, writes::undo and writes::stood).
 #[allow(clippy::too_many_arguments)]
-pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: &[u32], span: bool, asked: bool, f: *mut Frame, body: &mut Body<'_>) -> PyResult<Option<Traced>> {
+pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: &[u32], span: bool, asked: bool, f: *mut Frame, body: &mut Body<'_>) -> (PyResult<Option<Traced>>, super::foreign::Closing) {
+    let closing = super::foreign::Closing::start();
+    (trace_closed(name, args, types, unread, span, asked, f, body), closing)
+}
+
+#[allow(clippy::too_many_arguments)]
+unsafe fn trace_closed(name: &str, args: &[*mut PyObject], types: &[Slot], unread: &[u32], span: bool, asked: bool, f: *mut Frame, body: &mut Body<'_>) -> PyResult<Option<Traced>> {
     let py = Python::assume_attached();
     let null = null_sentinel(py)?;
     // The word the region is for: read here, before anything of the trace
@@ -866,6 +900,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
     let body: *mut Body<'_> = body;
     BODY.set(Some(std::mem::transmute::<*mut Body<'_>, *mut Body<'static>>(body)));
     TRACING.set(true);
+    STOOD.set(false);
     REFUSAL.set(None);
     super::reads::begin();
     super::backward::ready();
@@ -877,6 +912,15 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
         // came to nothing, the tracer's result but for what the region
         // keeps), where a frame run by a release is seen (foreign.rs).
         let _releasing = super::foreign::Releasing::start();
+        // A body that did not run to its end is no run of the program's:
+        // the executor runs its code again, and what the trace wrote is
+        // taken back here, in front of everything the trace lets go of
+        // (the tracer has done so already where it had containers to give
+        // back: _region_given_up). A body that ran to its end stands, and
+        // its writes with it.
+        if !STOOD.get() {
+            super::writes::take_back();
+        }
         super::reads::end();
         TRACING.set(false);
         BODY.set(None);
