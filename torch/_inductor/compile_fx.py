@@ -1713,8 +1713,8 @@ class _InProcessFxCompile(FxCompile):
             )
             with V.set_fake_mode(fake_mode):
                 # has some issues with memory in training
-                cuda_context = get_cuda_device_context(gm)
-                with cuda_context:
+                device_context = get_device_context(gm)
+                with device_context:
                     _recursive_post_grad_passes(gm, is_inference=is_inference)
                 V.debug.fx_graph_transformed(gm, example_inputs)
                 post_grad_graphs_log.debug(
@@ -2705,22 +2705,84 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
     }
 
 
-def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
+def get_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
     """
-    Returns a cuda device context manager if there is a single device in the graph
+    Returns a device context manager when the graph runs on a single device of
+    a backend whose DeviceInterface exposes a real device guard
+    (exposes_device_guard). CUDA takes precedence: a graph with exactly one
+    cuda device uses torch.cuda.device even alongside other device types.
+    Otherwise the graph must live on exactly one non-cpu, non-meta device type
+    (CPU scalars and meta placeholders are incidental), on a single index of
+    that type, and the backend must report itself available on this host; any
+    other shape returns a null context.
+
+    On hosts where the XPU or MTIA runtime is available, single-device
+    xpu/mtia graphs now run post-grad passes and partitioning under that
+    backend's device guard, the same treatment CUDA already had; all other
+    graph shapes are unchanged.
     """
-    if not torch.cuda.is_available():
+    all_devices = get_all_devices(gm)
+
+    # CUDA takes precedence: a single cuda device activates the cuda context
+    # even alongside other device types, so mixed graphs behave identically
+    # regardless of which other backends are registered.
+    cuda_devices: OrderedSet[torch.device] = OrderedSet(
+        device for device in all_devices if device.type == "cuda"
+    )
+    if len(cuda_devices) == 1:
+        if torch.cuda.is_available():
+            return torch.cuda.device(next(iter(cuda_devices)))  # type: ignore[return-value]
         return contextlib.nullcontext()
 
-    cuda_devices: OrderedSet[torch.device] = OrderedSet(
-        device for device in get_all_devices(gm) if device.type == "cuda"
-    )
+    # No single cuda device.  Extend the same semantic to any other device type
+    # that has an interface with a real device context manager.  cpu and meta
+    # are placeholders (CPU scalar inputs, fake intermediate states), not where
+    # the graph runs; discard them the way the wrapper codegen picks the graph
+    # device type (torch/_inductor/graph.py), so the guard does not depend on
+    # incidental CPU tensors.
+    device_types: OrderedSet[str] = OrderedSet(device.type for device in all_devices)
+    device_types.discard("cpu")
+    device_types.discard("meta")
+    if len(device_types) != 1:
+        return contextlib.nullcontext()
 
-    return (
-        torch.cuda.device(next(iter(cuda_devices)))  # type: ignore[return-value]
-        if len(cuda_devices) == 1
-        else contextlib.nullcontext()
+    device_type = next(iter(device_types))
+    # Check the guard opt-in before probing availability: interfaces without a
+    # guard (the base stub, torch.device, unregistered types) then cost a
+    # single registry lookup and never call the backend's is_available().
+    try:
+        interface = get_interface_for_device(device_type)
+    except NotImplementedError:
+        # Device type with no registered interface: nothing to guard.
+        return contextlib.nullcontext()
+    if not interface.exposes_device_guard():
+        # The interface only carries the raising base stub or torch.device
+        # (a default-device TorchFunctionMode, not a guard): nothing to enter.
+        return contextlib.nullcontext()
+    try:
+        available = interface.is_available()
+    except NotImplementedError:
+        # A partially-implemented interface cannot answer; treat it as
+        # unavailable.
+        available = False
+    if not available:
+        # Entering the guard on a host without the runtime would raise where
+        # the expected behavior is a no-op (mocked device tags, AOT
+        # cross-compile flows).
+        return contextlib.nullcontext()
+
+    devices: OrderedSet[torch.device] = OrderedSet(
+        device for device in all_devices if device.type == device_type
     )
+    if len(devices) == 1:
+        return interface.device(next(iter(devices)))  # type: ignore[return-value]
+    return contextlib.nullcontext()
+
+
+# Kept for import compatibility with the old CUDA-specific name; internal
+# call sites use get_device_context, so patching this alias does not intercept
+# them.
+get_cuda_device_context = get_device_context
 
 
 def partition_fn(
@@ -2735,8 +2797,8 @@ def partition_fn(
     partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
-    cuda_context = get_cuda_device_context(gm)
-    with cuda_context:
+    device_context = get_device_context(gm)
+    with device_context:
         # We can skip the invoke_subgraph because the
         # entire_partition_fn is called recursively for invoke_subgraph
         # in partitioning.
