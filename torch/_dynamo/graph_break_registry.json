@@ -5528,6 +5528,14 @@
   ],
   "GB1943": [
     {
+      "Gb_type": "Unsupported OrderedDict instance state",
+      "Context": "operation",
+      "Explanation": "Dynamo cannot preserve instance attributes while tracing {operation}.",
+      "Hints": [
+        "Move this OrderedDict operation outside compiled code."
+      ]
+    },
+    {
       "Gb_type": "Copying an OrderedDict with instance attributes",
       "Context": "OrderedDict.__reduce_ex__",
       "Explanation": "The OrderedDict has instance attributes, or a pending dictionary write could have modified them. Dynamo cannot preserve this state when tracing the copy.",
@@ -7583,6 +7591,36 @@
       "Explanation": "Dynamo would reconstruct the string using the tensor's mutated value.",
       "Hints": [
         "Move tensor formatting outside the compiled region."
+      ]
+    }
+  ],
+  "GB4655": [
+    {
+      "Gb_type": "Legacy deepcopy memo requires identity guards",
+      "Context": "copy.deepcopy",
+      "Explanation": "The deepcopy memo may already contain a replacement for this mapping key. Checking this requires a guard on the key's identity.",
+      "Hints": [
+        "Copy the mapping outside the captured region."
+      ]
+    }
+  ],
+  "GB3039": [
+    {
+      "Gb_type": "OrderedDict subclass allocation",
+      "Context": "{obj.python_type_name()}.{name}",
+      "Explanation": "Dynamo cannot trace allocating operations on OrderedDict subclasses.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1160": [
+    {
+      "Gb_type": "Unsupported dictionary view owner",
+      "Context": "dict_vt.python_type_name()",
+      "Explanation": "Dynamo cannot access this dictionary view's owner storage.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ]

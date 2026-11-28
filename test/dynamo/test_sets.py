@@ -3,6 +3,7 @@
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
 import math
+import sys
 import unittest
 from collections import OrderedDict
 from collections.abc import Iterable
@@ -316,17 +317,19 @@ class DictSetOperandTests(torch._dynamo.test_case.TestCase):
         ("set", "frozenset", "update", "union", "symmetric_difference", "isdisjoint"),
     )
     def test_dict_operand_keys(self, mapping_type, operation):
-        def fn(x, mapping):
+        def fn(x, mapping, observe_order=False):
             if operation == "set":
                 result = set(mapping)
             elif operation == "frozenset":
                 result = frozenset(mapping)
             else:
-                result = {"a", "z"}
+                result = set() if observe_order else {"a", "z"}
                 if operation == "update":
                     result.update(mapping)
                 else:
                     result = getattr(result, operation)(mapping)
+            if observe_order:
+                return x + 1, list(result)
             return x + 1, result
 
         counter = CompileCounter()
@@ -352,6 +355,15 @@ class DictSetOperandTests(torch._dynamo.test_case.TestCase):
             self.assertIs(type(actual[1]), type(expected[1]))
             frame_counts.append(counter.frame_count)
         self.assertEqual(frame_counts, [1, 1, 2, 3, 4, 5, 6, 6])
+
+        order_sensitive = ("set", "frozenset", "update", "union")
+        if mapping_type is OrderedDict and operation in order_sensitive:
+            # Colliding hashes make set iteration sensitive to the OrderedDict's linked order.
+            mapping = mapping_type.fromkeys((0, sys.hash_info.modulus))
+            for _ in range(2):
+                self.assertEqual(compiled(x, mapping, True), fn(x, mapping, True))
+                mapping.move_to_end(0)
+            self.assertEqual(counter.frame_count, 8)
 
     @parametrize("operation", ["isdisjoint", "intersection", "difference"])
     def test_dict_operand_order_observed_by_equality(self, operation):

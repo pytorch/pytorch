@@ -320,9 +320,9 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
 def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[bool]:
     """
     Drop every guard ``CheckFunctionManager.serialize_guards`` would refuse for
-    its type or a derived type, and keep everything else.
+    its type or a derived type, except deepcopy memo identities, which fail at save time.
 
-    The refused types are ``UNSUPPORTED_SERIALIZATION_GUARD_TYPES``: the
+    The types considered here are ``UNSUPPORTED_SERIALIZATION_GUARD_TYPES``: the
     identity guards ID_MATCH, FUNCTION_MATCH, MODULE_MATCH, NN_MODULE,
     CLASS_MATCH and CLOSURE_MATCH (a function by its ``__code__`` id), plus
     DICT_VERSION and WEAKREF_ALIVE. An ID_MATCH, FUNCTION_MATCH, MODULE_MATCH or
@@ -1392,6 +1392,7 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "FAKE_TENSOR_MATCH",
         "FUNCTION_CODE_MATCH",
         "HASATTR",
+        "DEEPCOPY_MEMO_CONTAINS_ID",
         "LIST_REVERSEITERATOR_LEN",
         "MAPPING_KEYS_CHECK",
         "NATIVE_METHOD_MATCH",

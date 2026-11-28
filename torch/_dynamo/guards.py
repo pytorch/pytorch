@@ -895,7 +895,10 @@ class GuardManagerWrapper:
                 node.mark_tag_safe_root()
 
     def populate_diff_guard_manager(self) -> None:
-        self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
+        if self.diff_guard_root is not self.root:
+            self.diff_guard_root = self.clone_with_chosen_sources(
+                self.diff_guard_sources
+            )
 
         # Ensure that C++ side points to the updated diff guard manager.  A new
         # GuardManagerWrapper is not cached yet, so this does nothing and the
@@ -2740,6 +2743,9 @@ class GuardBuilder(GuardBuilderBase):
         )
 
         base_manager = self.get_guard_manager_from_source(source)
+        # An exact dict has no instance attributes and its manager checks its type.
+        if isinstance(base_manager, DictGuardManager) and type(self.get(guard)) is dict:
+            return
         if val:
             # Just install a getattr manager. GetAttrGuardAccessor itself
             # acts as hasattr guard.
@@ -3084,6 +3090,21 @@ class GuardBuilder(GuardBuilderBase):
 
         self.get_guard_manager(guard).add_none_match_guard(
             get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @unsupported_guard_check_spec
+    def DEEPCOPY_MEMO_CONTAINS_ID(
+        self, guard: Guard, tokens: tuple[int, ...], present: bool
+    ) -> None:
+        # Memo tokens may come from arbitrary input computations.
+        self.guard_manager.diff_guard_root = self.guard_manager.root
+        excluded = frozenset(tokens)
+        code = [f"(id({self.arg_ref(guard)}) in {tokens!r}) == {present}"]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_lambda_guard(
+            lambda value: (id(value) in excluded) == present,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
 
     @register_guard_check_spec(
@@ -5264,6 +5285,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         # __tensor_flatten__ may build the ctx afresh.
         self._whole_compared_values: dict[int, Any] = {}
         self._instance_policies: dict[int, _PickleState] = {}
+        self._view_owners: dict[int, dict[Any, Any]] = {}
         self._pruned_dictionary_ids: set[int] = set()
         self._dict_snapshots: dict[int, _DictionaryItemsSnapshot | dict[Any, Any]] = {}
         self._module_dependencies: dict[int, Any] = {}
@@ -5347,6 +5369,11 @@ class GuardsStatePickler(FunctionPicklerBase):
                 if all(type(k) is str and k != "copy" for k in dict.keys(attrs)):
                     entries = dict.items(cast(dict[Any, Any], backing))
                     return itertools.chain.from_iterable(entries)
+        if issubclass(typ, dict_keys):
+            owner = gc.get_referents(obj)[0]
+            self._view_owners[id(owner)] = owner
+            # OrderedDict's linked-order iterator hashes keys.
+            return obj if typ is dict_keys else dict.keys(owner)
         function = typ is types.FunctionType
         if function or (issubclass(typ, torch.Tensor) and self._keep(obj)):
             if id(obj) in self.missing_values or id(obj) in self.empty_values:
@@ -5469,8 +5496,10 @@ class GuardsStatePickler(FunctionPicklerBase):
         return get_type_dict_no_user_code(owner)[name]
 
     @classmethod
-    def _unpickle_dict_keys(cls, elems: list[Any]) -> Any:
-        return dict.fromkeys(elems).keys()
+    def _unpickle_dict_keys(cls, owner: Any, ordered: bool = False) -> Any:
+        if type(owner) is list:  # older packages stored a list of keys
+            owner = dict.fromkeys(owner)
+        return (collections.OrderedDict.keys if ordered else dict.keys)(owner)
 
     @classmethod
     def _restore_ordered_dict_state(
@@ -5634,29 +5663,42 @@ class GuardsStatePickler(FunctionPicklerBase):
         self._scopes = local_scope, global_scope
         self._collect_required_state()
         tracked = self.guard_tree_values.values()
+        self._retain_required_state(
+            v for v in tracked if issubclass(type(v), dict_keys)
+        )
         for value in itertools.chain(tracked, dictionaries):
             if issubclass(type(value), dict):
                 keys = dict.keys(value)
                 self._retain_required_state(k for k in keys if type(k) is not str)
-        dictionaries = tuple(v for v in dictionaries if _can_prune_dict_values(v))
-        self._pruned_dictionary_ids.update(map(id, dictionaries))
+        pruned = {id(v): v for v in dictionaries if _can_prune_dict_values(v)}
+        self._pruned_dictionary_ids.update(pruned)
         self._verbatim_elements.update(map(id, modes))
         if annotation:
             self._retain_required_state((annotation,))
         self._prune_local_scope(local_scope)
+        seen: set[int] = set()
         if (
             dictionaries
             or self.missing_values
             or self.empty_values
+            or modes
+            or self._view_owners
             or any(
                 issubclass(type(v), torch.nn.Module) or self._can_prune_instance(v)
                 for v in tracked
             )
         ):
-            self._retain_dict_aliases(
-                itertools.chain(local_scope.values(), global_scope.values(), modes)
-            )
-        for value in dictionaries:
+            roots = itertools.chain(local_scope.values(), global_scope.values(), modes)
+            seen = self._retain_dict_aliases(roots)
+        # A keys view needs its owner, but only an independent reference needs its values.
+        for key, owner in self._view_owners.items():
+            if key not in seen and _can_prune_dict_values(owner):
+                self._pruned_dictionary_ids.add(key)
+                pruned[key] = owner
+            self.missing_values.pop(key, None)
+            self.empty_values.pop(key, None)
+        self.guard_tree_values.update(self._view_owners)
+        for value in pruned.values():
             if type(value) is dict:
                 # Freeze slots before other reducers run. Rehash user keys only at load.
                 items = _DictionaryItemsSnapshot(self._dictionary_items(value))
@@ -5666,7 +5708,7 @@ class GuardsStatePickler(FunctionPicklerBase):
 
     def _retain_dict_aliases(
         self, roots: collections.abc.Iterable[Any], *, late_copy: bool = False
-    ) -> None:
+    ) -> set[int]:
         """Retain constructor dependencies. Reject late copies that need pruned state."""
         opaque: list[Any] = []
         copies: list[Any] = []  # visit nested proxies before retaining snapshots
@@ -5678,9 +5720,9 @@ class GuardsStatePickler(FunctionPicklerBase):
             typ = type(value)
             if typ is int or typ is str or (obj_id := id(value)) in seen:
                 continue
-            seen.add(obj_id)
             if obj_id in self.missing_values or obj_id in self.empty_values:
                 continue
+            seen.add(obj_id)
             if self._instance_policies.get(obj_id) is _PickleState.OPAQUE:
                 self._retain_required_state((value,), late_copy=late_copy)
             elif typ is types.MappingProxyType:
@@ -5691,6 +5733,8 @@ class GuardsStatePickler(FunctionPicklerBase):
                 if obj_id in self._whole_compared_values:
                     copies.extend(cached[1][1])
                 pending.extend(cached[1][1])
+            elif issubclass(typ, dict_keys):
+                self._retain_required_state((value,), late_copy=late_copy)
             elif obj_id in self._whole_compared_values:
                 continue
             elif obj_id in self._pruned_dictionary_ids:
@@ -5719,7 +5763,9 @@ class GuardsStatePickler(FunctionPicklerBase):
                 pruned = self._unguarded_attributes(value)
                 pending.extend(v for k, v in attrs.items() if k not in pruned)
                 pending.extend(v for v in gc.get_referents(value) if v is not attrs)
-            elif self._is_user_instance(value):
+            elif self._is_user_instance(value) or issubclass(
+                typ, torch.overrides.TorchFunctionMode
+            ):
                 policy = self._instance_policies.get(obj_id) or _pickle_state(value)
                 target = opaque if policy is _PickleState.OPAQUE else pending
                 target.extend(gc.get_referents(value))
@@ -5735,6 +5781,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         while opaque:
             value = opaque.pop()
             key = id(value)
+            seen.add(key)
             if key in dependencies or key in self._whole_compared_values:
                 continue
             dependencies[key] = value
@@ -5748,6 +5795,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             else:
                 opaque.extend(self._constructor_referents(value))
         self._retain_required_state(copies, late_copy=late_copy)
+        return seen
 
     def _kept_element(self, value: object) -> bool:
         return self._keep(value) or id(value) in self._verbatim_elements
@@ -6275,8 +6323,9 @@ class GuardsStatePickler(FunctionPicklerBase):
             if item is not NotImplemented and step is not NotImplemented:
                 return type(self)._unpickle_count_iter, (item, step)
 
-        elif isinstance(obj, torch._dynamo.utils.dict_keys):
-            return type(self)._unpickle_dict_keys, (list(obj),)
+        elif isinstance(obj, dict_keys):
+            owner = gc.get_referents(obj)[0]
+            return type(self)._unpickle_dict_keys, (owner, type(obj) is not dict_keys)
 
         elif isinstance(
             obj, torch._ops.OpOverloadPacket
@@ -7040,7 +7089,9 @@ class CheckFunctionManager:
             ):
                 continue
             elif (
-                guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+                guard_type == "DEEPCOPY_MEMO_CONTAINS_ID"
+                or guard_type
+                in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
             ):
                 raise torch._dynamo.exc.PackageError(
                     f"{guard_type} guard cannot be serialized."
