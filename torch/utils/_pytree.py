@@ -1166,7 +1166,8 @@ def tree_is_leaf(
     """
     if is_leaf is not None and is_leaf(tree):
         return True
-    return _get_node_type(tree) not in SUPPORTED_NODES
+    node_type = _get_node_type(tree)
+    return node_type not in SUPPORTED_NODES
 
 
 @deprecated(
