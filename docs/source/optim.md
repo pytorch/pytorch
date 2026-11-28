@@ -801,6 +801,10 @@ learning rate from its initial value to 0.05 in 5 epochs within each parameter g
 You can also use cosine annealing to a fixed value instead of linear annealing by setting
 `anneal_strategy="cos"`.
 
+{class}`SWALR` is not the only option. The SWA paper also describes a cyclical schedule, which
+you can build with a scheduler such as {class}`torch.optim.lr_scheduler.CyclicLR`. The section
+"Putting it all together: SWA with a cyclical learning rate" below shows an example.
+
 
 ### Taking care of batch normalization
 
@@ -852,6 +856,44 @@ and start to collect SWA averages of the parameters at epoch 160:
 >>> # Use swa_model to make predictions on test data
 >>> preds = swa_model(test_input)
 ```
+
+### Putting it all together: SWA with a cyclical learning rate
+
+Instead of annealing to a constant learning rate with {class}`SWALR`, you can cycle the learning
+rate and add a snapshot of the weights to the average at the end of each cycle, when the
+learning rate is at its lowest. Here we use {class}`torch.optim.lr_scheduler.CyclicLR`, which is
+stepped after every batch rather than every epoch. Each cycle is 6 epochs long: the learning
+rate rises from `base_lr` to `max_lr` over the first 3 epochs and falls back over the last 3.
+We train for a total of 300 epochs and add the first snapshot at the end of the first cycle that
+finishes after epoch 160:
+
+```python
+>>> loader, optimizer, model, loss_fn = ...
+>>> swa_model = torch.optim.swa_utils.AveragedModel(model)
+>>> cycle_epochs = 6
+>>> swa_start = 160
+>>> scheduler = torch.optim.lr_scheduler.CyclicLR(
+>>>         optimizer, base_lr=0.01, max_lr=0.05,
+>>>         step_size_up=cycle_epochs // 2 * len(loader), cycle_momentum=False)
+>>>
+>>> for epoch in range(300):
+>>>       for input, target in loader:
+>>>           optimizer.zero_grad()
+>>>           loss_fn(model(input), target).backward()
+>>>           optimizer.step()
+>>>           scheduler.step()
+>>>       # The learning rate is back at base_lr at the end of every cycle
+>>>       if epoch >= swa_start and (epoch + 1) % cycle_epochs == 0:
+>>>           swa_model.update_parameters(model)
+>>>
+>>> # Update bn statistics for the swa_model at the end
+>>> torch.optim.swa_utils.update_bn(loader, swa_model)
+>>> # Use swa_model to make predictions on test data
+>>> preds = swa_model(test_input)
+```
+
+By default `CyclicLR` also cycles the optimizer's momentum (or `beta1`) inversely to the learning rate.
+`cycle_momentum=False` keeps the momentum fixed, and is required for optimizers that have neither.
 
 ### Putting it all together: EMA
 
