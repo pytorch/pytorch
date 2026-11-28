@@ -23,6 +23,12 @@ from torch._library.opaque_object import is_custom_class
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
+from torch.amp.autocast_mode import (
+    _check_autocast_dtype_enabled_balanced,
+    _get_autocast_enabled,
+    _preserve_autocast_dtypes,
+    _preserve_autocast_nesting,
+)
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -61,7 +67,7 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import create_subclass_meta
-from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
+from .utils import KNOWN_TYPES, simple_wraps, strict_zip
 
 
 if TYPE_CHECKING:
@@ -201,7 +207,6 @@ def run_functionalized_fw_and_collect_metadata(
         output_info: list[OutputAliasInfo] = []
 
         prior_grad_enabled = torch.is_grad_enabled()
-        prior_autocast_states = _get_autocast_states()
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(
@@ -218,7 +223,27 @@ def run_functionalized_fw_and_collect_metadata(
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        with disable_above, mode, suppress_pending, disable_autocast_cache():
+        # Autocast tracing-state contract for this metadata pass:
+        # - dtype / enabled: must balance across the traced region; mismatch
+        #   raises. Prefer `with torch.autocast(...)`. make_fx dtype safety
+        #   relies on the dtype check; _create_graph restores nesting only.
+        # - cache / nesting: cleaned up after tracing only (cache forced off by
+        #   disable_autocast_cache; Dynamo may emit unbalanced nesting). Cleanup
+        #   is not runtime support across graph breaks.
+        # Unmanaged _enter/_exit_autocast split by a graph break leaves enabled
+        # unbalanced in the first graph and is rejected here.
+        with (
+            disable_above,
+            _preserve_autocast_nesting(),
+            _preserve_autocast_dtypes() as prior_autocast_dtypes,
+            mode,
+            suppress_pending,
+            disable_autocast_cache(),
+        ):
+            # Snapshot enabled after ExcludeDispatchKeyGuard enters. Enabled is
+            # the Autocast* excluded-key bit; disable_above restores the full
+            # local excluded set on exit, so no separate enabled preserve.
+            prior_autocast_enabled = _get_autocast_enabled()
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
@@ -245,12 +270,10 @@ def run_functionalized_fw_and_collect_metadata(
                 fake_mode.epoch += 1
                 fake_mode.reset_nt_tensor_id_counter()
 
-        if prior_autocast_states != _get_autocast_states():
-            raise RuntimeError(
-                "AOTAutograd does not support tracing graphs that mutate the autocast state. "
-                "Dynamo will only insert autocast context managers (e.g. with torch.autocast(..)) into the graph, "
-                "which will unwind all of their mutations to autocast state before the graph exits. "
-                "If you encounter this error while using torch.compile, please file a bug."
+            # Check before context managers exit so ExcludeDispatchKeyGuard /
+            # preserve helpers have not yet restored TLS.
+            _check_autocast_dtype_enabled_balanced(
+                prior_autocast_dtypes, prior_autocast_enabled
             )
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info

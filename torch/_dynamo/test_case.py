@@ -17,13 +17,17 @@ import re
 import sys
 import unittest
 from collections.abc import Callable
-from functools import cache, partial
 from typing import Any
 
 import torch
 import torch.testing
 from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
+from torch.amp.autocast_mode import (
+    _autocast_state_specs,
+    _restore_autocast_state,
+    _snapshot_autocast_state,
+)
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     HardwareClassification,
     IS_WINDOWS,
@@ -36,66 +40,6 @@ from . import config, utils
 
 
 log = logging.getLogger(__name__)
-
-
-_AutocastStateSpec = tuple[str, Callable[[], Any], Callable[[Any], None]]
-_AutocastState = tuple[Any, ...]
-
-
-def _autocast_nesting() -> int:
-    # There is no direct getter for the autocast nesting counter, only
-    # autocast_increment_nesting()/autocast_decrement_nesting(), so read it
-    # via a no-net-effect increment+decrement pair.
-    n = torch.autocast_increment_nesting()
-    torch.autocast_decrement_nesting()
-    return n - 1
-
-
-def _restore_autocast_nesting(target: int) -> None:
-    delta = _autocast_nesting() - target
-    for _ in range(delta):
-        if torch.autocast_decrement_nesting() == 0:
-            torch.clear_autocast_cache()
-    for _ in range(-delta):
-        torch.autocast_increment_nesting()
-
-
-@cache
-def _autocast_state_specs() -> tuple[_AutocastStateSpec, ...]:
-    # Enabled state and dtype are per-device; cache and nesting are shared.
-    device_specs = tuple(
-        spec
-        for device in torch._C._autocast_supported_devices()
-        for spec in (
-            (
-                f"{device} autocast enabled state",
-                partial(torch.is_autocast_enabled, device),
-                partial(torch.set_autocast_enabled, device),
-            ),
-            (
-                f"{device} autocast dtype",
-                partial(torch.get_autocast_dtype, device),
-                partial(torch.set_autocast_dtype, device),
-            ),
-        )
-    )
-    return device_specs + (
-        (
-            "autocast cache enabled state",
-            torch.is_autocast_cache_enabled,
-            torch.set_autocast_cache_enabled,
-        ),
-        ("autocast nesting depth", _autocast_nesting, _restore_autocast_nesting),
-    )
-
-
-def _snapshot_autocast_state() -> _AutocastState:
-    return tuple(get() for _, get, _ in _autocast_state_specs())
-
-
-def _restore_autocast_state(snapshot: _AutocastState) -> None:
-    for (_, _, set_), value in zip(_autocast_state_specs(), snapshot):
-        set_(value)
 
 
 def run_tests(needs: str | tuple[str, ...] = ()) -> None:
