@@ -6474,6 +6474,12 @@ class SIMDScheduling(BaseScheduling):
     ):
         if not isinstance(tiling, dict):
             raise AssertionError(f"expected tiling to be a dict, got {type(tiling)}")
+        if any(
+            node.is_split_scan()
+            for node in NodeScheduleMarker.only_nodes(node_schedule)
+        ):
+            if OrderedSet(tiling) != OrderedSet(["x", "r0_"]):
+                return False
         return all(
             SIMDKernel.is_compatible(
                 tiling.values(), node.get_ranges(), reduction_numel=reduction_numel
@@ -6593,6 +6599,14 @@ class SIMDScheduling(BaseScheduling):
 
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
+
+        # TritonSplitScanKernel requires 1-D pointwise and 1-D scan (x, r0_).
+        # Multi-dimensional pointwise tiling is not supported for split scan.
+        if any(
+            node.is_split_scan()
+            for node in NodeScheduleMarker.only_nodes(node_schedule)
+        ):
+            return _TilingSelection(default_tiling, None, None)
 
         # Force tiling compatible with matmul dimensions
         # when natively generating matmul without template calls.
