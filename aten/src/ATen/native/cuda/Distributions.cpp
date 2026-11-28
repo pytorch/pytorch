@@ -11,8 +11,10 @@
 #include <ATen/ops/_sample_dirichlet_native.h>
 #include <ATen/ops/_standard_gamma_grad_native.h>
 #include <ATen/ops/_standard_gamma_native.h>
+#include <ATen/ops/all.h>
 #include <ATen/ops/binomial_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/isfinite.h>
 #include <ATen/ops/poisson_native.h>
 #endif
 
@@ -36,6 +38,11 @@ Tensor _s_binomial_cuda(const Tensor& count, const Tensor& prob, std::optional<G
       at::isFloatingType(prob.scalar_type()),
       "binomial only supports floating-point dtypes for prob, got: ",
       prob.scalar_type());
+  // Validate count before launching CUDA kernel.
+  // Fixes #203568 (NaN hang in binomial_inversion) and #203569 (silent negative count).
+  TORCH_CHECK(
+      (count >= 0).all().item<bool>() && at::isfinite(count).all().item<bool>(),
+      "torch.binomial requires count to be non-negative and finite");
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
   Tensor ret = at::empty(count.sizes(), count.options());
   at::TensorIterator iter = at::TensorIteratorConfig()
