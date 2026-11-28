@@ -685,7 +685,6 @@ class TestMultiGPUDevice(TestCase):
         self.assertEqual(offset, 100)
 
     # Verifies that mem_get_info works, including when called for a different device
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4775")
     def test_mem_get_info(self, device):
         device_module = torch.get_device_module(device)
 
@@ -703,7 +702,18 @@ class TestMultiGPUDevice(TestCase):
                 device_module.synchronize()
             after_free_bytes, after_available_bytes = device_module.mem_get_info(dev)
 
-            self.assertLess(after_free_bytes, before_free_bytes)
+            if device_type == "xpu":
+                # The SYCL runtime pools device allocations beneath the XPU
+                # caching allocator, so empty_cache() need not return memory to
+                # the driver and a same-sized re-allocation can be served from
+                # that pool, leaving the device-global free counter unchanged.
+                # XPU-native test_mem_get_info in test/test_xpu.py asserts the
+                # same weaker bound.
+                # TODO: Drop this branch once the SYCL runtime memory pool is
+                # removed (planned for 2027.0, GSD-13084).
+                self.assertLessEqual(after_free_bytes, before_free_bytes)
+            else:
+                self.assertLess(after_free_bytes, before_free_bytes)
             self.assertEqual(before_available_bytes, after_available_bytes)
 
         device_type = torch.device(device).type
