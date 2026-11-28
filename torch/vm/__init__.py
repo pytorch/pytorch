@@ -536,8 +536,12 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
     - ``values``: the float arguments its regions are checked on by value
       (``"arg 1 (float) == 0.5"``, one entry per value a region was traced
       for): those the code compared, hashed, converted or handed to C code
-      that reads the number (``float(t)``, numpy). A float argument that is
-      not listed is an input of the graph, whatever its value;
+      that reads the number (``float(t)``, numpy), and those handed to a
+      torch call whose trace does not show where the number went (a callee
+      that runs several operators, as ``torch.dropout(x, t, True)``, or
+      Python code of torch, as ``t - x``; ``x * t`` and ``torch.clamp(x,
+      min=t)`` show it). A float argument that is not listed is an input of
+      the graph, whatever its value;
     - ``runs`` (calls that ran a region) and ``misses`` (calls a region's own
       checks turned down, by what did not match: an argument's leaf, or
       ``"read: ..."`` for what a callee read);

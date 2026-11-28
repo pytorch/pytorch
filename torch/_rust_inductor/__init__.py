@@ -754,14 +754,139 @@ def _read_data(graph: torch.fx.Graph, t: torch.Tensor) -> torch.Tensor:
     return out
 
 
+# Where torch keeps the callable it generates for an operator, under the
+# operator's name: that callable parses a call's arguments into the
+# parameters of one overload of the operator, positions in the operator's
+# order and keywords by the parameters' names, and calls it with them.
+_BINDINGS = (
+    torch._C._VariableFunctions,
+    torch._C.TensorBase,
+    torch._C._nn,
+    torch._C._linalg,
+    torch._C._special,
+    torch._C._fft,
+    torch._C._sparse,
+)
+# The Python functions of torch that call a binding with the very arguments
+# they were called with (torch/_tensor.py: `__pow__` and `__ipow__` are that
+# wrapper around the binding, and a torch-function mode is handed the
+# wrapper), each with its binding.
+_CALLS_BINDING = (
+    (torch.Tensor.__pow__, torch._C.TensorBase.pow),
+    (torch.Tensor.__ipow__, torch._C.TensorBase.pow_),
+)
+# By the name of an operator: whether one of its overloads only calls other
+# operators (_decomposes).
+_decomposing: dict[str, bool] = {}
+# The names of the operators the dispatcher has, overload by overload (made
+# by _decomposes): an overload that is not among them is TorchScript's
+# alone, and no binding calls it.
+_dispatched: set[str] = set()
+
+
+def _decomposes(op: torch._ops.OpOverload) -> bool:
+    """Whether an overload of the operator ``op`` is an overload of has no
+    kernel of its own and only calls other operators. A trace records what
+    such an overload calls and not the overload: a node of this operator may
+    then stand for a call of another overload of it, made with arguments the
+    first one computed (`upsample_nearest2d.vec` calls `upsample_nearest2d`
+    with scales it takes out of a list)."""
+    name = op._schema.name
+    if name not in _decomposing:
+        if not _dispatched:
+            _dispatched.update(torch._C._dispatch_get_all_op_names())
+        composite = torch._C.DispatchKey.CompositeImplicitAutograd
+        has_kernel = torch._C._dispatch_has_kernel_for_dispatch_key
+        overloads = [
+            name if overload == "default" else f"{name}.{overload}"
+            for overload in op.overloadpacket.overloads()
+        ]
+        _decomposing[name] = any(
+            has_kernel(full, composite) for full in overloads if full in _dispatched
+        )
+    return _decomposing[name]
+
+
+def _floats_at(x, at, out):
+    """Appends (where, float) for every float in x, where _floats_in finds
+    them: the indices and keys that lead to it."""
+    if isinstance(x, float):
+        out.append((at, x))
+    elif isinstance(x, (list, tuple)):
+        for k, y in enumerate(x):
+            _floats_at(y, (*at, k), out)
+    elif isinstance(x, dict):
+        for k, y in x.items():
+            _floats_at(y, (*at, k), out)
+    return out
+
+
+def _handed_on(func, made, args, kwargs):
+    """The args and kwargs of the one node a call of ``func`` traced
+    (``made``: its nodes) with the call's own floats where the node has the
+    dispatcher's copies of them, or None: the trace does not show which
+    float of the call each float of a node is.
+
+    It shows it for a call that traced ONE node, of an operator that
+    ``func`` is the binding of (or the operator itself) and none of whose
+    overloads decomposes: the node is then the overload the binding called,
+    with the arguments it parsed, and a float of the node is the call's
+    float in the same parameter, at the same place in it. Every float of
+    the call must be found so, bit for bit, and every float of the node.
+
+    Nothing else shows it. A callee that calls other operators hands them
+    numbers of its own: `torch.dropout(x, p, True)` runs `bernoulli_(1 - p)`
+    and `div_(1 - p)`, and at p = 0.5 the one float its nodes show (the
+    other is the parameter's default, which a node leaves out) is equal to
+    p and is not p. A call that names its floats by keyword hands them in
+    its own order, not the operator's. And Python code under ``func`` does
+    with a float what this mode does not see."""
+    if len(made) != 1 or not isinstance(made[0].target, torch._ops.OpOverload):
+        return None
+    node, op = made[0], made[0].target
+    space, _, name = op._schema.name.partition("::")
+    func = next((binding for f, binding in _CALLS_BINDING if f is func), func)
+    own = func is op or func is op.overloadpacket
+    if not own and space == "aten":
+        own = any(getattr(holder, name, None) is func for holder in _BINDINGS)
+    if not own or _decomposes(op):
+        return None
+    names = [a.name for a in op._schema.arguments]
+    if len(args) > len(names) or len(node.args) > len(names):
+        return None
+    if not set(kwargs).isdisjoint(names[: len(args)]) or not set(kwargs) <= set(names):
+        return None
+    call = {**dict(zip(names, args)), **kwargs}
+    traced = {**dict(zip(names, node.args)), **node.kwargs}
+    put: dict[str, Any] = {}
+    for parameter in dict.fromkeys([*names, *traced]):
+        value = traced.get(parameter)
+        want = _floats_at(value, (), [])
+        have = _floats_at(call.get(parameter), (), [])
+        # (float.hex: -0.0 is not 0.0, and no method of a stand-in runs.)
+        if [(at, float.hex(x)) for at, x in want] != [
+            (at, float.hex(x)) for at, x in have
+        ]:
+            return None
+        floats = iter([x for _, x in have])
+        put[parameter] = torch.fx.node.map_aggregate(
+            value, lambda a: next(floats, a) if isinstance(a, float) else a
+        )
+    return (
+        tuple(put[parameter] for parameter in names[: len(node.args)]),
+        {parameter: put[parameter] for parameter in node.kwargs},
+    )
+
+
 class _ScalarArgs(TorchFunctionMode):
     """Puts the _Scalars a torch call is given back into the node the call
-    traced: the dispatcher hands make_fx new Python floats. The node's float
-    args are matched to the call's, in order; when they don't line up (the
-    call traced several nodes, or made a scalar a tensor), or when it is not
-    established of the node's operator that no scalar decides a size
+    traced: the dispatcher hands make_fx new Python floats. A float of the
+    node is the call's float only where the trace shows it (_handed_on: the
+    call traced one node, of the operator the callee is the binding of, and
+    the float is in the same parameter). Where it does not, or where it is
+    not established of the node's operator that no scalar decides a size
     (_scalars_decide_no_size), the region is specialized on those _Scalars
-    instead."""
+    instead: it is checked on their values."""
 
     def __init__(self, graph: torch.fx.Graph) -> None:
         super().__init__()
@@ -817,23 +942,9 @@ class _ScalarArgs(TorchFunctionMode):
             if node.op == "call_function":
                 made.append(node)
             node = node.next
-        traced = [n for n in made if _floats_in([list(n.args), dict(n.kwargs)], [])]
-        if (
-            len(traced) == 1
-            and [
-                float.__float__(x)
-                for x in _floats_in([list(traced[0].args), dict(traced[0].kwargs)], [])
-            ]
-            == [float.__float__(x) for x in given]
-            and _scalars_decide_no_size(traced[0], args, kwargs)
-        ):
-            it = iter(given)
-
-            def put_back(a):
-                return next(it) if isinstance(a, float) else a
-
-            traced[0].args = torch.fx.node.map_aggregate(traced[0].args, put_back)
-            traced[0].kwargs = torch.fx.node.map_aggregate(traced[0].kwargs, put_back)
+        handed = _handed_on(func, made, args, kwargs)
+        if handed is not None and _scalars_decide_no_size(made[0], args, kwargs):
+            made[0].args, made[0].kwargs = handed
         elif _scalar_state is not None:
             _scalar_state["specialized"].update(*(x.deps for x in live))
         return out

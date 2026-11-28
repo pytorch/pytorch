@@ -4687,8 +4687,12 @@ def sizes_range_read_from_a_tensor(x, s):
 
 def sizes_inputs(x, t):
     filled = torch.full((3,), t, device=x.device) + x.new_full((1,), t)
-    y = torch.where(x > 0.5, modes_work(x), t) + torch.full_like(x, t)[:3] + filled
+    y = modes_work(x).clamp(max=t) + torch.full_like(x, t)[:3] + filled
     return torch.add(y, t, out=torch.empty(0, device=x.device)).mul_(t) - t
+
+
+def sizes_where(x, t):
+    return torch.where(x > 0.5, modes_work(x), t) * 2 + 1
 
 
 # How a schema writes a scalar parameter, and a list of them.
@@ -4838,13 +4842,23 @@ class TestVmScalarSizes(TestCase):
 
     @isolated
     def test_scalars_that_stay_inputs(self, device):
-        # full and new_full (a size given as ints), full_like, where (its
-        # scalar made a tensor), add with out=, an in-place operator and a
-        # pointwise one: one region for every value, no check.
+        # full and new_full (a size given as ints), full_like, a float by
+        # keyword, add with out=, an in-place operator and a pointwise one:
+        # each call traced one node of its own operator, with the float in
+        # the parameter it was handed at. One region for every value, no
+        # check.
         rows = self.rows(sizes_inputs, device, (0.5, 0.75, 1.0), "in_turn", size=3)
         (row,) = (r for r in rows if r["state"] == "region")
         found = (row["variants"], row["values"], row["runs"], row["misses"])
         self.assertEqual(found, (1, [], 8, {}), msg=str(row))
+
+    @isolated
+    def test_scalar_that_where_makes_a_tensor(self, device):
+        # where makes a tensor of its scalar and runs a second operator on
+        # it: the trace of the call does not show that the number of the
+        # first is the call's own, and the region is checked on it.
+        ran = self.by_value(sizes_where, device, (0.5, 0.75, 1.0), "in_turn")
+        self.assertEqual(len(ran), 1)
 
 
 instantiate_device_type_tests(TestVmScalarSizes, globals())

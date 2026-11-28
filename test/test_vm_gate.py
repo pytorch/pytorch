@@ -45,6 +45,7 @@ import weakref
 import numpy
 
 import torch
+import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -23222,6 +23223,510 @@ class TestVmRulesTorchLines(TestCase):
                 found, {f"{form} -:K": "yes(10)@10", f"{form} alpha:K": "no@10"}
             )
             self.assertEqual(said, "")
+
+
+# The calls of torch's C callees that hand a float over, as the table of
+# torch's members has them (exec/rules/torch_members.tsv, the column
+# `domain`): one entry per (member, what the rules say of the call and its
+# form, place of the float), from a sample of the sweep that measured the
+# member. An entry has the call (`k0`: the float, an argument of the
+# function; `a0`, ..: the operands that are no constants, also arguments), how
+# to make each of those (a tensor: dtype, sizes, the range of its values),
+# the grad mode of the sample, and the values the float has while the region
+# is traced (`bases`: the sample's own, then 0.5, 0.0 and 1.0 where the call
+# returns). `kind` "pair": two floats, equal while the region is traced, by
+# keyword in the reverse of the operator's order.
+FLOATS_HANDED = [
+    json.loads(entry)
+    for entry in """
+{"member":"torch.Tensor.__iadd__","form":"-","places":["1"],"kind":"single","call":"torch.Tensor.__iadd__(a0, k0)","params":["a0"],"operands":[{"t":"float32","s":[5,5],"lo":0.565,"hi":23.285}],"grad":true,"bases":["0.9189385332046727","0.5","0.0","1.0"]}
+{"member":"torch.Tensor.add","form":"-","places":["1"],"kind":"single","call":"torch.Tensor.add(a0, k0)","params":["a0"],"operands":[{"t":"float32","s":[2,6,3],"lo":0.0,"hi":0.001}],"grad":true,"bases":["1.25","0.5","0.0","1.0"]}
+{"member":"torch.Tensor.add_","form":"-","places":["1"],"kind":"single","call":"torch.Tensor.add_(a0, k0)","params":["a0"],"operands":[{"t":"float32","s":[5,5],"lo":0.565,"hi":23.285}],"grad":true,"bases":["0.9189385332046727","0.5","0.0","1.0"]}
+{"member":"torch.Tensor.addcdiv_","form":"-","places":["value"],"kind":"single","call":"torch.Tensor.addcdiv_(a0, a1, a2, value=k0)","params":["a0","a1","a2"],"operands":[{"t":"float32","s":[5,5],"g":true,"lo":-8.478,"hi":8.397},{"t":"float32","s":[5,5],"g":true,"lo":-8.975,"hi":8.211},{"t":"float32","s":[5,5],"g":true,"lo":-8.806,"hi":8.019}],"grad":true,"bases":["3.14","0.5","0.0","1.0"]}
+{"member":"torch.Tensor.bernoulli_","form":"0:T","places":["1"],"kind":"single","call":"torch.Tensor.bernoulli_(a0, k0)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["0.3","0.5","0.0","1.0"]}
+{"member":"torch.Tensor.clamp_","form":"-","places":["min"],"kind":"single","call":"torch.Tensor.clamp_(a0, min=k0)","params":["a0"],"operands":[{"t":"float32","s":[5,5,1],"lo":0.623,"hi":8.931}],"grad":true,"bases":["1e-06","0.5","0.0","1.0"]}
+{"member":"torch.Tensor.exponential_","form":"0:T","places":["1"],"kind":"single","call":"torch.Tensor.exponential_(a0, k0)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["2.0","0.5","1.0"]}
+{"member":"torch.Tensor.exponential_","form":"0:T","places":["lambd"],"kind":"single","call":"torch.Tensor.exponential_(a0, lambd=k0)","params":["a0"],"operands":[{"t":"float64","s":[5],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["0.5","1.0"]}
+{"member":"torch.Tensor.mul","form":"-","places":["1"],"kind":"single","call":"torch.Tensor.mul(a0, k0)","params":["a0"],"operands":[{"t":"float32","s":[2,4,7,7],"lo":-3.144,"hi":3.658}],"grad":false,"bases":["0.3535533905932738","0.5","0.0","1.0"]}
+{"member":"torch.Tensor.new_full","form":"-","places":["2"],"kind":"single","call":"torch.Tensor.new_full(a0, [], k0)","params":["a0"],"operands":[{"t":"float32","s":[5,10,1],"lo":6.53,"hi":12.219}],"grad":true,"bases":["1e-12","0.5","0.0","1.0"]}
+{"member":"torch.Tensor.normal_","form":"0:T","places":["1"],"kind":"single","call":"torch.Tensor.normal_(a0, k0, 0.02)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["0.0","0.5","1.0"]}
+{"member":"torch.Tensor.normal_","form":"0:T","places":["2"],"kind":"single","call":"torch.Tensor.normal_(a0, 0.0, k0)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["0.02","0.5","0.0","1.0"]}
+{"member":"torch.Tensor.normal_","form":"0:T","places":["1","2"],"kind":"pair","call":"torch.Tensor.normal_(a0, std=k1, mean=k0)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["0.0","0.5","1.0"]}
+{"member":"torch.Tensor.normal_","form":"0:T","places":["mean"],"kind":"single","call":"torch.Tensor.normal_(a0, mean=k0, std=2.0)","params":["a0"],"operands":[{"t":"float64","s":[5],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["1.0","0.5","0.0"]}
+{"member":"torch.Tensor.normal_","form":"0:T","places":["std"],"kind":"single","call":"torch.Tensor.normal_(a0, mean=1.0, std=k0)","params":["a0"],"operands":[{"t":"float64","s":[5],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["2.0","0.5","0.0","1.0"]}
+{"member":"torch.Tensor.pow","form":"-","places":["1"],"kind":"single","call":"torch.Tensor.pow(a0, k0)","params":["a0"],"operands":[{"t":"float32","s":[2,6,3],"lo":1.25,"hi":1.251}],"grad":true,"bases":["0.5","0.0","1.0"]}
+{"member":"torch.Tensor.scatter_","form":"-","places":["3"],"kind":"single","call":"torch.Tensor.scatter_(a0, 0, a2, k0)","params":["a0","a2"],"operands":[{"t":"float32","s":[],"g":true,"lo":-0.21,"hi":-0.21},{"t":"int64","s":[],"lo":0,"hi":0}],"grad":true,"bases":["2.5","0.5","0.0","1.0"]}
+{"member":"torch._C._VariableFunctions.cdist","form":"-","places":["2"],"kind":"single","call":"torch._C._VariableFunctions.cdist(a0, a1, k0, 1)","params":["a0","a1"],"operands":[{"t":"float32","s":[5,5],"lo":-8.478,"hi":8.397},{"t":"float32","s":[5,5],"lo":-8.975,"hi":8.211}],"grad":true,"bases":["2.0","0.5","0.0","1.0"]}
+{"member":"torch._C._nn.cross_entropy_loss","form":"-","places":["5"],"kind":"single","call":"torch._C._nn.cross_entropy_loss(a0, a1, a2, 1, -100, k0)","params":["a0","a1","a2"],"operands":[{"t":"float32","s":[2,3],"lo":-8.478,"hi":3.612},{"t":"float32","s":[2,3],"lo":0.052,"hi":0.784},{"t":"float32","s":[3],"lo":-8.478,"hi":-1.766}],"grad":true,"bases":["0.0","0.5","1.0"]}
+{"member":"torch._C._nn.hardtanh_","form":"-","places":["1"],"kind":"single","call":"torch._C._nn.hardtanh_(a0, k0, 6.0)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["0.0","0.5","1.0"]}
+{"member":"torch._C._nn.hardtanh_","form":"-","places":["2"],"kind":"single","call":"torch._C._nn.hardtanh_(a0, 0.0, k0)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["6.0","0.5","0.0","1.0"]}
+{"member":"torch._C._nn.hardtanh_","form":"-","places":["1","2"],"kind":"pair","call":"torch._C._nn.hardtanh_(a0, max_val=k1, min_val=k0)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["0.0","0.5","1.0"]}
+{"member":"torch._C._nn.hardtanh_","form":"-","places":["min_val"],"kind":"single","call":"torch._C._nn.hardtanh_(a0, min_val=k0, max_val=0.5)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["-0.5","0.5","0.0","1.0"]}
+{"member":"torch._C._nn.hardtanh_","form":"-","places":["max_val"],"kind":"single","call":"torch._C._nn.hardtanh_(a0, min_val=-0.5, max_val=k0)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["0.5","0.0","1.0"]}
+{"member":"torch._C._nn.leaky_relu","form":"-","places":["1"],"kind":"single","call":"torch._C._nn.leaky_relu(a0, k0)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["0.01","0.5","0.0","1.0"]}
+{"member":"torch._C._nn.leaky_relu","form":"-","places":["negative_slope"],"kind":"single","call":"torch._C._nn.leaky_relu(a0, negative_slope=k0)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["0.1","0.5","0.0","1.0"]}
+{"member":"torch._C._nn.leaky_relu_","form":"-","places":["1"],"kind":"single","call":"torch._C._nn.leaky_relu_(a0, k0)","params":["a0"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541}],"grad":true,"bases":["0.01","0.5","0.0","1.0"]}
+{"member":"torch._C._nn.pad","form":"-","places":["3"],"kind":"single","call":"torch._C._nn.pad(a0, (1, 2), 'constant', k0)","params":["a0"],"operands":[{"t":"bool","s":[0,3,3,3],"lo":0,"hi":0}],"grad":true,"bases":["2.0","0.5","0.0","1.0"]}
+{"member":"torch._C._nn.scaled_dot_product_attention","form":"-","places":["dropout_p"],"kind":"single","call":"torch._C._nn.scaled_dot_product_attention(a0, a1, a2, is_causal=True, dropout_p=k0, enable_gqa=False)","params":["a0","a1","a2"],"operands":[{"t":"float32","s":[4,3,8],"lo":-8.568,"hi":8.978},{"t":"float32","s":[4,6,8],"lo":-8.702,"hi":8.972},{"t":"float32","s":[4,6,8],"lo":-8.933,"hi":8.937}],"grad":true,"bases":["0.5","0.0","1.0"]}
+{"member":"torch._C._nn.upsample_bicubic2d","form":"-","places":["3"],"kind":"single","call":"torch._C._nn.upsample_bicubic2d(a0, None, False, [k0, 0.6])","params":["a0"],"operands":[{"t":"float32","s":[2,3,4,4],"lo":-8.975,"hi":8.397}],"grad":true,"bases":["0.6","0.5","1.0"]}
+{"member":"torch._C._nn.upsample_nearest1d","form":"-","places":["2"],"kind":"single","call":"torch._C._nn.upsample_nearest1d(a0, None, [k0])","params":["a0"],"operands":[{"t":"float32","s":[2,3,4],"lo":-8.478,"hi":5.774}],"grad":true,"bases":["0.6","0.5","1.0"]}
+{"member":"torch._C._nn.upsample_nearest2d","form":"-","places":["2"],"kind":"single","call":"torch._C._nn.upsample_nearest2d(a0, None, [k0, 1.7])","params":["a0"],"operands":[{"t":"float32","s":[2,3,4,4],"lo":-8.975,"hi":8.397}],"grad":true,"bases":["1.7","0.5","1.0"]}
+{"member":"torch._foreach_add","form":"-","places":["alpha"],"kind":"single","call":"torch._foreach_add(a0, a1, alpha=k0)","params":["a0","a1"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":-2.179,"hi":1.541},{"t":"float32","s":[5],"lo":-0.452,"hi":0.661},{"t":"float32","s":[2,2],"lo":-1.205,"hi":0.392}],"tuple":false},{"l":[{"t":"float32","s":[3,4],"lo":-1.228,"hi":1.905},{"t":"float32","s":[5],"lo":-1.302,"hi":1.946},{"t":"float32","s":[2,2],"lo":-1.378,"hi":0.452}],"tuple":false}],"grad":true,"bases":["0.5","0.0","1.0"]}
+{"member":"torch._foreach_add_","form":"0:[T]","places":["1"],"kind":"single","call":"torch._foreach_add_(a0, k0)","params":["a0"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":0.588,"hi":1.396},{"t":"float32","s":[5],"lo":0.529,"hi":1.258},{"t":"float32","s":[2,2],"lo":0.881,"hi":1.137}],"tuple":false}],"grad":true,"bases":["0.5","0.0","1.0"]}
+{"member":"torch._foreach_add_","form":"0:[T] 1:[T]","places":["alpha"],"kind":"single","call":"torch._foreach_add_(a0, a1, alpha=k0)","params":["a0","a1"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":-2.179,"hi":1.541},{"t":"float32","s":[5],"lo":-0.452,"hi":0.661},{"t":"float32","s":[2,2],"lo":-1.205,"hi":0.392}],"tuple":false},{"l":[{"t":"float32","s":[3,4],"lo":-1.228,"hi":1.905},{"t":"float32","s":[5],"lo":-1.302,"hi":1.946},{"t":"float32","s":[2,2],"lo":-1.378,"hi":0.452}],"tuple":false}],"grad":true,"bases":["0.5","0.0","1.0"]}
+{"member":"torch._foreach_add_","form":"0:[T] 1:T alpha:K","places":["alpha"],"kind":"single","call":"torch._foreach_add_(a0, a1, alpha=k0)","params":["a0","a1"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":0.588,"hi":1.396},{"t":"float32","s":[5],"lo":0.529,"hi":1.258},{"t":"float32","s":[2,2],"lo":0.881,"hi":1.137}],"tuple":false},{"t":"float32","s":[],"lo":1.0,"hi":1.0}],"grad":true,"bases":["1.0","0.5","0.0"]}
+{"member":"torch._foreach_addcdiv_","form":"-","places":["value"],"kind":"single","call":"torch._foreach_addcdiv_(a0, a1, a2, value=k0)","params":["a0","a1","a2"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":0.588,"hi":1.396},{"t":"float32","s":[5],"lo":0.529,"hi":1.258},{"t":"float32","s":[2,2],"lo":0.881,"hi":1.137}],"tuple":false},{"l":[{"t":"float32","s":[3,4],"lo":0.714,"hi":1.469},{"t":"float32","s":[5],"lo":0.649,"hi":1.486},{"t":"float32","s":[2,2],"lo":0.733,"hi":1.087}],"tuple":false},{"l":[{"t":"float32","s":[3,4],"lo":0.59,"hi":1.431},{"t":"float32","s":[5],"lo":0.512,"hi":1.114},{"t":"float32","s":[2,2],"lo":0.51,"hi":1.203}],"tuple":false}],"grad":true,"bases":["0.5","0.0","1.0"]}
+{"member":"torch._foreach_addcdiv_","form":"-","places":["3"],"kind":"single","call":"torch._foreach_addcdiv_(a0, a1, a2, k0)","params":["a0","a1","a2"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":0.588,"hi":1.396},{"t":"float32","s":[5],"lo":0.529,"hi":1.258},{"t":"float32","s":[2,2],"lo":0.881,"hi":1.137}],"tuple":false},{"l":[{"t":"float32","s":[3,4],"lo":0.714,"hi":1.469},{"t":"float32","s":[5],"lo":0.649,"hi":1.486},{"t":"float32","s":[2,2],"lo":0.733,"hi":1.087}],"tuple":false},{"l":[{"t":"float32","s":[3,4],"lo":0.59,"hi":1.431},{"t":"float32","s":[5],"lo":0.512,"hi":1.114},{"t":"float32","s":[2,2],"lo":0.51,"hi":1.203}],"tuple":false}],"grad":true,"bases":["-0.1","0.5","0.0","1.0"]}
+{"member":"torch._foreach_addcmul_","form":"-","places":["value"],"kind":"single","call":"torch._foreach_addcmul_(a0, a1, a2, value=k0)","params":["a0","a1","a2"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":0.588,"hi":1.396},{"t":"float32","s":[5],"lo":0.529,"hi":1.258},{"t":"float32","s":[2,2],"lo":0.881,"hi":1.137}],"tuple":false},{"l":[{"t":"float32","s":[3,4],"lo":0.714,"hi":1.469},{"t":"float32","s":[5],"lo":0.649,"hi":1.486},{"t":"float32","s":[2,2],"lo":0.733,"hi":1.087}],"tuple":false},{"l":[{"t":"float32","s":[3,4],"lo":0.59,"hi":1.431},{"t":"float32","s":[5],"lo":0.512,"hi":1.114},{"t":"float32","s":[2,2],"lo":0.51,"hi":1.203}],"tuple":false}],"grad":true,"bases":["0.5","0.0","1.0"]}
+{"member":"torch._foreach_addcmul_","form":"-","places":["3"],"kind":"single","call":"torch._foreach_addcmul_(a0, a1, a2, k0)","params":["a0","a1","a2"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":0.588,"hi":1.396},{"t":"float32","s":[5],"lo":0.529,"hi":1.258},{"t":"float32","s":[2,2],"lo":0.881,"hi":1.137}],"tuple":false},{"l":[{"t":"float32","s":[3,4],"lo":0.714,"hi":1.469},{"t":"float32","s":[5],"lo":0.649,"hi":1.486},{"t":"float32","s":[2,2],"lo":0.733,"hi":1.087}],"tuple":false},{"l":[{"t":"float32","s":[3,4],"lo":0.59,"hi":1.431},{"t":"float32","s":[5],"lo":0.512,"hi":1.114},{"t":"float32","s":[2,2],"lo":0.51,"hi":1.203}],"tuple":false}],"grad":true,"bases":["-0.1","0.5","0.0","1.0"]}
+{"member":"torch._foreach_clamp_max_","form":"-","places":["1"],"kind":"single","call":"torch._foreach_clamp_max_(a0, k0)","params":["a0"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":-2.179,"hi":1.541},{"t":"float32","s":[5],"lo":-0.452,"hi":0.661},{"t":"float32","s":[2,2],"lo":-1.205,"hi":0.392}],"tuple":false}],"grad":true,"bases":["0.25","0.5","0.0","1.0"]}
+{"member":"torch._foreach_clamp_min_","form":"-","places":["1"],"kind":"single","call":"torch._foreach_clamp_min_(a0, k0)","params":["a0"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":-2.179,"hi":1.541},{"t":"float32","s":[5],"lo":-0.452,"hi":0.661},{"t":"float32","s":[2,2],"lo":-1.205,"hi":0.392}],"tuple":false}],"grad":true,"bases":["0.25","0.5","0.0","1.0"]}
+{"member":"torch._foreach_div_","form":"-","places":["1"],"kind":"single","call":"torch._foreach_div_(a0, k0)","params":["a0"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":0.588,"hi":1.396},{"t":"float32","s":[5],"lo":0.529,"hi":1.258},{"t":"float32","s":[2,2],"lo":0.881,"hi":1.137}],"tuple":false}],"grad":true,"bases":["0.5","0.0","1.0"]}
+{"member":"torch._foreach_lerp_","form":"-","places":["2"],"kind":"single","call":"torch._foreach_lerp_(a0, a1, k0)","params":["a0","a1"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":-2.179,"hi":1.541},{"t":"float32","s":[5],"lo":-0.452,"hi":0.661},{"t":"float32","s":[2,2],"lo":-1.205,"hi":0.392}],"tuple":false},{"l":[{"t":"float32","s":[3,4],"lo":-1.228,"hi":1.905},{"t":"float32","s":[5],"lo":-1.302,"hi":1.946},{"t":"float32","s":[2,2],"lo":-1.378,"hi":0.452}],"tuple":false}],"grad":true,"bases":["0.1","0.5","0.0","1.0"]}
+{"member":"torch._foreach_lerp_","form":"-","places":["weight"],"kind":"single","call":"torch._foreach_lerp_(a0, a1, weight=k0)","params":["a0","a1"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":-2.179,"hi":1.541},{"t":"float32","s":[5],"lo":-0.452,"hi":0.661},{"t":"float32","s":[2,2],"lo":-1.205,"hi":0.392}],"tuple":false},{"l":[{"t":"float32","s":[3,4],"lo":-1.228,"hi":1.905},{"t":"float32","s":[5],"lo":-1.302,"hi":1.946},{"t":"float32","s":[2,2],"lo":-1.378,"hi":0.452}],"tuple":false}],"grad":true,"bases":["0.9","0.5","0.0","1.0"]}
+{"member":"torch._foreach_mul_","form":"-","places":["1"],"kind":"single","call":"torch._foreach_mul_(a0, k0)","params":["a0"],"operands":[{"l":[{"t":"float32","s":[3,4],"lo":0.588,"hi":1.396},{"t":"float32","s":[5],"lo":0.529,"hi":1.258},{"t":"float32","s":[2,2],"lo":0.881,"hi":1.137}],"tuple":false}],"grad":true,"bases":["0.5","0.0","1.0"]}
+{"member":"torch.arange","form":"-","places":["0"],"kind":"single","call":"torch.arange(k0, -8.000001, -4.0, dtype=adtype, device='cpu')","params":["adtype"],"operands":[{"dtype":"complex64"}],"grad":true,"bases":["0.0","0.5","1.0"]}
+{"member":"torch.arange","form":"-","places":["1"],"kind":"single","call":"torch.arange(0.0, k0, -4.0, dtype=adtype, device='cpu')","params":["adtype"],"operands":[{"dtype":"complex64"}],"grad":true,"bases":["-8.000001","0.0"]}
+{"member":"torch.arange","form":"-","places":["2"],"kind":"single","call":"torch.arange(0.0, -8.000001, k0, dtype=adtype, device='cpu')","params":["adtype"],"operands":[{"dtype":"complex64"}],"grad":true,"bases":["-4.0"]}
+{"member":"torch.batch_norm","form":"0:T 3:T 4:T 5:True 8:True","places":["6"],"kind":"single","call":"torch.batch_norm(a0, None, None, a3, a4, True, k0, 1e-05, True)","params":["a0","a3","a4"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411},{"t":"float32","s":[3],"lo":0.0,"hi":0.0},{"t":"float32","s":[3],"lo":1.0,"hi":1.0}],"grad":true,"bases":["0.1","0.5","0.0","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 3:T 4:T 5:True 8:True","places":["7"],"kind":"single","call":"torch.batch_norm(a0, None, None, a3, a4, True, 0.1, k0, True)","params":["a0","a3","a4"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411},{"t":"float32","s":[3],"lo":0.0,"hi":0.0},{"t":"float32","s":[3],"lo":1.0,"hi":1.0}],"grad":true,"bases":["1e-05","0.5","0.0","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 3:T 4:T 5:True 8:True","places":["6","7"],"kind":"pair","call":"torch.batch_norm(a0, None, None, a3, a4, True, cudnn_enabled=True, eps=k1, momentum=k0)","params":["a0","a3","a4"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411},{"t":"float32","s":[3],"lo":0.0,"hi":0.0},{"t":"float32","s":[3],"lo":1.0,"hi":1.0}],"grad":true,"bases":["0.1","0.5","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 1:T 2:T 3:T 4:T 5:True 8:True","places":["6"],"kind":"single","call":"torch.batch_norm(a0, a1, a2, a3, a4, True, k0, 1e-05, True)","params":["a0","a1","a2","a3","a4"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411},{"t":"float32","s":[3],"lo":0.062,"hi":0.661},{"t":"float32","s":[3],"lo":-0.32,"hi":0.392},{"t":"float32","s":[3],"lo":0.0,"hi":0.0},{"t":"float32","s":[3],"lo":1.0,"hi":1.0}],"grad":true,"bases":["0.1","0.5","0.0","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 1:T 2:T 3:T 4:T 5:True 8:True","places":["7"],"kind":"single","call":"torch.batch_norm(a0, a1, a2, a3, a4, True, 0.1, k0, True)","params":["a0","a1","a2","a3","a4"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411},{"t":"float32","s":[3],"lo":0.062,"hi":0.661},{"t":"float32","s":[3],"lo":-0.32,"hi":0.392},{"t":"float32","s":[3],"lo":0.0,"hi":0.0},{"t":"float32","s":[3],"lo":1.0,"hi":1.0}],"grad":true,"bases":["1e-05","0.5","0.0","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 1:T 2:T 3:T 4:T 5:True 8:True","places":["6","7"],"kind":"pair","call":"torch.batch_norm(a0, a1, a2, a3, a4, True, cudnn_enabled=True, eps=k1, momentum=k0)","params":["a0","a1","a2","a3","a4"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411},{"t":"float32","s":[3],"lo":0.062,"hi":0.661},{"t":"float32","s":[3],"lo":-0.32,"hi":0.392},{"t":"float32","s":[3],"lo":0.0,"hi":0.0},{"t":"float32","s":[3],"lo":1.0,"hi":1.0}],"grad":true,"bases":["0.1","0.5","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 5:True 8:True","places":["6"],"kind":"single","call":"torch.batch_norm(a0, None, None, None, None, True, k0, 1e-05, True)","params":["a0"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411}],"grad":true,"bases":["0.1","0.5","0.0","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 5:True 8:True","places":["7"],"kind":"single","call":"torch.batch_norm(a0, None, None, None, None, True, 0.1, k0, True)","params":["a0"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411}],"grad":true,"bases":["1e-05","0.5","0.0","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 5:True 8:True","places":["6","7"],"kind":"pair","call":"torch.batch_norm(a0, None, None, None, None, True, cudnn_enabled=True, eps=k1, momentum=k0)","params":["a0"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411}],"grad":true,"bases":["0.1","0.5","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 3:T 4:T 5:False 8:True","places":["6"],"kind":"single","call":"torch.batch_norm(a0, None, None, a3, a4, False, k0, 1e-05, True)","params":["a0","a3","a4"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411},{"t":"float32","s":[3],"lo":0.0,"hi":0.0},{"t":"float32","s":[3],"lo":1.0,"hi":1.0}],"grad":true,"bases":["0.1","0.5","0.0","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 3:T 4:T 5:False 8:True","places":["7"],"kind":"single","call":"torch.batch_norm(a0, None, None, a3, a4, False, 0.1, k0, True)","params":["a0","a3","a4"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411},{"t":"float32","s":[3],"lo":0.0,"hi":0.0},{"t":"float32","s":[3],"lo":1.0,"hi":1.0}],"grad":true,"bases":["1e-05","0.5","0.0","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 3:T 4:T 5:False 8:True","places":["6","7"],"kind":"pair","call":"torch.batch_norm(a0, None, None, a3, a4, False, cudnn_enabled=True, eps=k1, momentum=k0)","params":["a0","a3","a4"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411},{"t":"float32","s":[3],"lo":0.0,"hi":0.0},{"t":"float32","s":[3],"lo":1.0,"hi":1.0}],"grad":true,"bases":["0.1","0.5","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 1:T 2:T 3:T 4:T 5:False 8:True","places":["6"],"kind":"single","call":"torch.batch_norm(a0, a1, a2, a3, a4, False, k0, 1e-05, True)","params":["a0","a1","a2","a3","a4"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411},{"t":"float32","s":[3],"lo":0.062,"hi":0.661},{"t":"float32","s":[3],"lo":-0.32,"hi":0.392},{"t":"float32","s":[3],"lo":0.0,"hi":0.0},{"t":"float32","s":[3],"lo":1.0,"hi":1.0}],"grad":true,"bases":["0.1","0.5","0.0","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 1:T 2:T 3:T 4:T 5:False 8:True","places":["7"],"kind":"single","call":"torch.batch_norm(a0, a1, a2, a3, a4, False, 0.1, k0, True)","params":["a0","a1","a2","a3","a4"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411},{"t":"float32","s":[3],"lo":0.062,"hi":0.661},{"t":"float32","s":[3],"lo":-0.32,"hi":0.392},{"t":"float32","s":[3],"lo":0.0,"hi":0.0},{"t":"float32","s":[3],"lo":1.0,"hi":1.0}],"grad":true,"bases":["1e-05","0.5","0.0","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 1:T 2:T 3:T 4:T 5:False 8:True","places":["6","7"],"kind":"pair","call":"torch.batch_norm(a0, a1, a2, a3, a4, False, cudnn_enabled=True, eps=k1, momentum=k0)","params":["a0","a1","a2","a3","a4"],"operands":[{"t":"float32","s":[4,3,5,5],"lo":-2.613,"hi":3.411},{"t":"float32","s":[3],"lo":0.062,"hi":0.661},{"t":"float32","s":[3],"lo":-0.32,"hi":0.392},{"t":"float32","s":[3],"lo":0.0,"hi":0.0},{"t":"float32","s":[3],"lo":1.0,"hi":1.0}],"grad":true,"bases":["0.1","0.5","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 1:T 2:T 5:True 8:True","places":["6"],"kind":"single","call":"torch.batch_norm(a0, a1, a2, None, None, True, k0, 1e-05, True)","params":["a0","a1","a2"],"operands":[{"t":"float32","s":[8,3],"lo":-2.316,"hi":2.005},{"t":"float32","s":[3],"lo":0.062,"hi":0.661},{"t":"float32","s":[3],"lo":-0.32,"hi":0.392}],"grad":true,"bases":["0.1","0.5","0.0","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 1:T 2:T 5:True 8:True","places":["7"],"kind":"single","call":"torch.batch_norm(a0, a1, a2, None, None, True, 0.1, k0, True)","params":["a0","a1","a2"],"operands":[{"t":"float32","s":[8,3],"lo":-2.316,"hi":2.005},{"t":"float32","s":[3],"lo":0.062,"hi":0.661},{"t":"float32","s":[3],"lo":-0.32,"hi":0.392}],"grad":true,"bases":["1e-05","0.5","0.0","1.0"]}
+{"member":"torch.batch_norm","form":"0:T 1:T 2:T 5:True 8:True","places":["6","7"],"kind":"pair","call":"torch.batch_norm(a0, a1, a2, None, None, True, cudnn_enabled=True, eps=k1, momentum=k0)","params":["a0","a1","a2"],"operands":[{"t":"float32","s":[8,3],"lo":-2.316,"hi":2.005},{"t":"float32","s":[3],"lo":0.062,"hi":0.661},{"t":"float32","s":[3],"lo":-0.32,"hi":0.392}],"grad":true,"bases":["0.1","0.5","1.0"]}
+{"member":"torch.dropout","form":"0:T 2:True","places":["1"],"kind":"single","call":"torch.dropout(a0, k0, True)","params":["a0"],"operands":[{"t":"float32","s":[4,5],"lo":-1.555,"hi":2.005}],"grad":true,"bases":["0.5","0.0","1.0"]}
+{"member":"torch.dropout","form":"0:T 2:False","places":["1"],"kind":"single","call":"torch.dropout(a0, k0, False)","params":["a0"],"operands":[{"t":"float32","s":[4,5],"lo":-1.555,"hi":2.005}],"grad":true,"bases":["0.5","0.0","1.0"]}
+{"member":"torch.full","form":"-","places":["1"],"kind":"single","call":"torch.full(a0, k0, device='cpu')","params":["a0"],"operands":[{"l":[{"t":"int64","s":[],"lo":2,"hi":2},{"lit":"3"}],"tuple":true}],"grad":true,"bases":["1.5","0.5","0.0","1.0"]}
+{"member":"torch.full_like","form":"-","places":["1"],"kind":"single","call":"torch.full_like(a0, k0, device='cpu')","params":["a0"],"operands":[{"t":"float32","s":[5],"lo":-8.478,"hi":-1.766}],"grad":true,"bases":["-8.067646980285645","0.5","0.0","1.0"]}
+{"member":"torch.layer_norm","form":"-","places":["4"],"kind":"single","call":"torch.layer_norm(a0, (32,), a2, a3, k0, True)","params":["a0","a2","a3"],"operands":[{"t":"float32","s":[2,7,32],"lo":-3.435,"hi":2.847},{"t":"float32","s":[32],"g":true,"lo":1.0,"hi":1.0},{"t":"float32","s":[32],"g":true,"lo":0.0,"hi":0.0}],"grad":false,"bases":["1e-12","0.5","0.0","1.0"]}
+{"member":"torch.lerp","form":"-","places":["2"],"kind":"single","call":"torch.lerp(a0, a1, k0)","params":["a0","a1"],"operands":[{"t":"float32","s":[],"lo":-8.478,"hi":-8.478},{"t":"float32","s":[5,5],"lo":-8.068,"hi":8.397}],"grad":true,"bases":["0.4","0.5","0.0","1.0"]}
+{"member":"torch.linspace","form":"-","places":["0"],"kind":"single","call":"torch.linspace(k0, 0, 50, dtype=adtype, device='cpu')","params":["adtype"],"operands":[{"dtype":"complex64"}],"grad":true,"bases":["4.3","0.5","0.0","1.0"]}
+{"member":"torch.quantize_per_tensor","form":"-","places":["1"],"kind":"single","call":"torch.quantize_per_tensor(a0, k0, 10, a3)","params":["a0","a3"],"operands":[{"t":"float32","s":[2,3],"lo":-2.179,"hi":1.541},{"dtype":"quint8"}],"grad":true,"bases":["0.1","0.5","0.0","1.0"]}
+{"member":"torch.quantize_per_tensor","form":"-","places":["scale"],"kind":"single","call":"torch.quantize_per_tensor(a0, scale=k0, zero_point=3, dtype=adtype)","params":["a0","adtype"],"operands":[{"t":"float32","s":[3],"lo":-2.179,"hi":1.541},{"dtype":"quint8"}],"grad":true,"bases":["1.0","0.5","0.0"]}
+""".splitlines()
+    if entry
+]
+# The places of the table with a float that have no entry above, each with
+# why: a member that gets a float at a new place has an entry or a line here.
+FLOATS_NOT_HELD = {
+    (
+        "torch.Tensor.add_",
+        "alpha",
+    ): "the sample with a float there has an operand that is no dense real tensor",
+    (
+        "torch.Tensor.addcmul_",
+        "value",
+    ): "the sample with a float there has an operand that is no dense real tensor",
+    (
+        "torch.Tensor.lerp_",
+        "2",
+    ): "the sample with a float there has an operand that is no dense real tensor",
+    (
+        "torch.Tensor.new_tensor",
+        "1",
+    ): "the sample with a float there sets ambient state around the call",
+    (
+        "torch.Tensor.sub",
+        "alpha",
+    ): "the sample with a float there has an operand that is no dense real tensor",
+    (
+        "torch.Tensor.sub_",
+        "alpha",
+    ): "the sample with a float there has an operand that is no dense real tensor",
+    (
+        "torch._C._has_torch_function",
+        "0",
+    ): "the sample with a float there sets ambient state around the call",
+    (
+        "torch._C._has_torch_function_unary",
+        "0",
+    ): "the sample with a float there sets ambient state around the call",
+    (
+        "torch._C._has_torch_function_variadic",
+        "0",
+    ): "the sample with a float there sets ambient state around the call",
+    (
+        "torch._C._has_torch_function_variadic",
+        "1",
+    ): "the sample with a float there sets ambient state around the call",
+    (
+        "torch._C._linalg.linalg_pinv",
+        "rtol",
+    ): "the sample with a float there has an operand that is no dense real tensor",
+    (
+        "torch._C._linalg.linalg_vector_norm",
+        "1",
+    ): "the sample with a float there has an operand that is no dense real tensor",
+    (
+        "torch._C._linalg.linalg_vector_norm",
+        "ord",
+    ): "the sample with a float there has an operand that is no dense real tensor",
+    ("torch._foreach_add", "1"): "no sample with a float there returns and is no stop",
+    (
+        "torch._foreach_maximum_",
+        "1",
+    ): "no sample with a float there returns and is no stop",
+    (
+        "torch.add",
+        "alpha",
+    ): "the sample with a float there has an operand that is no dense real tensor",
+    (
+        "torch.as_tensor",
+        "0",
+    ): "the sample with a float there sets ambient state around the call",
+    (
+        "torch.asarray",
+        "0",
+    ): "the sample with a float there sets ambient state around the call",
+    (
+        "torch.linspace",
+        "end",
+    ): "the sample with a float there has an operand that is no dense real tensor",
+    (
+        "torch.linspace",
+        "start",
+    ): "the sample with a float there has an operand that is no dense real tensor",
+    (
+        "torch.rsub",
+        "alpha",
+    ): "the sample with a float there has an operand that is no dense real tensor",
+    (
+        "torch.tensor",
+        "0",
+    ): "the sample with a float there sets ambient state around the call",
+}
+# Calls that are no entry of the table's walk: the float's value while the
+# region is traced, the body of `f(x, p)`, and how a region that ran holds
+# the float ("input": of its graph, with no check; "value": it is checked on
+# it; None: either). With "passed" the function is handed `(p, True)`.
+FLOATS_PLAIN = {
+    "dropout": (0.5, "y = x * 2\n    r = torch.dropout(y, p, True)", "value"),
+    "dropout_starred_tuple": (
+        0.5,
+        "a = (x * 2, p, True)\n    r = torch.dropout(*a)",
+        None,
+    ),
+    "dropout_starred_list": (
+        0.5,
+        "a = [x * 2, p, True]\n    r = torch.dropout(*a)",
+        None,
+    ),
+    "dropout_starred_tail": (
+        0.5,
+        "y, a = x * 2, (p, True)\n    r = torch.dropout(y, *a)",
+        None,
+    ),
+    "dropout_starred_passed": (
+        0.5,
+        "y = x * 2\n    r = torch.dropout(y, *p)",
+        None,
+    ),
+    "dropout_functional": (
+        0.5,
+        "y = x * 2\n    r = F.dropout(y, p, True)",
+        "value",
+    ),
+    "dropout_in_place": (
+        0.5,
+        "y = x * 2\n    r = torch.dropout_(y, p, True)",
+        "value",
+    ),
+    "feature_dropout": (
+        0.5,
+        "y = x * 2\n    r = torch.feature_dropout(y, p, True)",
+        "value",
+    ),
+    "cumulative_trapezoid": (
+        0.0,
+        "y = x * 2\n    r = torch.cumulative_trapezoid(y, dx=p)",
+        "value",
+    ),
+    "where": (0.5, "y = x * 2\n    r = torch.where(y > 0, y.cos(), p)", "value"),
+    "subtracted_from": (0.5, "y = x * 2\n    r = p - y.cos()", "value"),
+    "divided": (0.5, "y = x * 2\n    r = p / (y.cos() + 2)", "value"),
+    "leaky_relu_functional": (
+        0.5,
+        "y = x * 2\n    r = F.leaky_relu(y.cos(), p)",
+        "value",
+    ),
+    "multiplied": (0.5, "y = x * 2\n    r = y.cos() * p", "input"),
+    "clamped_by_keyword": (
+        0.5,
+        "y = x * 2\n    r = torch.clamp(y.cos(), min=p)",
+        "input",
+    ),
+    "power": (0.5, "y = x * 2\n    r = (y.cos() + 2) ** p", "input"),
+    "added_in_place": (0.5, "y = x * 2\n    r = y.cos().add_(p)", "input"),
+    "filled": (0.5, "y = x * 2\n    r = y.cos() + torch.full((6,), p)", "input"),
+}
+
+
+def floats_handed_bytes(v):
+    """What a comparison bit for bit takes of a result or an operand."""
+    if isinstance(v, torch.Tensor):
+        if v.is_quantized:
+            return (str(v.dtype), tuple(v.shape), repr(v))
+        return (str(v.dtype), tuple(v.shape), v.detach().numpy().tobytes())
+    if isinstance(v, (tuple, list)):
+        return (type(v).__name__, [floats_handed_bytes(i) for i in v])
+    if isinstance(v, Exception):
+        return (type(v).__name__, str(v)[:300])
+    return (type(v).__name__, repr(v))
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(CHECKS_HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmFloatsHanded(TestCase):
+    """A float argument of a function that the function hands to a call of
+    torch is, on every call, that call's own number. A region takes it as an
+    input of its graph only where the trace of the call shows where the
+    number went: the call traced one node, of the operator the callee is the
+    binding of, with the float in the parameter it was handed at. Anywhere
+    else the region is checked on the float's value: a callee that runs
+    several operators hands them numbers of its own (dropout: 1 - p), and a
+    call hands its keywords in its own order."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    @staticmethod
+    def others(base):
+        """Six other values for a float whose traced value is ``base``:
+        other floats, the other zero, an int and a bool where they are
+        equal to it, nan."""
+        whole = base.is_integer()
+        zero = -0.0 if (base == 0.0 and math.copysign(1.0, base) > 0) else 0.0
+        return [
+            base / 2 + 0.125,
+            0.75 if base != 0.75 else 0.25,
+            zero,
+            int(base) if whole else 1,
+            True if base == 1.0 else (1.0 if base != 1.0 else 2.0),
+            float("nan"),
+        ]
+
+    def steps(self, base, pair=False):
+        """The float (or the two) of each of 20 calls: ``base`` for the 8
+        that trace the region, then other values, and back."""
+        c = self.others(base)
+        if not pair:
+            order = [c[0]] * 3 + [base, c[1], c[2], base, c[3], base, c[4], base, c[5]]
+            return [(k,) for k in [base] * 8 + order]
+        same = (base, base)
+        order = [(c[1], c[0]), (base, c[0]), same, (c[1], base), same, (c[0], c[0])]
+        return [same] * 8 + [(c[0], c[1])] * 3 + [same, *order, same, (c[1], c[0])]
+
+    def operand(self, how):
+        if "l" in how:
+            items = [self.operand(x) for x in how["l"]]
+            return tuple(items) if how["tuple"] else items
+        if "dtype" in how:
+            return getattr(torch, how["dtype"])
+        if "device" in how:
+            return torch.device(how["device"])
+        if "lit" in how:
+            return ast.literal_eval(how["lit"])
+        dtype, seeded = getattr(torch, how["t"]), torch.Generator().manual_seed(7)
+        if dtype.is_floating_point:
+            spread = torch.rand(how["s"], generator=seeded, dtype=torch.float64)
+            made = (spread * (how["hi"] - how["lo"]) + how["lo"]).to(dtype)
+        else:
+            low, high = how["lo"], how["hi"] + 1
+            made = torch.randint(low, high, how["s"], generator=seeded).to(dtype)
+        return made.requires_grad_(True) if how.get("g") else made
+
+    def beside_eager(self, source, operands, steps, grad=True):
+        """The function ``f`` of ``source`` beside eager on 20 calls, the
+        default generator seeded alike in front of both: the result, every
+        operand after the call and where the generator is left are eager's,
+        bit for bit. Returns the places of ``f``."""
+        eager, traced = {"torch": torch, "F": F}, {"torch": torch, "F": F}
+        exec(compile(source, "<a float handed over>", "exec"), eager)
+        exec(compile(source, "<a float handed over>", "exec"), traced)
+        compiled = vm(traced["f"], passes=CHECKS_EARLY)
+        for call, floats in enumerate(steps):
+            found = []
+            for fn in (eager["f"], compiled):
+                given = operands(call)
+                torch.manual_seed(100 + call)
+                with torch.set_grad_enabled(grad):
+                    try:
+                        out = fn(*given, *floats)
+                    except Exception as e:
+                        out = e
+                left = torch.get_rng_state().numpy().tobytes()
+                found.append((floats_handed_bytes([out, given]), left))
+            # (Bit for bit, and not by the tolerances of assertEqual.)
+            self.assertTrue(found[1] == found[0], msg=f"call {call} with {floats}")
+        return [r for r in vm.regions(compiled) if r["function"] == "f"]
+
+    def test_every_float_the_table_hands_over_has_a_program(self):
+        # Of the table as it is: a place of a member with a float in its
+        # measured domain, of a member that is no stop, has an entry or a
+        # line that says why not; and no line is of a place that is gone.
+        status = {name: said for name, _, said in torch._rust._rules_torch()}
+        held = {(e["member"], place) for e in FLOATS_HANDED for place in e["places"]}
+        places = set()
+        for member, place, classes in torch._rust._rules_torch_domain():
+            if status[member] != "stop" and any("float" in c for c in classes):
+                places.add((member, place))
+        self.assertEqual(sorted(places - held - set(FLOATS_NOT_HELD)), [])
+        self.assertEqual(sorted(set(FLOATS_NOT_HELD) - places), [])
+        self.assertEqual(sorted(held - places), [])
+        self.assertGreaterEqual(len(held), 50)
+
+    @parametrize("part", range(8))
+    @checks_isolated
+    def test_a_float_handed_to_a_member_is_the_calls_own(self, part):
+        ran = 0
+        for entry in FLOATS_HANDED[part::8]:
+            floats = [f"k{i}" for i in range(len(entry["places"]))]
+            head = ", ".join(["z", *entry["params"], *floats])
+            source = (
+                f"def f({head}):\n    u = (z * 2).cos()\n"
+                f"    r = {entry['call']}\n    return r, (u + 1).tanh()\n"
+            )
+
+            def operands(call, entry=entry):
+                z = torch.randn(4, 6, generator=torch.Generator().manual_seed(call))
+                return [z, *map(self.operand, entry["operands"])]
+
+            for base in entry["bases"]:
+                with self.subTest(
+                    member=entry["member"], call=entry["call"], base=base
+                ):
+                    steps = self.steps(ast.literal_eval(base), entry["kind"] == "pair")
+                    rows = self.beside_eager(source, operands, steps, entry["grad"])
+                    ran += any(r["state"] == "region" and r["runs"] for r in rows)
+        # Regions ran over these calls: the comparisons are of regions.
+        self.assertGreater(ran, 20)
+
+    @parametrize("name", list(FLOATS_PLAIN))
+    @checks_isolated
+    def test_a_float_handed_to_a_call_of_torch(self, name):
+        base, body, held = FLOATS_PLAIN[name]
+        source = f"def f(x, p):\n    {body}\n    return r * 3 + 1\n"
+        steps = self.steps(base)
+        if name.endswith("_passed"):
+            steps = [((k, True),) for (k,) in steps]
+
+        def operands(call):
+            return [torch.randn(4, 6, generator=torch.Generator().manual_seed(call))]
+
+        rows = self.beside_eager(source, operands, steps)
+        ran = [r for r in rows if r["state"] == "region" and r["runs"]]
+        if held == "input":
+            # One graph for every float: no value is checked.
+            self.assertEqual([r["values"] for r in ran], [[]], msg=str(rows))
+            self.assertGreaterEqual(ran[0]["runs"], 8, msg=str(rows))
+        elif held == "value":
+            self.assertGreaterEqual(len(ran), 1, msg=str(rows))
+            for r in ran:
+                self.assertIn(f"arg 1 (float) == {base!r}", r["values"], msg=str(r))
+
+    def test_what_shows_where_a_float_of_a_call_went(self):
+        import torch._rust_inductor as tracer
+
+        class Named(float):
+            pass
+
+        aten, graph = torch.ops.aten, torch.fx.Graph()
+        x, t = graph.placeholder("x"), torch.ones(2, 2)
+        low, high = Named(0.5), Named(0.5)
+
+        def node(op, *args, **kwargs):
+            return graph.call_function(op, args, kwargs)
+
+        # One node of the callee's own operator: each float goes to the
+        # parameter it was handed at, in whatever order the call names them.
+        clamped = [node(aten.clamp.default, x, 0.5, 0.5)]
+        args, kwargs = tracer._handed_on(
+            torch.clamp, clamped, (t,), {"max": high, "min": low}
+        )
+        self.assertIs(args[1], low)
+        self.assertIs(args[2], high)
+        self.assertEqual(kwargs, {})
+        args, _ = tracer._handed_on(torch.Tensor.clamp, clamped, (t, low, high), {})
+        self.assertIs(args[1], low)
+        self.assertIs(args[2], high)
+        args, _ = tracer._handed_on(aten.clamp.default, clamped, (t, low, high), {})
+        self.assertIs(args[2], high)
+        powered = [node(aten.pow.Tensor_Scalar, x, 0.5)]
+        args, _ = tracer._handed_on(torch.Tensor.__pow__, powered, (t, low), {})
+        self.assertIs(args[1], low)
+        scaled = [node(aten.upsample_nearest2d.default, x, [4, 4], 0.5, 0.5)]
+        upsample = torch._C._nn.upsample_nearest2d
+        refused = {
+            "a second node": (
+                torch.clamp,
+                [*clamped, node(aten.neg.default, x)],
+                (t, low, high),
+                {},
+            ),
+            "no node": (torch.clamp, [], (t, low, high), {}),
+            "the node of another callee": (
+                torch.dropout,
+                [node(aten.div_.Scalar, x, 0.5)],
+                (t, low, True),
+                {},
+            ),
+            "a Python function": (
+                F.hardtanh,
+                [node(aten.hardtanh.default, x, 0.5, 0.5)],
+                (t, low, high),
+                {},
+            ),
+            "a keyword the operator has no parameter for": (
+                torch.clamp,
+                clamped,
+                (),
+                {"input": t, "min": low, "max": high},
+            ),
+            "a float the node has not": (
+                torch.clamp,
+                [node(aten.clamp.default, x, 0.5)],
+                (t, low, high),
+                {},
+            ),
+            "a float the call has not": (torch.clamp, clamped, (t, low), {}),
+            "another float": (torch.clamp, clamped, (t, low, Named(0.25)), {}),
+            "the other zero": (
+                torch.clamp,
+                [node(aten.clamp.default, x, 0.0)],
+                (t, Named(-0.0)),
+                {},
+            ),
+            "an operator with an overload that calls others": (
+                upsample,
+                scaled,
+                (t, [4, 4], low, high),
+                {},
+            ),
+            "a target that is no operator": (
+                torch.clamp,
+                [node(torch.clamp, x, 0.5, 0.5)],
+                (t, low, high),
+                {},
+            ),
+        }
+        for why, (func, made, args, kwargs) in refused.items():
+            with self.subTest(why=why):
+                self.assertIsNone(tracer._handed_on(func, made, args, kwargs))
+        self.assertTrue(tracer._decomposes(aten.upsample_nearest2d.default))
+        self.assertTrue(tracer._decomposes(aten.where.self))
+        self.assertFalse(tracer._decomposes(aten.clamp.default))
+        self.assertFalse(tracer._decomposes(aten.mul.Tensor))
 
 
 if __name__ == "__main__":
