@@ -13,6 +13,7 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <dnnl.hpp>
+#include <ideep/tensor.hpp>
 #include <ATen/native/mkldnn/detail/Attr.h>
 #include <ATen/native/mkldnn/detail/IdeepUtils.h>
 #endif // AT_MKLDNN_ENABLED()
@@ -132,7 +133,7 @@ constexpr bool mkldnn_lacks_aarch64_kernels() {
 #if AT_MKLDNN_ENABLED()
 inline bool mkldnn_bf16_device_check() {
 #if defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))
-  // Use oneDNN to check bf16 on X64 as cpuinfo has no avx_ne_convert check.
+  // Use ideep to check bf16 on X64 as cpuinfo has no avx_ne_convert check.
   return at::native::mkldnn::has_bf16_type_support();
 #else
   return mkldnn_bf16_device_check_arm();
