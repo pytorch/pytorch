@@ -82,6 +82,7 @@ class DecorateInfo:
         "cls_name",
         "test_name",
         "device_type",
+        "excluded_device_types",
         "dtypes",
         "active_if",
     ]
@@ -93,6 +94,7 @@ class DecorateInfo:
         test_name=None,
         *,
         device_type=None,
+        excluded_device_types=(),
         dtypes=None,
         active_if=True,
     ):
@@ -104,6 +106,7 @@ class DecorateInfo:
         self.cls_name = cls_name
         self.test_name = test_name
         self.device_type = device_type
+        self.excluded_device_types = excluded_device_types
         self.dtypes = dtypes
         self.active_if = active_if
 
@@ -127,6 +130,7 @@ class DecorateInfo:
             and (self.cls_name is None or self.cls_name == cls_name)
             and (self.test_name is None or self.test_name == test_name)
             and device_type_matched
+            and device_type not in self.excluded_device_types
             and (self.dtypes is None or dtype in self.dtypes)
             # Support callables over kwargs to determine if the decorator is active.
             and (

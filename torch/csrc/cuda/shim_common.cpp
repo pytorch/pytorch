@@ -32,6 +32,13 @@ AOTITorchError torch_get_current_cuda_blas_handle(void** ret_handle) {
   });
 }
 
+AOTITorchError torch_get_current_cuda_blas_handle_v2(
+    bool setup,
+    void** ret_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_handle = at::cuda::getCurrentCUDABlasHandle(setup); });
+}
+
 AOTITorchError torch_set_current_cuda_stream(
     void* stream,
     int32_t device_index) {

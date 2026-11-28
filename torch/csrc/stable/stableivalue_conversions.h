@@ -203,6 +203,10 @@ struct FromImpl<DeviceType> {
         return torch::stable::detail::from(aoti_torch_device_type_xpu());
       case DeviceType::MPS:
         return torch::stable::detail::from(aoti_torch_device_type_mps());
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+      case DeviceType::MTIA:
+        return torch::stable::detail::from(aoti_torch_device_type_mtia());
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
       case DeviceType::PrivateUse1:
         return torch::stable::detail::from(
             aoti_torch_device_type_privateuse1());
@@ -626,6 +630,10 @@ struct ToImpl<DeviceType> {
       return DeviceType::XPU;
     } else if (shim_devicetype == aoti_torch_device_type_mps()) {
       return DeviceType::MPS;
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+    } else if (shim_devicetype == aoti_torch_device_type_mtia()) {
+      return DeviceType::MTIA;
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
     } else if (shim_devicetype == aoti_torch_device_type_privateuse1()) {
       return DeviceType::PrivateUse1;
     } else {
