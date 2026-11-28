@@ -1,5 +1,5 @@
 from collections import namedtuple
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, TypeVar
 from typing_extensions import NamedTuple
 
@@ -66,7 +66,7 @@ def tree_flatten_spec(
     return flat_result
 
 
-def _dict_flatten_spec(d: dict[_K, _V], spec: TreeSpec) -> list[_V]:
+def _dict_flatten_spec(d: Mapping[_K, _V], spec: TreeSpec) -> list[_V]:
     return [d[k] for k in spec.context]
 
 
@@ -82,7 +82,7 @@ def _namedtuple_flatten_spec(d: NamedTuple, spec: TreeSpec) -> list[Any]:
     return [d[i] for i in range(spec.num_children)]
 
 
-def _dict_flatten_spec_exact_match(d: dict[_K, _V], spec: TreeSpec) -> bool:
+def _dict_flatten_spec_exact_match(d: Mapping[_K, _V], spec: TreeSpec) -> bool:
     return len(d) == spec.num_children
 
 
@@ -99,6 +99,10 @@ def _namedtuple_flatten_spec_exact_match(d: NamedTuple, spec: TreeSpec) -> bool:
 
 
 register_pytree_flatten_spec(dict, _dict_flatten_spec, _dict_flatten_spec_exact_match)
+if torch._has_frozendict:
+    register_pytree_flatten_spec(
+        torch._frozendict, _dict_flatten_spec, _dict_flatten_spec_exact_match
+    )
 register_pytree_flatten_spec(list, _list_flatten_spec, _list_flatten_spec_exact_match)
 register_pytree_flatten_spec(
     tuple,
