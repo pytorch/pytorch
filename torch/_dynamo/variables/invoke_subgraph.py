@@ -32,7 +32,7 @@ from torch._dynamo.guards import (
     SKIP_GUARD,
     UnsupportedGuardCheckSpec,
 )
-from torch._dynamo.source import SyntheticLocalSource
+from torch._dynamo.source import SyntheticLocalSource, TensorPropertySource
 from torch._dynamo.utils import _make_inlined, constants_identical, unpack_iterable
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
@@ -55,6 +55,7 @@ from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.graph_module import GraphModule
 from torch.fx.proxy import Proxy
 from torch.utils import _pytree as pytree
+from torch.utils._functools import cache_method
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -117,7 +118,9 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #   2. Source replacement -- clone each guard's source with a replacement map
 #      (old: L['self'].layers[0].weight -> new: L['self'].layers[1].weight),
 #      then evaluate against the new source's runtime value.
-#   3. Mutation check -- reject if the subgraph mutated any captured var.
+#   3. Reject outer writes to dependencies or changes in capture policy, aliases or shape guards.
+#      Mutations inside the region already made its original trace ineligible.
+#   4. Replay the winning entry's remapped guards in the enclosing trace.
 #
 # A shared resolve_cache memoizes intermediate source resolution (e.g.
 # L['self'].layers is evaluated once and reused across all guards).
@@ -176,7 +179,8 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #    the outer SideEffects tracker before accepting a reuse.
 #
 # - max_reuse_entries (default 8, configurable via nested_compile_region arg)
-#   caps cache entries per function. Exceeding it raises RuntimeError.
+#   caps entries per function. If no entry matches, caching an additional eligible trace
+#   beyond this limit raises RuntimeError.
 # - Guard failures logged with guard type + user stack trace.
 #   Enable: TORCH_LOGS='+hierarchical_compile'
 # ---------------------------------------------------------------------------
@@ -237,7 +241,7 @@ def classify_vt(vt: Any) -> InputTag | None:
 def _argument_source(tag: InputTag, vt: VariableTracker) -> Source | None:
     # Attribute guards follow the realized object, including preloaded aliases.
     if tag is InputTag.OBJECT and (canonical := vt.unwrap().source) is not None:
-        if vt.source is not None and vt.source != canonical:
+        if vt.source is not None:
             guard_mixed_scope_alias(vt.source, canonical)
         return canonical
     return vt.source
@@ -541,6 +545,8 @@ def is_reuse_eligible(
             return _reject_reuse("argument aliases a lexical read")
         if fingerprint.treespec is not None and tracing_info.has_container_identity:
             return _reject_reuse("flattened inputs do not preserve container identity")
+        if tracing_info.has_sourceless_grad:
+            return _reject_reuse("sourceless tensor grad cannot be remapped")
         if tracing_info.has_builtin_method_identity:
             # Stamp-out cannot replay remapped receiver-alias guards.
             hc_log.debug("subgraph_reuse: not eligible -- builtin-method identity")
@@ -660,7 +666,6 @@ def build_reuse_condition(
     for source in all_sources:
         all_relevant_guards.update(tx.output.guards.get_guards_for_source(source))
 
-    traced_sources = traced_sources.copy()
     guards: dict[Guard, tuple[GuardCheckSpec, object, OrderedSet[Source]]] = {}
     tensors = {}
     for guard in all_relevant_guards:
@@ -694,7 +699,6 @@ def build_reuse_condition(
             extra_sources = handler.get_extra_sources_fn(guard)
             if has_mutated_vars(tx, OrderedSet(extra_sources)):
                 return None
-            traced_sources.update(extra_sources)
             try:
                 value = (value, *map(tx.output.resolve_source_value, extra_sources))
             except Exception:
@@ -717,7 +721,7 @@ def build_reuse_condition(
         aliases=input_aliases(tx, fingerprint, tensors.values()),
         guards=guards,
         treespec=fingerprint.treespec,
-        traced_sources=traced_sources,
+        traced_sources=needed_sources,
         guard_on_key_order=tx.output.guard_on_key_order.intersection(needed_sources),
     )
 
@@ -759,31 +763,26 @@ class SubgraphReuseMatch:
     tx: "InstructionTranslatorBase"
     condition: InvokeSubgraphReuseCondition | None = None
     resolve_cache: dict[Source, Any] = field(default_factory=dict)
-    cloned_sources: dict[Source, Source] = field(default_factory=dict)
     runtime_guards: list[Guard] = field(default_factory=list)
-    captured_variables: dict[Source, VariableTracker] = field(default_factory=dict)
     static_metadata: dict[Source, "SizesStridesInfo"] = field(default_factory=dict)
     pending_shape_guards: list[sympy.Basic] = field(default_factory=list)
     symbol_replacements: dict[Any, Any] = field(default_factory=dict)
 
+    @cache_method
     def remap_source(self, source: Source) -> Source:
-        if not self.source_replacement or source in self.source_replacement:
-            return self.source_replacement.get(source, source)
-        if source not in self.cloned_sources:
-            cloned = _project_source(source, self.source_replacement)
-            self.cloned_sources[source] = cloned or source
-        return self.cloned_sources[source]
+        roots = self.source_replacement
+        if not roots or source in roots:
+            return roots.get(source, source)
+        return _project_source(source, roots) or source
 
     def resolve(self, source: Source) -> Any:
         return self.tx.output.resolve_source_value(source, self.resolve_cache)
 
+    @cache_method
     def build_capture(self, source: Source) -> VariableTracker:
         from .builder import VariableBuilder
 
-        if source not in self.captured_variables:
-            build = VariableBuilder(self.tx, source)
-            self.captured_variables[source] = build(self.resolve(source))
-        return self.captured_variables[source]
+        return VariableBuilder(self.tx, source)(self.resolve(source))
 
     def remap_bound_symbol(self, lifted: LiftedBoundSymbol) -> Any:
         original = lifted.source
@@ -791,9 +790,9 @@ class SubgraphReuseMatch:
             return lifted.expr
         if lifted.expr in self.symbol_replacements:
             return self.symbol_replacements[lifted.expr]
-        if isinstance(source, sources.TensorPropertySource):
-            tensor = self.build_capture(source.base)
-            example = tensor.as_proxy().node.meta["example_value"]
+        if isinstance(source, TensorPropertySource):
+            proxy = self.build_capture(source.base).as_proxy()
+            example = proxy.node.meta["example_value"]
             prop = getattr(example, source.prop.method_name())
             dim = prop() if source.idx is None else prop(source.idx)
         else:
@@ -835,13 +834,12 @@ class SubgraphReuseMatch:
         ):
             return _reject_reuse("incompatible cached tensor %s", source.name)
         plain = type(value) is torch.Tensor and tx.output.is_root_tracer()
-        # An unchanged plain tensor has no symbolic metadata to rebind.
-        if plain and source is new_source and not example._has_symbolic_sizes_strides:
-            return True
         parameter = (
             type(value) is torch.nn.Parameter
             and config.skip_no_tensor_aliasing_guards_on_parameters
         )
+        if plain and source is new_source and not example._has_symbolic_sizes_strides:
+            return True
         if (
             source is not new_source
             and (plain or parameter)
@@ -849,7 +847,7 @@ class SubgraphReuseMatch:
             and config._dynamic_shapes_spec is None
             and value not in tx.output.tracing_context.tensor_to_context
             and not example._has_symbolic_sizes_strides
-            and source not in self.entry.lifted_capture_sources
+            and LiftedCapturedSource(source) not in self.entry.subgraph_input_mapping
         ):
             static, _ = utils.tensor_always_has_static_shape(value, True, new_source)
             context = _automatic_dynamic(value, tx, new_source, static)
@@ -912,31 +910,20 @@ def _reject_reuse(reason: str, *args: object, exc_info: bool = False) -> bool:
     return False
 
 
-def _range_implies_bound(env: ShapeEnv, expr: sympy.Basic) -> bool:
-    if isinstance(expr, (sympy.Ge, sympy.Le)) and isinstance(expr.rhs, sympy.Integer):
-        if (vr := env.var_to_range.get(expr.lhs)) is not None:
-            edge = vr.lower if isinstance(expr, sympy.Ge) else vr.upper
-            return expr.func(edge, expr.rhs) is sympy.true
-    return False
-
-
 def _shape_guards_match(env: ShapeEnv, match: SubgraphReuseMatch) -> bool:
     for predicate in match.entry.shape_guards:
         try:
             expr = predicate.xreplace(match.symbol_replacements)
         except ZeroDivisionError:
             return _reject_reuse("zero divisor in %s", predicate)
-        if expr == predicate or _range_implies_bound(env, expr):
+        if expr == predicate:
             continue
         if expr.free_symbols <= env.var_to_range.keys():
-            try:
-                if env.guarding_hint_or_throw(expr):
-                    match.pending_shape_guards.append(expr)
-                    continue
-            except symbolic_shapes.GuardOnDataDependentSymNode:
-                bounds = env.bound_sympy(expr)
-                if bounds.is_singleton() and bool(bounds.lower):
-                    continue
+            if env.bound_sympy(expr).lower is sympy.true:
+                continue
+            if env.has_guarding_hint(expr) and env.guarding_hint_or_throw(expr):
+                match.pending_shape_guards.append(expr)
+                continue
         return _reject_reuse("%s rejected as %s", predicate, expr)
     return True
 
@@ -1078,14 +1065,18 @@ def is_reusable(
         if bindings.setdefault(old, new) != new:
             return _reject_reuse("conflicting argument binding")
         if new is None:
-            prop = sources.TensorProperty.STORAGE_OFFSET
-            if sources.TensorPropertySource(old, prop) in condition.traced_sources:
-                return _reject_reuse("sourceless operand has a storage offset guard")
+            # Sizes and strides are already checked against the operand's fake tensor.
+            missing = {old: None}
+            for dep in condition.traced_sources:
+                if isinstance(dep, TensorPropertySource) and dep.base == old:
+                    if dep.idx is not None:
+                        continue
+                if _project_source(dep, missing) is None:
+                    return _reject_reuse("sourceless operand dependency: %s", old.name)
         if isinstance(old, sources.ConstDictKeySource) and type(old) is not type(new):
             return _reject_reuse("incompatible dictionary key source")
     for old in condition.overlapping_args:
-        projected = _project_source(old, bindings)
-        if projected is None or projected != bindings[old]:
+        if bindings[old] is None or _project_source(old, bindings) != bindings[old]:
             return _reject_reuse("overlapping argument binding changed")
     # Parameterized source - this function gives you new sources parameterized
     # on the arg_sources. For example, if the input to the nested compile region
@@ -1306,30 +1297,25 @@ def save_reuse_entry(
     ]
 
     rebound: set[sympy.Symbol] = set()
-    captures = set()
     for item in subgraph_input_mapping:
         if isinstance(item, LiftedBoundSymbol) and item.source is not None:
             rebound.update(item.expr.free_symbols)
-        elif isinstance(item, LiftedCapturedSource):
-            captures.add(item.source)
     shape_guards: list[sympy.Basic] = []
     if rebound and condition is not None:
-        shape_env = tx.output.shape_env
-        candidates = [g.expr for g in shape_env.guards if g.expr.free_symbols & rebound]
+        env = tx.output.shape_env
+        candidates = [expr for expr in env.get_axioms() if expr.free_symbols & rebound]
         # Range facts can have removed a branch before any ShapeGuard was emitted.
-        for symbol in sorted(rebound.intersection(shape_env.var_to_range), key=str):
-            bounds = shape_env.var_to_range[symbol]
+        for symbol in sorted(rebound.intersection(env.var_to_range), key=str):
+            bounds = env.var_to_range[symbol]
             for rel, limit in ((sympy.Ge, bounds.lower), (sympy.Le, bounds.upper)):
                 if isinstance(limit, sympy.Integer):
                     candidates.append(rel(symbol, limit))
-        for group in shape_env.deferred_runtime_asserts.values():
-            candidates.extend(a.expr for a in group if a.expr.free_symbols & rebound)
         known: set[sympy.Basic] = set()
         for predicate in candidates:
             if symbolic_shapes.canonicalize_bool_expr(predicate) in known:
                 continue
             shape_guards.append(predicate)
-            facts = shape_env.get_implications(predicate)
+            facts = env.get_implications(predicate)
             known.update(expr for expr, truth in facts if truth is sympy.true)
 
     entry = InvokeSubgraphReuseEntry(
@@ -1337,7 +1323,6 @@ def save_reuse_entry(
         body_gmod=body_gmod,
         config=config,
         subgraph_input_mapping=subgraph_input_mapping,
-        lifted_capture_sources=frozenset(captures),
         single_tensor_output=single_tensor_output,
         output_metadata=output_metadata,
         # Record arg sources so that on cache hit we can build a
@@ -1455,7 +1440,7 @@ def stamp_out_subgraph(
                 proxy = bindings[binding_key]
             else:
                 source = match.remap_source(subgraph_input.source)
-                if isinstance(source, sources.TensorPropertySource):
+                if isinstance(source, TensorPropertySource):
                     tensor = match.build_capture(source.base)
                     idx = source.idx
                     args = [] if idx is None else [ConstantVariable.create(idx)]
@@ -1606,9 +1591,7 @@ def build_subgraph_input_mapping(
                 # The first creator of a shared symbol need not be read by this region.
                 expr = example.node._expr
                 dep = (
-                    source.base
-                    if isinstance(source, sources.TensorPropertySource)
-                    else source
+                    source.base if isinstance(source, TensorPropertySource) else source
                 )
                 if dep not in traced_sources or expr in explicit_symbols:
                     source = None
@@ -1853,9 +1836,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             fingerprint = build_input_fingerprint(tx, fingerprint_args, kwargs)
             traced_sources = tracing_info.traced_sources.copy()
             # Reused VariableTrackers bypass VariableBuilder's source recording.
-            for proxy in p_args[2:]:
-                if (source := _proxy_source(tx, proxy)) is not None:
-                    traced_sources.add(source)
+            traced_sources.update(
+                filter(None, (_proxy_source(tx, p) for p in p_args[2:]))
+            )
             if reuse_hash_fn is not None:
                 if not is_reuse_eligible(
                     tx,
