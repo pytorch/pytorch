@@ -1387,6 +1387,32 @@ def _coor_match_current_accelerator(tracer: _ProxyTracer, device: torch.device) 
     return True
 
 
+def _writes_untracked(
+    func: OpOverload, flat_args_kwargs: list[object], spec: pytree.TreeSpec
+) -> bool:
+    """Whether ``func`` writes to a tensor argument that the trace does not
+    track: one that is still a Tensor in ``flat_args_kwargs``, where tracked
+    tensors have been replaced by their _ProxyTensor.
+
+    proxy_call propagates constants by running an op a second time on the
+    constants of its arguments. A constant the traced function made itself
+    (``torch.tensor(1.0)``) is tracked, and its constant is a copy: the second
+    run writes to the copy, which is how the tensor stays a constant through
+    its own mutation. A tensor the trace does not track (a tensor of the
+    program's that the function reads, in real mode the very tensor the op
+    has just written to) has no copy and goes into the second run as it is."""
+    if not func._schema.is_mutable:
+        return False
+    args, kwargs = pytree.tree_unflatten(flat_args_kwargs, spec)
+    for i, a in enumerate(func._schema.arguments):
+        if a.alias_info is None or not a.alias_info.is_write:
+            continue
+        written = args[i] if i < len(args) else kwargs.get(a.name)
+        if any(isinstance(t, Tensor) for t in pytree.tree_leaves(written)):
+            return True
+    return False
+
+
 def proxy_call(
     proxy_mode: ProxyTorchDispatchMode,
     func: OpOverload,
@@ -1582,6 +1608,10 @@ def proxy_call(
             constant = args[0].clone()
     elif (
         torch.Tag.nondeterministic_seeded not in func.tags
+        # The op is run again below, on the constants. A tensor the trace
+        # does not track is handed to that run as it is, so an op that
+        # writes to one would write to it twice.
+        and not _writes_untracked(func, f_flat_args_kwargs, spec)
         and all_constant
         and any_constant
         and pytree.tree_all_only(Tensor, tensor_numel_in_limit, out)

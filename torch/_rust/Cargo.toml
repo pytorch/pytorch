@@ -1,0 +1,39 @@
+[package]
+name = "torch_rust"
+version = "0.1.0"
+# The Buck build ignores this file (it sets the edition itself and forbids
+# setting `edition` on first-party targets). Edition 2024 and pyo3 0.27 go
+# together: the sources use let chains and the pyo3 0.27 signatures
+# (`FromPyObject<'a, 'py>`, `Bound::cast`), and pyo3 0.26 does not compile
+# under edition 2024.
+edition = "2024"
+publish = false
+
+[lib]
+name = "_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+cxx = "1.0"
+pyo3 = { version = "0.27", features = ["extension-module"] }
+
+[build-dependencies]
+cc = "1.2"
+cxx-build = "1.0"
+pyo3-build-config = "0.27"
+
+# Edition 2024 turns `unsafe_op_in_unsafe_fn` on: an unsafe operation in an
+# `unsafe fn` then needs an `unsafe {}` block of its own. The executor's unsafe
+# fns are FFI calls and raw-pointer reads from end to end (about 730 sites), so
+# a block around each body would mark nothing; the lint stays as it was under
+# edition 2021. `warnings` is lowered in priority so that this override wins.
+[lints.rust]
+warnings = { level = "deny", priority = -1 }
+unsafe_op_in_unsafe_fn = "allow"
+
+# module_inception is inherent to the cxx::bridge pattern (a `mod ffi` inside
+# bindings/ffi.rs); cxx rejects an attribute-level allow on the bridge, so
+# suppress it here. `all` is lowered in priority so this specific override wins.
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+module_inception = "allow"
