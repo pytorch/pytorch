@@ -162,6 +162,10 @@ namespace c10::xpu {
   /* the maximum bus width between device and memory in bits. */              \
   _(memory_bus_width, memory_bus_width, 0)                                    \
                                                                               \
+  /* the PCI address of the device as "domain:bus:slot.function", empty when  \
+   * the device does not report one. */                                       \
+  _(pci_address, pci_address, std::string())                                  \
+                                                                              \
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES_XE(_)
 
 #define AT_FORALL_XPU_DEVICE_ASPECT(_)                  \
