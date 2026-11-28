@@ -59,6 +59,8 @@ from torch.utils._debug_mode._calls import (
 from torch.utils._debug_mode._utils import (
     _compute_rel_diff,
     _get_user_stack_trace,
+    _is_functional_collective,
+    _is_wait_op,
     _run_dispatch_hooks,
     _run_dispatch_pre_log_hooks,
     _stringify_dtensor_spec,
@@ -743,6 +745,10 @@ class DebugMode(TorchDispatchMode):
         hash_inputs: if True, also hashes tensors in (args, kwargs), storing them in "input_hash".
         Input hashes are captured before the operation executes, so they reflect the state before
         any in-place mutations.
+
+        Among functional collectives (_c10d_functional, _c10d_functional_autograd), only the outputs of
+        wait_tensor(s) are hashed. All other inputs and outputs are skipped, since they are in flight
+        or uninitialized (out/recv buffers) until the wait.
         """
 
         def hash_fn_option(hash_type):
@@ -779,7 +785,7 @@ class DebugMode(TorchDispatchMode):
             if "empty" in str(func) or "profiler" in str(func):
                 return None
 
-            if hash_inputs:
+            if hash_inputs and not _is_functional_collective(func):
                 # Capture input hashes before the operation
                 input_hash = _tree_hash((args, kwargs))
                 if not tree_all(lambda x: x is None, input_hash):
@@ -789,6 +795,9 @@ class DebugMode(TorchDispatchMode):
         def _dispatch_post_hook(func, types, args, kwargs, result):
             """Post-hook to capture output hashes after operation executes"""
             if "empty" in str(func) or "profiler" in str(func):
+                return None
+
+            if _is_functional_collective(func) and not _is_wait_op(func):
                 return None
 
             out = {}
