@@ -8920,6 +8920,25 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         for batch, (m, n) in product(batches, product(ns, ns)):
             run_test((*batch, m, n))
 
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    def test_geqrf_out_empty_strides(self, device):
+        for shape, strides in (
+            ((5, 0), (1, 1)),
+            ((0, 5), (5, 1)),
+            ((0, 5, 5), (25, 5, 1)),
+        ):
+            input = torch.empty(shape, device=device)
+            qr = torch.empty_strided(shape, strides, device=device)
+            tau_shape = (*shape[:-2], min(shape[-2:]))
+            tau = torch.empty(tau_shape, device=device)
+            tau_strides = tau.stride()
+            result = torch.geqrf(input, out=(qr, tau))
+            self.assertIs(result[0], qr)
+            self.assertIs(result[1], tau)
+            self.assertEqual(qr.stride(), strides)
+            self.assertEqual(tau.stride(), tau_strides)
+
     @skipCPUIfNoLapack
     def test_lapack_empty(self, device):
         # FIXME: these are just a selection of LAPACK functions -- we need a general strategy here.
