@@ -418,7 +418,29 @@ pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
-post_grad_fusion_options: dict[str, dict[str, Any]] = {}
+# batch_linear_lhs is enabled by default on XPU with static split widths.
+# Assign a merged dict to keep these defaults; assigning a new dict replaces
+# them. Keys: devices (device types or torch.device), min_fuse_set_size,
+# static_widths_only, max_fuse_tensor_bytes_batch_linear_lhs (max fused weight
+# bytes plus copies for returned outputs), and skip_user_visible (skip
+# projections whose outputs reach the graph output; enabled in the shipped
+# default). All keys live only in the shipped entry: a partial
+# batch_linear_lhs dict drops the unset keys (devices, static_widths_only,
+# skip_user_visible, and the cap), so a partial opt-in can fuse on every device.
+# A group whose fused bytes are not statically known is declined under a cap.
+# The devices key is consumed by the graph-level group/batch fusion filter;
+# other post-grad pattern passes that read post_grad_fusion_options directly do
+# not consume it. Only batch_linear_lhs additionally checks it per node. Device
+# indices are ignored at graph level.
+post_grad_fusion_options: dict[str, dict[str, Any]] = {
+    "batch_linear_lhs": {
+        "devices": ("xpu",),
+        "min_fuse_set_size": 2,
+        "static_widths_only": True,
+        "max_fuse_tensor_bytes_batch_linear_lhs": 4 << 20,
+        "skip_user_visible": True,
+    },
+}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
