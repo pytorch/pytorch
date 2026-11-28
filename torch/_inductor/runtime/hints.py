@@ -341,6 +341,7 @@ class InductorMeta(typing.TypedDict, total=False):
     force_disable_caches: bool
     dynamic_scale_rblock: bool
     incremental_autotune: bool
+    incremental_autotune_reduction: bool
     incremental_autotune_max_dispatches: int
     max_autotune: bool
     max_autotune_pointwise: bool

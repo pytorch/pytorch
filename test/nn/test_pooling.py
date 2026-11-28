@@ -1661,6 +1661,56 @@ torch.{device_type}.synchronize()
         helper(4, 8, 7, 7, 7, 3, padding=1, stride=1)
         helper(2, 16, 10, 10, 10, 3, stride=2)
 
+    @skipXPUIf(True, "For CUDA and MPS only")
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
+    @parametrize_test("layout", ["contiguous", "unbatched", "channels_last"])
+    @parametrize_test(
+        "pool_args",
+        [
+            subtest((2, 2, 0, 1, False), name="single_window"),
+            subtest((3, 1, 1, 1, False), name="overlapping"),
+            subtest((2, 3, 0, 1, False), name="gaps"),
+            subtest((2, 2, 0, 2, True), name="dilated_ceil"),
+        ],
+    )
+    @parametrize_test("grad_value", [0, 1])
+    def test_max_pool2d_backward_out_initializes(
+        self, device, dtype, layout, pool_args, grad_value
+    ):
+        shape = (3, 5, 7) if layout == "unbatched" else (2, 3, 5, 7)
+        memory_format = (
+            torch.channels_last
+            if layout == "channels_last"
+            else torch.contiguous_format
+        )
+        input = torch.arange(math.prod(shape), device=device, dtype=dtype).reshape(
+            shape
+        )
+        input = input.contiguous(memory_format=memory_format)
+        kernel_size, stride, padding, dilation, ceil_mode = pool_args
+        output, indices = F.max_pool2d(input, *pool_args, return_indices=True)
+        grad_output = torch.full_like(output, grad_value)
+        grad_input = torch.full_like(input, nan, memory_format=memory_format)
+
+        ref_input = input.cpu().detach().requires_grad_()
+        ref_output = F.max_pool2d(ref_input, *pool_args)
+        ref_output.backward(torch.full_like(ref_output, grad_value))
+        self.assertTrue((ref_input.grad == 0).any())
+
+        actual = torch.ops.aten.max_pool2d_with_indices_backward.grad_input(
+            grad_output,
+            input,
+            [kernel_size, kernel_size],
+            [stride, stride],
+            [padding, padding],
+            [dilation, dilation],
+            ceil_mode,
+            indices,
+            grad_input=grad_input,
+        )
+        self.assertEqual(actual.data_ptr(), grad_input.data_ptr())
+        self.assertEqual(actual, ref_input.grad)
+
     @onlyAccelerator
     @gcIfJetson
     def test_max_pool2d(self, device):
@@ -1685,7 +1735,6 @@ torch.{device_type}.synchronize()
         helper(1, 100000, 32, 32, ks=4)
         helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
 
-    @expectedFailureMPS  # TODO: Fixme
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfXPU(torch.half, torch.bfloat16, torch.float, torch.double)
@@ -1928,7 +1977,6 @@ torch.{device_type}.synchronize()
             helper((2, 1, 3, 3, 3), (1, 1, 1), contig)
 
     @dtypes(torch.float, torch.double)
-    @expectedFailureMPS  # test_pooling_max_nhwc currently fails on MPS - ISSUE#
     def test_pooling_max_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride, padding, dilation, contig, device):
             output_height = math.floor(
@@ -2700,6 +2748,29 @@ class TestPoolingNNCudaOnly(NNTestCase):
 
 class TestPoolingNNMpsOnly(NNTestCase):
     hw_classification = HardwareClassification.MPS
+
+    @parametrize_test("step", [1, 2])
+    def test_max_pool2d_empty_dilated_window(self, device, step):
+        x = torch.ones((1, 1, 2, 4), device=device)[:, :, :1, ::step].requires_grad_()
+        args = ((2, 1), (1, 1), (1, 0), (2, 1))
+        output, indices = F.max_pool2d(x, *args, return_indices=True)
+        self.assertEqual(output, torch.full_like(output, -inf))
+        cpu_indices = F.max_pool2d(x.detach().cpu(), *args, return_indices=True)[1]
+        self.assertEqual(indices, cpu_indices)
+        zeros = torch.zeros_like(x)
+        self.assertEqual(torch.autograd.grad(output.sum(), x)[0], zeros)
+        recomputed = F.max_pool2d(x, *args)
+        self.assertEqual(torch.autograd.grad(recomputed.sum(), x)[0], zeros)
+
+    @parametrize_test("return_indices", [False, True])
+    def test_max_pool2d_empty_width_window(self, device, return_indices):
+        x = torch.ones((1, 1, 2, 1), device=device, requires_grad=True)
+        result = F.max_pool2d(
+            x, (2, 2), 1, (0, 1), (1, 2), return_indices=return_indices
+        )
+        output = result[0] if return_indices else result
+        self.assertEqual(output, torch.full_like(output, -inf))
+        self.assertEqual(torch.autograd.grad(output.sum(), x)[0], torch.zeros_like(x))
 
     # Max: verify against unfold+amax. (Avg int is implementation-defined.)
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)

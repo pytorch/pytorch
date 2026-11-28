@@ -106,6 +106,12 @@ struct LUSmallInvParams {
   index_t X_cstride;
 };
 
+// lu_solve walks the factor in diagonal tiles of this many rows.
+C10_METAL_CONSTEXPR uint32_t kLUSolveTS = 32;
+// Tail tiles up to this many rows use trsmDiagSolveLU's direct instantiation.
+// It skips tile padding but costs rows^2 per column: wins at 16, loses at 31.
+C10_METAL_CONSTEXPR uint32_t kLUSolveDirectMaxRows = kLUSolveTS / 2;
+
 // for LU streaming-panel kernels
 C10_METAL_CONSTEXPR unsigned kLUStreamNT = 256;
 C10_METAL_CONSTEXPR unsigned kLUStreamWarpsPerTG =
