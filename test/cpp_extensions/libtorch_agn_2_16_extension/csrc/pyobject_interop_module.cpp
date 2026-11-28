@@ -108,6 +108,13 @@ PyObject* int64_arrayref_roundtrip(PyObject* /*self*/, PyObject* obj) {
   });
 }
 
+PyObject* generator_roundtrip(PyObject* /*self*/, PyObject* obj) {
+  return call([&] {
+    return torch::stable::generator_to_pyobject(
+        torch::stable::generator_from_pyobject(obj));
+  });
+}
+
 PyMethodDef methods[] = {
     {"layout_roundtrip", layout_roundtrip, METH_O, nullptr},
     {"tensor_layout", tensor_layout, METH_O, nullptr},
@@ -152,6 +159,11 @@ PyMethodDef methods[] = {
      METH_O,
      nullptr},
     {"int64_arrayref_roundtrip", int64_arrayref_roundtrip, METH_O, nullptr},
+    {"generator_roundtrip", generator_roundtrip, METH_O, nullptr},
+    {"optional_generator_roundtrip",
+     roundtrip<std::optional<torch::stable::Generator>>,
+     METH_O,
+     nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyModuleDef moduledef = {

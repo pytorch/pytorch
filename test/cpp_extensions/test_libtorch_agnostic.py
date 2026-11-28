@@ -999,6 +999,45 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(RuntimeError, "out of range"):
             libtorch_agnostic._interop.double_list_roundtrip(values)
 
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_generator_shares_state(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        class GeneratorSubclass(torch.Generator):
+            pass
+
+        interop = libtorch_agnostic._interop
+        for g in (torch.Generator(), GeneratorSubclass()):
+            g.manual_seed(0)
+            out = interop.generator_roundtrip(g)
+            self.assertIsInstance(out, torch.Generator)
+            # The RNG state is shared, not cloned: drawing from one advances both.
+            torch.rand(4, generator=out)
+            self.assertEqual(out.get_state(), g.get_state())
+            out.manual_seed(123)
+            self.assertEqual(g.initial_seed(), 123)
+            # A generator that already has a Python object maps back to it.
+            self.assertIs(interop.generator_roundtrip(out), out)
+        self.assertIsNone(interop.optional_generator_roundtrip(None))
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @skipIfTorchDynamo("Dynamo intercepts the spoofed __class__")
+    def test_pyobject_generator_rejects(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        class PretendGenerator:
+            @property
+            def __class__(self):
+                return torch.Generator
+
+        obj = PretendGenerator()
+        self.assertIsInstance(obj, torch.Generator)
+        for value in (obj, None, 0):
+            with self.assertRaisesRegex(RuntimeError, "expected torch.Generator"):
+                libtorch_agnostic._interop.generator_roundtrip(value)
+
     @skipIfTorchVersionLessThan(2, 16)
     @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
     def test_my_add(self, device):
