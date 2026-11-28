@@ -2983,6 +2983,76 @@ except RuntimeError as e:
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
+class TestSharedBatchPool(TestCase):
+    @parametrize("invalid", [(0, 16), (1, 0), (-1, 16), (True, 16), (1,), 16])
+    def test_invalid_capacity(self, invalid):
+        with self.assertRaisesRegex(ValueError, "pair of positive integers"):
+            DataLoader([0], shared_memory_pool=invalid)
+
+    def test_fallback_and_release(self):
+        from torch.utils.data._utils.shared_batch import _SharedBatch, SharedBatchPool
+
+        pool = SharedBatchPool(1, 16, mp.get_context())
+        samples = [torch.tensor([1, 2]), torch.tensor([3, 4])]
+        # A batch larger than the slot still has ordinary collation semantics.
+        self.assertEqual(pool.collate(samples), torch.stack(samples))
+        samples = [x.to(torch.int32) for x in samples]
+        batch = pool.collate(samples)
+        self.assertIsInstance(batch, _SharedBatch)
+        # The slot is still in use, so a second worker can proceed without it.
+        self.assertEqual(pool.collate(samples), torch.stack(samples))
+        with (
+            mock.patch(
+                "torch.empty_like",
+                side_effect=RuntimeError("pin failed"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "pin failed"),
+        ):
+            pool.pin(batch, "cuda")
+        with self.assertRaisesRegex(RuntimeError, "equal size"):
+            pool.collate([samples[0], samples[1][:1]])
+        with mock.patch.dict(
+            _utils.collate.default_collate_fn_map,
+            {torch.Tensor: lambda batch, *, collate_fn_map: "custom"},
+        ):
+            self.assertEqual(pool.collate(samples), "custom")
+        result = pool.collate(samples)
+        self.assertIsInstance(result, _SharedBatch)
+        expected = torch.stack(samples)
+        with mock.patch("torch.empty_like", return_value=torch.empty_like(expected)):
+            output = pool.pin(result, "cuda")
+        self.assertEqual(output, expected)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA pinning")
+    @parametrize("context", [c for c in supported_multiprocessing_contexts if c])
+    def test_delivery(self, context):
+        dataset = [
+            {
+                "x": torch.tensor([i], dtype=torch.uint8),
+                "y": torch.tensor(i + 1),
+                "id": str(i),
+            }
+            for i in range(9)
+        ]
+        loader = DataLoader(
+            dataset,
+            batch_size=2,
+            num_workers=2,
+            pin_memory=True,
+            multiprocessing_context=context,
+            persistent_workers=True,
+            shared_memory_pool=(2, 32),
+        )
+        first = next(iter(loader))
+        # Reset an iterator with outstanding prefetches, and include a short tail.
+        for batch, start in zip(loader, range(0, len(dataset), 2), strict=True):
+            ref = _utils.collate.default_collate(dataset[start : start + 2])
+            self.assertEqual(batch, ref)
+            self.assertTrue(batch["x"].is_pinned())
+            self.assertTrue(batch["y"].is_pinned())
+        self.assertEqual(first, _utils.collate.default_collate(dataset[:2]))
+
+
 class TestDataLoaderDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -4061,6 +4131,7 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertEqual(expected_data, data)
 
 
+instantiate_parametrized_tests(TestSharedBatchPool)
 instantiate_device_type_tests(TestDataLoaderDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestDataLoaderMultiProcessing)
 instantiate_device_type_tests(

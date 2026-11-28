@@ -207,6 +207,12 @@ class DataLoader(Generic[_T_co]):
             will be used as the device if ``pin_memory=True``.
         in_order (bool, optional): If ``False``, the data loader will not enforce that batches
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
+        shared_memory_pool (tuple of int, optional): A pair ``(slots, bytes_per_slot)``.
+            With CUDA pinning, multiprocessing and default collation, workers can
+            stack dense CPU Tensor batches or top-level Tensor fields of a plain
+            dictionary directly into reusable shared memory. Each iterator reserves
+            ``slots * bytes_per_slot`` bytes for the pool. Busy slots and fields
+            that do not fit use ordinary collation. Disabled by default.
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -248,6 +254,7 @@ class DataLoader(Generic[_T_co]):
     sampler: Sampler | Iterable
     pin_memory_device: str
     prefetch_factor: int | None
+    shared_memory_pool: tuple[int, int] | None = None
     _iterator: _BaseDataLoaderIter | None
     __initialized = False
 
@@ -271,6 +278,7 @@ class DataLoader(Generic[_T_co]):
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,
+        shared_memory_pool: tuple[int, int] | None = None,
     ) -> None:
         torch._C._log_api_usage_once("python.data_loader")
 
@@ -296,6 +304,13 @@ class DataLoader(Generic[_T_co]):
         if persistent_workers and num_workers == 0:
             raise ValueError("persistent_workers option needs num_workers > 0")
 
+        if shared_memory_pool is not None and (
+            not isinstance(shared_memory_pool, tuple)
+            or len(shared_memory_pool) != 2
+            or any(type(n) is not int or n <= 0 for n in shared_memory_pool)
+        ):
+            raise ValueError("shared_memory_pool must be a pair of positive integers")
+        self.shared_memory_pool = shared_memory_pool
         self.dataset = dataset
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
@@ -1117,6 +1132,18 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         else:
             multiprocessing_context = loader.multiprocessing_context
 
+        pool = None
+        if (
+            loader.shared_memory_pool is not None
+            and self._pin_memory_device == "cuda"
+            and self._auto_collation
+            and self._collate_fn is _utils.collate.default_collate
+        ):
+            from ._utils.shared_batch import SharedBatchPool
+
+            pool = SharedBatchPool(*loader.shared_memory_pool, multiprocessing_context)
+            self._collate_fn = pool.collate
+
         self._worker_init_fn = loader.worker_init_fn
 
         # Adds forward compatibilities so classic DataLoader can work with DataPipes:
@@ -1202,6 +1229,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     current_device_id,
                     self._pin_memory_thread_done_event,
                     self._pin_memory_device,
+                    pool,
                 ),
             )
             pin_memory_thread.daemon = True
