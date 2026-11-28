@@ -21,6 +21,7 @@ import random
 import re
 import sys
 import time
+import traceback
 import types
 import typing
 import unittest
@@ -335,6 +336,334 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
             self.assertEqual([compiled(x, p) for p in cases], [fn(x, p) for p in cases])
         self.assertEqual(counter.frame_count, 2)
+
+    def _check_defaulted_attribute_invalidation(self, obj, mutate, *, reads=0):
+        def fn(x, obj):
+            return x + getattr(obj, "scale", 1), obj.reads
+
+        obj.reads = 0
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x, obj), (x + 1, reads))
+        self.assertEqual(counter.frame_count, 1)
+        obj.reads = 0
+        mutate()
+        self.assertEqual(compiled(x, obj), (x + 3, 0))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize(
+        "kind, destination",
+        [
+            (kind, dst)
+            for kind in ("plain", "getattr", "getattribute")
+            for dst in ("instance", "class", "base")
+        ]
+        + [
+            ("slot", "instance"),
+            ("slot_getattr", "instance"),
+            ("module", "instance"),
+            ("module", "registry"),
+        ],
+    )
+    def test_defaulted_attribute_absence_invalidation(self, kind, destination):
+        class Base:
+            __slots__ = ()
+
+        class Input(Base):
+            if kind.startswith("slot"):
+                __slots__ = ("scale", "reads")
+            if kind in ("getattr", "slot_getattr"):
+
+                def __getattr__(self, name):
+                    if name == "scale":
+                        self.reads += 1
+                    raise AttributeError(name)
+            elif kind == "getattribute":
+
+                def __getattribute__(self, name):
+                    return super().__getattribute__(name)
+
+        obj = torch.nn.Identity() if kind == "module" else Input()
+
+        def mutate():
+            if destination == "registry":
+                obj.register_buffer("scale", torch.tensor(3))
+            else:
+                target = {"instance": obj, "class": Input, "base": Base}[destination]
+                target.scale = 3
+
+        reads = int(kind in ("getattr", "slot_getattr"))
+        self._check_defaulted_attribute_invalidation(obj, mutate, reads=reads)
+
+    @parametrize("kind", ["metadata", "dict_property", "bases"])
+    def test_defaulted_attribute_type_invalidation(self, kind):
+        class Meta(type):
+            if kind == "metadata":
+
+                def __getattribute__(cls, name):
+                    if name == "__dictoffset__":
+                        return 0
+                    return super().__getattribute__(name)
+
+        class Base:
+            pass
+
+        class Input(Base, metaclass=Meta):
+            if kind == "dict_property":
+
+                @property
+                def __dict__(self):
+                    raise AttributeError("__dict__")
+
+        class Other:
+            scale = 3
+
+        obj = Input()
+
+        def mutate():
+            if kind == "bases":
+                Input.__bases__ = (Base, Other)
+            else:
+                (obj if kind == "metadata" else Input).scale = 3
+
+        self._check_defaulted_attribute_invalidation(obj, mutate)
+
+    @parametrize("replace_dict", [False, True])
+    def test_defaulted_attribute_deleted_while_tracing(self, replace_dict):
+        class Input:
+            pass
+
+        def fn(x, obj):
+            if replace_dict:
+                obj.__dict__ = {}
+            else:
+                del obj.scale
+            return x + getattr(obj, "scale", 1)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x, obj = torch.ones(1), Input()
+        obj.scale = 3
+        self.assertEqual(compiled(x, obj), x + 1)
+        self.assertFalse(hasattr(obj, "scale"))
+        self.assertEqual(counter.frame_count, 1)
+        obj.scale = Input.scale = 3
+        self.assertEqual(compiled(x, obj), x + 3)
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("on_class", [False, True])
+    def test_defaulted_getattr_lazy_result(self, on_class):
+        class Input:
+            pass
+
+        def fn(x, obj):
+            return x + 1, getattr(obj, "tag", "fallback")
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x, obj = torch.ones(1), Input()
+        owner = Input if on_class else obj
+        for tag in ("a", "b"):
+            owner.tag = tag
+            self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 1)
+        del owner.tag
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_sourceless_custom_metaclass_attribute_invalidation(self):
+        class Meta(type):
+            def __getattribute__(cls, name):
+                return 99 if name == "tag" else super().__getattribute__(name)
+
+        class Input(metaclass=Meta):
+            pass
+
+        def fn(x):
+            return x + getattr(Input(), "tag", 1)
+
+        x = torch.ones(1)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x), x + 1)
+        Input.tag = 7
+        self.assertEqual(compiled(x), x + 7)
+        self.assertEqual(counter.frame_count, 2)
+        Input.tag = 8
+        self.assertEqual(compiled(x), x + 8)
+        frames = counter.frame_count
+        del Input.tag
+        self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(counter.frame_count, frames)
+
+    def test_missing_attribute_does_not_repeat_source_getter(self):
+        watching = False
+        reads = []
+
+        class Holder:
+            def __getattribute__(self, name):
+                if name == "value" and watching:
+                    reads.append(name)
+                return super().__getattribute__(name)
+
+        def toggle(_):
+            nonlocal watching
+            watching = not watching
+
+        def fn(x, holder):
+            value = holder.value
+            result = x + value
+            comptime(toggle)
+            try:
+                value.missing
+            except AttributeError:
+                pass
+            comptime(toggle)
+            return result
+
+        holder = Holder()
+        holder.value = 7
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, holder), x + 7
+        )
+        self.assertEqual(reads, [])
+
+    def test_called_weakref_attribute(self):
+        def fn(x, ref):
+            return x + ref(), hasattr(ref, "shape")
+
+        x = torch.ones(1)
+        referent = x + 2
+        self._check_reuse(fn, [weakref.ref(referent)], frames=1)
+
+    @parametrize(
+        "kind",
+        ["size", "pointer", "format", "weakref", "frame", "constant", "descriptor"],
+    )
+    def test_sourceless_missing_attribute(self, kind):
+        @torch._dynamo.assume_constant_result
+        def make_input():
+            return MyCls()
+
+        def fn(x):
+            if kind == "descriptor":
+                return x + 1, hasattr([].__len__, "__wrapped__")
+            if kind == "size":
+                obj = x.size(0)
+            elif kind == "pointer":
+                obj = x.data_ptr()
+            elif kind == "format":
+                obj = str.format("{}", x.size(0))
+            elif kind == "weakref":
+                obj = weakref.ref(x)
+            elif kind == "constant":
+                obj = make_input()
+            else:
+                try:
+                    raise ValueError
+                except ValueError as exc:
+                    obj = traceback.extract_tb(exc.__traceback__)[-1]
+            missing = hasattr(obj, "foo")
+            default = getattr(obj, "foo", 3)
+            try:
+                obj.foo
+            except AttributeError as error:
+                return (
+                    x + default,
+                    missing,
+                    error.name,
+                    kind != "constant" or error.obj is obj,
+                )
+
+        x = torch.ones(3)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    @parametrize("method", ["__getattr__", "__getattribute__", "replace", "value"])
+    @parametrize("inherited", [False, True])
+    @parametrize("slots", [None, (), ("value",)])
+    def test_defaulted_getattr_guards_lookup_hook(self, method, inherited, slots):
+        class Base:
+            __slots__ = ()
+
+        class Input(Base):
+            if slots is not None:
+                __slots__ = slots
+
+                def __iter__(self):
+                    return iter((1,))
+
+        def getter(self, key):
+            return 7 if key == "value" else object.__getattribute__(self, key)
+
+        def fn(x, obj):
+            default = getattr(obj, "value", 1)
+            if slots:
+                return x + default
+            try:
+                return x + obj.value, default, hasattr(obj, "value")
+            except AttributeError:
+                return x + default
+
+        obj, owner = Input(), Base if inherited else Input
+        if method == "replace":
+            method = "__getattribute__"
+            owner.__getattribute__ = object.__getattribute__
+        compiled, counter = self._check_reuse(fn, [obj], frames=1)
+        if method == "value":
+            Input.value = 7
+        else:
+            setattr(owner, method, getter)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("base_lookup", ["unbound", "super"])
+    def test_getattr_delegating_to_base_lookup(self, base_lookup):
+        class Box:
+            def __getattr__(self, name):
+                self.calls.append(name)
+                if name == "virtual":
+                    return 5
+                if base_lookup == "super":
+                    return super().__getattribute__(name)
+                return object.__getattribute__(self, name)
+
+        def fn(x, box):
+            return x + box.virtual, getattr(box, "missing", -1)
+
+        obj, x = Box(), torch.ones(1)
+        obj.calls = []
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), (x + 5, -1))
+        self.assertEqual(obj.calls, ["virtual", "missing"])
+        obj.missing = 7
+        obj.calls.clear()
+        self.assertEqual(compiled(x, obj), (x + 5, 7))
+        self.assertEqual(obj.calls, ["virtual"])
+
+    def test_defaulted_getattr_reads_property_once(self):
+        class Input:
+            reads = 0
+
+            @property
+            def value(self):
+                self.reads += 1
+                return self.reads
+
+        def fn(x, obj):
+            return x + getattr(obj, "value", 9), obj.reads
+
+        x, obj = torch.ones(1), Input()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for _ in range(2):
+            obj.reads = 0
+            self.assertEqual(compiled(x, obj), (x + 1, 1))
+            self.assertEqual(obj.reads, 1)
+        self.assertEqual(counter.frame_count, 1)
 
     def test_shared_mro_owner_base_replacement(self):
         class Base:

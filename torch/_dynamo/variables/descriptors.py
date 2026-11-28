@@ -280,6 +280,10 @@ class WrapperDescriptorVariable(DescriptorVariable):
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
         obj = obj.realize()
+        if self.descriptor is object.__getattribute__ and isinstance(
+            obj, UserDefinedObjectVariable
+        ):
+            return obj.call_base_method(tx, name, rest, kwargs)
         if name in ("__setattr__", "__delattr__"):
             setattr_hackcheck(tx, obj, self.descriptor)
         if self.descriptor is object.__eq__ and len(rest) == 1 and not kwargs:
@@ -333,6 +337,8 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
     PyWrapper_New which stores a reference to the descriptor and the instance.
     https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1450
     """
+
+    _cpython_type = types.MethodWrapperType
 
     _nonvar_fields = {
         "descriptor",
@@ -1553,6 +1559,8 @@ class PropertyVariable(VariableTracker):
     https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
     """
 
+    _cpython_type = property
+
     _nonvar_fields = {
         "descriptor",
         *VariableTracker._nonvar_fields,
@@ -1708,6 +1716,8 @@ class TupleGetterVariable(VariableTracker):
     https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2735
     https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2636-L2663
     """
+
+    _cpython_type = _collections._tuplegetter
 
     _nonvar_fields = {
         "descriptor",

@@ -58,6 +58,7 @@ from ..source import (
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
+    TypeSource,
     UnspecializedNNModuleSource,
 )
 from ..utils import (
@@ -80,6 +81,7 @@ from ..utils import (
 )
 from .base import (
     Method,
+    NO_SUCH_SUBOBJ,
     typestr,
     ValueAndAttributeMutationExisting,
     ValueMutationNew,
@@ -88,7 +90,13 @@ from .base import (
 from .functions import invoke_and_store_as_constant
 from .hashable import HashableTracker
 from .lazy import LazyVariableTracker
-from .object_protocol import generic_is_true
+from .object_protocol import (
+    generic_getitem,
+    generic_is_true,
+    mro_attr_source,
+    mro_lookup,
+    pysequence_contains,
+)
 from .user_defined import (
     can_guard_class_function_code,
     UserDefinedNNModuleHooksDictVariable,
@@ -552,7 +560,7 @@ class NNModuleVariable(VariableTracker):
     ) -> VariableTracker:
         from .builder import VariableBuilder
 
-        source = self.source and AttrSource(self.source, name)
+        source: Source | None = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
         # NB: We look up attributes in __dict__ directly, bypassing any custom
@@ -560,9 +568,6 @@ class NNModuleVariable(VariableTracker):
         # fallback (via _custom_getattr_fallback) for attributes not found here.
         base_dict = object.__getattribute__(base, "__dict__")
         object_member = True
-        all_class_attribute_names = set()
-        for x in inspect.getmro(base.__class__):
-            all_class_attribute_names.update(x.__dict__.keys())
 
         if not self.source:
             unimplemented(
@@ -577,25 +582,71 @@ class NNModuleVariable(VariableTracker):
         if name == "__dict__":
             return self.get_dict_vt(tx)
 
-        subobj = None
-        if name in base_dict:
-            subobj = base_dict[name]
-        elif (
-            "_modules" in base_dict
-            and name in base_dict["_modules"]
-            and name not in all_class_attribute_names
-        ):
-            subobj = base_dict["_modules"][name]
-        elif "_parameters" in base_dict and name in base_dict["_parameters"]:
-            subobj = base_dict["_parameters"][name]
-        elif "_buffers" in base_dict and name in base_dict["_buffers"]:
-            subobj = base_dict["_buffers"][name]
+        out = None
+        subobj = base_dict.get(name, NO_SUCH_SUBOBJ)
+        cls, cls_source = type(base), TypeSource(self.source)
+        class_attr = mro_lookup(cls, name)
+        if istype(class_attr, property):
+            # A property's AttributeError skips the instance dict and invokes __getattr__.
+            attr_source = mro_attr_source(tx, cls, cls_source, name, raw_metadata=True)
+            prop = VariableTracker.build(tx, class_attr, attr_source, realize=True)
+            getter = prop.tp_getattro_impl(tx, "fget").realize()
+            if not getter.is_constant_none():
+                try:
+                    return getter.call_function(tx, [self], {})
+                except ObservedAttributeError:
+                    handle_observed_exception(tx)
+            hook = mro_lookup(cls, "__getattr__")
+            hook_source = mro_attr_source(
+                tx, cls, cls_source, "__getattr__", raw_metadata=True
+            )
+            fallback = VariableTracker.build(tx, hook, hook_source, realize=True)
+            if hook is not torch.nn.Module.__getattr__:
+                if hasattr(type(hook), "__get__"):
+                    fallback = fallback.tp_descr_get_impl(
+                        tx, self, VariableTracker.build(tx, cls, cls_source)
+                    )
+                return fallback.call_function(tx, [VariableTracker.build(tx, name)], {})
+            subobj = NO_SUCH_SUBOBJ
+        elif subobj is NO_SUCH_SUBOBJ and class_attr is not NO_SUCH_SUBOBJ:
+            subobj = class_attr
+            object_member = False
         else:
-            try:
-                subobj = inspect.getattr_static(base, name)
-                object_member = False
-            except AttributeError:
-                # see if we can fallback to __getattr__, which is not checked by getattr_static
+            # A new property would take precedence over the instance dict or registry.
+            attr_source = mro_attr_source(tx, cls, cls_source, name, raw_metadata=True)
+            if attr_source is not None:
+                install_guard(attr_source.make_guard(GuardBuilder.TYPE_MATCH))
+        if subobj is NO_SUCH_SUBOBJ:
+            for field in ("_parameters", "_buffers", "_modules"):
+                if field not in base_dict:
+                    continue
+                registry = base_dict[field]
+                registry_source = AttrSource(self.source, field)
+                if not istype(registry, (dict, collections.OrderedDict)):
+                    # Keep stored tensors on the module while tracing the registry's lookup.
+                    specialized_source = NNModuleSource(registry_source)
+                    mapping = VariableBuilder(tx, specialized_source)(registry)
+                    key = VariableTracker.build(tx, name)
+                    if pysequence_contains(tx, mapping, key).as_python_constant():
+                        out = generic_getitem(tx, mapping, key)
+                        break
+                    continue
+                present = name in registry
+                guard = (
+                    GuardBuilder.DICT_CONTAINS
+                    if present
+                    else GuardBuilder.DICT_NOT_CONTAINS
+                )
+                install_guard(
+                    registry_source.make_guard(GuardBuilder.TYPE_MATCH),
+                    registry_source.make_guard(functools.partial(guard, key=name)),
+                )
+                if present:
+                    subobj = registry[name]
+                    if istype(class_attr, property):
+                        source = DictGetItemSource(registry_source, name)
+                    break
+            else:
                 result = self._custom_getattr_fallback(
                     base=base, tx=tx, name=name, obj_source=self.source
                 )
@@ -619,7 +670,8 @@ class NNModuleVariable(VariableTracker):
             guard_to_detect_forward_monkeypatching(self.source, base)
 
         if object_member:
-            out = VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
+            if out is None:
+                out = VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
 
             if isinstance(out, (NNModuleVariable, UnspecializedNNModuleVariable)):
                 # nn_module_stack source is BC surface area. Ensure that
@@ -631,18 +683,7 @@ class NNModuleVariable(VariableTracker):
             return out
 
         else:
-            if istype(subobj, property):
-                if self.source:
-                    # Read the class attribute to reach the property
-                    source = AttrSource(AttrSource(self.source, "__class__"), name)
-                    # Get the getter function
-                    source = AttrSource(source, "fget")
-                # A builder would eagerly resolve this source through the metaclass.
-                return VariableBuilder.create_internal_user_function(
-                    subobj.fget,  # pyrefly: ignore[bad-argument-type]
-                    source=source,
-                ).call_function(tx, [self], {})
-            elif istype(subobj, classmethod):
+            if istype(subobj, classmethod):
                 return variables.UserMethodVariable(
                     VariableBuilder.create_internal_user_function(
                         subobj.__func__,
@@ -1674,7 +1715,13 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> VariableTracker | None:
         dict_vt = self.tp_getattro_impl(tx, field)
         if isinstance(dict_vt, variables.ConstDictVariable):
-            return dict_vt.maybe_getitem_const(name_vt)
+            result = dict_vt.maybe_getitem_const(name_vt)
+            if result is None:
+                # Successful lookups guard the sourced value; misses need a presence guard.
+                dict_vt.install_dict_contains_guard(
+                    tx, HashableTracker(name_vt), key_present=False
+                )
+            return result
         return None
 
     def tp_getattro_impl(
@@ -1832,9 +1879,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         name_vt = SourcelessBuilder.create(tx, name)
         out = self.getattr_helper(tx, "_parameters", name_vt)
         if out is None:
-            out = self.getattr_helper(tx, "_modules", name_vt)
-        if out is None:
             out = self.getattr_helper(tx, "_buffers", name_vt)
+        if out is None:
+            out = self.getattr_helper(tx, "_modules", name_vt)
         if out is None:
             raise_observed_exception(
                 AttributeError,

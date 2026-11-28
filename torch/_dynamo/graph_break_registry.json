@@ -7643,5 +7643,16 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB4121": [
+    {
+      "Gb_type": "Cannot reconstruct a live container iterator",
+      "Context": "reason",
+      "Explanation": "Rebuilding the iterator could change its backing container or the mutations it observes.",
+      "Hints": [
+        "Consume the iterator before returning or reaching a graph break, or create it outside torch.compile.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
