@@ -143,6 +143,60 @@ inline void* memory_format_to_pyobject(
   return raw;
 }
 
+// Read a Python bool (PyObject* passed as void*). Only True and False are
+// accepted; NumPy booleans and general truthiness conversions are rejected.
+inline bool bool_from_pyobject(void* py_obj) {
+  bool ret = false;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_bool_from_pyobject(py_obj, &ret));
+  return ret;
+}
+
+// Wrap a bool as a new-reference Python bool.
+inline void* bool_to_pyobject(bool value) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_bool_to_pyobject(value, &raw));
+  return raw;
+}
+
+// Read a Python int or subclass (PyObject* passed as void*) as an int64_t.
+// NumPy integer scalars are also accepted when runtime NumPy support is
+// available and unpacking succeeds. bool and values outside the int64_t range
+// are rejected; an unrelated __index__ method alone does not pass the type
+// gate.
+inline int64_t int64_from_pyobject(void* py_obj) {
+  int64_t ret = 0;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_int64_from_pyobject(py_obj, &ret));
+  return ret;
+}
+
+// Wrap an int64_t as a new-reference Python int.
+inline void* int64_to_pyobject(int64_t value) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_int64_to_pyobject(value, &raw));
+  return raw;
+}
+
+// Read a Python float, int or subclass (PyObject* passed as void*) as a double,
+// including bool (True becomes 1.0). With runtime NumPy support, NumPy boolean,
+// integer, floating and complex scalars are accepted if float conversion
+// succeeds. NumPy complex conversion discards the imaginary part and can emit
+// ComplexWarning; promoting that warning to an exception makes conversion fail.
+// This uses PythonArgParser's builtin/NumPy scalar check-and-unpack policy, not
+// its Tensor or symbolic-number conveniences. Builtin complex and unrelated
+// objects with only __float__ or __index__ methods are rejected.
+inline double double_from_pyobject(void* py_obj) {
+  double ret = 0;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_double_from_pyobject(py_obj, &ret));
+  return ret;
+}
+
+// Wrap a double as a new-reference Python float.
+inline void* double_to_pyobject(double value) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_double_to_pyobject(value, &raw));
+  return raw;
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 HIDDEN_NAMESPACE_END(torch, stable)

@@ -69,9 +69,17 @@ which will handle all the rough edges of the C API for the user.
 - `device_from_pyobject` / `device_to_pyobject`: `torch.device` <-> `torch::stable::Device`
 - `layout_from_pyobject` / `layout_to_pyobject`: `torch.layout` <-> `torch::headeronly::Layout`
 - `memory_format_from_pyobject` / `memory_format_to_pyobject`: `torch.memory_format` <-> `torch::headeronly::MemoryFormat`
+- `bool_from_pyobject` / `bool_to_pyobject`: `bool` (only `True` or `False`) <-> `bool`
+- `int64_from_pyobject` / `int64_to_pyobject`: `int` (not `bool`; values outside the `int64_t` range raise) <-> `int64_t`
+- `double_from_pyobject` / `double_to_pyobject`: `float` or `int` <-> `double`
 - `is_tensor_pyobject`: whether a Python object's actual type is `torch.Tensor`
   or a subclass; overridden `__class__` attributes are ignored, as in
   `tensor_from_pyobject`
+
+`int64_from_pyobject` uses `THPUtils_checkLong` / `THPUtils_unpackLong`, and
+`double_from_pyobject` uses `THPUtils_checkDouble` / `THPUtils_unpackDouble`.
+NumPy scalar acceptance additionally depends on the runtime build's NumPy
+support and on the corresponding unpack operation succeeding.
 
 The helpers above that translate through the stable enum mappings
 can only cover the subset of types that have stable encodings. E.g.,
@@ -80,6 +88,11 @@ would raise an error, while all `torch.layout` types are supported.
 
 Like the rest of the stable ABI, an extension using them can just link
 `libtorch`.
+
+The helpers report failures as C++ exceptions. When the failure comes from
+CPython itself (for example an `int` too large for a `double`), its Python
+exception is also left set, so a Python-facing function can propagate it by
+returning `NULL`; call `PyErr_Clear()` if you handle the C++ exception instead.
 
 Unlike the rest of the stable ABI, they require `libtorch_python` to be loaded at
 runtime and must be called with the GIL held. If you call them from a context that

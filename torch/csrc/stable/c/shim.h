@@ -407,6 +407,33 @@ AOTI_TORCH_EXPORT AOTITorchError torch_memory_format_to_pyobject(
     int32_t memory_format,
     void** ret); // returns new reference
 
+// Read a Python bool. Only True and False are accepted.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_bool_from_pyobject(void* py_obj, bool* ret);
+
+// Wrap a bool as a Python bool.
+AOTI_TORCH_EXPORT AOTITorchError torch_bool_to_pyobject(
+    bool value,
+    void** ret); // returns new reference
+
+// Read a Python int (not bool) as an int64_t; errors if it is out of range.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_int64_from_pyobject(void* py_obj, int64_t* ret);
+
+// Wrap an int64_t as a Python int.
+AOTI_TORCH_EXPORT AOTITorchError torch_int64_to_pyobject(
+    int64_t value,
+    void** ret); // returns new reference
+
+// Read a Python float or int as a double.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_double_from_pyobject(void* py_obj, double* ret);
+
+// Wrap a double as a Python float.
+AOTI_TORCH_EXPORT AOTITorchError torch_double_to_pyobject(
+    double value,
+    void** ret); // returns new reference
+
 // Reads an integer from at::cpu::get_cpu_capabilities().
 // Key is borrowed and NUL-terminated. Outputs are caller-owned.
 // A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
