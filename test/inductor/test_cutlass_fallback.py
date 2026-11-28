@@ -12,6 +12,7 @@ from torch._inductor.select_algorithm import AlgorithmSelectorCache, ExternKerne
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_caches
 from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
@@ -33,6 +34,8 @@ def _get_path_without_sccache() -> str:
 
 class TestCutlassFallback(TestCase):
     """Tests for CUTLASS fallback behavior when benchmarks fail."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         if not HAS_CUDA_AND_TRITON:
@@ -222,6 +225,8 @@ class TestCutlassFallback(TestCase):
 
 class TestCutlassSubprocessRouting(TestCase):
     """Tests for CUTLASS subprocess benchmarking routing and error recovery."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_cutlass_forces_subprocess_benchmarking(self):
         """make_benchmark_fn routes to subprocess when CUTLASS choices are present."""

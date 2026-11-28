@@ -11,6 +11,7 @@ from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import ensure_cute_available
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -22,6 +23,8 @@ from torch.testing._internal.common_utils import (
 )
 @instantiate_parametrized_tests
 class TestCuTeDSLGroupedGemm(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _get_inputs(
         self,
         group_size: int,
