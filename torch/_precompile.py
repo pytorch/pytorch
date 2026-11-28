@@ -2198,9 +2198,12 @@ def _op_registration(
         owners = (m for m in modules if m and any(v is op for v in vars(m).values()))
         module = next((m.__name__ for m in owners), None)
     if module is None:
-        module = _custom_op_module(op_name, overload) or _library_op_module(
-            op_name, overload, file_modules
-        )
+        from torch._library.custom_ops import OPDEFS
+
+        qualname = f"{op_name}.{overload}" if overload else op_name
+        module = _custom_op_module(op_name, overload)
+        if module is None and qualname not in OPDEFS:
+            module = _library_op_module(op_name, overload, file_modules)
         # A prim another module makes with _make_prim is registered from torch._prims.
         if ns == "prims" and module in _TORCH_PRIM_MODULES:
             module = None
@@ -2252,6 +2255,19 @@ def _custom_op_modules(
         paths = _kernel_paths(qualname)
         callers = kernel_callers(qualname)
         kernels = _kernel_modules(qualname, paths, callers, keys, file_modules)
+        if kind == "unrecorded":
+            from torch._library import custom_ops
+            from torch._library.custom_ops import OPDEFS
+
+            if opdef := OPDEFS.get(qualname):
+                default_kernel_path = os.path.realpath(custom_ops.__file__)
+                init_module = opdef._init_fn.__module__
+                kernels = {
+                    key: module
+                    for key, module in kernels.items()
+                    if os.path.realpath(paths[key]) != default_kernel_path
+                    or callers.get(key) == init_module
+                }
         modules.update(kernels.values())
         if kind == "module":
             modules.add(value)

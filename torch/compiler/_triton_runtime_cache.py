@@ -40,7 +40,7 @@ _VERSION = 1
 # produced; import still compares each entry byte for byte, so later compiles
 # into the same directory do not invalidate the mark.
 _READY = ".runtime_cache_bundle"
-_BINARY_SUFFIXES = (".cubin", ".hsaco", ".zebin")
+_BINARY_SUFFIXES = (".cubin", ".hsaco", ".zebin", ".spv")
 _NATIVE_SUFFIXES = (".so", ".pyd", ".dll", ".dylib")
 _AUTOTUNE_SUFFIX = ".autotune.json"
 
