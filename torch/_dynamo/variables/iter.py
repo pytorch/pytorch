@@ -1011,10 +1011,11 @@ class DictViewIterator(IteratorVariable):
             return None
 
         def guarded_type(var: VariableTracker) -> type | None:
-            if isinstance(var, variables.UserDefinedObjectVariable) and var.source:
-                guards = tx.output.guards.get_guards_for_source(var.source)
-                if any(g.create_fn is GuardBuilder.TYPE_MATCH for g in guards):
-                    return var.value_type
+            if var.source and any(
+                g.create_fn in (GuardBuilder.TYPE_MATCH, GuardBuilder.CLASS_MATCH)
+                for g in tx.output.guards.get_guards_for_source(var.source)
+            ):
+                return tx.output.source_types.get(var.source)
             return None
 
         # Stack reconstruction precedes replay of mutations to a live input.

@@ -26,11 +26,11 @@ from ..exc import (
     raise_observed_exception,
     raise_type_error,
     unimplemented,
+    unimplemented_identity,
 )
 from ..guards import (
     _method_identity_guards_filtered,
     _receiver_alias_pattern,
-    _untracked_method_identity,
     GuardBuilder,
     install_guard,
 )
@@ -326,7 +326,7 @@ def _bound_method_receiver(
         return tx.output.resolve_source_value(obj.source)
     receiver = obj.get_real_python_backed_value()
     if receiver is NO_SUCH_SUBOBJ or receiver is not obj.get_real_python_backed_value():
-        _untracked_method_identity(f"unstable receiver: {obj}", skip_frame=True)
+        unimplemented_identity(f"unstable receiver: {obj}", skip_frame=True)
     return receiver
 
 
@@ -454,7 +454,7 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
 
     def _check_identity_guards(self, tx: "InstructionTranslatorBase") -> None:
         if _method_identity_guards_filtered(tx):
-            _untracked_method_identity(f"slot-wrapper identity requires guards: {self}")
+            unimplemented_identity(f"slot-wrapper identity requires guards: {self}")
 
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         self._check_identity_guards(tx)
@@ -484,7 +484,7 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
 
                 same = vt_identity_compare(left, right)
                 if same is None:
-                    _untracked_method_identity(
+                    unimplemented_identity(
                         f"undecidable slot-wrapper identity: {self} {op} {other}"
                     )
                 equal = same.as_python_constant()
@@ -723,7 +723,7 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
 
     def get_id(self, tx: "InstructionTranslatorBase") -> int | None:
         if self.value is not None and _method_identity_guards_filtered(tx):
-            _untracked_method_identity("method identity requires wrapper guards")
+            unimplemented_identity("method identity requires wrapper guards")
         return super().get_id(tx)
 
     def has_fresh_container_receiver(self) -> bool:

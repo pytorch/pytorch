@@ -795,6 +795,16 @@
       "Hints": []
     }
   ],
+  "GB2282": [
+    {
+      "Gb_type": "Specialization-dependent super method error",
+      "Context": "dict.{name}",
+      "Explanation": "CPython specialization can change the receiver named in the argument error.",
+      "Hints": [
+        "Bind the method before calling it."
+      ]
+    }
+  ],
   "GB0050": [
     {
       "Gb_type": "Exception with bad expected type",
@@ -3378,9 +3388,9 @@
   ],
   "GB1551": [
     {
-      "Gb_type": "Builtin method operation requires identity guards",
+      "Gb_type": "Operation requires stable Python identity",
       "Context": "context",
-      "Explanation": "Dynamo cannot establish the stable receiver identity required by this operation.",
+      "Explanation": "Dynamo cannot preserve the object identity required by this operation.",
       "Hints": [
         "Pass the computed result as an input to the compiled function."
       ]
@@ -5574,16 +5584,6 @@
       ]
     }
   ],
-  "GB8756": [
-    {
-      "Gb_type": "Conversion of compile-time-only hash value",
-      "Context": "identity-dependent hash",
-      "Explanation": "An identity-dependent hash cannot be converted to a constant result.",
-      "Hints": [
-        "Compute the hash outside the compiled function."
-      ]
-    }
-  ],
   "GB9567": [
     {
       "Gb_type": "Unsupported descriptor on opaque class",
@@ -7621,6 +7621,16 @@
       "Explanation": "Dynamo cannot safely specialize this object's formatting behavior.",
       "Hints": [
         "Format this value outside the compiled region."
+      ]
+    }
+  ],
+  "GB2469": [
+    {
+      "Gb_type": "Tensor mutation after formatting",
+      "Context": "{node.op} {node.target}",
+      "Explanation": "Dynamo would reconstruct the string using the tensor's mutated value.",
+      "Hints": [
+        "Move tensor formatting outside the compiled region."
       ]
     }
   ],
