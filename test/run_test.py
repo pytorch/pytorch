@@ -2189,6 +2189,7 @@ def get_selected_tests(options) -> list[str]:
             "inductor/test_torchinductor",
             "inductor/test_aot_inductor",
             "inductor/test_torchinductor_dynamic_shapes",
+            "inductor/test_user_streams",
         ]
     if options.xpu:
         selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
