@@ -2,7 +2,6 @@
 
 import contextlib
 from concurrent.futures import Future
-from unittest import skipIf
 from unittest.mock import call, Mock, patch, PropertyMock
 
 import sympy
@@ -61,21 +60,21 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyAccelerator,
-    onlyCUDA,
     skipCUDAIf,
+    skipIf,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfMPS,
     skipIfXpu,
     subtest,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
+from torch.testing._internal.inductor_utils import HAS_TRITON, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -131,7 +130,10 @@ def _test_cases(device, dtype):
     return test_cases
 
 
-class TestScheduler(TestCase):
+@instantiate_parametrized_tests
+class TestSchedulerGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_why_no_fuse_names_are_lazy(self):
         node1 = Mock()
         node2 = Mock()
@@ -166,32 +168,6 @@ class TestScheduler(TestCase):
         snode = object.__new__(ExternKernelSchedulerNode)
         snode.node = node
         return snode
-
-    @skipIf(not HAS_GPU, "candidate_tilings is used by the GPU scheduling backends")
-    @inductor_config.patch({"triton.coalesce_tiling_analysis": False})
-    def test_candidate_tilings_cache_cleared_after_codegen(self):
-        # The cache is keyed on scheduler nodes; leaving entries behind keeps
-        # the compiled graph (and e.g. frozen constants) alive after compile.
-        def fn(x):
-            return x.t() + x
-
-        # Record the cache size after each codegen, before it is cleared, to
-        # check that the tiling analysis actually ran in this compile.
-        sizes_before_clear = []
-        orig_codegen = Scheduler._codegen
-
-        def codegen(self, *args, **kwargs):
-            out = orig_codegen(self, *args, **kwargs)
-            info = SIMDScheduling.candidate_tilings.cache_info()
-            sizes_before_clear.append(info.currsize)
-            return out
-
-        torch._dynamo.reset()
-        # A warm FX graph cache would skip scheduler codegen entirely.
-        with fresh_inductor_cache(), patch.object(Scheduler, "_codegen", codegen):
-            torch.compile(fn)(torch.randn(64, 64, device=GPU_TYPE))
-        self.assertGreater(max(sizes_before_clear, default=0), 0)
-        self.assertEqual(SIMDScheduling.candidate_tilings.cache_info().currsize, 0)
 
     def test_stable_topological_sort_schedule(self):
         consumer = self._mock_base_snode("consumer")
@@ -704,10 +680,9 @@ class TestScheduler(TestCase):
 
     def test_fuse_two_nodes_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
-        device = torch.device(GPU_TYPE, 0)
-        node1 = self._mock_base_snode("node1", device)
-        node2 = self._mock_base_snode("node2", device)
-        node3 = self._mock_base_snode("node3", device)
+        node1 = self._mock_base_snode("node1")
+        node2 = self._mock_base_snode("node2")
+        node3 = self._mock_base_snode("node3")
         node3.get_nodes.return_value = [node1, node2]
         backend = Mock()
         backend.fuse.return_value = node3
@@ -895,137 +870,6 @@ class TestScheduler(TestCase):
             result = nested._plan_fusion_with(other)
 
         self.assertIsNone(result)
-
-    @skipIfMPS  # MPS is filtered by _filter_nodes_for_combo_kernel_grouping
-    @inductor_config.patch(combo_kernel_max_num_nodes=16)
-    def test_combo_kernel_grouping_respects_mempool(self):
-        scheduler = Mock()
-        device = torch.device(GPU_TYPE, 0)
-        pool_node1 = self._mock_base_snode("pool_node1", device)
-        pool_node2 = self._mock_base_snode("pool_node2", device)
-        default_node = self._mock_base_snode("default_node", device)
-        other_pool_node = self._mock_base_snode("other_pool_node", device)
-        scheduler._topological_sort_nodes.return_value = [
-            [pool_node1, default_node, pool_node2, other_pool_node]
-        ]
-        scheduler.node_to_stream = {
-            pool_node1: 0,
-            pool_node2: 0,
-            default_node: 0,
-            other_pool_node: 0,
-        }
-        scheduler.get_node_stream.side_effect = scheduler.node_to_stream.__getitem__
-        scheduler.node_to_mempool = {
-            pool_node1: (7, 0),
-            pool_node2: (7, 0),
-            default_node: None,
-            other_pool_node: (8, 0),
-        }
-
-        groups = ForeachKernelSchedulerNode._default_group_nodes_for_combo_kernels(
-            scheduler
-        )
-
-        self.assertEqual(
-            groups, [[pool_node1, pool_node2], [default_node], [other_pool_node]]
-        )
-
-    @xfailIfNoAcceleratorTriton
-    @onlyCUDA
-    def test_fusion_memory_guard_rejects_in_torch_compile(self, device):
-        def fn(x, weight):
-            early = torch.mm(torch.sin(x).sum(dim=0)[None, :], weight)
-            late = torch.cos(x).sum(dim=0)
-            return early, late
-
-        x = torch.testing.make_tensor((1, 4096), device=device, dtype=torch.bool)
-        weight = torch.testing.make_tensor(
-            (4096, 1), device=device, dtype=torch.float32
-        )
-
-        def compile_and_measure(increase_gb, pct_threshold):
-            torch._dynamo.reset()
-            metrics.reset()
-            final_peaks = []
-            original_fuse_nodes = Scheduler.fuse_nodes
-
-            def fuse_nodes_and_record(scheduler, nodes):
-                nodes = original_fuse_nodes(scheduler, nodes)
-                buffer_to_step = {
-                    name: step
-                    for step, node in enumerate(nodes)
-                    for name in node.get_buffer_names()
-                }
-                for step, node in enumerate(nodes):
-                    for dep in node.unmet_dependencies:
-                        if dep.name in buffer_to_step:
-                            self.assertLessEqual(buffer_to_step[dep.name], step)
-                graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
-                graph_outputs = OrderedSet(V.graph.get_output_names())
-                freeable = inductor_memory.get_freeable_input_buf(nodes, graph_inputs)
-                inductor_memory.assign_memory_planning_info_for_scheduler_buffers(
-                    nodes, scheduler.name_to_buf
-                )
-                inductor_memory.assign_memory_planning_info_for_scheduler_nodes(
-                    nodes,
-                    scheduler.name_to_fused_node,
-                    scheduler.name_to_buf,
-                    freeable,
-                )
-                peak, _ = inductor_memory.estimate_peak_memory(
-                    nodes, freeable, graph_outputs
-                )
-                final_peaks.append(peak)
-                return nodes
-
-            with patch.object(Scheduler, "fuse_nodes", fuse_nodes_and_record):
-                compiled = torch.compile(
-                    fn,
-                    backend="inductor",
-                    fullgraph=True,
-                    options={
-                        "fx_graph_cache": False,
-                        "reorder_for_peak_memory": False,
-                        "fusion_memory_timeline_peak_memory_increase_gb": increase_gb,
-                        "fusion_memory_timeline_peak_memory_pct_threshold": pct_threshold,
-                    },
-                )
-                self.assertEqual(compiled(x, weight), fn(x, weight))
-
-            self.assertEqual(len(final_peaks), 1)
-            return metrics.generated_kernel_count, final_peaks[0]
-
-        unrestricted_count, unrestricted_peak = compile_and_measure(None, None)
-        guarded_count, guarded_peak = compile_and_measure(0.0, None)
-
-        self.assertEqual(unrestricted_count, 1)
-        self.assertEqual(guarded_count, 2)
-        self.assertLess(guarded_peak, unrestricted_peak)
-        self.assertEqual(compile_and_measure(1000.0, None)[0], 1)
-        self.assertEqual(compile_and_measure(None, 1000.0)[0], 1)
-        self.assertEqual(compile_and_measure(1000.0, 0.0)[0], 2)
-
-    @xfailIfNoAcceleratorTriton
-    @onlyCUDA
-    def test_fusion_memory_guard_foreach(self, device):
-        def fn(a, b):
-            values = torch._foreach_abs([a, b])
-            return values, torch._foreach_sqrt(values)
-
-        args = (
-            torch.testing.make_tensor((10, 10), device=device, dtype=torch.float32),
-            torch.testing.make_tensor((20, 20), device=device, dtype=torch.float32),
-        )
-        expected = fn(*args)
-        compiled = torch.compile(
-            fn,
-            fullgraph=True,
-            options={
-                "fx_graph_cache": False,
-                "fusion_memory_timeline_peak_memory_increase_gb": 1000.0,
-            },
-        )
-        self.assertEqual(compiled(*args), expected)
 
     def test_fusion_memory_update_resolves_retired_consumer(self):
         scheduler = object.__new__(Scheduler)
@@ -2578,41 +2422,6 @@ class TestScheduler(TestCase):
             None,
         )
 
-    @inductor_config.patch(reorder_for_peak_memory=True)
-    @parametrize("cpp_wrapper", (False, True))
-    @dtypes(torch.complex64, torch.complex128)
-    @xfailIfNoAcceleratorTriton
-    def test_mutating_fallback_returned_alias_ordering(
-        self, device, dtype, cpp_wrapper
-    ):
-        def fn(x, index, values, replacement):
-            x.index_put_((index,), values)
-            result = x.real[:, None].expand(-1, 128).square()
-            x.copy_(torch.cat((replacement, replacement)))
-            return result, x
-
-        args = (
-            torch.zeros(32, device=device, dtype=dtype),
-            torch.arange(0, 32, 2, device=device),
-            torch.full((16,), 1 + 2j, device=device, dtype=dtype),
-            torch.full((16,), 3 + 4j, device=device, dtype=dtype),
-        )
-        expected = fn(*(arg.clone() for arg in args))
-        with (
-            fresh_inductor_cache(),
-            inductor_config.patch(cpp_wrapper=cpp_wrapper),
-        ):
-            actual, code = run_and_get_code(
-                torch.compile(fn, fullgraph=True), *(arg.clone() for arg in args)
-            )
-        self.assertEqual(actual, expected)
-        fallback_call = (
-            'findSchemaOrThrow("aten::index_put_", "")'
-            if cpp_wrapper
-            else "= torch.ops.aten.index_put_.default("
-        )
-        self.assertIn(fallback_call, "\n".join(code))
-
     def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
         scheduler = Scheduler.__new__(Scheduler)
 
@@ -2696,78 +2505,6 @@ class TestScheduler(TestCase):
             ["live_constant", "preexisting_removed_constant"],
         )
         self.assertFalse(cleaned.skip_cudagraph)
-
-    @dtypes(torch.float, torch.float16)
-    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @xfailIfNoAcceleratorTriton
-    def test_disable_get_estimated_runtime_logging(self, device, dtype):
-        if device == "cpu":
-            return
-        tc = _test_cases(device, dtype)
-        # turn off logging of inductor metrics so that they don't get logged
-        torch._logging.set_logs(inductor_metrics=False)
-        metrics.reset()
-        for op, example_inputs, kwargs in tc:
-            comp = torch.compile(op)
-            torch._dynamo.reset()
-            with fresh_inductor_cache():
-                comp(*example_inputs, **kwargs)
-            self.assertEqual(metrics.num_bytes_accessed, 0)
-            self.assertEqual(any(m[1] for m in metrics.node_runtimes), False)
-            self.assertEqual(any(m[1] for m in metrics.nodes_num_elem), False)
-            metrics.reset()
-        torch._logging.set_logs()
-
-    @xfailIfNoAcceleratorTriton
-    @dtypes(torch.float, torch.float16)
-    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @parametrize(
-        "options",
-        [
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-            },
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON,ATEN",
-            },
-        ],
-    )
-    @torch._inductor.config.patch(
-        {"force_disable_caches": True, "shape_padding": False}
-    )
-    @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
-    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
-    def test_flop_counter_op(self, device, dtype, options):
-        if device == "cpu":
-            return
-
-        tc = _test_cases(device, dtype)
-
-        torch._logging.set_logs(inductor_metrics=True)
-        for op, example_inputs, kwargs in tc:
-            comp = torch.compile(op, options=options)
-            # next two lines are required, otherwise the flops will be cached from previous runs of this function.
-            torch._dynamo.reset()
-            with fresh_inductor_cache():
-                # actually run to set the counters
-                comp(*example_inputs, **kwargs)
-                with FlopCounterMode() as mode:
-                    comp(*example_inputs, **kwargs)
-            reference_flops = get_total_flops(mode)
-
-            self.assertEqual(
-                reference_flops,
-                counters["inductor"]["flop_count"],
-                msg=lambda msg: f"{msg}\nop = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}",
-            )
-            if op != torch.add:
-                self.assertNotEqual(
-                    reference_flops, 0, msg=lambda msg: f"{msg}\nop = {op} is 0 flops"
-                )
-            counters["inductor"]["flop_count"] = 0
-        torch._logging.set_logs()
 
     def test_fusion_prevent_too_many_reads_and_writes_prevents_fusion(self):
         """Test that fusion is prevented when unique I/O buffers exceed threshold"""
@@ -2952,9 +2689,185 @@ class TestScheduler(TestCase):
         self.assertTrue(can_fuse_prologue(hook_blocks=False))
         self.assertFalse(can_fuse_prologue(hook_blocks=True))
 
+
+class TestSchedulerAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _mock_base_snode(self, name, device=None):
+        node = Mock()
+        node.get_name.return_value = name
+        node.get_first_name.return_value = name
+        node.get_device.return_value = device
+        node.get_nodes.return_value = [node]
+        node.get_buffer_names.return_value = OrderedSet()
+        node.used_buffer_names.return_value = OrderedSet()
+        node.is_template.return_value = False
+        node.is_reduction.return_value = False
+        return node
+
+    @skipIf(not HAS_TRITON, "requires triton")
+    @inductor_config.patch({"triton.coalesce_tiling_analysis": False})
+    def test_candidate_tilings_cache_cleared_after_codegen(self, device):
+        # The cache is keyed on scheduler nodes; leaving entries behind keeps
+        # the compiled graph (and e.g. frozen constants) alive after compile.
+        def fn(x):
+            return x.t() + x
+
+        # Record the cache size after each codegen, before it is cleared, to
+        # check that the tiling analysis actually ran in this compile.
+        sizes_before_clear = []
+        orig_codegen = Scheduler._codegen
+
+        def codegen(self, *args, **kwargs):
+            out = orig_codegen(self, *args, **kwargs)
+            info = SIMDScheduling.candidate_tilings.cache_info()
+            sizes_before_clear.append(info.currsize)
+            return out
+
+        torch._dynamo.reset()
+        # A warm FX graph cache would skip scheduler codegen entirely.
+        with fresh_inductor_cache(), patch.object(Scheduler, "_codegen", codegen):
+            torch.compile(fn)(torch.randn(64, 64, device=device))
+        self.assertGreater(max(sizes_before_clear, default=0), 0)
+        self.assertEqual(SIMDScheduling.candidate_tilings.cache_info().currsize, 0)
+
+    @inductor_config.patch(combo_kernel_max_num_nodes=16)
+    def test_combo_kernel_grouping_respects_mempool(self, device):
+        scheduler = Mock()
+        dev = torch.device(device, 0)
+        pool_node1 = self._mock_base_snode("pool_node1", dev)
+        pool_node2 = self._mock_base_snode("pool_node2", dev)
+        default_node = self._mock_base_snode("default_node", dev)
+        other_pool_node = self._mock_base_snode("other_pool_node", dev)
+        scheduler._topological_sort_nodes.return_value = [
+            [pool_node1, default_node, pool_node2, other_pool_node]
+        ]
+        scheduler.node_to_stream = {
+            pool_node1: 0,
+            pool_node2: 0,
+            default_node: 0,
+            other_pool_node: 0,
+        }
+        scheduler.get_node_stream.side_effect = scheduler.node_to_stream.__getitem__
+        scheduler.node_to_mempool = {
+            pool_node1: (7, 0),
+            pool_node2: (7, 0),
+            default_node: None,
+            other_pool_node: (8, 0),
+        }
+
+        groups = ForeachKernelSchedulerNode._default_group_nodes_for_combo_kernels(
+            scheduler
+        )
+
+        self.assertEqual(
+            groups, [[pool_node1, pool_node2], [default_node], [other_pool_node]]
+        )
+
+    @inductor_config.patch(reorder_for_peak_memory=True)
+    @parametrize("cpp_wrapper", (False, True))
+    @dtypes(torch.complex64, torch.complex128)
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
-    def test_index_add_fusion_prevented(self):
+    def test_mutating_fallback_returned_alias_ordering(
+        self, device, dtype, cpp_wrapper
+    ):
+        def fn(x, index, values, replacement):
+            x.index_put_((index,), values)
+            result = x.real[:, None].expand(-1, 128).square()
+            x.copy_(torch.cat((replacement, replacement)))
+            return result, x
+
+        args = (
+            torch.zeros(32, device=device, dtype=dtype),
+            torch.arange(0, 32, 2, device=device),
+            torch.full((16,), 1 + 2j, device=device, dtype=dtype),
+            torch.full((16,), 3 + 4j, device=device, dtype=dtype),
+        )
+        expected = fn(*(arg.clone() for arg in args))
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(cpp_wrapper=cpp_wrapper),
+        ):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), *(arg.clone() for arg in args)
+            )
+        self.assertEqual(actual, expected)
+        fallback_call = (
+            'findSchemaOrThrow("aten::index_put_", "")'
+            if cpp_wrapper
+            else "= torch.ops.aten.index_put_.default("
+        )
+        self.assertIn(fallback_call, "\n".join(code))
+
+    @dtypes(torch.float, torch.float16)
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @xfailIfNoAcceleratorTriton
+    def test_disable_get_estimated_runtime_logging(self, device, dtype):
+        tc = _test_cases(device, dtype)
+        # turn off logging of inductor metrics so that they don't get logged
+        torch._logging.set_logs(inductor_metrics=False)
+        metrics.reset()
+        for op, example_inputs, kwargs in tc:
+            comp = torch.compile(op)
+            torch._dynamo.reset()
+            with fresh_inductor_cache():
+                comp(*example_inputs, **kwargs)
+            self.assertEqual(metrics.num_bytes_accessed, 0)
+            self.assertEqual(any(m[1] for m in metrics.node_runtimes), False)
+            self.assertEqual(any(m[1] for m in metrics.nodes_num_elem), False)
+            metrics.reset()
+        torch._logging.set_logs()
+
+    @xfailIfNoAcceleratorTriton
+    @dtypes(torch.float, torch.float16)
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @parametrize(
+        "options",
+        [
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON,ATEN",
+            },
+        ],
+    )
+    @torch._inductor.config.patch(
+        {"force_disable_caches": True, "shape_padding": False}
+    )
+    @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
+    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
+    def test_flop_counter_op(self, device, dtype, options):
+        tc = _test_cases(device, dtype)
+
+        torch._logging.set_logs(inductor_metrics=True)
+        for op, example_inputs, kwargs in tc:
+            comp = torch.compile(op, options=options)
+            # next two lines are required, otherwise the flops will be cached from previous runs of this function.
+            torch._dynamo.reset()
+            with fresh_inductor_cache():
+                # actually run to set the counters
+                comp(*example_inputs, **kwargs)
+                with FlopCounterMode() as mode:
+                    comp(*example_inputs, **kwargs)
+            reference_flops = get_total_flops(mode)
+
+            self.assertEqual(
+                reference_flops,
+                counters["inductor"]["flop_count"],
+                msg=lambda msg: f"{msg}\nop = {op} reference flops = {reference_flops} != counters {counters['inductor']['flop_count']}",
+            )
+            if op != torch.add:
+                self.assertNotEqual(
+                    reference_flops, 0, msg=lambda msg: f"{msg}\nop = {op} is 0 flops"
+                )
+            counters["inductor"]["flop_count"] = 0
+        torch._logging.set_logs()
+
+    @xfailIfNoAcceleratorTriton
+    def test_index_add_fusion_prevented(self, device):
         """
         Test that index_add_ (scatter with atomic_add mode) is not fused with
         subsequent reads from the same buffer, preventing read-after-write hazards.
@@ -2974,7 +2887,6 @@ class TestScheduler(TestCase):
             F_u_at_atom = F_u_mol[batch] + 1e-6
             return f_u / F_u_at_atom
 
-        device = GPU_TYPE
         f = torch.ones(1024, 1, device=device)
         batch = torch.zeros(1024, dtype=torch.long, device=device)
 
@@ -2994,8 +2906,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
-    def test_atomic_add_no_fusion_correctness(self):
+    def test_atomic_add_no_fusion_correctness(self, device):
         """
         Test that atomic_add operations produce correct results.
         """
@@ -3005,7 +2916,6 @@ class TestScheduler(TestCase):
             out.index_add_(0, idx, x)  # atomic_add: scatter to shared locations
             return out[idx] + 1.0  # read from same buffer: requires sync
 
-        device = GPU_TYPE
         x = torch.ones(5, device=device)
         idx = torch.tensor([0, 1, 0, 1, 0], device=device, dtype=torch.long)
 
@@ -3025,8 +2935,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
-    def test_expand_reuse_does_not_realize_before_reduction(self):
+    def test_expand_reuse_does_not_realize_before_reduction(self, device):
         def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
             input1_selected = torch.index_select(input1, 2, icrd1)
             input2_selected = torch.index_select(input2, 2, icrd2)
@@ -3051,7 +2960,6 @@ class TestScheduler(TestCase):
         U = 4
         V = 4
         W = 4
-        device = GPU_TYPE
 
         torch.manual_seed(0)
         input1 = torch.rand((B, U, L), dtype=torch.float32, device=device)
@@ -3096,14 +3004,14 @@ class TestScheduler(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
     @parametrize("width,kernel_count", [(32, 1), (512, 2)])
-    def test_wide_broadcast_realizes_expensive_producer(self, width, kernel_count):
+    def test_wide_broadcast_realizes_expensive_producer(
+        self, device, width, kernel_count
+    ):
         def fn(x, logits, idx):
             weight = torch.softmax(logits.float(), dim=-1).to(x.dtype).view(-1)[idx]
             return x * weight.unsqueeze(-1)
 
-        device = GPU_TYPE
         x = torch.randn((256, width), dtype=torch.bfloat16, device=device)
         logits = torch.randn((64, 4), dtype=torch.bfloat16, device=device)
         idx = torch.randperm(256, device=device)
@@ -3119,8 +3027,7 @@ class TestScheduler(TestCase):
         self.assertEqual(metrics.generated_kernel_count, kernel_count)
 
     @xfailIfNoAcceleratorTriton
-    @onlyAccelerator
-    def test_expand_reuse_realizes_in_deterministic_mode(self):
+    def test_expand_reuse_realizes_in_deterministic_mode(self, device):
         def fn(a, b, c, d, e):
             x = a * b * c * d * e
             y = x.view(8, 8, 1).expand(8, 8, 16)
@@ -3136,7 +3043,6 @@ class TestScheduler(TestCase):
             self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
             self.assertEqual(metrics.generated_kernel_count, 2)
 
-        device = GPU_TYPE
         torch.manual_seed(0)
         args = [
             torch.rand((8, 8), dtype=torch.float32, device=device) for _ in range(5)
@@ -3156,14 +3062,112 @@ class TestScheduler(TestCase):
         with inductor_config.patch(deterministic=True):
             check_realizes()
 
+
+class TestSchedulerCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    def test_fusion_memory_guard_rejects_in_torch_compile(self, device):
+        def fn(x, weight):
+            early = torch.mm(torch.sin(x).sum(dim=0)[None, :], weight)
+            late = torch.cos(x).sum(dim=0)
+            return early, late
+
+        x = torch.testing.make_tensor((1, 4096), device=device, dtype=torch.bool)
+        weight = torch.testing.make_tensor(
+            (4096, 1), device=device, dtype=torch.float32
+        )
+
+        def compile_and_measure(increase_gb, pct_threshold):
+            torch._dynamo.reset()
+            metrics.reset()
+            final_peaks = []
+            original_fuse_nodes = Scheduler.fuse_nodes
+
+            def fuse_nodes_and_record(scheduler, nodes):
+                nodes = original_fuse_nodes(scheduler, nodes)
+                buffer_to_step = {
+                    name: step
+                    for step, node in enumerate(nodes)
+                    for name in node.get_buffer_names()
+                }
+                for step, node in enumerate(nodes):
+                    for dep in node.unmet_dependencies:
+                        if dep.name in buffer_to_step:
+                            self.assertLessEqual(buffer_to_step[dep.name], step)
+                graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
+                graph_outputs = OrderedSet(V.graph.get_output_names())
+                freeable = inductor_memory.get_freeable_input_buf(nodes, graph_inputs)
+                inductor_memory.assign_memory_planning_info_for_scheduler_buffers(
+                    nodes, scheduler.name_to_buf
+                )
+                inductor_memory.assign_memory_planning_info_for_scheduler_nodes(
+                    nodes,
+                    scheduler.name_to_fused_node,
+                    scheduler.name_to_buf,
+                    freeable,
+                )
+                peak, _ = inductor_memory.estimate_peak_memory(
+                    nodes, freeable, graph_outputs
+                )
+                final_peaks.append(peak)
+                return nodes
+
+            with patch.object(Scheduler, "fuse_nodes", fuse_nodes_and_record):
+                compiled = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    options={
+                        "fx_graph_cache": False,
+                        "reorder_for_peak_memory": False,
+                        "fusion_memory_timeline_peak_memory_increase_gb": increase_gb,
+                        "fusion_memory_timeline_peak_memory_pct_threshold": pct_threshold,
+                    },
+                )
+                self.assertEqual(compiled(x, weight), fn(x, weight))
+
+            self.assertEqual(len(final_peaks), 1)
+            return metrics.generated_kernel_count, final_peaks[0]
+
+        unrestricted_count, unrestricted_peak = compile_and_measure(None, None)
+        guarded_count, guarded_peak = compile_and_measure(0.0, None)
+
+        self.assertEqual(unrestricted_count, 1)
+        self.assertEqual(guarded_count, 2)
+        self.assertLess(guarded_peak, unrestricted_peak)
+        self.assertEqual(compile_and_measure(1000.0, None)[0], 1)
+        self.assertEqual(compile_and_measure(None, 1000.0)[0], 1)
+        self.assertEqual(compile_and_measure(1000.0, 0.0)[0], 2)
+
+    @xfailIfNoAcceleratorTriton
+    def test_fusion_memory_guard_foreach(self, device):
+        def fn(a, b):
+            values = torch._foreach_abs([a, b])
+            return values, torch._foreach_sqrt(values)
+
+        args = (
+            torch.testing.make_tensor((10, 10), device=device, dtype=torch.float32),
+            torch.testing.make_tensor((20, 20), device=device, dtype=torch.float32),
+        )
+        expected = fn(*args)
+        compiled = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "fx_graph_cache": False,
+                "fusion_memory_timeline_peak_memory_increase_gb": 1000.0,
+            },
+        )
+        self.assertEqual(compiled(*args), expected)
+
+    @xfailIfNoAcceleratorTriton
     @parametrize("op", ["select_scatter", "index_put"])
     # Both settings are pinned so the test can only pass via graph_fanout:
     # deterministic mode makes expand realize src on its own, and the read
     # threshold decides whether src counts as expensive at all.
     @inductor_config.patch(deterministic=False, realize_reads_threshold=4)
-    def test_scatter_realizes_expensive_src(self, op):
+    def test_scatter_realizes_expensive_src(self, device, op):
         def src(a, b, c, d, e):
             return a[..., 1] * b[..., 0] + c[..., 1] * d[..., 0] + e[..., 2]
 
@@ -3178,7 +3182,6 @@ class TestScheduler(TestCase):
                 base.index_put_((index,), src(*args))
                 return base
 
-        device = "cuda"
         torch.manual_seed(0)
         base_size = (32, 32, 26) if op == "select_scatter" else (26, 32, 32)
         base = torch.rand(base_size, dtype=torch.float32, device=device)
@@ -3215,10 +3218,12 @@ class TestScoreFusionMemory(TestCase):
     3. Small overlap: reads on different offset but overlap is small → don't fuse (2 kernels)
     """
 
-    @skipIf(not HAS_GPU, "GPU not available")
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipIf(not HAS_TRITON, "requires triton")
     @inductor_config.patch("score_fusion_memory_threshold", 1)
     @inductor_config.patch("min_overlap_ratio", 0.5)
-    def test_exact_same_reads_should_fuse(self) -> None:
+    def test_exact_same_reads_should_fuse(self, device) -> None:
         """
         Case 1: Exact matches in read/write → should fuse into 1 kernel.
 
@@ -3235,7 +3240,7 @@ class TestScoreFusionMemory(TestCase):
         torch._dynamo.reset()
         metrics.reset()
 
-        x = torch.randn(8, 512, device=GPU_TYPE, dtype=torch.float16)
+        x = torch.randn(8, 512, device=device, dtype=torch.float16)
 
         compiled_fn = torch.compile(exact_reads, backend="inductor", fullgraph=True)
         out1_eager, out2_eager = exact_reads(x)
@@ -3246,10 +3251,10 @@ class TestScoreFusionMemory(TestCase):
         # Should fuse into 1 kernel since both ops read exact same buffer
         self.assertEqual(metrics.generated_kernel_count, 1)
 
-    @skipIf(not HAS_GPU, "GPU not available")
+    @skipIf(not HAS_TRITON, "requires triton")
     @inductor_config.patch("score_fusion_memory_threshold", 1)
     @inductor_config.patch("min_overlap_ratio", 0.5)
-    def test_split_cat_large_overlap_should_fuse(self) -> None:
+    def test_split_cat_large_overlap_should_fuse(self, device) -> None:
         """
         Case 2: Reads on different offset but overlap is huge (split/cat) → should fuse into 1 kernel.
 
@@ -3267,7 +3272,7 @@ class TestScoreFusionMemory(TestCase):
         torch._dynamo.reset()
         metrics.reset()
 
-        x = torch.randn(8, 512, device=GPU_TYPE, dtype=torch.float16)
+        x = torch.randn(8, 512, device=device, dtype=torch.float16)
 
         compiled_fn = torch.compile(
             split_and_process, backend="inductor", fullgraph=True
@@ -3280,9 +3285,9 @@ class TestScoreFusionMemory(TestCase):
         # Should fuse into 1 kernel since all ops read from the same underlying buffer
         self.assertEqual(metrics.generated_kernel_count, 1)
 
-    @skipIf(not HAS_GPU, "GPU not available")
+    @skipIf(not HAS_TRITON, "requires triton")
     @inductor_config.patch("score_fusion_memory_threshold", 1)
-    def test_partial_overlap_below_threshold(self) -> None:
+    def test_partial_overlap_below_threshold(self, device) -> None:
         """
         Case 3: Partial overlap below the 0.5 threshold → should NOT fuse (2 kernels).
 
@@ -3319,9 +3324,9 @@ class TestScoreFusionMemory(TestCase):
         # y and z are 3x larger (384 elements each)
         # So each op reads: 128 (from x slice) + 384 (from y or z) = 512 total
         # overlap_ratio = 128 / 512 = 0.25 < 0.5 threshold
-        x = torch.randn(8, 512, device=GPU_TYPE, dtype=torch.float16)
-        y = torch.randn(8, 128, device=GPU_TYPE, dtype=torch.float16)
-        z = torch.randn(8, 128, device=GPU_TYPE, dtype=torch.float16)
+        x = torch.randn(8, 512, device=device, dtype=torch.float16)
+        y = torch.randn(8, 128, device=device, dtype=torch.float16)
+        z = torch.randn(8, 128, device=device, dtype=torch.float16)
 
         compiled_fn = torch.compile(
             partial_overlap_split, backend="inductor", fullgraph=True
@@ -3336,8 +3341,15 @@ class TestScoreFusionMemory(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 2)
 
 
-instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestScoreFusionMemory, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestSchedulerAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
+
+instantiate_device_type_tests(TestSchedulerCuda, globals(), only_for="cuda")
+
+instantiate_device_type_tests(
+    TestScoreFusionMemory, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

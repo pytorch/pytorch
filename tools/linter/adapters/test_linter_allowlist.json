@@ -392,7 +392,6 @@
   "test/inductor/test_inductor_freezing.py",
   "test/inductor/test_inductor_lite_mode.py",
   "test/inductor/test_inductor_ops.py",
-  "test/inductor/test_inductor_scheduler.py",
   "test/inductor/test_inductor_utils.py",
   "test/inductor/test_inplace_padding.py",
   "test/inductor/test_inplacing_pass.py",
