@@ -12,12 +12,15 @@ import torch._dynamo.test_case
 import torch._inductor.test_case
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+from torch._C._dynamo.guards import compute_overlapping_tensors
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     expectedFailureDynamic,
     rand_strided,
 )
+from torch._functorch._aot_autograd import input_output_analysis
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
 from torch._functorch.partitioners import _extract_fwd_bwd_modules
 from torch._guards import CompileContext, StorageOverlap, TracingContext
@@ -1938,6 +1941,132 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         torch._dynamo.reset()
         result = torch.compile(f)(x, w)  # noqa: UNSPECIFIED_BACKEND
         self.assertIsInstance(result, torch.Tensor)
+
+
+class StorageOverlapAnalysisTests(torch._inductor.test_case.TestCase):
+    # Kept out of AotAutogradFallbackTests, which test_dynamic_shapes.py clones:
+    # these already compile with dynamic=True or build their own ShapeEnv.
+
+    def test_input_mutation_storage_overlap_analysis_uses_hints(self):
+        # Overlap analysis on symbolic views of one storage must run on their
+        # hinted layouts and make no ShapeEnv calls, rather than evaluate a
+        # symbolic expression per pair of views.
+        def f(inputs):
+            torch._foreach_add_(inputs, 1)
+
+        orig_evaluate_expr = ShapeEnv.evaluate_expr
+        orig_analysis = input_output_analysis.compute_overlapping_tensors
+        orig_hinted_views = input_output_analysis._hinted_views
+        hinted = []
+        in_analysis = False
+        calls_in_analysis = 0
+
+        def hinted_views(tensors):
+            hinted.append(orig_hinted_views(tensors))
+            return hinted[-1]
+
+        def evaluate_expr(*args, **kwargs):
+            nonlocal calls_in_analysis
+            calls_in_analysis += in_analysis
+            return orig_evaluate_expr(*args, **kwargs)
+
+        def analysis(*args, **kwargs):
+            nonlocal in_analysis
+            in_analysis = True
+            try:
+                return orig_analysis(*args, **kwargs)
+            finally:
+                in_analysis = False
+
+        inputs = list(torch.zeros(10, 4).unbind())
+        with (
+            patch.object(ShapeEnv, "evaluate_expr", evaluate_expr),
+            patch.object(
+                input_output_analysis, "compute_overlapping_tensors", analysis
+            ),
+            patch.object(input_output_analysis, "_hinted_views", hinted_views),
+        ):
+            torch.compile(f, backend="aot_eager", dynamic=True, fullgraph=True)(inputs)
+        self.assertEqual(inputs, [torch.ones(4)] * 10)
+        self.assertTrue(hinted)
+        self.assertTrue(all(h is not None for h in hinted))
+        self.assertEqual(calls_in_analysis, 0)
+
+    def test_hinted_overlap_analysis_matches_symbolic(self):
+        # With shape guards suppressed, the symbolic analysis evaluates each
+        # comparison at the hints, so running the static analysis on the hinted
+        # layouts must give the same answer, for the swept list and every pair.
+        shape_env = ShapeEnv()
+        s0, s1 = (
+            shape_env.create_symintnode(
+                shape_env.create_symbol(hint, ConstantSource(name)), hint=hint
+            )
+            for name, hint in (("s0", 6), ("s1", 12))
+        )
+        with FakeTensorMode(shape_env=shape_env):
+            base = torch.empty(s0, s1)
+            flat = base.view(-1)
+            empty = flat[3:3]
+            views = [
+                # Column tiles, one overlapping its neighbors.
+                *(base[:, 2 * k : 2 * k + 2] for k in range(4)),
+                base[:, 3:5],
+                # Disjoint tiles in one row band take the 2-D stride-modulo
+                # branch.
+                base[0:3, 8:10],
+                base[1:3, 10:12],
+                # Symbolic offsets, a zero stride and another dtype.
+                flat[s1 : s1 + 2],
+                flat[2 * s1 + 1 : 2 * s1 + 3],
+                flat[5 * s1 : 5 * s1 + 1].expand(3),
+                flat[4 * s1 + 8 : 4 * s1 + 10].view(torch.float16),
+                # Repeated and distinct empty tensors, one with a huge stride.
+                empty,
+                empty,
+                flat[7:7],
+                flat.as_strided((0, 3), (0, 2**62)),
+            ]
+            guards = list(shape_env.guards)
+            hinted = input_output_analysis._hinted_views(views)
+            self.assertIsNotNone(hinted)
+
+        cases = [list(range(len(views)))]
+        cases += [[i, j] for i in range(len(views)) for j in range(i)]
+        for case in cases:
+            with shape_env.suppress_guards():
+                expected = compute_overlapping_tensors(
+                    [views[i] for i in case], symbolic=True
+                )
+            actual = compute_overlapping_tensors(
+                [hinted[i] for i in case], symbolic=False
+            )
+            self.assertEqual(actual, expected, msg=str(case))
+        self.assertEqual(shape_env.guards, guards)
+
+    @torch._functorch.config.patch(fake_tensor_allow_meta=False)
+    def test_hinted_overlap_analysis_without_meta_fake_tensors(self):
+        # The hinted views are plain meta tensors, built outside the compile's
+        # fake mode, so they work when FakeTensors on meta are disallowed.
+        def f(a, b):
+            a.add_(1)
+            b.add_(1)
+            return a + b
+
+        results = []
+        orig_hinted_views = input_output_analysis._hinted_views
+
+        def hinted_views(tensors):
+            results.append(orig_hinted_views(tensors))
+            return results[-1]
+
+        x, y = torch.zeros(10), torch.zeros(10)
+        compiled = torch.compile(f, backend="aot_eager", dynamic=True, fullgraph=True)
+        with patch.object(input_output_analysis, "_hinted_views", hinted_views):
+            self.assertEqual(compiled(x[:5], x[3:8]), f(y[:5], y[3:8]))
+        self.assertEqual(x, y)
+        # The hint path ran and built the meta tensors.
+        self.assertTrue(results)
+        self.assertTrue(all(r is not None for r in results))
 
 
 class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
