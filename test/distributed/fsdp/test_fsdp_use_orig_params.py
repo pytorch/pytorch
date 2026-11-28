@@ -102,14 +102,14 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         param_groups = self._get_param_groups(model)
         return optim_class(param_groups, lr=5e-3, foreach=multi_tensor)
 
-    def _get_ddp_transformer(self, find_unused_params: bool) -> DDP:
+    def _get_ddp_transformer(self, device: str, find_unused_params: bool) -> DDP:
         """Returns a transformer with shared parameters wrapped with DDP."""
         model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            DEVICEInitMode.DEVICE_BEFORE,
+            DEVICEInitMode.DEVICE_NEVER,
             deterministic=True,
-        )
+        ).to(torch.device(device).type)
         ddp_model = DDP(
             model,
             device_ids=[self.rank],
@@ -150,9 +150,11 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            device_init_mode,
+            DEVICEInitMode.DEVICE_NEVER,
             deterministic=True,
         )
+        if device_init_mode == DEVICEInitMode.DEVICE_BEFORE:
+            model = model.to(torch.device(device).type)
         if init_optim_before_wrap:
             fsdp_optim = self._get_optim(model, optim_class, multi_tensor)
             fsdp_model = FSDP(model, self.process_group, **fsdp_kwargs)
@@ -261,9 +263,9 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         base_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            DEVICEInitMode.DEVICE_BEFORE,
+            DEVICEInitMode.DEVICE_NEVER,
             deterministic=True,
-        )
+        ).to(torch.device(device).type)
         ref_model = FSDP(copy.deepcopy(base_model), self.process_group, **fsdp_kwargs)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         model = FSDP(copy.deepcopy(base_model), self.process_group, **fsdp_kwargs)
@@ -382,7 +384,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             and cpu_offload.offload_params
         ):
             return  # not supported
-        ddp_model = self._get_ddp_transformer(find_unused_params=False)
+        ddp_model = self._get_ddp_transformer(device, find_unused_params=False)
         ddp_optim = self._get_optim(ddp_model, optim_class, multi_tensor)
         # FlatParamHandle reads the env var at construction.
         with patch.dict(
@@ -428,7 +430,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         device: str,
     ):
         optim_class = torch.optim.Adam
-        ddp_model = self._get_ddp_transformer(find_unused_params=True)
+        ddp_model = self._get_ddp_transformer(device, find_unused_params=True)
         ddp_optim = self._get_optim(ddp_model, optim_class, multi_tensor)
         fsdp_model, fsdp_optim = self._get_fsdp_transformer_and_optim(
             device_init_mode=DEVICEInitMode.DEVICE_BEFORE,
@@ -470,7 +472,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
     def _test_multiple_optimizers(
         self, sharding_strategy: ShardingStrategy, device: str
     ):
-        ddp_model = self._get_ddp_transformer(find_unused_params=True)
+        ddp_model = self._get_ddp_transformer(device, find_unused_params=True)
         ddp_param_groups = self._get_param_groups(ddp_model)
         if not (len(ddp_param_groups) == 3):
             raise AssertionError(
@@ -614,6 +616,7 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTestContinuous):
         self,
         sharding_strategy: ShardingStrategy,
         cpu_offload: CPUOffload,
+        device: str,
     ) -> tuple[FSDP, torch.optim.Optimizer, FSDP, torch.optim.Optimizer]:
         """
         Returns a pair of (FSDP model, optimizer) for ``use_orig_params=False``
@@ -624,11 +627,14 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTestContinuous):
             "sharding_strategy": sharding_strategy,
             "cpu_offload": cpu_offload,
             "use_orig_params": False,
+            "device_id": torch.device(
+                torch.device(device).type, torch.accelerator.current_device_index()
+            ),
         }
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            DEVICEInitMode.DEVICE_BEFORE,
+            DEVICEInitMode.DEVICE_NEVER,
             fsdp_kwargs=fsdp_kwargs,
             deterministic=True,
         )
@@ -637,7 +643,7 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTestContinuous):
         fsdp_model_orig_params = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            DEVICEInitMode.DEVICE_BEFORE,
+            DEVICEInitMode.DEVICE_NEVER,
             fsdp_kwargs=fsdp_kwargs,
             deterministic=True,
         )
@@ -692,7 +698,7 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTestContinuous):
             optim,
             fsdp_model_orig_params,
             optim_orig_params,
-        ) = self._get_fsdp_models_and_optims(sharding_strategy, cpu_offload)
+        ) = self._get_fsdp_models_and_optims(sharding_strategy, cpu_offload, device)
         device = torch.device(torch.device(device).type)
         for _ in range(3):
             inp1 = fsdp_model.get_input(device)
@@ -752,7 +758,7 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTestContinuous):
             optim,
             fsdp_model_orig_params,
             optim_orig_params,
-        ) = self._get_fsdp_models_and_optims(sharding_strategy, cpu_offload)
+        ) = self._get_fsdp_models_and_optims(sharding_strategy, cpu_offload, device)
         device = torch.device(torch.device(device).type)
         for _ in range(3):
             optim.zero_grad()
