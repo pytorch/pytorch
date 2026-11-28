@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 import functools
+import threading
 import warnings
 from typing import Any
 
@@ -47,6 +48,13 @@ def autocast_decorator(autocast_instance, func):
         "@autocast() decorator is not supported in script mode"
     )
     return decorate_autocast
+
+
+class _AutocastRestoreState(threading.local):
+    def __init__(self):
+        # One entry per active `with` on this instance in the current thread.
+        # Autocast state is thread-local, so restore state must be too.
+        self.stack = []
 
 
 class autocast:
@@ -304,6 +312,7 @@ class autocast:
                 warnings.warn(error_message, stacklevel=2)
                 enabled = False
         self._enabled = enabled
+        self._prev_states = _AutocastRestoreState()
 
     def __enter__(self):
         if torch._jit_internal.is_scripting():
@@ -311,9 +320,13 @@ class autocast:
                 raise AssertionError("fast_dtype must not be None in scripting mode")
             return self
 
-        self.prev_cache_enabled = torch.is_autocast_cache_enabled()
-        self.prev = torch.is_autocast_enabled(self.device)
-        self.prev_fastdtype = torch.get_autocast_dtype(self.device)
+        self._prev_states.stack.append(
+            (
+                torch.is_autocast_enabled(self.device),
+                torch.get_autocast_dtype(self.device),
+                torch.is_autocast_cache_enabled(),
+            )
+        )
         torch.set_autocast_enabled(self.device, self._enabled)
         torch.set_autocast_dtype(self.device, self.fast_dtype)  # type: ignore[arg-type]
         torch.autocast_increment_nesting()
@@ -347,11 +360,12 @@ class autocast:
             return
 
         # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
+        prev, prev_fastdtype, prev_cache_enabled = self._prev_states.stack.pop()
         if torch.autocast_decrement_nesting() == 0:
             torch.clear_autocast_cache()
-        torch.set_autocast_enabled(self.device, self.prev)
-        torch.set_autocast_dtype(self.device, self.prev_fastdtype)
-        torch.set_autocast_cache_enabled(self.prev_cache_enabled)
+        torch.set_autocast_enabled(self.device, prev)
+        torch.set_autocast_dtype(self.device, prev_fastdtype)
+        torch.set_autocast_cache_enabled(prev_cache_enabled)
 
         # only dispatch to PreDispatchTorchFunctionMode to avoid exposing this
         # API to other functional modes. We only expose to PreDispatchTorchFunctionMode
