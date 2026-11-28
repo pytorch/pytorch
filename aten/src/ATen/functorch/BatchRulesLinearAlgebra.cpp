@@ -8,6 +8,9 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 
 #include <algorithm>
+#include <array>
+#include <tuple>
+#include <vector>
 
 namespace at::functorch {
 
@@ -746,6 +749,254 @@ _scaled_dot_product_cudnn_attention_batch_rule(
   );
 }
 
+template <typename F>
+auto sdpa_backward_with_shared_dropout(
+    const Tensor& grad_out, int64_t grad_out_bdim, F backward) {
+  // Flattening cotangents into the forward batch would change the dropout mask.
+  const auto batch_size = grad_out.size(grad_out_bdim);
+  TORCH_CHECK(
+      batch_size > 0,
+      "vmap: SDPA backward with shared dropout does not support a batch dimension of size 0.");
+  constexpr auto num_outputs = std::tuple_size_v<decltype(backward(grad_out))>;
+  std::array<std::vector<Tensor>, num_outputs> shards;
+  for (auto& output_shards : shards) {
+    output_shards.reserve(batch_size);
+  }
+  for (const auto i : c10::irange(batch_size)) {
+    auto outputs = backward(grad_out.select(grad_out_bdim, i));
+    std::apply(
+        [&](const auto&... output) {
+          size_t index = 0;
+          (shards[index++].push_back(output), ...);
+        },
+        outputs);
+  }
+  std::array<Tensor, num_outputs> outputs;
+  for (const auto i : c10::irange(num_outputs)) {
+    const auto defined = shards[i].front().defined();
+    TORCH_INTERNAL_ASSERT(std::all_of(
+        shards[i].begin(), shards[i].end(),
+        [defined](const Tensor& tensor) { return tensor.defined() == defined; }));
+    if (defined) {
+      outputs[i] = at::stack(shards[i]);
+    }
+  }
+  return std::apply(
+      [](const auto&... output) {
+        return std::tuple_cat(std::make_tuple(
+            output, output.defined() ? std::optional<int64_t>(0) : std::nullopt)...);
+      },
+      outputs);
+}
+
+fourOutputs _scaled_dot_product_efficient_attention_backward_batch_rule(
+    const Tensor& grad_out_, std::optional<int64_t> grad_out_bdim,
+    const Tensor& query, std::optional<int64_t> query_bdim,
+    const Tensor& key, std::optional<int64_t> key_bdim,
+    const Tensor& value, std::optional<int64_t> value_bdim,
+    const Tensor& attn_bias, std::optional<int64_t> attn_bias_bdim,
+    const Tensor& out, std::optional<int64_t> out_bdim,
+    const Tensor& logsumexp, std::optional<int64_t> logsumexp_bdim,
+    const Tensor& philox_seed, std::optional<int64_t> philox_seed_bdim,
+    const Tensor& philox_offset, std::optional<int64_t> philox_offset_bdim,
+    double dropout_p,
+    std::array<bool, 4> grad_input_mask,
+    bool is_causal,
+    std::optional<double> scale
+) {
+  TORCH_INTERNAL_ASSERT(!philox_seed_bdim && !philox_offset_bdim);
+  if (dropout_p > 0 && !query_bdim && !key_bdim && !value_bdim &&
+      !attn_bias_bdim && !out_bdim && !logsumexp_bdim) {
+    TORCH_INTERNAL_ASSERT(grad_out_bdim.has_value());
+    return sdpa_backward_with_shared_dropout(
+        grad_out_, *grad_out_bdim, [&](const Tensor& cotangent) {
+          return at::_scaled_dot_product_efficient_attention_backward(
+              cotangent, query, key, value, attn_bias, out, logsumexp,
+              philox_seed, philox_offset, dropout_p, grad_input_mask, is_causal, scale);
+        });
+  }
+  const auto batch_size = maybeCurrentDynamicLayer().value().batchSize();
+  auto grad_out = moveBatchDimToFront(grad_out_, grad_out_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  auto out_ = moveBatchDimToFront(out, out_bdim);
+  auto logsumexp_ = moveBatchDimToFront(logsumexp, logsumexp_bdim);
+
+  grad_out = ensure_has_bdim(grad_out, grad_out_bdim.has_value(), batch_size).flatten(0, 1);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size).flatten(0, 1);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size).flatten(0, 1);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size).flatten(0, 1);
+  out_ = ensure_has_bdim(out_, out_bdim.has_value(), batch_size).flatten(0, 1);
+  logsumexp_ = ensure_has_bdim(logsumexp_, logsumexp_bdim.has_value(), batch_size).flatten(0, 1);
+
+  Tensor attn_bias_ = attn_bias;
+  if (attn_bias.defined()) {
+    attn_bias_ = flatten_sdpa_attn_bias_for_vmap(attn_bias, attn_bias_bdim, batch_size);
+  }
+
+  auto [res0, res1, res2, res3] = at::_scaled_dot_product_efficient_attention_backward(
+      grad_out, query_, key_, value_, attn_bias_, out_, logsumexp_,
+      philox_seed, philox_offset, dropout_p, grad_input_mask, is_causal, scale);
+
+  std::optional<int64_t> res0_bdim = std::nullopt;
+  std::optional<int64_t> res1_bdim = std::nullopt;
+  std::optional<int64_t> res2_bdim = std::nullopt;
+  std::optional<int64_t> res3_bdim = std::nullopt;
+  if (res0.defined()) {
+    res0 = reshape_dim_outof_symint(0, batch_size, res0);
+    res0_bdim = 0;
+  }
+  if (res1.defined()) {
+    res1 = reshape_dim_outof_symint(0, batch_size, res1);
+    res1_bdim = 0;
+  }
+  if (res2.defined()) {
+    res2 = reshape_dim_outof_symint(0, batch_size, res2);
+    res2_bdim = 0;
+  }
+  if (res3.defined()) {
+    res3 = reshape_dim_outof_symint(0, batch_size, res3);
+    res3_bdim = 0;
+  }
+
+  return std::make_tuple(
+    std::move(res0), res0_bdim,
+    std::move(res1), res1_bdim,
+    std::move(res2), res2_bdim,
+    std::move(res3), res3_bdim
+  );
+}
+
+threeOutputs _scaled_dot_product_flash_attention_backward_batch_rule(
+    const Tensor& grad_out, std::optional<int64_t> grad_out_bdim,
+    const Tensor& query, std::optional<int64_t> query_bdim,
+    const Tensor& key, std::optional<int64_t> key_bdim,
+    const Tensor& value, std::optional<int64_t> value_bdim,
+    const Tensor& out, std::optional<int64_t> out_bdim,
+    const Tensor& logsumexp, std::optional<int64_t> logsumexp_bdim,
+    const Tensor& cum_seq_q, std::optional<int64_t> cum_seq_q_bdim,
+    const Tensor& cum_seq_k, std::optional<int64_t> cum_seq_k_bdim,
+    const c10::SymInt& max_q,
+    const c10::SymInt& max_k,
+    double dropout_p,
+    bool is_causal,
+    const Tensor& philox_seed, std::optional<int64_t> philox_seed_bdim,
+    const Tensor& philox_offset, std::optional<int64_t> philox_offset_bdim,
+    std::optional<double> scale
+) {
+  TORCH_INTERNAL_ASSERT(!cum_seq_q_bdim && !cum_seq_k_bdim);
+  TORCH_INTERNAL_ASSERT(!philox_seed_bdim && !philox_offset_bdim);
+  if (dropout_p > 0 && !query_bdim && !key_bdim && !value_bdim &&
+      !out_bdim && !logsumexp_bdim) {
+    TORCH_INTERNAL_ASSERT(grad_out_bdim.has_value());
+    return sdpa_backward_with_shared_dropout(
+        grad_out, *grad_out_bdim, [&](const Tensor& cotangent) {
+          return at::_scaled_dot_product_flash_attention_backward_symint(
+              cotangent, query, key, value, out, logsumexp,
+              cum_seq_q, cum_seq_k, max_q, max_k,
+              dropout_p, is_causal, philox_seed, philox_offset, scale);
+        });
+  }
+  const auto batch_size = maybeCurrentDynamicLayer().value().batchSize();
+  auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  auto out_ = moveBatchDimToFront(out, out_bdim);
+  auto logsumexp_ = moveBatchDimToFront(logsumexp, logsumexp_bdim);
+
+  grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), batch_size).flatten(0, 1);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size).flatten(0, 1);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size).flatten(0, 1);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size).flatten(0, 1);
+  out_ = ensure_has_bdim(out_, out_bdim.has_value(), batch_size).flatten(0, 1);
+  logsumexp_ = ensure_has_bdim(logsumexp_, logsumexp_bdim.has_value(), batch_size).flatten(0, 1);
+
+  auto [res0, res1, res2] = at::_scaled_dot_product_flash_attention_backward_symint(
+      grad_out_, query_, key_, value_, out_, logsumexp_,
+      cum_seq_q, cum_seq_k, max_q, max_k,
+      dropout_p, is_causal, philox_seed, philox_offset, scale);
+
+  res0 = reshape_dim_outof_symint(0, batch_size, res0);
+  res1 = reshape_dim_outof_symint(0, batch_size, res1);
+  res2 = reshape_dim_outof_symint(0, batch_size, res2);
+
+  return std::make_tuple(
+    std::move(res0), 0,
+    std::move(res1), 0,
+    std::move(res2), 0
+  );
+}
+
+threeOutputs _scaled_dot_product_cudnn_attention_backward_batch_rule(
+    const Tensor& grad_out, std::optional<int64_t> grad_out_bdim,
+    const Tensor& query, std::optional<int64_t> query_bdim,
+    const Tensor& key, std::optional<int64_t> key_bdim,
+    const Tensor& value, std::optional<int64_t> value_bdim,
+    const Tensor& out, std::optional<int64_t> out_bdim,
+    const Tensor& logsumexp, std::optional<int64_t> logsumexp_bdim,
+    const Tensor& philox_seed, std::optional<int64_t> philox_seed_bdim,
+    const Tensor& philox_offset, std::optional<int64_t> philox_offset_bdim,
+    const Tensor& attn_bias, std::optional<int64_t> attn_bias_bdim,
+    const Tensor& cum_seq_q, std::optional<int64_t> cum_seq_q_bdim,
+    const Tensor& cum_seq_k, std::optional<int64_t> cum_seq_k_bdim,
+    const c10::SymInt& max_q,
+    const c10::SymInt& max_k,
+    double dropout_p,
+    bool is_causal,
+    std::optional<double> scale
+) {
+  TORCH_INTERNAL_ASSERT(!cum_seq_q_bdim && !cum_seq_k_bdim);
+  TORCH_INTERNAL_ASSERT(!philox_seed_bdim && !philox_offset_bdim);
+  if (dropout_p > 0 && !query_bdim && !key_bdim && !value_bdim &&
+      !attn_bias_bdim && !out_bdim && !logsumexp_bdim) {
+    TORCH_INTERNAL_ASSERT(grad_out_bdim.has_value());
+    return sdpa_backward_with_shared_dropout(
+        grad_out, *grad_out_bdim, [&](const Tensor& cotangent) {
+          return at::_scaled_dot_product_cudnn_attention_backward_symint(
+              cotangent, query, key, value, out, logsumexp,
+              philox_seed, philox_offset, attn_bias, cum_seq_q, cum_seq_k,
+              max_q, max_k, dropout_p, is_causal, scale);
+        });
+  }
+  const auto batch_size = maybeCurrentDynamicLayer().value().batchSize();
+  auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  auto out_ = moveBatchDimToFront(out, out_bdim);
+  auto logsumexp_ = moveBatchDimToFront(logsumexp, logsumexp_bdim);
+
+  grad_out_ = ensure_has_bdim(grad_out_, grad_out_bdim.has_value(), batch_size).flatten(0, 1);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size).flatten(0, 1);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size).flatten(0, 1);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size).flatten(0, 1);
+  out_ = ensure_has_bdim(out_, out_bdim.has_value(), batch_size).flatten(0, 1);
+  logsumexp_ = ensure_has_bdim(logsumexp_, logsumexp_bdim.has_value(), batch_size).flatten(0, 1);
+
+  Tensor attn_bias_ = attn_bias;
+  if (attn_bias.defined()) {
+    attn_bias_ = flatten_sdpa_attn_bias_for_vmap(attn_bias, attn_bias_bdim, batch_size);
+  }
+
+  auto [res0, res1, res2] = at::_scaled_dot_product_cudnn_attention_backward_symint(
+      grad_out_, query_, key_, value_, out_, logsumexp_,
+      philox_seed, philox_offset, attn_bias_,
+      cum_seq_q, cum_seq_k, max_q, max_k,
+      dropout_p, is_causal, scale);
+
+  res0 = reshape_dim_outof_symint(0, batch_size, res0);
+  res1 = reshape_dim_outof_symint(0, batch_size, res1);
+  res2 = reshape_dim_outof_symint(0, batch_size, res2);
+
+  return std::make_tuple(
+    std::move(res0), 0,
+    std::move(res1), 0,
+    std::move(res2), 0
+  );
+}
+
 }
 
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
@@ -875,10 +1126,14 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
   VMAP_SUPPORT(_scaled_dot_product_efficient_attention, _scaled_dot_product_efficient_attention_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_efficient_attention_backward, _scaled_dot_product_efficient_attention_backward_batch_rule);
 
   VMAP_SUPPORT(_scaled_dot_product_flash_attention, _scaled_dot_product_flash_attention_batch_rule);
   VMAP_SUPPORT2(_scaled_dot_product_flash_attention, quantized, _scaled_dot_product_flash_attention_quantized_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_flash_attention_backward, _scaled_dot_product_flash_attention_backward_batch_rule);
+
   VMAP_SUPPORT(_scaled_dot_product_cudnn_attention, _scaled_dot_product_cudnn_attention_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_cudnn_attention_backward, _scaled_dot_product_cudnn_attention_backward_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 
