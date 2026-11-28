@@ -825,18 +825,6 @@ struct FastCudaLauncherObject {
   int numTotalArgs; // numKernelArgs + nScratch
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char argTypes[MAX_ARGS + 1]; // null-terminated
-  // Thread safety: argStorage/kernelArgs are shared across calls but safe
-  // because the GIL is held throughout fast_launcher_vectorcall (no
-  // Py_BEGIN_ALLOW_THREADS).  cuLaunchKernel copies arg values from the
-  // kernelArgs pointers synchronously before returning, so by the time the
-  // GIL could be released the driver already has its own copy.
-  // TODO(T000000): Not safe under free-threaded Python (PEP 703, nogil).
-  // If two threads call the same instance concurrently without the GIL,
-  // they will corrupt argStorage/kernelArgs.  Revisit when nogil is stable.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  uint64_t argStorage[MAX_ARGS];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  void* kernelArgs[MAX_ARGS];
 };
 
 static PyObject* fast_launcher_vectorcall(
@@ -897,12 +885,6 @@ static PyObject* FastCudaLauncher_new(
   }
   self->argTypes[nTotal] = '\0';
 
-  // Pre-compute kernelArgs pointers and zero all storage.
-  std::memset(self->argStorage, 0, sizeof(self->argStorage));
-  for (const auto i : c10::irange(nTotal)) {
-    self->kernelArgs[i] = &self->argStorage[i];
-  }
-
   // Set vectorcall function pointer.
   self->vectorcall = fast_launcher_vectorcall;
 
@@ -955,10 +937,20 @@ static PyObject* fast_launcher_vectorcall(
 
   uint64_t stream = THPUtils_unpackUInt64(args[3]);
 
-  // Pack kernel args from Python into pre-allocated argStorage.
+  // On the stack, as threads of a free-threaded build can launch through one
+  // launcher at once. Scratch slots stay null: inductor passes None for them.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  std::array<uint64_t, MAX_ARGS> argStorage;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  std::array<void*, MAX_ARGS> kernelArgs;
+  for (const auto i : c10::irange(self->numTotalArgs)) {
+    argStorage[i] = 0;
+    kernelArgs[i] = &argStorage[i];
+  }
+
   for (const auto i : c10::irange(self->numKernelArgs)) {
     PyObject* item = args[4 + i];
-    void* slot = static_cast<void*>(&self->argStorage[i]);
+    void* slot = static_cast<void*>(&argStorage[i]);
     char typeChar = self->argTypes[i];
     switch (typeChar) {
       case 'O': {
@@ -969,8 +961,8 @@ static PyObject* fast_launcher_vectorcall(
 #if defined(USE_ROCM)
         TORCH_CHECK(false, "tensordesc kernel args are not supported on ROCm");
 #else
-        // Override the pre-bound slot to point at the descriptor's 128 bytes.
-        self->kernelArgs[i] = getTmaDescPtr(item);
+        // Point the slot at the descriptor's 128 bytes.
+        kernelArgs[i] = getTmaDescPtr(item);
         continue;
 #endif
       }
@@ -1023,10 +1015,6 @@ static PyObject* fast_launcher_vectorcall(
             false, "_FastCudaLauncher: unknown arg type '", typeChar, "'");
     }
   }
-  // Scratch slots already zeroed at construction time and stay zero.
-  // Invariant: inductor codegen always passes None for scratch args, so the
-  // pre-zeroed nullptr values remain valid across launches.  If scratch
-  // semantics ever require non-null per-launch values, re-zero here.
 
   launchKernel(
       self->func,
@@ -1035,7 +1023,7 @@ static PyObject* fast_launcher_vectorcall(
       static_cast<uint32_t>(gridZ),
       self->numWarps,
       self->sharedMemBytes,
-      self->kernelArgs,
+      kernelArgs.data(),
       reinterpret_cast<cudaStream_t>(stream), // NOLINT
       self->launchPdl);
 
