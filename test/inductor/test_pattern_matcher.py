@@ -88,6 +88,31 @@ register_custom_class(OpaqueScaleFactor, typ="constant", hoist=True)
 class TestPatternMatcher(TestCase):
     device_type = GPU_TYPE
 
+    def test_reinplace_helper_reads_parameter(self):
+        # Guards against the closure-capture defect in #206431: the scalar
+        # branch of tensor_with_same_storage_already_reinplaced must be a
+        # pure function of its own parameter, not the enclosing mutated_arg.
+        import ast
+        import inspect
+        import textwrap
+        from torch._inductor.fx_passes import reinplace
+
+        src = textwrap.dedent(inspect.getsource(reinplace.reinplace_inplaceable_ops_core))
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.FunctionDef)
+                and node.name == "tensor_with_same_storage_already_reinplaced"
+            ):
+                for ret in (n for n in ast.walk(node) if isinstance(n, ast.Return)):
+                    names = {n.id for n in ast.walk(ret) if isinstance(n, ast.Name)}
+                    if "storage_of_reinplaced_args" in names and "arg" not in names:
+                        raise AssertionError(
+                            "scalar branch reads closed-over mutated_arg instead of parameter arg"
+                        )
+                return
+        raise AssertionError("tensor_with_same_storage_already_reinplaced not found")
+
     def common(
         self,
         fn,
