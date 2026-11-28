@@ -73,7 +73,7 @@ class L1Loss(_Loss):
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
         l_n = \left| x_n - y_n \right|,
 
-    where :math:`N` is the batch size. If :attr:`reduction` is not ``'none'``
+    where :math:`N` is the total number of elements in :math:`x` and :math:`y`. If :attr:`reduction` is not ``'none'``
     (default ``'mean'``), then:
 
     .. math::
@@ -86,7 +86,7 @@ class L1Loss(_Loss):
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
     of :math:`N` elements each.
 
-    The sum operation still operates over all the elements, and divides by :math:`N`.
+    The mean operation still operates over all the elements, and divides by :math:`N`.
 
     The division by :math:`N` can be avoided if one sets ``reduction = 'sum'``.
 
@@ -574,7 +574,7 @@ class MSELoss(_Loss):
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
         l_n = \left( x_n - y_n \right)^2,
 
-    where :math:`N` is the batch size. If :attr:`reduction` is not ``'none'``
+    where :math:`N` is the total number of elements in :math:`x` and :math:`y`. If :attr:`reduction` is not ``'none'``
     (default ``'mean'``), then:
 
     .. math::
