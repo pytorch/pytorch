@@ -2342,6 +2342,30 @@ class TestMetaKernelConv(TestCase):
 class TestMetaKernelRegistrations(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("op", [torch.cummin, torch.cummax], name_fn=lambda op: op.__name__)
+    @parametrize("shape", [(), (0,), (2, 0, 3)])
+    @parametrize("fake", [False, True])
+    def test_cummin_cummax_dim(self, op, shape, fake):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        if fake:
+            mode = FakeTensorMode(allow_fallback_kernels=False)
+            x = mode.from_tensor(torch.empty(shape))
+        else:
+            x = torch.empty(shape, device="meta")
+
+        rank = max(len(shape), 1)  # Scalars accept dim=-1 and dim=0.
+        for dim in (-rank, rank - 1):
+            values, indices = op(x, dim)
+            self.assertEqual(values.shape, x.shape)
+            self.assertEqual(indices.shape, x.shape)
+            self.assertEqual(values.dtype, x.dtype)
+            self.assertEqual(indices.dtype, torch.long)
+        for dim in (-rank - 1, rank):
+            with self.subTest(dim=dim):
+                with self.assertRaisesRegex(IndexError, "[Dd]im"):
+                    op(x, dim)
+
     @parametrize("tensor_lr", [False, True])
     @parametrize("amsgrad", [False, True])
     @parametrize("fake", [False, True])
