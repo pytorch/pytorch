@@ -14,6 +14,21 @@
 
 namespace at::native {
 
+namespace {
+
+void check_real_qparams(const Tensor& scale, const Tensor& zero_point) {
+  TORCH_CHECK_VALUE(
+      !isComplexType(scale.scalar_type()),
+      "quantize_per_tensor: scale must be a real tensor, but got ",
+      scale.scalar_type());
+  TORCH_CHECK_VALUE(
+      !isComplexType(zero_point.scalar_type()),
+      "quantize_per_tensor: zero_point must be a real tensor, but got ",
+      zero_point.scalar_type());
+}
+
+} // namespace
+
 Tensor quantize_per_tensor_dynamic(
     const Tensor& self,
     ScalarType dtype,
@@ -69,6 +84,7 @@ Tensor quantize_per_tensor_tensor_qparams(
     const Tensor& scale,
     const Tensor& zero_point,
     ScalarType dtype) {
+  check_real_qparams(scale, zero_point);
   auto quantizer = make_per_tensor_affine_quantizer(scale.item().toDouble(), zero_point.item().toLong(), dtype);
   return quantizer->quantize(self);
 }
@@ -78,6 +94,7 @@ std::vector<Tensor> quantize_per_tensor_list_cpu(
     const Tensor& scales,
     const Tensor& zero_points,
     ScalarType dtype) {
+  check_real_qparams(scales, zero_points);
   std::vector<Tensor> quantized_tensors;
   quantized_tensors.reserve(tensors.size());
   for (const auto i : c10::irange(tensors.size())) {
