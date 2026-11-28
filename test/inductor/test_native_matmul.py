@@ -24,7 +24,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     TEST_WITH_ROCM,
+    xfailIf,
 )
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -444,6 +446,8 @@ class TestNativeMatmulRowReduction(TestCase):
             "local_xindex_mask)"
         ).run(code)
 
+    # https://github.com/intel/torch-xpu-ops/issues/6234
+    @xfailIf(GPU_TYPE == "xpu" and not Xe2_Or_Later)
     def test_matmul_output_precision(self):
         def f(x, weight):
             return (x @ weight).sum(-1)
