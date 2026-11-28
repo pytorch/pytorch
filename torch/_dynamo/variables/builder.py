@@ -3440,6 +3440,20 @@ class VariableBuilder:
         if value in self.tx.output.side_effects:
             raise AssertionError("Tensor is already tracked in side effects")
 
+        # A ZeroTensor has no storage, so it is materialized in-graph below. Export
+        # skips this: an ExportedProgram has no dispatch key guard to recompile on.
+        # Tensor._is_zerotensor() would dispatch to a subclass __torch_function__.
+        keys = torch._C._dispatch_keys(value)
+        is_zerotensor = keys.has(torch._C.DispatchKey.ZeroTensor) and not self.tx.export
+        if is_zerotensor and (value.requires_grad or infer_subclass_type(value)):
+            unimplemented(
+                gb_type="Attempted to wrap a ZeroTensor input that requires grad or is a subclass",
+                context=f"type: {type(value)}; requires_grad: {value.requires_grad}",
+                explanation="torch.compile materializes ZeroTensor inputs as dense "
+                "zeros, which would drop requires_grad and the tensor subclass.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
         is_static_input = get_static_address_type(value) is not None
 
         # When a shapes_spec is provided for this tensor, we must skip the
@@ -3628,6 +3642,14 @@ class VariableBuilder:
             **options,
         )
 
+        if is_zerotensor:
+            tensor_variable = wrap_fx_proxy(
+                tx=self.tx,
+                proxy=self.tx.output.root_tracer.create_proxy(
+                    "call_function", torch.zeros_like, (tensor_proxy,), {}
+                ),
+            )
+
         # Track input tensors for attribute mutation, matching how
         # handle_traced_output tracks intermediate tensors with AttributeMutationNew.
         # This enables setattr on input tensors (e.g. tensor.custom_attr = val)
@@ -3648,7 +3670,10 @@ class VariableBuilder:
         guard_type = GuardBuilder.TENSOR_MATCH
 
         if isinstance(source, GradSource) and is_from_optimizer_source(source):
-            guard_type = GuardBuilder.NOT_NONE_MATCH
+            # A materialized ZeroTensor keeps TENSOR_MATCH, which checks the
+            # dispatch key set, so a dense grad at this site recompiles.
+            if not is_zerotensor:
+                guard_type = GuardBuilder.NOT_NONE_MATCH
 
         is_dtensor = torch.distributed.is_available() and isinstance(
             value, torch.distributed.tensor.DTensor
@@ -3786,7 +3811,7 @@ class VariableBuilder:
 
         # Note: this information is conveyed via subclass_type now
         # type: ignore[attr-defined]
-        fake_tensor_value = tensor_variable.proxy.node.meta["example_value"]
+        fake_tensor_value = tensor_proxy.node.meta["example_value"]
         if maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode:
             raise InternalTorchDynamoError("Wrapped Tensor must be this graph's fake")
 
