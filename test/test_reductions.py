@@ -30,7 +30,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCPU, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
     precisionOverride, skipXPUIf)
 from torch.testing._internal.common_methods_invocations import (
-    ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
+    ReductionOpInfo, reduction_ops, reference_masked_ops)
 
 
 
@@ -307,7 +307,7 @@ class TestReductionsDevice(TestCase):
         See discussion here https://github.com/pytorch/pytorch/issues/61901
         """
         t = make_tensor((0, 2, 3), dtype=torch.float, device=device)
-        for dim in [0] + [[0, 2]] if op.supports_multiple_dims else []:
+        for dim in [0] + ([[0, 2]] if op.supports_multiple_dims else []):
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
             if op.identity is not None:
                 # Reducing along empty slice should return identity
@@ -319,13 +319,8 @@ class TestReductionsDevice(TestCase):
                 self.assertEqual(result, torch.full_like(result, torch.nan))
             else:
                 # Reducing along empty slice should raise an error
-                if isinstance(op, ReductionPythonRefInfo):
-                    # ref reductions throw RuntimeError for this
-                    with self.assertRaises(RuntimeError):
-                        op(t, *args, dim=dim, **kwargs)
-                else:
-                    with self.assertRaises(IndexError):
-                        op(t, *args, dim=dim, **kwargs)
+                with self.assertRaisesRegex(IndexError, "Expected reduction dim"):
+                    op(t, *args, dim=dim, **kwargs)
 
     @skipIfMPS
     @ops(reduction_ops, dtypes=OpDTypes.none)
@@ -333,7 +328,7 @@ class TestReductionsDevice(TestCase):
         """Tests that reducing a nonempty slice of an empty tensor returns an
         empty tensor with the dimensions reduced."""
         t = make_tensor((0, 2, 3), dtype=torch.float, device=device)
-        for dim in [1] + [[1, 2]] if op.supports_multiple_dims else []:
+        for dim in [1] + ([[1, 2]] if op.supports_multiple_dims else []):
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
             result = op(t, *args, dim=dim, **kwargs)
             self.assertEqual(result.shape, _reduced_shape(t.shape, dim=dim))

@@ -2575,6 +2575,10 @@ def amin(
             f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
         )
 
+    if dim is not None:
+        for d in (dim,) if isinstance(dim, Dim) else dim:
+            utils.zero_numel_check_dims(a, utils.canonicalize_dim(a.ndim, d), "amin()")
+
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
@@ -2605,6 +2609,10 @@ def amax(
             lambda: f"Expected the dtype for input and out to match, but got "
             f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
         )
+
+    if dim is not None:
+        for d in (dim,) if isinstance(dim, Dim) else dim:
+            utils.zero_numel_check_dims(a, utils.canonicalize_dim(a.ndim, d), "amax()")
 
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
