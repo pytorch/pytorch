@@ -18,18 +18,15 @@ from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.fsdp._fully_shard._fsdp_init import _get_managed_modules
 from torch.distributed.tensor import Replicate, Shard
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
-    MultiProcContinuousTest,
+    MultiProcContinuousForInstantiateTest,
     run_subtests,
     skip_if_lt_x_gpu,
     TEST_SKIPS,
 )
-from torch.testing._internal.common_fsdp import (
-    check_sharded_parity,
-    DEVICE_TYPE,
-    MLPStack,
-)
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_fsdp import check_sharded_parity, MLPStack
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -47,16 +44,10 @@ class Net(nn.Module):
         return self.fc3(self.fc2(self.fc1(x)))
 
 
-class ReplicateTest(MultiProcContinuousTest):
+class ReplicateTest(MultiProcContinuousForInstantiateTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = 4
-
-    @classmethod
-    def backend_str(cls, device) -> str:
-        return dist.get_default_backend_for_device(DEVICE_TYPE)
-
-    @property
-    def device_type(self) -> str:
-        return DEVICE_TYPE
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
@@ -66,19 +57,22 @@ class ReplicateTest(MultiProcContinuousTest):
             torch.accelerator.set_device_index(rank)
         super()._init_pg(rank, world_size, rdvz_file)
 
-    def init_replicate_tp_mesh(self) -> DeviceMesh:
+    def init_replicate_tp_mesh(self, device: str) -> DeviceMesh:
         # Prefer to test with >=4 GPUs, but for 2 GPUs, use 2-way TP
         replicate_size = 2
         return init_device_mesh(
-            DEVICE_TYPE,
+            torch.device(device).type,
             (replicate_size, 1, self.world_size // replicate_size),
             mesh_dim_names=("replicate", "shard", "tp"),
         )
 
     @skip_if_lt_x_gpu(4)
-    def test_replicate_transformer(self):
+    def test_replicate_transformer(self, device):
         """
         This tests that replicate works on a transformer model with fully_shard and replicate layers
+
+        Args:
+            device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
         run_subtests(
             self,
@@ -86,6 +80,7 @@ class ReplicateTest(MultiProcContinuousTest):
                 "sharding_strategy": ["replicate", "fully_shard"],
             },
             self._test_replicate_transformer,
+            device=device,
         )
 
     def _composable_api_module_check(self, module, sharding_strategy):
@@ -94,10 +89,10 @@ class ReplicateTest(MultiProcContinuousTest):
         else:
             self.assertTrue("fully_shard" in _get_registry(module))
 
-    def _test_replicate_transformer(self, sharding_strategy):
+    def _test_replicate_transformer(self, sharding_strategy, *, device: str):
         model_args = ModelArgs()
 
-        model = Transformer(model_args)
+        model = Transformer(model_args).to(torch.device(device).type)
         replicate_model = deepcopy(model)
 
         for i, layer in enumerate(replicate_model.layers):
@@ -125,7 +120,7 @@ class ReplicateTest(MultiProcContinuousTest):
                     self.assertEqual(parameter.placements, (Shard(dim=0),))
 
     @skip_if_lt_x_gpu(4)
-    def test_replicate_transformer_managed_modules(self):
+    def test_replicate_transformer_managed_modules(self, device):
         """
         This tests that replicate managed modules works properly. In this test we use a Transformer Module with 3 layers,
         which means there are 49 submodules. We apply replicate on the first layer and fully shard on the second layer,
@@ -156,12 +151,14 @@ class ReplicateTest(MultiProcContinuousTest):
                 13. w2
                 14. resid_dropout
 
+        Args:
+            device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
 
         model_args = ModelArgs()
         model_args.n_layers = 3
 
-        model = Transformer(model_args)
+        model = Transformer(model_args).to(torch.device(device).type)
         replicate_model = deepcopy(model)
 
         self.assertEqual(
@@ -194,14 +191,16 @@ class ReplicateTest(MultiProcContinuousTest):
         )
 
     @skip_if_lt_x_gpu(4)
-    def test_replicate_tp_device_mesh(self):
+    def test_replicate_tp_device_mesh(self, device):
         """
         This tests that a user can pass in a device mesh to replicate a module
+
+        Args:
+            device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
 
-        device = torch.device(
-            f"{DEVICE_TYPE}:{self.rank % torch.accelerator.device_count()}"
-        )
+        device_type = torch.device(device).type
+        device = torch.device(f"{device_type}:{self.rank}")
         model = Net().to(device)
         replicate_model = deepcopy(model)
 
@@ -211,7 +210,7 @@ class ReplicateTest(MultiProcContinuousTest):
             replicate_model.fc3,
         ]
 
-        global_mesh = self.init_replicate_tp_mesh()
+        global_mesh = self.init_replicate_tp_mesh(device)
         replicate_mesh = global_mesh["replicate"]
 
         for layer in layers:
@@ -222,14 +221,16 @@ class ReplicateTest(MultiProcContinuousTest):
                 self.assertEqual(parameter.placements, (Replicate(),))
 
     @skip_if_lt_x_gpu(4)
-    def test_train_replicate_fsdp(self):
+    def test_train_replicate_fsdp(self, device):
         """
         Tests that replicate_model has the same behavior as original model when training
+
+        Args:
+            device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
 
-        device = torch.device(
-            f"{DEVICE_TYPE}:{self.rank % torch.accelerator.device_count()}"
-        )
+        device_type = torch.device(device).type
+        device = torch.device(f"{device_type}:{self.rank}")
         model = Net().to(device)
         replicate_model = deepcopy(model)
 
@@ -270,11 +271,14 @@ class ReplicateTest(MultiProcContinuousTest):
             check_sharded_parity(self, model, replicate_model)
 
     @skip_if_lt_x_gpu(4)
-    def test_train_parity_2d_mlp(self):
+    def test_train_parity_2d_mlp(self, device):
         """
         Verifies when a device mesh is passed in, the model has the same behavior as the original model when training
+
+        Args:
+            device: Device to run the test on. typically designated by an identifier such as "cuda:0".
         """
-        global_mesh = self.init_replicate_tp_mesh()
+        global_mesh = self.init_replicate_tp_mesh(device)
         run_subtests(
             self,
             {
@@ -282,6 +286,7 @@ class ReplicateTest(MultiProcContinuousTest):
                 "mlp_dim": [3, 16, 17],
             },
             functools.partial(self._test_train_parity_2d_mlp, global_mesh),
+            device=device,
         )
 
     def _test_train_parity_2d_mlp(
@@ -289,7 +294,11 @@ class ReplicateTest(MultiProcContinuousTest):
         global_mesh: DeviceMesh,
         use_activation_checkpointing: bool,
         mlp_dim: int,
+        *,
+        device: str,
     ):
+        device_type = torch.device(device).type
+        device = torch.device(f"{device_type}:{self.rank}")
         replicate_shard_mesh, tp_mesh = (
             global_mesh["replicate", "shard"],
             global_mesh["tp"],
@@ -299,7 +308,7 @@ class ReplicateTest(MultiProcContinuousTest):
 
         torch.manual_seed(42)
         model = MLPStack(mlp_dim)
-        ref_model = copy.deepcopy(model).to(DEVICE_TYPE)
+        ref_model = copy.deepcopy(model).to(device)
         replicate(ref_model, mesh=replicate_mesh)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
         model.parallelize(
@@ -310,7 +319,6 @@ class ReplicateTest(MultiProcContinuousTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
 
         torch.manual_seed(42 + replicate_pg.rank() + 1)
-        device = torch.device(DEVICE_TYPE)
         for iter_idx in range(10):
             inp = torch.randn((8, mlp_dim), device=device)
             losses: list[torch.Tensor] = []
@@ -321,6 +329,10 @@ class ReplicateTest(MultiProcContinuousTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
+
+instantiate_device_type_tests(
+    ReplicateTest, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
