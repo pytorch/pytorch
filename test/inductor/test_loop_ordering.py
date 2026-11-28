@@ -1648,6 +1648,87 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(1, metrics.generated_kernel_count)
 
 
+@instantiate_parametrized_tests
+class MemoryCoalescingAnalysisTest(MockSchedulerTest):
+    """Memory coalescing and tiling analysis over MockScheduler IR."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def _create_buffer(self, name, sizes):
+        """Create a buffer with specified sizes"""
+
+        strides = ir.FlexibleLayout.contiguous_strides(sizes)
+
+        box = ir.TensorBox.create(
+            ir.Buffer(
+                name=name,
+                layout=ir.FixedLayout(
+                    torch.device(GPU_TYPE),
+                    dtype=torch.float32,
+                    size=sizes,
+                    stride=strides,
+                ),
+            )
+        )
+        box_loader = box.make_loader()
+
+        def inner_fn(index):
+            return box_loader(index) * 2
+
+        buf = ir.Pointwise.create(
+            device=box.get_device(),
+            dtype=box.get_dtype(),
+            inner_fn=inner_fn,
+            ranges=box.get_size(),
+        )
+        buf.realize()
+        computed_buf = buf.data.data
+        computed_buf.decide_layout()
+
+        return computed_buf
+
+    def _create_scheduler_node(self, buf):
+        s = SchedulerNode(V.graph.scheduler, buf)
+        s.min_order = 0
+        s.max_order = 100
+        return s
+
+    @parametrize(
+        "inps",
+        (
+            ((128, 384, 196), (768, 64, 196), (128, 6, 64, 196)),
+            ((64,), (16, 4), (16, 4)),
+            ((5, 6), (3, 10), (30,)),
+            ((5, 6, 20), (3, 10, 20), (30, 20)),
+        ),
+    )
+    def test_inferred_splits(self, inps):
+        """
+        Test memory coalescing analysis with the specified tensor sizes.
+        Using direct SchedulerNode creation with sizes (128, 384, 196) and (768, 64, 196).
+        """
+
+        s1, s2, expected_size = inps
+
+        # Create buffers with the specified sizes
+        buf1 = self._create_buffer("buffer1", s1)
+        buf2 = self._create_buffer("buffer2", s2)
+
+        # Create scheduler nodes
+        snode1 = self._create_scheduler_node(buf1)
+        snode2 = self._create_scheduler_node(buf2)
+
+        # Create a fused node
+        fused_node = torch._inductor.scheduler.FusedSchedulerNode.fuse(snode1, snode2)
+
+        from torch._inductor import tiling_utils
+
+        fused_norm_read_writes = tiling_utils.extract_normalized_read_writes(fused_node)
+
+        var_ranges = fused_norm_read_writes.var_ranges
+        self.assertEqual(list(var_ranges.values()), list(expected_size))
+
+
 class MemoryCoalescingTest(MockSchedulerTest):
     """Tests for memory coalescing analysis with specific tensor sizes."""
 
@@ -1693,80 +1774,6 @@ class MemoryCoalescingTest(MockSchedulerTest):
             selection.memory.coalesced + selection.memory.uncoalesced, total_cost
         )
         return analysis, selection
-
-    def _create_buffer(self, device, name, sizes):
-        """Create a buffer with specified sizes"""
-
-        strides = ir.FlexibleLayout.contiguous_strides(sizes)
-
-        box = ir.TensorBox.create(
-            ir.Buffer(
-                name=name,
-                layout=ir.FixedLayout(
-                    torch.device(device),
-                    dtype=torch.float32,
-                    size=sizes,
-                    stride=strides,
-                ),
-            )
-        )
-        box_loader = box.make_loader()
-
-        def inner_fn(index):
-            return box_loader(index) * 2
-
-        buf = ir.Pointwise.create(
-            device=box.get_device(),
-            dtype=box.get_dtype(),
-            inner_fn=inner_fn,
-            ranges=box.get_size(),
-        )
-        buf.realize()
-        computed_buf = buf.data.data
-        computed_buf.decide_layout()
-
-        return computed_buf
-
-    def _create_scheduler_node(self, buf):
-        s = SchedulerNode(V.graph.scheduler, buf)
-        s.min_order = 0
-        s.max_order = 100
-        return s
-
-    @parametrize(
-        "inps",
-        (
-            ((128, 384, 196), (768, 64, 196), (128, 6, 64, 196)),
-            ((64,), (16, 4), (16, 4)),
-            ((5, 6), (3, 10), (30,)),
-            ((5, 6, 20), (3, 10, 20), (30, 20)),
-        ),
-    )
-    def test_inferred_splits(self, device, inps):
-        """
-        Test memory coalescing analysis with the specified tensor sizes.
-        Using direct SchedulerNode creation with sizes (128, 384, 196) and (768, 64, 196).
-        """
-
-        s1, s2, expected_size = inps
-
-        # Create buffers with the specified sizes
-        buf1 = self._create_buffer(device, "buffer1", s1)
-        buf2 = self._create_buffer(device, "buffer2", s2)
-
-        # Create scheduler nodes
-        snode1 = self._create_scheduler_node(buf1)
-        snode2 = self._create_scheduler_node(buf2)
-
-        # Create a fused node
-        fused_node = torch._inductor.scheduler.FusedSchedulerNode.fuse(snode1, snode2)
-
-        from torch._inductor import tiling_utils
-
-        fused_norm_read_writes = tiling_utils.extract_normalized_read_writes(fused_node)
-
-        var_ranges = fused_norm_read_writes.var_ranges
-        self.assertEqual(list(var_ranges.values()), list(expected_size))
 
     @requires_triton
     def test_remapped_reads(self, device):
