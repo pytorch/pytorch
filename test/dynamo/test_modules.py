@@ -1852,47 +1852,41 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(torch.allclose(ref3, res3))
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
-    def test_registered_attribute_presence_invalidation(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                try:
-                    self.value
-                except AttributeError:
-                    return x
-                return x + 1
-
-        model = Model()
-        model.register_buffer("value", None)
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(model, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        self.assertEqual(compiled(x), x + 1)
-        self.assertEqual(compiled(x), x + 1)
-        del model._buffers["value"]
-        self.assertEqual(compiled(x), x)
-        self.assertEqual(counter.frame_count, 2)
-
     @parametrize("custom_getitem", [False, True])
-    def test_export_registered_attribute_custom_registry(self, custom_getitem):
+    @parametrize("getterless", [False, True])
+    def test_export_registered_attribute_custom_registry(
+        self, custom_getitem, getterless
+    ):
         class Registry(dict):
-            pass
+            if custom_getitem:
 
-        class ScaledRegistry(dict):
-            def __getitem__(self, name):
-                return super().__getitem__(name) * 2
+                def __getitem__(self, name):
+                    return super().__getitem__(name) * 2
 
-        class Model(torch.nn.Module):
+        class HiddenWeight(Registry):
+            def __contains__(self, name):
+                return name != "weight" and super().__contains__(name)
+
+        class Base(torch.nn.Module):
+            @property
+            def weight(self):
+                raise AttributeError
+
+        class Model(Base):
             def forward(self, x):
-                return x + self.weight + self.offset
+                return x + getattr(self, "weight", 10) + self.offset
 
+        if getterless:
+            Base.weight = property()
         model = Model()
         model.torchdynamo_force_dynamic = False
-        weight = model.weight = torch.nn.Parameter(torch.tensor(5.0))
+        weight = torch.nn.Parameter(torch.tensor(5.0))
+        model.register_parameter("weight", weight)
+        model.__dict__["weight"] = 17
         offset = torch.tensor(3.0)
         model.register_buffer("offset", offset)
-        registry = ScaledRegistry if custom_getitem else Registry
-        model._parameters = registry(model._parameters)
-        model._buffers = registry(model._buffers)
+        model._parameters = Registry(model._parameters)
+        model._buffers = Registry(model._buffers)
         x = torch.ones(1)
         exported = torch._dynamo.export(model)(x).graph_module
         self.assertEqual(len(exported.graph.find_nodes(op="placeholder")), 1)
@@ -1901,30 +1895,21 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             weight.add_(1)
             offset.add_(3)
         self.assertEqual(exported(x), model(x))
+        compiled = torch.compile(model, backend="eager", fullgraph=True)
+        model._buffers["weight"] = offset
+        for registry in (Registry, HiddenWeight, Registry):
+            model._parameters = registry(model._parameters)
+            self.assertEqual(compiled(x), model(x))
 
-    def test_registered_attribute_lookup_custom_registry(self):
-        class HiddenValue(dict):
-            def __contains__(self, name):
-                return name != "value" and super().__contains__(name)
+        def fallback(self, name):
+            return 13 if name == "weight" else torch.nn.Module.__getattr__(self, name)
 
-        def fn(x, module):
-            return x + module.value
-
-        module = torch.nn.Module()
-        module.torchdynamo_force_dynamic = False
-        module.register_buffer("value", torch.tensor(2.0))
-        module._parameters["value"] = torch.nn.Parameter(torch.tensor(5.0))
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(1)
-
-        class VisibleValue(dict):
-            pass
-
-        for registry in (dict, HiddenValue, VisibleValue):
-            module._parameters = registry(module._parameters)
-            self.assertEqual(compiled(x, module), fn(x, module))
-        module.__dict__["value"] = torch.tensor(9.0)
-        self.assertEqual(compiled(x, module), fn(x, module))
+        model.__dict__["__getattr__"] = lambda _: 31
+        Model.__getattr__ = fallback
+        self.assertEqual(compiled(x), model(x))
+        for cls, getter in ((Base, lambda _: 7), (Model, lambda _: 9)):
+            cls.weight = property(getter)
+            self.assertEqual(compiled(x), model(x))
 
     @parametrize("specialize", [False, True])
     def test_registered_attribute_lookup_precedence(self, specialize):
@@ -1935,7 +1920,12 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 self._modules["value"] = torch.nn.Identity()
 
             def forward(self, x):
-                value = self.value
+                try:
+                    value = self.value
+                except AttributeError:
+                    return x
+                if value is None:
+                    return x + 1
                 return value(x) + 7 if isinstance(value, torch.nn.Module) else x + value
 
         model = Model()
@@ -1952,7 +1942,14 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x), x + 2)
         del model._buffers["value"]
         self.assertEqual(compiled(x), x + 7)
-        self.assertEqual(counter.frame_count, 3)
+        del model._modules["value"]
+        model.register_buffer("value", None)
+        self.assertEqual(compiled(x), x + 1)
+        del model._buffers["value"]
+        self.assertEqual(compiled(x), x)
+        self.assertEqual(counter.frame_count, 5)
+        Model.value = property(lambda _: 9)
+        self.assertEqual(compiled(x), x + 9)
 
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
