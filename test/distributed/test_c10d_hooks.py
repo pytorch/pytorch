@@ -10,7 +10,12 @@ from torch.distributed._hooks.collective_annotations import (
     unregister_collective_annotation_hooks,
 )
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.testing._internal.common_distributed import MultiProcContinuousTest
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
@@ -18,27 +23,10 @@ from torch.testing._internal.common_utils import HardwareClassification, run_tes
 _PGS_TO_ANNOTATE = "torch.distributed._hooks.collective_annotations._pgs_to_annotate"
 
 
-class TestProcessGroupHooks(MultiProcContinuousTest):
-    """
-    Verify that pre/post collective hooks registered on a ProcessGroup fire for
-    every collective issued through it, and for split_group. Collective hooks
-    are wired into the c10d dispatcher kernels (Ops.cpp), so they fire wherever
-    a c10d op is dispatched -- including replay of a captured graph that
-    re-dispatches the raw op (see test_hooks_fire_on_captured_graph_replay).
-    Uses a real gloo backend; a pure-Python or fake ProcessGroup overrides the
-    collective methods and dispatches without going through the c10d ops, so it
-    bypasses these hooks.
-    """
-
-    hw_classification = HardwareClassification.GENERIC
-
+class _HooksFireForAllCollectives:
     world_size = 2
 
-    @classmethod
-    def backend_str(cls, device):
-        return "gloo"
-
-    def test_hooks_fire_for_all_collectives(self):
+    def _check_hooks_fire_for_all_collectives(self, device):
         pg = _get_default_group()
         # The pre-hook fires before the op is issued, the post-hook after, with
         # a matching op_id correlating the two.
@@ -63,37 +51,50 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         rank = self.rank
         ws = self.world_size
 
-        dist.broadcast(torch.ones(2), src=0)
-        dist.all_reduce(torch.ones(2))
-        dist.reduce(torch.ones(2), dst=0)
-        dist.all_gather([torch.zeros(2) for _ in range(ws)], torch.ones(2))
-        dist.all_gather_into_tensor(torch.zeros(2 * ws), torch.ones(2))
-        dist.reduce_scatter(torch.zeros(2), [torch.ones(2) for _ in range(ws)])
-        dist.reduce_scatter_tensor(torch.zeros(2), torch.ones(2 * ws))
-        dist.all_to_all_single(torch.zeros(ws), torch.arange(ws, dtype=torch.float32))
+        dist.broadcast(torch.ones(2, device=device), src=0)
+        dist.all_reduce(torch.ones(2, device=device))
+        dist.reduce(torch.ones(2, device=device), dst=0)
+        dist.all_gather(
+            [torch.zeros(2, device=device) for _ in range(ws)],
+            torch.ones(2, device=device),
+        )
+        dist.all_gather_into_tensor(
+            torch.zeros(2 * ws, device=device), torch.ones(2, device=device)
+        )
+        dist.reduce_scatter(
+            torch.zeros(2, device=device),
+            [torch.ones(2, device=device) for _ in range(ws)],
+        )
+        dist.reduce_scatter_tensor(
+            torch.zeros(2, device=device), torch.ones(2 * ws, device=device)
+        )
+        dist.all_to_all_single(
+            torch.zeros(ws, device=device),
+            torch.arange(ws, dtype=torch.float32, device=device),
+        )
         dist.all_to_all(
-            [torch.zeros(1) for _ in range(ws)],
-            [torch.ones(1) for _ in range(ws)],
+            [torch.zeros(1, device=device) for _ in range(ws)],
+            [torch.ones(1, device=device) for _ in range(ws)],
         )
         dist.scatter(
-            torch.zeros(2),
-            [torch.ones(2) for _ in range(ws)] if rank == 0 else None,
+            torch.zeros(2, device=device),
+            [torch.ones(2, device=device) for _ in range(ws)] if rank == 0 else None,
             src=0,
         )
         dist.gather(
-            torch.ones(2),
-            [torch.zeros(2) for _ in range(ws)] if rank == 0 else None,
+            torch.ones(2, device=device),
+            [torch.zeros(2, device=device) for _ in range(ws)] if rank == 0 else None,
             dst=0,
         )
         dist.barrier()
         # send/recv need a peer; order send/recv by parity to avoid deadlock.
         peer = (rank + 1) % ws
         if rank % 2 == 0:
-            dist.send(torch.ones(2), dst=peer)
-            dist.recv(torch.zeros(2), src=peer)
+            dist.send(torch.ones(2, device=device), dst=peer)
+            dist.recv(torch.zeros(2, device=device), src=peer)
         else:
-            dist.recv(torch.zeros(2), src=peer)
-            dist.send(torch.ones(2), dst=peer)
+            dist.recv(torch.zeros(2, device=device), src=peer)
+            dist.send(torch.ones(2, device=device), dst=peer)
 
         expected = {
             HookOpName.BROADCAST,
@@ -122,19 +123,42 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         self.assertEqual(pre_op_ids, post_op_ids)
 
         # Only barrier carries the device it was dispatched for.
-        for op, device in zip(pre_ops, pre_devices):
-            expected_device = torch.device("cpu") if op == HookOpName.BARRIER else None
-            self.assertEqual(device, expected_device, msg=str(op))
+        barrier_device = torch.device(device.type)
+        for op, hook_device in zip(pre_ops, pre_devices):
+            expected_device = barrier_device if op == HookOpName.BARRIER else None
+            self.assertEqual(hook_device, expected_device, msg=str(op))
 
         # After unregistering, no further hooks fire.
         pg.unregister_pre_hook(0)
         pg.unregister_post_hook(0)
         pre_count, post_count = len(pre_ops), len(post_ops)
-        dist.all_reduce(torch.ones(2))
+        dist.all_reduce(torch.ones(2, device=device))
         self.assertEqual(len(pre_ops), pre_count)
         self.assertEqual(len(post_ops), post_count)
 
         dist.barrier()
+
+
+class TestProcessGroupHooks(_HooksFireForAllCollectives, MultiProcContinuousTest):
+    """
+    Verify that pre/post collective hooks registered on a ProcessGroup fire for
+    every collective issued through it, and for split_group. Collective hooks
+    are wired into the c10d dispatcher kernels (Ops.cpp), so they fire wherever
+    a c10d op is dispatched -- including replay of a captured graph that
+    re-dispatches the raw op (see test_hooks_fire_on_captured_graph_replay).
+    Uses a real gloo backend; a pure-Python or fake ProcessGroup overrides the
+    collective methods and dispatches without going through the c10d ops, so it
+    bypasses these hooks.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    @classmethod
+    def backend_str(cls, device):
+        return "gloo"
+
+    def test_hooks_fire_for_all_collectives(self):
+        self._check_hooks_fire_for_all_collectives(torch.device("cpu"))
 
     def test_hooks_fire_on_captured_graph_replay(self):
         # make_fx traces at the dispatcher (op) level and records the raw
@@ -283,6 +307,30 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         self.assertEqual(metadata["Process Group Name"], group.group_name)
 
         dist.barrier()
+
+
+class TestProcessGroupHooksAccelerator(
+    _HooksFireForAllCollectives, MultiProcContinuousTest
+):
+    """Hooks also fire for accelerator collectives dispatched through Ops.cpp."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def backend_str(cls, device):
+        return dist.get_default_backend_for_device(device)
+
+    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    def test_hooks_fire_for_all_collectives(self, device):
+        device = torch.device(torch.device(device).type, self.rank)
+        torch.accelerator.set_device_index(device.index)
+        self._check_hooks_fire_for_all_collectives(device)
+
+
+instantiate_device_type_tests(
+    TestProcessGroupHooksAccelerator, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
