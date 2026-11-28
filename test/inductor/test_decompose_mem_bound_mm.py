@@ -541,7 +541,7 @@ class TestDecomposeMemMMAccelerator(_DecomposeMemMMMixin, TestCase):
 class TestDecomposeBmmCpuDynamicShape(TestCase):
     """CPU bmm decomposition when the batch dim is symbolic.
 
-    Kept out of TestDecomposeMemMM because these cases need no GPU.
+    Kept out of TestDecomposeMemMMAccelerator because these cases need no GPU.
     """
 
     hw_classification = HardwareClassification.CPU
