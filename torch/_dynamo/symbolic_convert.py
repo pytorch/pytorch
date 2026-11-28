@@ -4531,7 +4531,7 @@ class InstructionTranslatorBase(
             if (
                 py_type is not None
                 and py_type.__format__ is object.__format__
-                and not BuiltinVariable.pending_format_slot(self, realized)
+                and not BuiltinVariable.has_pending_format_slots(self)
             ):
                 try:
                     from .variables.object_protocol import generic_str

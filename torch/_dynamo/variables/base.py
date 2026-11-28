@@ -342,16 +342,25 @@ class MethodFlags(IntFlag):
 
 
 def _check_method_arity(
+    vt: VariableTracker,
     tx: InstructionTranslatorBase,
-    qualname: str,
+    name: str,
     flags: MethodFlags,
     args: Any,
     kwargs: Any,
+    *,
+    owner: type | None = None,
 ) -> None:
     # Centralized arity check for a tp_methods handler, driven by MethodFlags,
     # raising the same TypeErrors CPython raises for builtin methods. Shared by
     # Method and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
+    prefix = (
+        vt.python_type_name()
+        if owner is None
+        else type.__dict__["__qualname__"].__get__(owner)
+    )
+    qualname = f"{prefix}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
         raise_type_error(tx, f"{qualname}() takes no keyword arguments")
     if flags & (MethodFlags.NOARGS | MethodFlags.O):
@@ -427,7 +436,7 @@ class Method:
         kwargs: Any,
     ) -> VariableTracker | None:
         flags = _derive_method_flags(vt, name)
-        _check_method_arity(tx, f"{vt.python_type_name()}.{name}", flags, args, kwargs)
+        _check_method_arity(vt, tx, name, flags, args, kwargs)
         return self.handler(vt, tx, args, kwargs)
 
 
@@ -694,11 +703,9 @@ def _wrap_binaryfunc(
     func: Callable[..., VariableTracker],
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
-    *,
-    name: str = "this method",
 ) -> VariableTracker:
     if kwargs:
-        raise_type_error(tx, f"{name} takes no keyword arguments")
+        raise_type_error(tx, "this method takes no keyword arguments")
     check_num_args(tx, args, 1)
     other = args[0]
     return func(self, tx, other)
@@ -710,12 +717,10 @@ def _wrap_binaryfunc_r(
     func: Callable[..., VariableTracker],
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
-    *,
-    name: str = "this method",
 ) -> VariableTracker:
     # Reflected binary op (``__radd__``): same impl, operands from the right.
     if kwargs:
-        raise_type_error(tx, f"{name} takes no keyword arguments")
+        raise_type_error(tx, "this method takes no keyword arguments")
     check_num_args(tx, args, 1)
     other = args[0]
     return func(self, tx, other, reverse=True)
@@ -792,11 +797,9 @@ def _wrap_indexargfunc(
     func: Callable[..., VariableTracker],
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
-    *,
-    name: str = "this method",
 ) -> VariableTracker:
     if kwargs:
-        raise_type_error(tx, f"{name} takes no keyword arguments")
+        raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import pynumber_as_ssize_t
 
     check_positional(tx, "", len(args), 1, 1)
@@ -814,8 +817,8 @@ def _wrap_objobjargproc(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     if kwargs:
-        raise_type_error(tx, "wrapper __setitem__() takes no keyword arguments")
-    # CPython gh-123446 added the slot name to PyArg_UnpackTuple in 3.14.
+        raise_type_error(tx, "this method takes no keyword arguments")
+    # CPython gh-123446 added the slot name in 3.14.
     name = "__setitem__" if sys.version_info >= (3, 14) else ""
     check_positional(tx, name, len(args), 2, 2)
     [key, value] = args
@@ -830,7 +833,7 @@ def _wrap_delitem(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     if kwargs:
-        raise_type_error(tx, "wrapper __delitem__() takes no keyword arguments")
+        raise_type_error(tx, "this method takes no keyword arguments")
     check_num_args(tx, args, 1)
     [key] = args
     return func(self, tx, key, None)
@@ -1239,12 +1242,20 @@ class SlotDef:
     impl: str
     group: SlotGroup
     slot: int
-    wrapper: WrapperType
+    raw_wrapper: WrapperType
 
-    def __post_init__(self) -> None:
-        if self.wrapper in (_wrap_binaryfunc, _wrap_binaryfunc_r, _wrap_indexargfunc):
-            named = functools.partial(self.wrapper, name=f"wrapper {self.name}()")
-            object.__setattr__(self, "wrapper", named)
+    def wrapper(
+        self,
+        vt: VariableTracker,
+        tx: InstructionTranslatorBase,
+        impl: Callable[..., VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Only these slot wrappers accept keywords in CPython's slotdefs table.
+        if kwargs and self.raw_wrapper not in (wrap_call, _wrap_init, _wrap_new):
+            raise_type_error(tx, f"wrapper {self.name}() takes no keyword arguments")
+        return self.raw_wrapper(vt, tx, impl, args, kwargs)
 
     def __call__(
         self,
@@ -1256,7 +1267,8 @@ class SlotDef:
         """Call the impl via the wrapper, passing self, tx, and args."""
         vt = vt.realize()
         func = getattr(type(vt), self.impl)
-        return self.wrapper(vt, tx, func, args, kwargs)
+        wrapper = self.wrapper if kwargs else self.raw_wrapper
+        return wrapper(vt, tx, func, args, kwargs)
 
 
 def SQSLOT(name: str, impl: str, slot: int, wrapper: WrapperType) -> SlotDef:
