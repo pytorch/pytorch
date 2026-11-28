@@ -1435,6 +1435,38 @@ class MetaConverter(Generic[_TensorT]):
                     # Dense -> Dense view case uses as_strided() to construct view relationship.
                     # TODO: Change this logic to use view replay for consistency?
                     # It's likely there is no view func available.
+                    def is_c_of_r(
+                        complex_dtype: torch.dtype, real_dtype: torch.dtype
+                    ) -> bool:
+                        return (
+                            utils.is_complex_dtype(complex_dtype)
+                            and utils.corresponding_real_dtype(complex_dtype)
+                            == real_dtype
+                        )
+
+                    # Native fallback conversion excludes Fake, but dtype
+                    # replay needs fake dispatch to wrap its Meta output.
+                    with (
+                        torch._C._SetExcludeDispatchKeyGuard(
+                            torch._C.DispatchKey.Fake, False
+                        )
+                        if self.cpp_fakes
+                        else contextlib.nullcontext()
+                    ):
+                        if base.dtype == t.dtype:
+                            pass
+                        elif is_c_of_r(base.dtype, t.dtype):
+                            base = self._checked_cast_tensor_t(torch.view_as_real(base))
+                        elif is_c_of_r(t.dtype, base.dtype):
+                            base = self._checked_cast_tensor_t(
+                                torch.view_as_complex(base)
+                            )
+                        else:
+                            # This is not guaranteed to succeed.  If it fails, it
+                            # means there is another dtype-converting view function
+                            # that hasn't been handled here
+                            base = self._checked_cast_tensor_t(base.view(t.dtype))
+
                     with maybe_suppress():
                         return self._checked_cast_tensor_t(
                             base.as_strided(sizes, strides, storage_offset)
@@ -1945,15 +1977,6 @@ class MetaConverter(Generic[_TensorT]):
                             base_symbolic_context,
                         )
 
-                    def is_c_of_r(
-                        complex_dtype: torch.dtype, real_dtype: torch.dtype
-                    ) -> bool:
-                        return (
-                            utils.is_complex_dtype(complex_dtype)
-                            and utils.corresponding_real_dtype(complex_dtype)
-                            == real_dtype
-                        )
-
                     # In some situations, MetaConverter may be called in a
                     # context where autograd is disabled.  For the _is_view
                     # assert to pass, we have to setup the autograd view
@@ -1966,31 +1989,6 @@ class MetaConverter(Generic[_TensorT]):
                         torch._C.DispatchKey.ADInplaceOrView, False
                     )
                     try:
-                        # Native fallback conversion excludes Fake, but dtype
-                        # replay needs fake dispatch to wrap its Meta output.
-                        with (
-                            torch._C._SetExcludeDispatchKeyGuard(
-                                torch._C.DispatchKey.Fake, False
-                            )
-                            if self.cpp_fakes
-                            else contextlib.nullcontext()
-                        ):
-                            if base.dtype == t.dtype:
-                                pass
-                            elif is_c_of_r(base.dtype, t.dtype):
-                                base = self._checked_cast_tensor_t(
-                                    torch.view_as_real(base)
-                                )
-                            elif is_c_of_r(t.dtype, base.dtype):
-                                base = self._checked_cast_tensor_t(
-                                    torch.view_as_complex(base)
-                                )
-                            else:
-                                # This is not guaranteed to succeed.  If it fails, it
-                                # means there is another dtype-converting view function
-                                # that hasn't been handled here
-                                base = self._checked_cast_tensor_t(base.view(t.dtype))
-
                         # This is very tricky.  Naively, you might expect this
                         # to hold:
                         #
