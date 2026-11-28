@@ -154,6 +154,14 @@ class TestSWAUtilsGeneric(TestCase):
             for b_avg, b_swa in zip(dnn.buffers(), averaged_dnn.module.buffers()):
                 self.assertEqual(b_avg, b_swa)
 
+    def test_ema_avg_fn_fixed_point(self):
+        param = torch.tensor([0.7])
+        ema = param.clone()
+        avg_fn = get_ema_avg_fn(0.9999)
+        for step in range(100):
+            ema = avg_fn(ema, param, step)
+        self.assertEqual(ema, param, atol=0, rtol=0)
+
     def test_bn_update_eval_momentum(self):
         objects = 100
         input_channels = 3
