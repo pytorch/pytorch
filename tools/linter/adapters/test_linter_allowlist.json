@@ -584,7 +584,6 @@
   "test/test_proxy_tensor.py",
   "test/test_public_bindings.py",
   "test/test_pytree.py",
-  "test/test_reductions.py",
   "test/test_reuse_old_whl.py",
   "test/test_serialization.py",
   "test/test_set_default_mobile_cpu_allocator.py",
