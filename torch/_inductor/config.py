@@ -1996,8 +1996,10 @@ avoid_32bit_indexing_guards: bool = False
 # made while generating it. Choices made before that keep the example's hints, e.g.
 # Reduction.num_splits at lowering and the memory-coalescing analysis that ranks
 # tilings. If the example inputs already exceed int32, only the 64-bit kernel is built,
-# as without this flag.
-# So far covers Triton reduction kernels from the main SIMD codegen path.
+# as without this flag. Unbacked sizes, which have no hint to guard on, already get one
+# 64-bit kernel with no guard; for them, this adds the second compile to get 32-bit
+# speed when the sizes fit.
+# So far covers Triton pointwise and reduction kernels from the main SIMD codegen path.
 # Takes precedence over avoid_32bit_indexing_guards for the kernels it covers;
 # assume_32bit_indexing takes precedence over it. Not applied with the cpp or FX
 # wrapper or triton.autotune_at_compile_time.

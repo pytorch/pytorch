@@ -4854,12 +4854,10 @@ class SIMDScheduling(BaseScheduling):
                 if getattr(kernel, attr) != getattr(kernels[0], attr):
                     raise AssertionError(f"kernel versions differ in {attr}")
 
-    def _should_build_int32_and_int64(
-        self, kernel_features: SIMDKernelFeatures
-    ) -> bool:
-        """Whether config.dual_index_dtype_kernels applies to this kernel: build an
-        int32 and an int64 variant and launch the int32 one only when the sizes fit,
-        instead of a single kernel with a size guard."""
+    def _should_build_int32_and_int64(self) -> bool:
+        """Whether config.dual_index_dtype_kernels applies to this backend's kernels in
+        this graph: build an int32 and an int64 variant of each and launch the int32
+        one only when the sizes fit, instead of a single kernel with a size guard."""
         from .triton import TritonScheduling
 
         if not config.dual_index_dtype_kernels:
@@ -4868,9 +4866,6 @@ class SIMDScheduling(BaseScheduling):
             # ConditionalMultiKernel emits Triton launches.
             "a non-Triton backend"
             if not isinstance(self, TritonScheduling)
-            # TODO: remove to cover all kernels, with tests for them.
-            else "a non-reduction kernel"
-            if not kernel_features.is_reduction()
             # TODO: support the cpp and FX wrappers (they cannot emit the conditional
             # launch yet).
             else "the cpp wrapper"
@@ -4917,7 +4912,7 @@ class SIMDScheduling(BaseScheduling):
         final_kernel: SIMDKernel | MultiKernelBase
         # Empty or None conditions: select_index_dtype picks int32 or int64 without a
         # guard, so a single kernel suffices.
-        if self._should_build_int32_and_int64(kernel_features) and (
+        if self._should_build_int32_and_int64() and (
             int32_conditions := kernel_features.int32_index_conditions()
         ):
             int64_hints = _int64_kernel_hint_overrides(int32_conditions)
