@@ -2898,7 +2898,25 @@ class _AutogradBackwardCompiler:
 
     def get_or_compile(self, *, saved_tensors_use_once: bool) -> Callable[..., Any]:
         if self.compiled_bw is not None:
-            return self.compiled_bw
+            # Dynamic shapes eagerly lower the backward at forward time with
+            # donated buffers (num_symints_saved_for_bw > 0). That skips the
+            # lazy path that clears donations for retain_graph=True. If we
+            # still have the lazy bw module, drop the donated compile and
+            # recompile without donations so retain_graph matches static.
+            # Only the dynamic/eager-fw path compiles donated bw at forward
+            # (num_symints_saved_for_bw > 0). Keep static retain_graph raising.
+            can_recompile_without_donations = (
+                not saved_tensors_use_once
+                and bool(self.fw_metadata.bw_donated_idxs)
+                and (self.fw_metadata.num_symints_saved_for_bw or 0) > 0
+                and self.bw_compiler is not None
+                and isinstance(
+                    self.lazy_backward_info, AutogradLazyBackwardCompileInfo
+                )
+            )
+            if not can_recompile_without_donations:
+                return self.compiled_bw
+            self.compiled_bw = None
 
         if self.lazy_backward_info is None:
             raise AssertionError("lazy_backward_info must not be None")
