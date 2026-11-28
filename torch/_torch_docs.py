@@ -2987,6 +2987,82 @@ In-place version of :func:`torch.clamp`
 )
 
 add_docstr(
+    torch.clamp_max,
+    r"""
+clamp_max(input, max, *, out=None) -> Tensor
+
+Clamps each element of :attr:`input` to be at most :attr:`max`.
+Equivalent to :func:`torch.clamp` with only :attr:`max` specified.
+If :attr:`max` is a tensor, :attr:`input` and :attr:`max` are
+broadcast to a common shape.
+
+Args:
+    {input}
+    max (Number or Tensor): upper bound for each element.
+
+Keyword args:
+    {out}
+
+Examples::
+
+    >>> a = torch.tensor([-1.0, 0.5, 2.0])
+    >>> torch.clamp_max(a, 1.0)
+    tensor([-1.0000,  0.5000,  1.0000])
+    >>> torch.clamp_max(a, torch.tensor([[0.0], [1.0]]))
+    tensor([[-1.0000,  0.0000,  0.0000],
+            [-1.0000,  0.5000,  1.0000]])
+""".format(**common_args),
+)
+
+add_docstr(
+    torch.clamp_max_,
+    r"""
+clamp_max_(input, max) -> Tensor
+
+In-place version of :func:`torch.clamp_max`.
+Broadcasting must not change the shape of the tensor being modified.
+""",
+)
+
+add_docstr(
+    torch.clamp_min,
+    r"""
+clamp_min(input, min, *, out=None) -> Tensor
+
+Clamps each element of :attr:`input` to be at least :attr:`min`.
+Equivalent to :func:`torch.clamp` with only :attr:`min` specified.
+If :attr:`min` is a tensor, :attr:`input` and :attr:`min` are
+broadcast to a common shape.
+
+Args:
+    {input}
+    min (Number or Tensor): lower bound for each element.
+
+Keyword args:
+    {out}
+
+Examples::
+
+    >>> a = torch.tensor([-1.0, 0.5, 2.0])
+    >>> torch.clamp_min(a, 0.0)
+    tensor([0.0000, 0.5000, 2.0000])
+    >>> torch.clamp_min(a, torch.tensor([[0.0], [1.0]]))
+    tensor([[0.0000, 0.5000, 2.0000],
+            [1.0000, 1.0000, 2.0000]])
+""".format(**common_args),
+)
+
+add_docstr(
+    torch.clamp_min_,
+    r"""
+clamp_min_(input, min) -> Tensor
+
+In-place version of :func:`torch.clamp_min`.
+Broadcasting must not change the shape of the tensor being modified.
+""",
+)
+
+add_docstr(
     torch.clip,
     r"""
 clip(input, min=None, max=None, *, out=None) -> Tensor
