@@ -1002,7 +1002,6 @@ class TestFP8LoweringAccelerator(TestCase):
         rounding = torch.finfo(torch.bfloat16).eps * reference.abs()
         self.assertTrue(torch.all(actual_error <= eager_error + rounding + 1e-5))
 
-    @requires_capabilities(Capability.dtype.fp8)
     @parametrize("contraction_dim", [(0, 0), (1, 1), (0, 1)])
     def test_scaled_mm_v2_invalid_contraction_dim(self, device, contraction_dim):
         def fn(a, b, scale):
