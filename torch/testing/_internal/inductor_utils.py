@@ -165,6 +165,14 @@ RUN_TPU = LazyVal(
 )
 
 
+RUN_PRIVATEUSE1 = LazyVal(
+    lambda: any(
+        getattr(x, "device_type", "") not in ("cpu", "cuda", "xpu", "mps", "mtia")
+        for x in _desired_test_bases
+    )
+)
+
+
 def _check_has_dynamic_shape(
     self: TestCase,
     code,
