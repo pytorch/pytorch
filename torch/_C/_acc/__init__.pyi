@@ -1,4 +1,4 @@
-from torch import Tensor
+from torch import Stream, Tensor
 from torch.types import _dtype, _int, Device
 
 # Defined in torch/csrc/acc/Module.cpp
@@ -9,6 +9,11 @@ class PrivateUse1Hooks:
 
 class DeviceGuard:
     def type_(self) -> Device: ...
+    # Optional. If a subclass does not define this, creating a stream for the
+    # device raises instead of returning the default stream. The returned
+    # Stream must be built with the (stream_id, device_index, device_type)
+    # overload; Stream(device=...) would re-enter this method.
+    def get_new_stream(self, device: Device, priority: _int) -> Stream: ...
 
 def register_python_privateuseone_device_guard(guard: DeviceGuard) -> bool: ...
 def register_python_privateuseone_hook(hook: PrivateUse1Hooks) -> bool: ...
