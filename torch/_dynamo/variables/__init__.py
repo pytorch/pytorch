@@ -77,6 +77,7 @@ from .descriptors import (
     PropertyVariable,
     StaticMethodVariable,
     TupleGetterVariable,
+    UserDefinedPropertyVariable,
     WrapperDescriptorVariable,
 )
 from .dicts import (

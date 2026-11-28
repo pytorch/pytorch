@@ -516,8 +516,10 @@ class BaseUserFunctionVariable(VariableTracker):
         return self.get_code().co_qualname
 
     def get_doc(self) -> str | None:
-        # stored in code.co_consts[0]
-        return self.get_code().co_consts[0]
+        code = self.get_code()
+        if sys.version_info >= (3, 14) and not code.co_flags & inspect.CO_HAS_DOCSTRING:
+            return None
+        return code.co_consts[0]
 
     def get_globals(self) -> dict[str, Any]:
         raise NotImplementedError

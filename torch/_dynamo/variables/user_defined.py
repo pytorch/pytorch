@@ -92,6 +92,7 @@ from ..utils import (
     float_methods,
     frozenset_methods,
     get_custom_getattr,
+    get_property_accessor,
     has_torch_function,
     int_methods,
     is_lru_cache_wrapped_function,
@@ -637,6 +638,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             bytes.__new__,
             collections.deque.__new__,
             types.SimpleNamespace.__new__,
+            property.__new__,
         }
         return c_new_fns.union(exceptions)
 
@@ -884,6 +886,22 @@ class UserDefinedClassVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle data descriptors from the metaclass MRO (type.__dict__ slots)."""
+        if (
+            name != "__dict__"
+            and type(meta_attr) is not property
+            and issubclass(type(meta_attr), property)
+        ):
+            metacls_source = TypeSource(self.source) if self.source else None
+            descriptor_source = (
+                mro_attr_source(tx, type(self.value), metacls_source, name)
+                if metacls_source
+                else None
+            )
+            descriptor = variables.PropertyVariable.from_descriptor(
+                tx, meta_attr, source=descriptor_source
+            )
+            metacls = VariableTracker.build(tx, type(self.value), metacls_source)
+            return descriptor.tp_descr_get_impl(tx, self, metacls)
         if name == "__dict__":
             return VariableTracker.build(
                 tx,
@@ -1022,15 +1040,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             cmd_vt = variables.ClassMethodDescriptorVariable.create(cls_attr, source)
             return cmd_vt.tp_descr_get_impl(tx, self, self)
 
-        # property_descr_get with obj=NULL returns self.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1662-L1663
+        # Subclasses can override class-level descriptor access.
         if isinstance(cls_attr, property):
             descriptor_source = (
                 self.get_source_by_walking_mro(tx, name)
                 if self.source is not None
                 else None
             )
-            return variables.PropertyVariable.create(cls_attr, descriptor_source)
+            prop_vt = variables.PropertyVariable.from_descriptor(
+                tx, cls_attr, source=descriptor_source
+            )
+            return prop_vt.tp_descr_get_impl(tx, None, self)
 
         # member_get with obj=NULL returns self.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L164
@@ -1432,7 +1452,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # base_cls.__new__(cls) without unreconstructable args (e.g.
         # generators). Everything else (object.__new__, BaseException
         # subclasses, structseq classes) uses the extra args.
-        if owner in (collections.deque, types.SimpleNamespace):
+        if owner in (collections.deque, types.SimpleNamespace, property):
             init_args: list[VariableTracker] = []
         else:
             init_args = list(args[1:])
@@ -3771,9 +3791,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # fget is an instancemethod wrapper - https://docs.python.org/3/c-api/method.html#c.PyInstanceMethod_Check
 
         # If we have a PyCFunction, we make an assumption that there is no side effect.
+        if inspect.getattr_static(type(subobj), "__get__") is not property.__get__:
+            return False
+        fget = get_property_accessor(subobj, "fget")
         return isinstance(
-            subobj.fget, types.BuiltinFunctionType
-        ) or torch._C._dynamo.utils.is_instancemethod(subobj.fget)  # type: ignore[attr-defined]
+            fget, types.BuiltinFunctionType
+        ) or torch._C._dynamo.utils.is_instancemethod(fget)  # type: ignore[attr-defined]
 
     def _getattr_static(self, name: str) -> object:
         if name in self._looked_up_attrs:
@@ -4115,9 +4138,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
             # descriptor protocol and skip past the property wrapper.
-            if self.source:
+            if self.cls_source:
                 source = self.get_source_by_walking_mro(tx, name)
-            prop_vt = variables.PropertyVariable.create(type_attr, source)
+            elif self.source:
+                source = mro_attr_source(
+                    tx, self.python_type(), TypeSource(self.source), name
+                )
+            else:
+                source = None
+            prop_vt = variables.PropertyVariable.from_descriptor(
+                tx, type_attr, source=source
+            )
             return prop_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
@@ -4141,8 +4172,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
 
         if isinstance(type_attr, types.GetSetDescriptorType):
-            if tx.output.side_effects.has_pending_mutation_of_attr(
-                self, name, AttrMutationKind.GENERIC_SETATTR
+            if (
+                type_attr.__objclass__ is not property
+                and tx.output.side_effects.has_pending_mutation_of_attr(
+                    self, name, AttrMutationKind.GENERIC_SETATTR
+                )
             ):
                 result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
                 if isinstance(result, variables.DeletedVariable):
@@ -4333,11 +4367,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
-        if can_use_mro_source:
-            source = self.get_source_by_walking_mro(tx, name)
-        elif not source and self.cls_source is not None:
-            source = AttrSource(self.cls_source, name)
+        source = self._class_attribute_source(tx, name, source)
         return VariableTracker.build(tx, type_attr, source)
+
+    def _class_attribute_source(
+        self, tx: "InstructionTranslatorBase", name: str, source: Source | None
+    ) -> Source | None:
+        if self.cls_source is not None and self.source is not None:
+            return self.get_source_by_walking_mro(tx, name)
+        if source is None and self.cls_source is not None:
+            return AttrSource(self.cls_source, name)
+        return source
 
     def invoke_descriptor_get(
         self,

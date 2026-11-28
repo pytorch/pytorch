@@ -2379,8 +2379,18 @@ def _resolve_descriptor_set(  # noqa: RVT001
     value: VariableTracker | None,
     source: "Source | None",
 ) -> "VariableTracker | None":
-    if isinstance(descriptor, property):
-        prop_vt = variables.PropertyVariable(descriptor, source=source)
+    if issubclass(type(descriptor), property):
+        slot = "__delete__" if value is None else "__set__"
+        if source is None and inspect.getattr_static(
+            type(descriptor), slot
+        ) is not getattr(property, slot):
+            unimplemented(
+                gb_type="Property subclass setter or deleter without a source",
+                context=f"property subclass {slot} without a source",
+                explanation="A source is required to trace a custom property descriptor method.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        prop_vt = variables.PropertyVariable.from_descriptor(tx, descriptor, source)
         return prop_vt.tp_descr_set_impl(tx, obj, value)
     if isinstance(descriptor, types.GetSetDescriptorType):
         gs_vt = variables.GetSetDescriptorVariable(descriptor, source=source)
@@ -2460,7 +2470,9 @@ def _resolve_descriptor_get(
             if obj is not None and obj.source
             else None
         )
-        prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
+        prop_vt = variables.PropertyVariable.from_descriptor(
+            tx, type_attr, source=prop_source
+        )
         return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MemberDescriptorType):
         md_vt = variables.MemberDescriptorVariable.create(type_attr, source)
@@ -2838,6 +2850,15 @@ def object_generic_setattr_str(
     py_type = maybe_get_python_type(obj)
     getset = obj.lookup_tp_getset_member(name)
     if getset is not None:
+        if (
+            isinstance(obj, variables.UserDefinedPropertyVariable)
+            and obj.cls_source is not None
+            and (
+                name in variables.PropertyVariable.tp_getset
+                or name in variables.PropertyVariable.tp_members
+            )
+        ):
+            obj.get_source_by_walking_mro(tx, name)
         # getset_set's wording; a READONLY tp_members entry keeps
         # PyMember_SetOne's "readonly attribute" from readonly_setter itself.
         if getset.setter is None or (

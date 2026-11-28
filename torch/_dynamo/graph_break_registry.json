@@ -6768,6 +6768,96 @@
       ]
     }
   ],
+  "GB5326": [
+    {
+      "Gb_type": "Untracked property subclass mutation",
+      "Context": "property subclass attribute mutation: {name}",
+      "Explanation": "Dynamo cannot replay attribute mutations on this property subclass because its side effects are not tracked.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1984": [
+    {
+      "Gb_type": "Property subclass setter or deleter without a source",
+      "Context": "property subclass {slot} without a source",
+      "Explanation": "A source is required to trace a custom property descriptor method.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9870": [
+    {
+      "Gb_type": "Property subclass getter without a source",
+      "Context": "property subclass __get__ without a source",
+      "Explanation": "A source is required to trace a property descriptor and guard its state.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4072": [
+    {
+      "Gb_type": "Unsupported legacy property error message",
+      "Context": "property missing {kind}",
+      "Explanation": "Before Python 3.13 the stored property name is not exposed, so Dynamo cannot safely format its accessor error.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2168": [
+    {
+      "Gb_type": "Unsupported property owner name lookup",
+      "Context": "custom metaclass __getattribute__",
+      "Explanation": "Dynamo cannot format a property error through custom metaclass attribute access.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1762": [
+    {
+      "Gb_type": "Unsupported property subclass initialization",
+      "Context": "property subclass initialization",
+      "Explanation": "Dynamo cannot trace property subclass initialization on Python < 3.12, for existing objects, with custom __setattr__, or after a pending class metadata change.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1145": [
+    {
+      "Gb_type": "Property subclass initialization with a custom doc setter",
+      "Context": "property subclass initialization with a custom __doc__ descriptor",
+      "Explanation": "Dynamo cannot reconstruct a property subclass with a custom __doc__ setter without repeating user code.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5251": [
+    {
+      "Gb_type": "Unsupported existing property name lookup",
+      "Context": "property name may fall back to the getter's __name__",
+      "Explanation": "Dynamo cannot read an existing property's name when its getter has custom attribute access or a pending name mutation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4207": [
+    {
+      "Gb_type": "Unsupported property name formatting",
+      "Context": "non-constant property name representation",
+      "Explanation": "Dynamo cannot format a property error with a non-constant name representation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0345": [
     {
       "Gb_type": "strict_mode: improper args",
