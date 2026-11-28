@@ -158,7 +158,6 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
-from .exc import unimplemented
 from .source import (
     AttrProxySource,
     AttrSource,
@@ -405,17 +404,6 @@ def _method_identity_guards_filtered(
     return context is not None and context.is_aot_capture
 
 
-def _untracked_method_identity(context: str, *, skip_frame: bool = False) -> NoReturn:
-    unimplemented(
-        gb_type="Builtin method operation requires identity guards",
-        context=context,
-        explanation="Dynamo cannot establish the stable receiver identity required by this operation.",
-        hints=["Pass the computed result as an input to the compiled function."],
-        skip_frame=skip_frame,
-        preserve_skip_frame_after_inline=skip_frame,
-    )
-
-
 def install_builtin_method_guard(
     tx: InstructionTranslatorBase, source: Source, value: object = None
 ) -> None:
@@ -427,7 +415,7 @@ def install_builtin_method_guard(
         create = functools.partial(GuardBuilder.NATIVE_METHOD_MATCH, expected=expected)
         install_guard(source.make_guard(create))
     elif filtered:
-        _untracked_method_identity(f"binding prebound builtin method {source.name}")
+        exc.unimplemented_identity(f"binding prebound builtin method {source.name}")
     else:
         install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
