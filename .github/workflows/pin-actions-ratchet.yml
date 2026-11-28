@@ -1,0 +1,68 @@
+# Fail CI if ROCm-owned workflow files use mutable GitHub Action refs
+# (tags like @v4, branches like @main/@master) instead of commit SHAs.
+# Addresses SEC-00829 / ROCM-27018.
+name: Pin Actions Ratchet
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/parity.yml'
+      - '.github/workflows/build_portable_linux_pytorch_dockers.yml'
+      - '.github/workflows/pytorch_ifu.yml'
+      - '.github/workflows/pin-actions-ratchet.yml'
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/parity.yml'
+      - '.github/workflows/build_portable_linux_pytorch_dockers.yml'
+      - '.github/workflows/pytorch_ifu.yml'
+      - '.github/workflows/pin-actions-ratchet.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ratchet:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Check ROCm workflow action pins
+        run: |
+          set -euo pipefail
+
+          # ROCm-owned workflows outside upstream PyTorch parity.
+          FILES=(
+            .github/workflows/parity.yml
+            .github/workflows/build_portable_linux_pytorch_dockers.yml
+            .github/workflows/pytorch_ifu.yml
+          )
+
+          FAIL=0
+
+          for file in "${FILES[@]}"; do
+            if [[ ! -f "$file" ]]; then
+              echo "::warning::$file not found, skipping"
+              continue
+            fi
+
+            while IFS= read -r line; do
+              if [[ "$line" =~ uses:[[:space:]]*([^@[:space:]]+)@([^[:space:]]+) ]]; then
+                ref="${BASH_REMATCH[2]}"
+                if [[ ! "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+                  echo "::error file=$file::Mutable action ref '@${ref}' — pin to a 40-char commit SHA"
+                  FAIL=1
+                fi
+              fi
+            done < <(grep -E 'uses:[[:space:]]*[^@[:space:]]+@' "$file" || true)
+          done
+
+          if [[ "$FAIL" -ne 0 ]]; then
+            echo ""
+            echo "Pin actions with: pinact run --only '${FILES[*]}'"
+            exit 1
+          fi
+
+          echo "All ROCm-owned workflow action refs are pinned to commit SHAs."

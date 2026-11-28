@@ -1,0 +1,19 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# Reference: https://trivy.dev/latest/docs/configuration/filtering/#trivyignore
+#
+# One vulnerability, misconfiguration, or secret rule ID per line.
+# A line starting with # is a comment and suppresses nothing. Remove the
+# leading # to activate an example:
+#
+#   CVE-2019-14697 exp:2027-01-01
+#   AVD-DS-0002
+#   generic-unwanted-rule
+#
+# `exp:YYYY-MM-DD` limits a suppression to that date. After it, trivy
+# reports the finding again.
+#
+# This file sits beside the configured trivy.yml, so the scan uses it.
+# A .trivyignore at the repository root applies only when this file is
+# absent; the two are never merged.

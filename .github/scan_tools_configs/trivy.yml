@@ -1,0 +1,38 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# trivy configuration
+# Reference: https://trivy.dev/latest/docs/references/configuration/config-file/
+# Local scan: trivy fs --config .github/scan_tools_configs/trivy.yml .
+#
+# Trivy configuration for this repository's security scans.
+#
+# This file defines the complete scanner policy;
+# Keep repository-specific suppressions and tuning here.
+#
+# Ways to suppress a finding, narrowest first:
+#
+#   1. `.trivyignore` -- one vulnerability, misconfiguration or secret rule
+#      ID per line. Add `exp:YYYY-MM-DD` for a temporary suppression:
+#          CVE-2019-14697 exp:2027-01-01
+#      Reference: https://trivy.dev/latest/docs/configuration/filtering/#trivyignore
+#      Keep it beside this file (`.github/scan_tools_configs/.trivyignore`)
+#      or at the repository root. The file beside this config takes
+#      precedence; the two are never merged. The `.trivyignore` here is
+#      a commented placeholder.
+#
+#   2. `scan.skip-dirs` / `scan.skip-files` below -- paths trivy never
+#      reads, for vendored trees and generated output. Anything found only
+#      there is not scanned at all, so keep entries narrow.
+
+# Environment and generated-output exclusions support local scans; these
+# paths are absent from clean CI checkouts.
+scan:
+  skip-dirs:
+    - .git
+    - .venv*
+    - venv*
+    - build
+    - dist
+    - node_modules
+    - __pycache__

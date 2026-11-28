@@ -1,0 +1,197 @@
+name: Publish pytorch-nightly multi-arch image
+
+on:
+  schedule:
+    - cron: "0 7 * * *"   # daily at 07:00 UTC
+  workflow_dispatch:
+    inputs:
+      pytorch_branch:
+        description: "pytorch/pytorch branch to clone into the image"
+        type: string
+        default: "nightly"
+      rocm_version:
+        description: "ROCm version used for PyTorch nightly wheels and ROCm devel packages"
+        type: string
+        default: "10.0"
+      push_tag:
+        description: "Primary Docker Hub tag"
+        type: string
+        default: "latest"
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: rocm/pytorch-nightly
+  PYTORCH_REPO: pytorch/pytorch
+  PYTORCH_BRANCH: ${{ inputs.pytorch_branch || 'nightly' }}
+  ROCM_VERSION: ${{ inputs.rocm_version || '10.0' }}
+  TORCH_PACKAGE_INDEX_URL: https://download.pytorch.org/whl/nightly/rocm${{ inputs.rocm_version || '10.0' }}/
+  ROCM_PACKAGE_INDEX_URL: https://stable.repo.amd.com/rocm/whl-next/
+  PUSH_TAG: ${{ inputs.push_tag || 'latest' }}
+  BASE_IMAGE: ubuntu:24.04
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve PyTorch nightly branch head
+        id: resolve
+        run: |
+          sha="$(git ls-remote "https://github.com/${PYTORCH_REPO}.git" "refs/heads/${PYTORCH_BRANCH}" | awk '{print $1}')"
+          if [[ -z "${sha}" ]]; then
+            echo "Could not resolve ${PYTORCH_REPO}:${PYTORCH_BRANCH}" >&2
+            exit 1
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${sha:0:7}" >> "$GITHUB_OUTPUT"
+          echo "Resolved ${PYTORCH_REPO}:${PYTORCH_BRANCH} -> ${sha}"
+
+      - name: Generate Dockerfile
+        run: |
+          cat > Dockerfile <<'EOF'
+          ARG BASE_IMAGE=ubuntu:24.04
+          FROM ${BASE_IMAGE}
+
+          ARG TORCH_PACKAGE_INDEX_URL
+          ARG ROCM_PACKAGE_INDEX_URL
+          ARG ROCM_VERSION
+          ARG PYTORCH_REPO
+          ARG PYTORCH_BRANCH
+          ARG PYTORCH_SHA
+
+          ENV DEBIAN_FRONTEND=noninteractive
+          ENV PIP_NO_CACHE_DIR=1
+          ENV VIRTUAL_ENV=/opt/venv
+          ENV PATH="/opt/venv/bin:${PATH}"
+          ENV PYTORCH_SRC_DIR=/root/pytorch
+          # install_rocm.sh uses bash printf %q; Docker's default /bin/sh (dash) rejects it.
+          SHELL ["/bin/bash", "-c"]
+
+          RUN apt-get update && apt-get install -y --no-install-recommends \
+                ca-certificates \
+                git \
+                kmod \
+                libatomic1 \
+                libgomp1 \
+                libnuma-dev \
+                libc++1 \
+                libc++abi1 \
+                python3 \
+                python3-pip \
+                python3-venv \
+              && rm -rf /var/lib/apt/lists/*
+
+          # Install all ROCm packages from repo.amd.com; devel is not on download.pytorch.org.
+          # device-all pulls kernels for every supported gfx target.
+          RUN python3 -m venv "${VIRTUAL_ENV}" \
+              && python -m pip install --no-cache-dir \
+                --index-url "${ROCM_PACKAGE_INDEX_URL}" \
+                "rocm[libraries,devel,device-all]==${ROCM_VERSION}.*"
+
+          # Install PyTorch packages from download.pytorch.org.
+          RUN python -m pip install --no-cache-dir \
+                --index-url "${TORCH_PACKAGE_INDEX_URL}" \
+                torch torchvision torchaudio
+
+          RUN ROCM_HOME="$(rocm-sdk path --root)" \
+              && ROCM_BIN="$(rocm-sdk path --bin)" \
+              && { \
+                echo '# ROCm paths discovered from the rocm[devel] package.'; \
+                printf 'export ROCM_PATH=%q\n' "${ROCM_HOME}"; \
+                printf 'export ROCM_HOME=%q\n' "${ROCM_HOME}"; \
+                printf 'export PATH=%q:${PATH}\n' "${ROCM_BIN}"; \
+                printf 'export CMAKE_PREFIX_PATH=%q:${CMAKE_PREFIX_PATH:-}\n' "${ROCM_HOME}"; \
+                printf 'export LD_LIBRARY_PATH=%q:${LD_LIBRARY_PATH:-}\n' "${ROCM_HOME}/lib"; \
+              } > /etc/rocm_env.sh \
+              && echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc \
+              && if [[ -e /etc/bashrc ]]; then echo "source /etc/rocm_env.sh" >> /etc/bashrc; fi
+
+          # Use the expanded form of ~/pytorch inside the image.
+          RUN mkdir -p "$(dirname "${PYTORCH_SRC_DIR}")" \
+              && git clone --filter=blob:none --branch "${PYTORCH_BRANCH}" \
+                   "https://github.com/${PYTORCH_REPO}.git" "${PYTORCH_SRC_DIR}" \
+              && cd "${PYTORCH_SRC_DIR}" \
+              && git checkout --detach "${PYTORCH_SHA}"
+
+          WORKDIR ${PYTORCH_SRC_DIR}
+          EOF
+
+      - name: Generate tags
+        id: tags
+        run: |
+          date="$(date -u +%Y%m%d)"
+          echo "primary=${PUSH_TAG}" >> "$GITHUB_OUTPUT"
+          echo "dated=${date}-${{ steps.resolve.outputs.short_sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Docker image
+        run: |
+          primary="${REGISTRY}/${IMAGE_NAME}:${{ steps.tags.outputs.primary }}"
+          dated="${REGISTRY}/${IMAGE_NAME}:${{ steps.tags.outputs.dated }}"
+          docker build --progress=plain \
+            --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+            --build-arg "TORCH_PACKAGE_INDEX_URL=${TORCH_PACKAGE_INDEX_URL}" \
+            --build-arg "ROCM_PACKAGE_INDEX_URL=${ROCM_PACKAGE_INDEX_URL}" \
+            --build-arg "ROCM_VERSION=${ROCM_VERSION}" \
+            --build-arg "PYTORCH_REPO=${PYTORCH_REPO}" \
+            --build-arg "PYTORCH_BRANCH=${PYTORCH_BRANCH}" \
+            --build-arg "PYTORCH_SHA=${{ steps.resolve.outputs.sha }}" \
+            --label "pytorch.repo=${PYTORCH_REPO}" \
+            --label "pytorch.branch=${PYTORCH_BRANCH}" \
+            --label "pytorch.commit=${{ steps.resolve.outputs.sha }}" \
+            --label "torch.package_index=${TORCH_PACKAGE_INDEX_URL}" \
+            --label "rocm.package_index=${ROCM_PACKAGE_INDEX_URL}" \
+            --label "rocm.version=${ROCM_VERSION}" \
+            --tag "${primary}" \
+            --tag "${dated}" \
+            .
+
+      - name: Validate image
+        run: |
+          primary="${REGISTRY}/${IMAGE_NAME}:${{ steps.tags.outputs.primary }}"
+          docker run --rm "${primary}" bash -lc '
+            set -e
+            source /etc/rocm_env.sh
+            cd /tmp
+            python3 - <<PY
+          import torch
+          print("torch", torch.__version__)
+          print("hip", torch.version.hip)
+          print("rocm", torch.version.rocm)
+          PY
+            test "$(git -C "${PYTORCH_SRC_DIR}" rev-parse HEAD)" = "${{ steps.resolve.outputs.sha }}"
+          '
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'schedule'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Push Docker image
+        if: github.event_name == 'schedule'
+        run: |
+          docker push "${REGISTRY}/${IMAGE_NAME}:${{ steps.tags.outputs.primary }}"
+          docker push "${REGISTRY}/${IMAGE_NAME}:${{ steps.tags.outputs.dated }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## pytorch-nightly multi-arch publish"
+            echo ""
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| pytorch source | \`${PYTORCH_REPO}:${PYTORCH_BRANCH}\` |"
+            echo "| source commit | \`${{ steps.resolve.outputs.sha }}\` |"
+            echo "| ROCm version | \`${ROCM_VERSION}\` |"
+            echo "| torch package index | \`${TORCH_PACKAGE_INDEX_URL}\` |"
+            echo "| ROCm package index | \`${ROCM_PACKAGE_INDEX_URL}\` |"
+            if [[ "${{ github.event_name }}" == "schedule" ]]; then
+              echo "| pushed tags | \`${{ steps.tags.outputs.primary }}\`, \`${{ steps.tags.outputs.dated }}\` |"
+            else
+              echo "| pushed tags | not pushed for manual runs |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

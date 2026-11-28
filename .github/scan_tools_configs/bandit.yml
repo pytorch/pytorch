@@ -1,0 +1,32 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# bandit configuration
+# Reference: https://bandit.readthedocs.io/en/latest/config.html
+# Local scan: bandit --recursive . --configfile .github/scan_tools_configs/bandit.yml
+#
+# Bandit configuration for this repository's security scans.
+#
+# This file defines the complete scanner policy;
+# Keep repository-specific suppressions and tuning here.
+#
+# Bandit has no ignore file. Suppress a finding with:
+#
+#   1. `# nosec <test ID>` on the flagged line:
+#          subprocess.run(cmd, shell=True)  # nosec B602 # cmd is a constant
+#
+#   2. `skips:` for test IDs disabled across the repository:
+#          skips: [B101]
+#
+#   3. `exclude_dirs:` below for paths Bandit should not scan.
+
+# Environment and generated-output exclusions support local scans; these
+# paths are absent from clean CI checkouts.
+exclude_dirs:
+  - .git
+  - .venv*
+  - venv*
+  - build
+  - dist
+  - node_modules
+  - __pycache__

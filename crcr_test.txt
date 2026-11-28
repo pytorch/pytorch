@@ -1,0 +1,2 @@
+CRCR end-to-end test for ROCm/pytorch-windows-ci. Do not merge.
+CRCR integration test - synchronize event validation.
