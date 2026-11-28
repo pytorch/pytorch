@@ -689,7 +689,7 @@ def flex_attention(
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
             if hasattr(conf, attrib):
-                cur_kernel_options[attrib] = getattr(conf, attrib)
+                cur_kernel_options.setdefault(attrib, getattr(conf, attrib))
 
         num_programs = CeilDiv(seq_len_q, cur_kernel_options["BLOCK_M"]) * Bq * Hq
         hinted = _set_num_xccs(
@@ -1388,7 +1388,7 @@ def flex_attention_backward(*args, **kwargs):
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
             if hasattr(conf, attrib):
-                cur_kernel_options[attrib] = getattr(conf, attrib)
+                cur_kernel_options.setdefault(attrib, getattr(conf, attrib))
 
         q_pids = CeilDiv(seq_len_q, cur_kernel_options["BLOCK_M2"]) * gqa_shared_heads
         num_pids = q_pids + CeilDiv(seq_len_kv, cur_kernel_options["BLOCK_N1"])
