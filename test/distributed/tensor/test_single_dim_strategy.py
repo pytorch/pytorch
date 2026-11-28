@@ -53,7 +53,11 @@ from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Placement,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
@@ -94,6 +98,8 @@ def _get_mm_specs(
 
 
 class TestExpandPlaceholder(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.world_size = 64
@@ -1299,6 +1305,8 @@ class TestExpandPlaceholder(TestCase):
 
 
 class TestDijkstraExpandSingleDimStrategy(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         store = FakeStore()
@@ -1972,6 +1980,8 @@ def _dummy_check_fake(x):
 class TestCommonPointwiseSingleDimStrategy(TestCase):
     """Unit tests for _common_pointwise_single_dim_strategy raw rule generation."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def _meta(self, *dims: int) -> TensorMeta:
         shape = torch.Size(dims)
         stride = torch.empty(shape).stride()
@@ -2063,6 +2073,8 @@ class TestCommonPointwiseSingleDimStrategy(TestCase):
 
 
 class TestSingleDimStrategyRegistration(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.world_size = 4
