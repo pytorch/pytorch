@@ -10,6 +10,11 @@ name: Issue Triage (pi)
 #   apply  (issues:write, no AWS)  applies the filtered plan with no model involved
 #   report (issues:read)           manual runs only: prints the effects, writes nothing
 #
+# A just-opened issue is triaged as if it had no labels other than close blockers
+# (issue templates add some, e.g. `oncall: pt2`), unless a bot opened it or it
+# was reopened; its labels are kept, never removed. See triage_labels in
+# apply_plan.py.
+#
 # Manual modes:
 #   replay   show already-triaged issues as they were before triage and compare
 #            each plan with the issue's current labels (no writes)
@@ -54,6 +59,7 @@ jobs:
     outputs:
       issues: ${{ steps.config.outputs.issues }}
       mode: ${{ steps.config.outputs.mode }}
+      new_issue: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.event == 'issues' }}
       model: ${{ steps.config.outputs.model }}
       release_minor: ${{ steps.config.outputs.release_minor }}
     steps:
@@ -136,6 +142,7 @@ jobs:
       # Replays and dry runs must not overwrite the log of the run that triaged.
       LOG_PREFIX: ${{ needs.prepare.outputs.mode == 'apply' && github.repository == 'pytorch/pytorch' && 'review-logs' || '' }}
       TRIAGE_REPLAY_ISSUE: ${{ needs.prepare.outputs.mode == 'replay' && matrix.issue || '' }}
+      TRIAGE_NEW_ISSUE: ${{ needs.prepare.outputs.new_issue == 'true' && matrix.issue || '' }}
     steps:
       # MUST be the first step. The allowlist is pinned by
       # scripts/issue_triage_pi/test_workflow_contract.py; pi.dev is deliberately
@@ -283,8 +290,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          NEW_ISSUE: ${{ needs.prepare.outputs.new_issue }}
         run: |
+          flags=()
+          [[ "$NEW_ISSUE" == "true" ]] && flags+=(--new-issue)
           for run in runs/issue-triage-pi-*; do
             issue=${run##*-}; plan="$run/result.json"
-            python3 scripts/issue_triage_pi/apply_plan.py "$REPO" "$issue" "$plan" --apply
+            python3 scripts/issue_triage_pi/apply_plan.py "$REPO" "$issue" "$plan" --apply "${flags[@]}"
           done

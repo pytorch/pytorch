@@ -111,6 +111,12 @@ through the `model` dispatch input:
    has not already posted, and adds `bot-triaged`. It closes usage questions, expected
    numerical behavior, or covered reports for catalog-enabled closing umbrellas.
 
+On the run triggered by an issue being opened (`TRIAGE_NEW_ISSUE` for the plan,
+`--new-issue` for apply), the issue is triaged as if it had no labels other than
+close blockers (`triage review`, `high priority`, `needs reproduction`), unless a bot
+opened it or it was reopened. Its existing labels, such as the PT2 template's
+`oncall: pt2`, are kept.
+
 Related-issue discovery uses the existing `search_issues` tool with GitHub search syntax,
 with `get_issue` / `get_issue_comments` for candidate evidence. Triage includes checking for
 duplicates and applicable umbrellas, without a prescribed query strategy or tool-call sequence.

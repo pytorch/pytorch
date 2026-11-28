@@ -1,6 +1,7 @@
 """Behavior of the trusted plan-to-effects mapping for pi issue triage."""
 
 import json
+import re
 import tempfile
 import unittest
 from io import StringIO
@@ -8,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from apply_plan import (
+    CLOSE_BLOCKERS,
     CLOSING_TEMPLATES,
     LABELING_DECISIONS,
     labels_before_triage,
@@ -15,6 +17,7 @@ from apply_plan import (
     plan_effects,
     publish,
     summary_markdown,
+    triage_labels,
 )
 from labels import (
     DISTRIBUTED_MODULES,
@@ -414,6 +417,75 @@ class LabelsBeforeTriageTest(unittest.TestCase):
             self.event("labeled", "module: dynamo"),
         ]
         self.assertEqual(labels_before_triage(events), {"oncall: pt2"})
+
+
+class NewIssueTest(unittest.TestCase):
+    LABELS = ["oncall: pt2", "oncall: distributed", "module: nn", "high priority"]
+
+    def issue(self, user_type="User"):
+        return {
+            "labels": [{"name": label} for label in self.LABELS],
+            "state": "open",
+            "user": {"login": "author", "type": user_type},
+        }
+
+    def test_new_issue_keeps_only_close_blockers_unless_bot_opened_or_reopened(self):
+        self.assertEqual(triage_labels(self.issue(), True), {"high priority"})
+        self.assertEqual(triage_labels(self.issue(), False), set(self.LABELS))
+        self.assertEqual(triage_labels(self.issue("Bot"), True), set(self.LABELS))
+        reopened = {**self.issue(), "state_reason": "reopened"}
+        self.assertEqual(triage_labels(reopened, True), set(self.LABELS))
+
+    def test_plan_tools_hide_the_same_close_blockers(self):
+        tools = (
+            Path(__file__).resolve().parents[2]
+            / ".github/pi/extensions/github-issue-tools.ts"
+        ).read_text()
+        listed = re.search(
+            r"const CLOSE_BLOCKERS = new Set.*?\(\[(.*?)\]\)", tools, re.DOTALL
+        )
+        self.assertIsNotNone(
+            listed, "CLOSE_BLOCKERS not found in github-issue-tools.ts"
+        )
+        self.assertEqual(set(re.findall(r'"([^"]+)"', listed.group(1))), CLOSE_BLOCKERS)
+
+    def test_existing_oncall_labels_do_not_skip_triage_of_a_new_issue(self):
+        plan_labels = ["oncall: pt2", "module: inductor"]
+        for flags, added in (
+            ([], "—"),
+            (
+                ["--new-issue"],
+                "`oncall: pt2`, `module: inductor`, `triaged`, `bot-triaged`",
+            ),
+        ):
+            with self.subTest(flags=flags), tempfile.TemporaryDirectory() as temp:
+                plan = Path(temp) / "plan.json"
+                plan.write_text(
+                    json.dumps({"decision": "label", "labels": plan_labels})
+                )
+                argv = ["apply_plan", "pytorch/ciforge", "123", str(plan), *flags]
+                with (
+                    patch("sys.argv", argv),
+                    patch("apply_plan.fetch_issue", return_value=(self.issue(), [])),
+                    patch("apply_plan.publish") as publish,
+                ):
+                    self.assertEqual(main(), 0)
+                summary = publish.call_args.args[0]
+                self.assertIn("→ routed (dry run)", summary)
+                self.assertIn(f"**Add labels:** {added}\n", summary)
+
+    def test_outcome_counts_ignored_labels_still_on_the_issue(self):
+        with tempfile.TemporaryDirectory() as temp:
+            plan = Path(temp) / "plan.json"
+            plan.write_text(json.dumps({"decision": "label", "labels": ["module: nn"]}))
+            argv = ["apply_plan", "pytorch/ciforge", "123", str(plan), "--new-issue"]
+            with (
+                patch("sys.argv", argv),
+                patch("apply_plan.fetch_issue", return_value=(self.issue(), [])),
+                patch("apply_plan.publish") as publish,
+            ):
+                self.assertEqual(main(), 0)
+            self.assertIn("→ routed (dry run)", publish.call_args.args[0])
 
 
 if __name__ == "__main__":

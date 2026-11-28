@@ -13,6 +13,7 @@ const jiti = createJiti(hostFile, { alias: { typebox: host.resolve("typebox") } 
 const { validateToolArguments } = await jiti.import("@earendil-works/pi-ai/utils/validation");
 process.env.TRIAGE_REPO = "pytorch/pytorch";
 process.env.TRIAGE_REPLAY_ISSUE = "77";
+process.env.TRIAGE_NEW_ISSUE = "88";
 const { default: extension } = await jiti.import(new URL("../extensions/github-issue-tools.ts", import.meta.url).pathname);
 const temp = mkdtempSync(join(tmpdir(), "pi-issue-tools-"));
 const originalPath = process.env.PATH;
@@ -96,6 +97,27 @@ test("supports general GitHub queries followed by candidate body and comment rea
     ["api", "repos/pytorch/pytorch/issues/69512"],
     ["api", "repos/pytorch/pytorch/issues/69512/comments?per_page=50"],
   ]);
+});
+
+test("shows a new issue with only its close blockers, unless a bot opened it or it was reopened", async () => {
+  const labels = [{ name: "oncall: pt2" }, { name: "high priority" }, { name: "module: nn" }];
+  const reporter = { login: "reporter", type: "User" };
+  const all = ["oncall: pt2", "high priority", "module: nn"];
+  for (const [overrides, expected] of [
+    [{ user: reporter }, ["high priority"]],
+    [{ user: { login: "pytorch-bot[bot]", type: "Bot" } }, all],
+    [{ user: reporter, state_reason: "reopened" }, all],
+  ]) {
+    const call = session({
+      reads: {
+        "repos/pytorch/pytorch/issues/88": issue(88, { ...overrides, labels }),
+        "repos/pytorch/pytorch/issues/69512": issue(69512, overrides),
+      },
+    });
+    assert.deepEqual((await call("get_issue", { issue_number: 88 })).labels, expected);
+    assert.deepEqual((await call("get_issue", { issue_number: 69512 })).labels, ["module: dtensor"]);
+    assert.equal(calls().length, 2);
+  }
 });
 
 test("filters source, replay, PR and foreign identities independently of the query", async () => {

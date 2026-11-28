@@ -47,7 +47,9 @@ class GitHub:
         comments: Iterable[dict] = (),
         close_failures: int = 0,
     ) -> None:
-        self.source = issue(SOURCE, labels=labels)
+        self.source = issue(
+            SOURCE, labels=labels, user={"login": "author", "type": "User"}
+        )
         self.target = issue(number)
         self.comments = list(comments)
         self.writes = []
@@ -358,6 +360,31 @@ class UmbrellaPlanTest(unittest.TestCase):
                 api.writes.clear()
                 self.assertFalse(self.apply(api, proposal).mutates)
                 self.assertEqual(api.writes, [])
+
+    def test_new_issue_ignores_existing_routing_but_not_close_blockers(self):
+        for labels, author_type, close in (
+            (["oncall: pt2"], "User", True),
+            (["oncall: distributed"], "User", True),
+            (["oncall: pt2", "high priority"], "User", False),
+            (["oncall: pt2"], "Bot", False),
+        ):
+            with (
+                self.subTest(labels=labels, author_type=author_type),
+                tempfile.TemporaryDirectory() as temp,
+            ):
+                api = GitHub(labels=labels)
+                api.source["user"]["type"] = author_type
+                filename = Path(temp) / "plan.json"
+                filename.write_text(json.dumps(plan(labels=["oncall: pt2"])))
+                argv = ["apply_plan", REPO, str(SOURCE), str(filename)]
+                with (
+                    patch("sys.argv", [*argv, "--apply", "--new-issue"]),
+                    patch("apply_plan.gh_api", side_effect=api),
+                    patch("apply_plan.publish"),
+                ):
+                    self.assertEqual(apply_plan.main(), 0)
+                self.assertEqual(api.source["state"], "closed" if close else "open")
+                self.assertEqual(bool(api.writes), author_type == "User")
 
     def test_completed_pt2_receipt_does_not_close_a_reopened_issue(self):
         proposal, api = plan(labels=["oncall: pt2"]), GitHub()
