@@ -22,7 +22,7 @@ import math
 import struct
 import itertools
 import torch.optim as optim
-from torch.backends.cuda import can_use_flash_attention, SDPAParams
+from torch.backends.cuda import can_use_efficient_attention, can_use_flash_attention, SDPAParams
 from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
@@ -76,6 +76,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_CK_SDPA,
     PLATFORM_FUSED_ATTENTION_SUPPORTS_HDIM512,
+    PLATFORM_SUPPORTS_BF16,
     tf32_off,
     tf32_on_and_off,
     tf32_enabled,
@@ -5501,6 +5502,44 @@ class TestSDPAAccelerator(NNTestCase):
             actual = F.scaled_dot_product_attention(query, key, value, is_causal=is_causal, scale=1.0)
 
         self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
+
+    @onlyCUDA
+    @parametrize(
+        "backend",
+        [None, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION],
+        name_fn=lambda backend: "default" if backend is None else backend.name.lower(),
+    )
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("head_dim", [288, 320, 384, 512])
+    def test_sdpa_large_head_dim(self, device, head_dim, dtype, backend):
+        # gfx11 has no working fused attention kernels above head_dim 256. Builds that
+        # still sent these inputs to AOTriton returned wrong output (saturated values,
+        # NaN or zeros) or raised (#189849, ROCm/TheRock#6561). Whatever backend the
+        # dispatcher picks must be correct, and a fused backend is forced only where
+        # can_use_* accepts the inputs, so no per-arch head_dim limit is hard-coded.
+        if dtype is torch.bfloat16 and not PLATFORM_SUPPORTS_BF16:
+            self.skipTest("bfloat16 is not supported on this system")
+        shape = (1, 1, 256, head_dim)
+        generator = torch.Generator().manual_seed(0)
+        query, key, value = (torch.randn(shape, generator=generator).to(dtype) for _ in range(3))
+        # Reference: the same rounded inputs in float32 on the CPU.
+        scores = query.float() @ key.float().transpose(-2, -1) / math.sqrt(head_dim)
+        expected = torch.softmax(scores, dim=-1) @ value.float()
+
+        query, key, value = (t.to(device) for t in (query, key, value))
+        if backend is None:
+            context = contextlib.nullcontext()
+        else:
+            can_use = can_use_flash_attention if backend == SDPBackend.FLASH_ATTENTION else can_use_efficient_attention
+            if not can_use(SDPAParams(query, key, value, None, 0.0, False, False)):
+                self.skipTest(f"{backend.name} does not support head_dim {head_dim} on this device")
+            context = sdpa_kernel(backends=[backend])
+        with context:
+            actual = F.scaled_dot_product_attention(query, key, value)
+
+        self.assertEqual(actual.dtype, dtype)
+        # The wrong outputs were off by 0.5 to 512, or NaN; 3e-2 covers bfloat16 rounding.
+        self.assertEqual(actual.float().cpu(), expected, atol=3e-2, rtol=3e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
