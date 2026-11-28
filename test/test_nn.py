@@ -1761,6 +1761,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         sample = next(model.parameters())[0, 0, 0]
         self.assertTrue(torch.equal(sample.data, vec.data[:5]))
 
+        before = parameters_to_vector(model.parameters()).clone()
+        for wrong_size in (979, 981):
+            with self.assertRaisesRegex(ValueError, "980 elements in total"):
+                vector_to_parameters(torch.zeros(wrong_size), model.parameters())
+            # A failed call leaves the parameters untouched.
+            self.assertEqual(parameters_to_vector(model.parameters()), before)
+
+        vector_to_parameters(torch.zeros(0), [])
+        with self.assertRaisesRegex(ValueError, "0 elements in total"):
+            vector_to_parameters(torch.zeros(1), [])
+
     def test_rnn_weight_norm(self):
         def check_weight_norm(l, name, num_params):
             # This Module has 4 or 5 parameters called:
