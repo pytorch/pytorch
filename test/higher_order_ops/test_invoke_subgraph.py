@@ -3905,56 +3905,32 @@ class TestInvokeSubgraphReuse(TestCase):
         run = self._reuse_runner(fn, Holder(child=a), Holder(child=b))
         run(orphan, traces=1 if case == "collision" else 2)
 
-    @parametrize("binding", ["unrelated", "range", "integer"])
-    def test_reused_region_capture_binding(self, binding):
-        bodies = {
-            "unrelated": lambda x, h: x * h.scale,
-            "integer": lambda x, h: x.expand(h.scale).clone(),
-            "range": lambda x, h: x + 100 if h.tensor.shape[0] >= 4 else x - 100,
-        }
-        region = _map_nested_region(bodies[binding])
-        preload = binding == "unrelated"
-        fn = lambda x, hs: region(hs[0].tensor.clone() if preload else x, hs)
-        holders = [Holder(tensor=torch.ones(5), scale=n) for n in (5, 3)]
-        if binding == "range":
-            mark_dynamic(holders[0].tensor, 0, min=4)
-            mark_dynamic(holders[1].tensor, 0)
-        elif preload:
-            holders[0].scale = holders[1].scale = 2
-            del holders[1].tensor
-            mark_dynamic(holders[0].tensor, 0)
-        run = self._reuse_runner(fn, torch.ones(1))
-        run(holders, traces=2 if binding == "integer" else 1)
-        if binding == "range":
-            holders[1].tensor = _dynamic_capture(3)
-        else:
-            holders[0].scale = 7
-        run(holders, traces=2 if preload else 3, frames=2)
-
-    @parametrize("reject_candidate", [False, True])
-    def test_reused_region_dynamic_capture_branch(self, reject_candidate):
+    @parametrize("mode", ["hint", "range", "reject"])
+    def test_reused_region_dynamic_capture_branch(self, mode):
         @_map_nested_region
         def fn(x, holder):
             return x + holder.tensor.sum() + (17 if holder.tensor.shape[0] >= 6 else 0)
 
         holders = [Holder(tensor=_dynamic_capture(5)) for _ in range(2)]
+        if mode == "range":
+            mark_dynamic(holders[0].tensor, 0, max=5)
 
         def reject(match, *args):
             tx = match.tx
             (predicate,) = match.pending_shape_guards
             self.assertEqual(predicate, next(iter(predicate.free_symbols)) < 6)
             self.assertNotIn(predicate, [g.expr for g in tx.output.shape_env.guards])
-            tensors = {vt.as_proxy().node for vt in match.captured_variables.values()}
+            captures = {match.remap_source(s) for s in match.condition.tensor_sources}
             for node in tx.output.graph.find_nodes(op="call_method"):
                 if node.target in ("size", "stride", "storage_offset"):
-                    self.assertNotIn(node.args[0], tensors)
+                    self.assertNotIn(node.args[0].meta["grapharg"].source, captures)
             return False
 
-        if reject_candidate:
+        if mode == "reject":
             cls = reuse.SubgraphReuseMatch
             self.enterContext(mock.patch.object(cls, "capture_policy_matches", reject))
         run = self._reuse_runner(fn, torch.ones(1))
-        run(holders, traces=2 if reject_candidate else 1)
+        run(holders, traces=2 if mode == "reject" else 1)
         holders[-1].tensor.add_(3)
         run(holders)
         for size, frames in ((2, 1), (5, 1), (6, 2), (7, 2)):
@@ -3986,20 +3962,34 @@ class TestInvokeSubgraphReuse(TestCase):
                 holders[1].tensor = holders[0].tensor
             run(holders, traces=2 if second_capture == "static" else 1, frames=1)
 
-    @parametrize("op", ["scalar", "offset", "static_offset", "data"])
+    @parametrize("op", ["scalar", "offset", "static", "data", "integer", "unused"])
     def test_reused_region_captured_symbol_source(self, op):
-        holder = lambda n: Holder(scale=n, tensor=torch.arange(12.0)[n : n + 2])
-        read = {"scalar": lambda h: h.scale, "data": lambda h: h.tensor}
-        value = read.get(op, lambda h: h.tensor.storage_offset())
-        fn = _map_nested_region(lambda x, h: x + value(h))
+        @_map_nested_region
+        def region(x, h):
+            if op == "integer":
+                return x.expand(h.scale).clone()
+            if op in ("scalar", "unused"):
+                return x + h.scale
+            return x + (h.tensor if op == "data" else h.tensor.storage_offset())
 
-        sizes = {"data": range(10), "static_offset": (0, 1, 1)}.get(op, (5, 3, 7))
-        holders = list(map(holder, sizes))
-        run = self._reuse_runner(fn, torch.ones(2), dynamic=op in ("scalar", "offset"))
-        run(holders)
-        if op != "static_offset":
+        preload = op == "unused"
+        fn = lambda x, hs: region(hs[0].tensor.clone() if preload else x, hs)
+        sizes = {"data": range(10), "static": (0, 1, 1), "unused": (2, 2)}
+        holder = lambda n: Holder(scale=n, tensor=torch.arange(12.0)[n : n + 2])
+        holders = list(map(holder, sizes.get(op, (5, 3, 7))))
+        if preload:
+            holders[0].tensor = _dynamic_capture(5)
+            del holders[1].tensor
+        recompile = preload or op == "integer"
+        dynamic = None if recompile else op in ("scalar", "offset")
+        run = self._reuse_runner(fn, torch.ones(1), dynamic=dynamic)
+        traces = {"integer": len(holders), "static": 2}.get(op, 1)
+        run(holders, traces=traces, frames=1)
+        if recompile:
+            holders[0].scale = 8
+        elif op != "static":
             holders[-1] = holder(6)
-        run(holders, traces=2 if op == "static_offset" else 1, frames=1)
+        run(holders, traces=traces + int(recompile), frames=1 + int(recompile))
 
     @torch._dynamo.config.patch(install_free_tensors=True)
     @parametrize("attr", ["buffer", "size", "stride"])
@@ -4019,19 +4009,45 @@ class TestInvokeSubgraphReuse(TestCase):
             layers[-1].weight = torch.nn.Parameter(torch.ones(4, 5)[:, 0])
             run(layers, traces=3, frames=2)
 
+    def test_reuse_distinct_guard_exemptions(self):
+        left, right = source.LocalSource("a"), source.LocalSource("b")
+        check = GuardBuilder.NOT_DUPLICATE_INPUT
+        for skip in (source.SkipGuardSource, source.OptimizerSource):
+            for a, b in ((skip(left), right), (left, skip(right))):
+                check(object(), a.make_guard(check), b)
+
+    @parametrize("first,second", list(product((False, True), repeat=2)))
+    def test_reused_region_sourceless_grad(self, first, second):
+        region = nested_compile_region(lambda t: t + t.grad)
+
+        def fn(x, y):
+            return region(x.float() if first else x), region(y.float() if second else y)
+
+        x, y = torch.tensor(1.0), torch.tensor(10.0)
+        x.grad, y.grad = torch.tensor(3.0), torch.tensor(7.0)
+        self._reuse_runner(fn)(x, y, traces=2 if first or second else 1, frames=1)
+
     def test_reused_region_sourceless_storage_offset(self):
         region = nested_compile_region(lambda x: x + x.storage_offset())
         run = self._reuse_runner(lambda x, w: (region(x), region(w[1:])))
-        with self.assertRaisesRegex(UncapturedHigherOrderOpError, "storage_offset"):
-            run(torch.ones(4), torch.arange(5.0))
+        with self.assertLogs(reuse.hc_log, "DEBUG") as logs:
+            with self.assertRaisesRegex(UncapturedHigherOrderOpError, "storage_offset"):
+                run(torch.ones(4), torch.arange(5.0))
+        self.assertIn("sourceless operand dependency: L['x']", "\n".join(logs.output))
 
     def test_reused_region_explicit_spec_parameter_captures(self):
-        fn = _map_nested_region(lambda x, layer: x @ layer.weight)
-        layers = [torch.nn.Linear(3, 3, bias=False) for _ in range(9)]
+        fn = _map_nested_region(lambda x, m: sum(x @ w for w in m))
+        layer = lambda: torch.nn.ParameterList(torch.randn(3, 3) for _ in range(12))
+        layers = [layer() for _ in range(9)]
         shapes = {"x": TensorSpec([ShapeVar("batch"), 3])}
-        run = self._reuse_runner(fn, dynamic_shapes=shapes)
+        backend = EagerAndRecordGraphs()
+        run = self._reuse_runner(fn, backend=backend, dynamic_shapes=shapes)
         for batch in (2, 4):
             run(torch.randn(batch, 3), layers, traces=1, frames=1)
+        inputs = backend.graphs[0].graph.find_nodes(op="placeholder")
+        names = [n.name for n in inputs if "_parameters_" in n.name]
+        expected = [f"l_items_{j}_parameters_{i}_" for j in range(9) for i in range(12)]
+        self.assertEqual(names, expected)
 
     @parametrize(
         "read", [lambda t: t.shape[0], lambda t: t.size(0), lambda t: len(tuple(t))]
@@ -4131,6 +4147,7 @@ class TestInvokeSubgraphReuse(TestCase):
         if make is IdentityItem:
             body = lambda x, a, b: x + a.value + b.value + (a is b) + (a == b)
 
+        # Read explicit operands in the caller, or preload the captured field for IdentityItem.
         if explicit := outer_read and make is not IdentityItem:
             region = nested_compile_region(body)
             fn = lambda x, hs: tuple(region(x, h.a, h.b) for h in hs)
@@ -4225,17 +4242,6 @@ class TestInvokeSubgraphReuse(TestCase):
         run = self._reuse_runner(_add_captured_sizes)
         run(torch.ones(1), holders, expected=(torch.full((1,), 6.0),) * 2, traces=2)
         self.assertEqual(seen, [1])
-
-    def test_reused_region_placeholder_order(self):
-        names = [f"capture_{i}" for i in range(12)]
-        fn = _map_nested_region(lambda x, h: sum((getattr(h, n) for n in names), x))
-        holders = [Holder(**{k: torch.ones(1) for k in names}) for _ in range(2)]
-        backend = EagerAndRecordGraphs()
-        run = self._reuse_runner(fn, torch.ones(1), backend=backend)
-        run(holders, traces=1, frames=1)
-        names = [n.name for n in backend.graphs[0].graph.find_nodes(op="placeholder")]
-        expected = [f"l_items_{j}_capture_{i}" for j in range(2) for i in range(12)]
-        self.assertEqual([name for name in names if "_capture_" in name], expected)
 
     def test_subgraph_reuse_skips_tracing(self):
         @nested_compile_region
@@ -5883,16 +5889,16 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8)
         ref = fn(x)
 
-        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
         with self._count_speculate_calls() as count:
-            res = compiled(x)
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
         self.assertEqual(ref, res)
         # Both modules have the same code and same c=5, so the second call
         # should reuse the first trace despite having different function ids.
         self.assertEqual(count(), 1)
         mod2.c = 7
-        self.assertEqual(compiled(x), fn(x))
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
 
     def test_subgraph_reuse_module_apply(self):
         """Using module.apply to wrap transformer layers with nested_compile_region."""
@@ -5979,16 +5985,16 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8)
         ref = fn(x)
 
-        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
         with self._count_speculate_calls() as count:
-            res = compiled(x)
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
         self.assertEqual(ref, res)
         # Both modules have the same forward code and same c=5, so the
         # second call should reuse the first trace.
         self.assertEqual(count(), 1)
         mod2.c = 7
-        self.assertEqual(compiled(x), fn(x))
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
