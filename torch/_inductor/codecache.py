@@ -666,6 +666,19 @@ class TensorMetadataAndValues:
 
     tensor_metadata: TensorMetadata
     values: list[Any]
+    is_pinned: bool
+
+
+@dataclasses.dataclass
+class TensorMetadataAndPinned:
+    """
+    TensorMetadata plus pinned-ness, without values.
+    Used for hashing non-inlined frozen parameters, where only metadata
+    (now including pinned-ness) feeds the cache key.
+    """
+
+    tensor_metadata: TensorMetadata
+    is_pinned: bool
 
 
 def _ident(x: T) -> T:
@@ -861,7 +874,9 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_tensor(
         self, t: Tensor
-    ) -> tuple[Callable[[T], T], tuple[TensorMetadata | TensorMetadataAndValues]]:
+    ) -> tuple[
+        Callable[[T], T], tuple[TensorMetadataAndValues | TensorMetadataAndPinned]
+    ]:
         """
         Route fake tensors to metadata-only serialization and real tensors to
         constant serialization.
@@ -873,9 +888,11 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_constant_tensor(
         self, t: Tensor
-    ) -> tuple[Callable[[T], T], tuple[TensorMetadata | TensorMetadataAndValues]]:
+    ) -> tuple[
+        Callable[[T], T], tuple[TensorMetadataAndValues | TensorMetadataAndPinned]
+    ]:
         """Serialize a real tensor constant stored on the GraphModule."""
-        from .graph import GraphLowering
+        from .graph import _is_cpu_strided_tensor_pinned, GraphLowering
 
         if t.is_mkldnn:
             # TODO: These tensors don't currently pickle, so we can't cache a compiled
@@ -890,8 +907,9 @@ class FxGraphCachePickler(pickle.Pickler):
             )
 
         # If this is a non-inlined frozen parameter, we consider the metadata only.
+        is_pinned = _is_cpu_strided_tensor_pinned(t)
         if is_frozen_param(t) and not GraphLowering.can_inline_constant(t):
-            return (_ident, (metadata,))
+            return (_ident, (TensorMetadataAndPinned(metadata, is_pinned),))
 
         # Very large tensors will be expensive to copy to cpu and hash. Let's at least
         # report any slowness.
@@ -904,7 +922,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 "Please file an issue."
             )
 
-        return (_ident, (TensorMetadataAndValues(metadata, values),))
+        return (_ident, (TensorMetadataAndValues(metadata, values, is_pinned),))
 
     def _reduce_symint(self, s: SymInt) -> tuple[Callable[[T], T], tuple[str]]:
         """
