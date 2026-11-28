@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <ATen/core/Tensor.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/NonEmptyUtils.h>
@@ -150,12 +151,38 @@ inline DimVector shape_from_dim_mask(const Tensor& self, DimMask mask, bool keep
   return shape;
 }
 
+// Reductions accept an `out=` that overlaps the input when it already has the
+// result shape (see copy_if_overlaps). Resizing such an `out` would change the
+// input before it is read, so reject that case.
+inline void check_overlapping_out_shape(const Tensor& result, const Tensor& self, IntArrayRef shape) {
+  if (result.defined() && result.sizes() != shape && self.is_alias_of(result)) {
+    TORCH_CHECK(get_overlap_status(result, self) == MemOverlapStatus::No,
+        "unsupported operation: the out tensor overlaps the input and would need to be resized. "
+        "Please pass an out tensor of the result shape or clone() the input.");
+  }
+}
+
+// Some reduction kernels (e.g. on CPU) write the output before reading the
+// input, so reduce from a copy when `result` overlaps `self`. This applies on
+// all devices. Overlap that cannot be ruled out cheaply (TooHard) also copies.
+inline Tensor copy_if_overlaps(const Tensor& self, const Tensor& result) {
+  if (self.is_alias_of(result) && get_overlap_status(result, self) != MemOverlapStatus::No) {
+    return self.clone();
+  }
+  return self;
+}
+
+inline Tensor copy_if_overlaps(const Tensor& self, const Tensor& result1, const Tensor& result2) {
+  return copy_if_overlaps(copy_if_overlaps(self, result1), result2);
+}
+
 inline void resize_reduction_result(
     Tensor& result, const Tensor& self, DimMask mask, bool keepdim,
     ScalarType /*dtype*/)
 {
   auto shape = shape_from_dim_mask(self, mask, keepdim);
   TORCH_CHECK(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
+  check_overlapping_out_shape(result, self, shape);
   at::native::resize_output(result, shape);
 }
 
@@ -201,7 +228,7 @@ inline TensorIterator make_reduction(
   resize_reduction_result(result, self, mask, keepdim, out_dtype);
   auto viewed_result = review_reduce_result(result, ndim, mask, keepdim);
   if (self.scalar_type() == in_dtype) {
-    return TensorIterator::reduce_op(viewed_result, self);
+    return TensorIterator::reduce_op(viewed_result, copy_if_overlaps(self, result));
   }
   return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
 }
@@ -260,7 +287,7 @@ inline TensorIterator make_reduction(
   const bool gpu_f16_to_f32 =
       (self.is_cuda() || self.is_xpu()) && self.scalar_type() == kHalf && dtype1 == kFloat;
   if (self.scalar_type() == dtype1 || gpu_f16_to_f32) {
-    return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
+    return TensorIterator::reduce_op(viewed_result1, viewed_result2, copy_if_overlaps(self, result1, result2));
   }
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
 }
@@ -384,6 +411,7 @@ inline void resize_reduction(
   DimVector dims_ = at::native::make_dim_vector(opt_dims, self.dim());
   maybe_wrap_dims(dims_, self.dim());
   auto shape = get_reduction_shape(self, dims_, keepdim, allow_empty_dims);
+  at::native::check_overlapping_out_shape(meta.maybe_get_output(0), self, shape);
   if (self.layout() == kStrided) {
     meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
   } else if (shape.empty()) {
@@ -417,7 +445,7 @@ inline TensorIterator make_reduction(
   auto viewed_result =
       at::native::review_reduce_result(result, ndim, mask, keepdim);
   if (self.scalar_type() == in_dtype) {
-    return TensorIterator::reduce_op(viewed_result, self);
+    return TensorIterator::reduce_op(viewed_result, at::native::copy_if_overlaps(self, result));
   }
   return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
 }
@@ -440,7 +468,7 @@ inline TensorIterator make_reduction(
   const bool gpu_f16_to_f32 =
       (self.is_cuda() || self.is_xpu()) && self.scalar_type() == kHalf && dtype1 == kFloat;
   if (self.scalar_type() == dtype1 || gpu_f16_to_f32) {
-    return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
+    return TensorIterator::reduce_op(viewed_result1, viewed_result2, at::native::copy_if_overlaps(self, result1, result2));
   }
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
 }
