@@ -92,7 +92,7 @@ if triton is not None:
         )
 
     try:
-        from triton.runtime.errors import IntelGPUError
+        from triton.backends.intel.errors import IntelGPUError
     except ImportError:
 
         class IntelGPUError(Exception):  # type: ignore[no-redef]
