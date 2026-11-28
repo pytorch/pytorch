@@ -16,7 +16,10 @@ except ImportError:
     import test_flydsl_template as input_factory
 
 
-@unittest.skipIf(not flydsl_utils.runtime_available(), "FlyDSL runtime unavailable")
+@unittest.skipIf(
+    not input_factory._vendored_rocm_flydsl_available(),
+    "requires ROCm FlyDSL runtime",
+)
 class TestFlyDSLGroupedSchedulerPolicy(TestCase):
     def test_grid_cap_and_cache_modes(self):
         import dataclasses
