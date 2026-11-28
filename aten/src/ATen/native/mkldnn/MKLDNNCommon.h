@@ -4,11 +4,25 @@
 #include <ATen/Config.h>
 
 #if AT_MKLDNN_ENABLED()
+#include <ideep.hpp>
 #include <dnnl.hpp>
 #include <ATen/native/mkldnn/detail/Attr.h>
 #include <ATen/native/mkldnn/detail/IdeepUtils.h>
 #include <ATen/native/mkldnn/detail/Memory.h>
-#include <ATen/native/mkldnn/detail/Version.h>
+
+#ifndef DNNL_PREREQ
+// oneDNN version check macro
+// Checks if the current oneDNN version is >= the specified version
+#if defined(DNNL_VERSION_MAJOR) && defined(DNNL_VERSION_MINOR) && \
+  defined(DNNL_VERSION_PATCH)
+#define DNNL_PREREQ(major, minor, patch) \
+  (((DNNL_VERSION_MAJOR << 16) + (DNNL_VERSION_MINOR << 8) + \
+   (DNNL_VERSION_PATCH << 0)) >= \
+   ((major << 16) + (minor << 8) + (patch << 0)))
+#else
+#define DNNL_PREREQ(major, minor, patch) 0
+#endif
+#endif
 
 namespace at::native {
 
@@ -28,31 +42,31 @@ TORCH_API at::Tensor mkldnn_tensor_from_data_ptr(
     const uint8_t* opaque_metadata,
     int64_t opaque_metadata_size);
 
-// Construct aten MKL-DNN tensor given an MkldnnMemory
-TORCH_API Tensor new_with_mkldnn_memory(mkldnn::MkldnnMemory&& it, std::optional<ScalarType> dtype, std::optional<Device> device);
+// Construct aten MKL-DNN tensor given an ideep tensor
+TORCH_API Tensor new_with_itensor_mkldnn(mkldnn::MkldnnMemory&& it, std::optional<ScalarType> dtype, std::optional<Device> device);
 
-// Retrieve `MkldnnMemory` from MKL-DNN tensor
-TORCH_API mkldnn::MkldnnMemory& memory_from_mkldnn(const Tensor& mkldnn_tensor);
+// Retrieve `ideep::tensor` from MKL-DNN tensor
+TORCH_API mkldnn::MkldnnMemory& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 
 TORCH_API int64_t nbytes_from_mkldnn(const Tensor& mkldnn_tensor);
 
-// Construct an `MkldnnMemory` "view" from dense tensor, note the
-// MkldnnMemory will share the underlying buffer
-TORCH_API mkldnn::MkldnnMemory memory_view_from_dense(const Tensor& tensor);
-TORCH_API mkldnn::MkldnnMemory memory_view_from_const_dense(const Tensor& tensor);
+// Construct an `ideep::tensor` "view" from dense tensor, note the
+// ideep::tensor will share the underlying buffer
+TORCH_API mkldnn::MkldnnMemory itensor_view_from_dense(const Tensor& tensor);
+TORCH_API mkldnn::MkldnnMemory itensor_view_from_const_dense(const Tensor& tensor);
 
-// Construct an `MkldnnMemory` "view" from dense tensor using given desc, note
-// the MkldnnMemory will share the underlying buffer
-TORCH_API mkldnn::MkldnnMemory memory_view_from_dense(
+// Construct an `ideep::tensor` "view" from dense tensor using given desc, note
+// the ideep::tensor will share the underlying buffer
+TORCH_API mkldnn::MkldnnMemory itensor_view_from_dense(
     const at::Tensor& tensor,
   const mkldnn::MkldnnMemory::desc& desc);
-TORCH_API mkldnn::MkldnnMemory memory_view_from_const_dense(
+TORCH_API mkldnn::MkldnnMemory itensor_view_from_const_dense(
   const at::Tensor& tensor,
   const mkldnn::MkldnnMemory::desc& desc);
 
-// Helper function for getting an MkldnnMemory out of an aten Tensor or MKL-DNN tensor.
-TORCH_API mkldnn::MkldnnMemory memory_from_tensor(const Tensor& tensor);
-TORCH_API mkldnn::MkldnnMemory memory_from_const_tensor(const Tensor& tensor);
+// Helper function for getting an ideep tensor out of an aten Tensor or MKL-DNN tensor.
+TORCH_API mkldnn::MkldnnMemory itensor_from_tensor(const Tensor& tensor);
+TORCH_API mkldnn::MkldnnMemory itensor_from_const_tensor(const Tensor& tensor);
 
 // Set MKLDNN verbose level
 TORCH_API int set_verbose(int level);
