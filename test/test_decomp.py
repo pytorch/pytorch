@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     ops,
     skip,
@@ -1353,6 +1354,51 @@ instantiate_device_type_tests(TestDecomp, globals(), allow_xpu=True)
 
 class DecompOneOffTests(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float16)
+    @parametrize("exact", [False, True])
+    @parametrize("channels", [3, 4])
+    @parametrize("memory_format", [torch.contiguous_format, torch.channels_last])
+    def test_upsample_nearest2d_memory_format(
+        self, device, dtype, exact, channels, memory_format
+    ):
+        op = (
+            aten._upsample_nearest_exact2d.default
+            if exact
+            else aten.upsample_nearest2d.default
+        )
+        x = torch.randn(2, channels, 4, 5, device=device, dtype=dtype).contiguous(
+            memory_format=memory_format
+        )
+        expected = op(x, [3, 3])
+        actual = decomposition_table[op](x, [3, 3])
+        self.assertEqual(actual, expected, exact_stride=True)
+        with FakeTensorMode() as mode:
+            fake = op(mode.from_tensor(x), [3, 3])
+        self.assertEqual(fake.stride(), expected.stride())
+
+    @onlyCUDA
+    @parametrize("mode", ["nearest", "nearest-exact"])
+    @parametrize("dynamic", [False, True])
+    def test_upsample_nearest2d_compile_memory_format(self, device, mode, dynamic):
+        def fn(x):
+            return torch.nn.functional.interpolate(x, size=(3, 3), mode=mode)
+
+        x = (
+            torch.randn(2, 3, 4, 5, device=device)
+            .contiguous(memory_format=torch.channels_last)
+            .requires_grad_()
+        )
+        expected = fn(x)
+        actual = torch.compile(
+            fn, backend="aot_eager", fullgraph=True, dynamic=dynamic
+        )(x)
+        self.assertEqual(actual, expected, exact_stride=True)
+        self.assertEqual(
+            torch.autograd.grad(actual.sum(), x)[0],
+            torch.autograd.grad(expected.sum(), x)[0],
+        )
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
