@@ -43,6 +43,7 @@ class _Transfer:
     local: _Descriptors
     remote: _Descriptors
     remote_agent: str
+    notification: bytes = b""
 
 
 @dataclass
@@ -67,6 +68,8 @@ class _Agent:
         self.registrations = []
         self.remote_metadata = {}
         self.released = 0
+        self.notifications = {}
+        self.notification_lock = threading.Lock()
         self.agents[name] = self
 
     def create_backend(self, plugin, options):
@@ -140,7 +143,10 @@ class _Agent:
                 return tensor.view(torch.uint8).flatten()[offset : offset + length]
         raise RuntimeError("unknown local memory")
 
-    def transfer(self, handle):
+    def transfer(self, handle, notif_msg=b""):
+        # Like UCX, a transfer's notification is sent once the initiator sees it
+        # done: here, or in a later check_xfer_state (ai-dynamo/nixl#2439).
+        handle.notification = notif_msg
         if self.transfer_state != "DONE":
             return self.transfer_state
         peer = self.agents[handle.remote_agent]
@@ -150,10 +156,32 @@ class _Agent:
             remote.copy_(local.clone())
         else:
             local.copy_(remote.clone())
+        self._send_transfer_notification(handle)
         return "DONE"
 
     def check_xfer_state(self, handle):
+        if self.transfer_state == "DONE":
+            self._send_transfer_notification(handle)
         return self.transfer_state
+
+    def _send_transfer_notification(self, handle):
+        if handle.notification:
+            self.agents[handle.remote_agent]._deliver(self.name, handle.notification)
+            handle.notification = b""
+
+    def _deliver(self, sender, message):
+        with self.notification_lock:
+            self.notifications.setdefault(sender, []).append(message)
+
+    def send_notif(self, remote_agent_name, notif_msg, backend=None):
+        if remote_agent_name not in self.remote_metadata:
+            raise RuntimeError("NIXL_ERR_NOT_FOUND")
+        self.agents[remote_agent_name]._deliver(self.name, notif_msg)
+
+    def get_new_notifs(self, backends=()):
+        with self.notification_lock:
+            notifications, self.notifications = self.notifications, {}
+        return notifications
 
     def release_xfer_handle(self, handle):
         self.released += 1
@@ -356,6 +384,9 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             patch.object(self, "plugin", plugin.lower()),
         ):
             self.test_transport_asyncio_put_get()
+            first, second = self.make_transport_pair()
+            first.send_notification(second.peer_id, b"x").wait()
+            self.assertEqual(self._receive(second), [(first.peer_id, b"x")])
         for agent in _Agent.agents.values():
             self.assertEqual(list(agent.backends), [plugin])
             self.assertEqual(agent.registrations, [])
@@ -956,6 +987,57 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(check.call_count, len(states))
         self.assertEqual(first._agent.released, 1)
         self.assertEqual(first._transfers, {})
+
+    def test_transfer_notification_sent_without_waiting(self):
+        first, second, source, remote = self.registered_pair()
+        with patch.object(_Agent, "transfer_state", "PROC"):
+            work = first.write(
+                source.to_view(), remote, async_op=True, notification=b"x"
+            )
+            self.assertEqual(second.wait_notifications(timeout=0), [])
+        # Nobody waits on the write: the transport's progress thread must check
+        # it so that the notification is sent.
+        self.assertEqual(self._receive(second), [(first.peer_id, b"x")])
+        self.assertTrue(work.wait(timedelta(seconds=30)))
+
+    def test_one_blocked_waiter_polls_and_close_fails_all(self):
+        first, second = self.make_transport_pair()
+        drain = second._drain_notifications
+        drains = []
+        entered = threading.Event()
+        polled = threading.Event()
+        start = 0
+
+        def record():
+            nonlocal start
+            drain()
+            drains.append(threading.current_thread())
+            if not entered.is_set() and len(set(drains)) == 4:
+                start = len(drains)
+                entered.set()
+            if entered.is_set() and len(drains) >= start + 40:
+                polled.set()
+
+        errors = []
+
+        def blocked():
+            try:
+                second.wait_notifications(timeout=30)
+            except RuntimeError as error:
+                errors.append(error)
+
+        with patch.object(second, "_drain_notifications", record):
+            waiters = [threading.Thread(target=blocked) for _ in range(4)]
+            for waiter in waiters:
+                waiter.start()
+            self.assertTrue(entered.wait(30))
+            self.assertTrue(polled.wait(30))
+            self.assertEqual(len(set(drains[start:])), 1)
+            second.close()
+            for waiter in waiters:
+                waiter.join(30)
+                self.assertFalse(waiter.is_alive())
+        self.assertEqual([str(error) for error in errors], ["transport is closed"] * 4)
 
 
 if __name__ == "__main__":
