@@ -95,9 +95,11 @@ from .exception import (
     AttributeErrorVariable,
     ExceptionVariable,
     FrameSummaryVariable,
+    KeyErrorVariable,
     NameErrorVariable,
     StopIterationVariable,
     TracebackVariable,
+    UnmodeledStrExceptionVariable,
 )
 from .functions import (
     BaseUserFunctionVariable,
@@ -292,6 +294,7 @@ __all__ = [
     "IterBuiltinVariable",
     "IteratorVariable",
     "ItertoolsVariable",
+    "KeyErrorVariable",
     "LambdaVariable",
     "LazyConstantVariable",
     "LazyVariableTracker",
@@ -332,6 +335,7 @@ __all__ = [
     "TorchInGraphFunctionVariable",
     "TupleVariable",
     "UnknownVariable",
+    "UnmodeledStrExceptionVariable",
     "UnspecializedNNModuleVariable",
     "UnspecializedPythonVariable",
     "UntypedStorageVariable",
