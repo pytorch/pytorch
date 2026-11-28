@@ -1,12 +1,15 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Parallel.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/mkl/LinearAlgebra.h>
 #include <ATen/native/mkldnn/Matmul.h>
 
+#include <c10/core/CPUAllocator.h>
 #include <c10/util/SmallBuffer.h>
 #include <c10/util/irange.h>
 
 #include <climits>
+#include <memory>
 #if !defined(__s390x__ ) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -121,6 +124,70 @@ bool use_blas_gemm(
       (ldc >= std::max(int64_t{1}, m)));
 }
 C10_DIAGNOSTIC_POP()
+
+#if defined(MKL_HAS_SBGEMM) || defined(MKL_HAS_SHGEMM)
+// Runs a bf16/f16 gemm on MKL, which only writes f32 C, through an f32 copy of C.
+// Returns false when the ATen kernel should handle the problem instead: tiny
+// problems (same bound as mkldnn_gemm, where MKL's call overhead dominates),
+// alpha == 0 (ATen kernel still propagates inf/NaN) and skinny transa ones, and
+// bf16 matrix-vector products with only B transposed.
+template <typename scalar_t>
+bool mkl_xf16_gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const scalar_t *a, int64_t lda,
+    const scalar_t *b, int64_t ldb,
+    float beta,
+    scalar_t *c, int64_t ldc) {
+  // For transa/no-transb problems, the dot-product kernel in cpu/BlasKernel.cpp
+  // beats MKL's bf16/f16 gemm when B has few columns.
+  // For small size problem MKL wins from about 24 columns at any thread count.
+  // For larger problem the ATen kernel splits the m rows of C across threads, so its
+  // time scales with problem size / threads, while at small n MKL's time is nearly
+  // flat in n and scales poorly with threads; so the crossover grows with the
+  // thread count. The constants come from a sweep on one Xeon 8570 with AVX2 and
+  // AVX-512 without AMX emulated by capping the ISA.
+  const int64_t threads = at::in_parallel_region() ? 1 : at::get_num_threads();
+  const int64_t min_cols_transa = m * k <= 1024 * 1024 ? 24 : 24 + 6 * threads;
+  const bool skinny_transa = transa != TransposeType::NoTranspose &&
+      transb == TransposeType::NoTranspose && n < min_cols_transa;
+  // MKL's bf16 gemm is slow for matrix-vector products with A not transposed. With B
+  // transposed the ATen kernel is much faster
+  const bool bf16_gemv_transb = std::is_same_v<scalar_t, at::BFloat16> && n == 1 &&
+      transa == TransposeType::NoTranspose && transb != TransposeType::NoTranspose;
+  if (m * n * k <= 16 * 16 * 16 || alpha == 0.0f || skinny_transa || bf16_gemv_transb ||
+      !use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+    return false;
+  }
+  at::DataPtr c_buf = c10::GetCPUAllocator()->allocate(m * n * sizeof(float));
+  float* c_f32 = static_cast<float*>(c_buf.get());
+  const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(1, m));
+  if (beta != 0.0f) {
+    at::parallel_for(0, n, grain, [&](int64_t begin, int64_t end) {
+      for (const auto j : c10::irange(begin, end)) {
+        for (const auto i : c10::irange(m)) {
+          c_f32[j * m + i] = c[j * ldc + i];
+        }
+      }
+    });
+  }
+  const int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb;
+  if constexpr (std::is_same_v<scalar_t, at::BFloat16>) {
+    mkl_gemm_bf16bf16f32(transa, transb, m_, n_, k_, alpha, a, lda_, b, ldb_, beta, c_f32, m_);
+  } else {
+    mkl_gemm_f16f16f32(transa, transb, m_, n_, k_, alpha, a, lda_, b, ldb_, beta, c_f32, m_);
+  }
+  at::parallel_for(0, n, grain, [&](int64_t begin, int64_t end) {
+    for (const auto j : c10::irange(begin, end)) {
+      for (const auto i : c10::irange(m)) {
+        c[j * ldc + i] = c_f32[j * m + i];
+      }
+    }
+  });
+  return true;
+}
+#endif  // MKL_HAS_SBGEMM || MKL_HAS_SHGEMM
 
 #ifdef USE_FBGEMM
 fbgemm::matrix_op_t to_fbgemm(TransposeType trans) {
@@ -393,6 +460,11 @@ void gemm(
       return;
    }
 #endif
+#ifdef MKL_HAS_SBGEMM
+   if (mkl_xf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif
    gemm_stub(
       at::kCPU, at::kBFloat16,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
@@ -452,6 +524,11 @@ void gemm(
         }
       }
       return;
+   }
+#endif
+#ifdef MKL_HAS_SHGEMM
+   if (mkl_xf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
    }
 #endif
    gemm_stub(
