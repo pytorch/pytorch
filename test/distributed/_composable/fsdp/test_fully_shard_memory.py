@@ -4,6 +4,7 @@ import contextlib
 import functools
 import gc
 import math
+import types
 import unittest
 import weakref
 from unittest import mock
@@ -25,6 +26,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_CUDA,
     TEST_HPU,
+    TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -651,6 +653,428 @@ class TestFullyShardAllReduceHookSyncCorrectness(FSDPTest):
         model(inp).sum().backward()
         for param, ref_grad in zip(model.parameters(), ref_grads):
             self.assertEqual(param.grad.to_local(), ref_grad)
+
+
+class TestFullyShardReduceOutputCurrentStreamUnit(TestCase):
+    """Stream-allocation and event-guarded retention contracts without GPU."""
+
+    def _make_fake_streams(self):
+        events: list[tuple] = []
+
+        class FakeEvent:
+            def __init__(self, stream_name: str, seq: int) -> None:
+                self.stream_name = stream_name
+                self.seq = seq
+
+        class FakeStream:
+            def __init__(self, name: str) -> None:
+                self.name = name
+                self._seq = 0
+
+            def wait_stream(self, other: "FakeStream") -> None:
+                events.append(("wait_stream", self.name, other.name))
+
+            def wait_event(self, event: FakeEvent) -> None:
+                events.append(("wait_event", self.name, event.stream_name, event.seq))
+
+            def record_event(self) -> FakeEvent:
+                self._seq += 1
+                ev = FakeEvent(self.name, self._seq)
+                events.append(("record_event", self.name, ev.seq))
+                return ev
+
+        current = FakeStream("current")
+        rs_stream = FakeStream("rs")
+        ar_stream = FakeStream("ar")
+        state = {"current": current}
+
+        @contextlib.contextmanager
+        def use_stream(stream: FakeStream):
+            prev = state["current"]
+            state["current"] = stream
+            try:
+                yield
+            finally:
+                state["current"] = prev
+
+        handle = types.SimpleNamespace(
+            current_stream=lambda: state["current"],
+            stream=use_stream,
+        )
+        return handle, current, rs_stream, ar_stream, events
+
+    def _make_fake_fsdp_param(
+        self,
+        shape: tuple[int, ...],
+        sharded_grad_dtype: torch.dtype,
+        *,
+        padded_shape: tuple[int, ...] | None = None,
+        needs_nonzero_dim_padding: bool = False,
+    ):
+        padded = torch.Size(padded_shape or shape)
+        sharded_size = torch.Size(shape)
+        stride = torch.empty(sharded_size).stride()
+        sharded_param = types.SimpleNamespace(
+            grad=None, _post_accumulate_grad_hooks=None
+        )
+        return types.SimpleNamespace(
+            fsdp_placement=types.SimpleNamespace(dim=0),
+            padded_sharded_param_size=padded,
+            sharded_size=sharded_size,
+            contiguous_sharded_stride=stride,
+            sharded_grad_dtype=sharded_grad_dtype,
+            needs_nonzero_dim_padding=needs_nonzero_dim_padding,
+            offload_to_cpu=False,
+            pin_memory=False,
+            sharded_param=sharded_param,
+            to_sharded_dtensor=lambda grad: grad,
+        )
+
+    def test_foreach_reduce_allocates_in_current_stream_and_retains_refs(self):
+        from torch.distributed.fsdp._fully_shard import _fsdp_collectives
+
+        cases = [
+            # (reduce_output_in_current_stream, sharded_dtype, has_ar, ar_grads, has_hook, nonzero_pad)
+            (False, torch.float32, False, False, False, False),
+            (True, torch.float32, False, False, False, False),
+            (True, torch.float32, False, False, False, True),
+            (True, torch.bfloat16, False, False, False, False),
+            (True, torch.bfloat16, True, True, False, False),
+            (True, torch.bfloat16, True, False, False, False),
+            (True, torch.bfloat16, False, False, True, False),
+        ]
+        for (
+            in_current,
+            sharded_dtype,
+            has_ar,
+            ar_grads,
+            has_hook,
+            nonzero_pad,
+        ) in cases:
+            handle, current, rs_stream, ar_stream, events = self._make_fake_streams()
+            alloc_streams: list[str] = []
+            comm_streams: list[str] = []
+            orig_empty = torch.empty
+
+            def tracking_empty(*args, **kwargs):
+                alloc_streams.append(handle.current_stream().name)
+                return orig_empty(*args, **kwargs)
+
+            class FakeRSComm:
+                def allocate(self, size, *, dtype, device):
+                    alloc_streams.append(handle.current_stream().name)
+                    return orig_empty(*size, dtype=dtype, device="cpu")
+
+                def __call__(self, *, output_tensor, input_tensor, group, op):
+                    comm_streams.append(handle.current_stream().name)
+                    output_tensor.copy_(input_tensor[: output_tensor.numel()])
+
+            class FakeARComm:
+                def __call__(self, *, tensor, group, op):
+                    comm_streams.append(handle.current_stream().name)
+
+            fake_dev = types.SimpleNamespace(type="fake_acc")
+            fsdp_param = self._make_fake_fsdp_param(
+                (2, 2),
+                sharded_dtype,
+                padded_shape=(2, 3) if nonzero_pad else (2, 2),
+                needs_nonzero_dim_padding=nonzero_pad,
+            )
+            unsharded_grad = torch.ones(
+                (4, 3 if nonzero_pad else 2), dtype=torch.float32
+            )
+
+            def fake_copy_in(grads, *, shard_dims, world_size):
+                def _fill(buf):
+                    buf.fill_(1.0)
+
+                return _fill
+
+            hook = (lambda _t: None) if has_hook else None
+            with (
+                mock.patch.object(
+                    _fsdp_collectives, "_get_device_handle", return_value=handle
+                ),
+                mock.patch.object(
+                    _fsdp_collectives,
+                    "record_grad_output_stream",
+                    side_effect=AssertionError(
+                        "record_grad_output_stream should not run"
+                    )
+                    if in_current and (not has_ar or ar_grads)
+                    else None,
+                ),
+                mock.patch.object(torch, "empty", side_effect=tracking_empty),
+                mock.patch.object(
+                    torch.Tensor,
+                    "record_stream",
+                    side_effect=AssertionError("record_stream must not be called"),
+                ),
+            ):
+                (
+                    rs_input,
+                    rs_event,
+                    post_stream,
+                    post_event,
+                    ar_input,
+                    ar_event,
+                    partial_out,
+                ) = _fsdp_collectives.foreach_reduce(
+                    [fsdp_param],
+                    [unsharded_grad],
+                    types.SimpleNamespace(size=lambda: 2),
+                    rs_stream,
+                    FakeRSComm(),
+                    torch.float32,
+                    fake_dev,
+                    1.0,
+                    types.SimpleNamespace(size=lambda: 2) if has_ar else None,
+                    ar_stream,
+                    ar_grads,
+                    None,
+                    hook,
+                    prepare_reduce_scatter_inputs=fake_copy_in,
+                    all_reduce_comm=FakeARComm(),
+                    reduce_output_in_current_stream=in_current,
+                )
+
+            self.assertEqual(comm_streams[0], "rs")
+            if not in_current:
+                # Default behavior: input on current, output on rs
+                self.assertEqual(alloc_streams[:2], ["current", "rs"])
+            elif has_ar and not ar_grads:
+                # HSDP partial step stays internal to rs stream
+                self.assertEqual(alloc_streams[:2], ["current", "rs"])
+                self.assertIsNotNone(partial_out)
+            else:
+                # Every allocation (input, output, and any cast/unpad) lives on current stream
+                self.assertTrue(
+                    all(stream == "current" for stream in alloc_streams),
+                    f"Expected all allocations on current stream, got {alloc_streams}",
+                )
+                if has_ar or has_hook:
+                    self.assertEqual(post_stream, ar_stream)
+                    self.assertEqual(rs_event.stream_name, "rs")
+                    self.assertIs(ar_event, post_event)
+                    if sharded_dtype != torch.float32:
+                        self.assertIsInstance(ar_input, list)
+                        self.assertEqual(len(ar_input), 2)
+                    if has_hook and sharded_dtype != torch.float32:
+                        self.assertIn(("wait_stream", "ar", "current"), events)
+                else:
+                    self.assertEqual(post_stream, rs_stream)
+                    self.assertIs(rs_event, post_event)
+                    self.assertIsInstance(rs_input, list)
+                    expected_len = (
+                        3 if (sharded_dtype != torch.float32 or nonzero_pad) else 2
+                    )
+                    self.assertEqual(len(rs_input), expected_len)
+
+    def test_reduce_single_rank_allocates_cast_in_current_stream(self):
+        from torch.distributed.fsdp._fully_shard import _fsdp_collectives
+
+        handle, current, rs_stream, _, _ = self._make_fake_streams()
+        alloc_streams: list[str] = []
+        orig_empty = torch.empty
+
+        def tracking_empty(*args, **kwargs):
+            alloc_streams.append(handle.current_stream().name)
+            return orig_empty(*args, **kwargs)
+
+        fsdp_param = self._make_fake_fsdp_param((2, 2), torch.bfloat16)
+        grad = torch.ones((2, 2), dtype=torch.float32)
+        with (
+            mock.patch.object(
+                _fsdp_collectives, "_get_device_handle", return_value=handle
+            ),
+            mock.patch.object(torch, "empty", side_effect=tracking_empty),
+        ):
+            keepalive, rs_event, _, post_event, _, _, _ = (
+                _fsdp_collectives._reduce_single_rank(
+                    [fsdp_param],
+                    [grad],
+                    rs_stream,
+                    torch.float32,
+                    types.SimpleNamespace(type="fake_acc"),
+                    [],
+                    reduce_output_in_current_stream=True,
+                )
+            )
+        self.assertEqual(alloc_streams, ["current"])
+        self.assertIs(rs_event, post_event)
+        self.assertEqual(len(keepalive), 2)
+        self.assertEqual(fsdp_param.sharded_param.grad.dtype, torch.bfloat16)
+
+    def test_release_all_reduce_state_waits_on_allocation_stream(self):
+        from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
+            AllReduceState,
+            FSDPParamGroup,
+        )
+
+        handle, current, rs_stream, ar_stream, events = self._make_fake_streams()
+        ev = ar_stream.record_event()
+        group = object.__new__(FSDPParamGroup)
+        group.device_handle = handle
+        group._all_reduce_state = AllReduceState(
+            torch.empty(1), ev, allocation_stream=rs_stream
+        )
+        group._release_all_reduce_state()
+        self.assertIsNone(group._all_reduce_state)
+        self.assertIn(("wait_event", "rs", "ar", ev.seq), events)
+        self.assertIn(("wait_event", "current", "ar", ev.seq), events)
+
+
+class TestFullyShardReduceOutputCurrentStream(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(2, torch.get_device_module(device_type).device_count())
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_reduce_output_in_current_stream_recurse(self):
+        model = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8)).to(device_type)
+        # Wrap only model[0] and root model so both hold non-empty param groups.
+        fully_shard(model[0])
+        fully_shard(model)
+
+        for mod in (model, model[0]):
+            groups = mod._get_fsdp_state()._fsdp_param_groups
+            self.assertGreater(len(groups), 0)
+            self.assertTrue(all(not g.reduce_output_in_current_stream for g in groups))
+
+        model.set_reduce_output_in_current_stream(True, recurse=False)
+        self.assertTrue(
+            all(
+                g.reduce_output_in_current_stream
+                for g in model._get_fsdp_state()._fsdp_param_groups
+            )
+        )
+        self.assertTrue(
+            all(
+                not g.reduce_output_in_current_stream
+                for g in model[0]._get_fsdp_state()._fsdp_param_groups
+            )
+        )
+
+        model.set_reduce_output_in_current_stream(True)
+        for mod in (model, model[0]):
+            self.assertTrue(
+                all(
+                    g.reduce_output_in_current_stream
+                    for g in mod._get_fsdp_state()._fsdp_param_groups
+                )
+            )
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_output_in_current_stream_training_parity(self):
+        self.run_subtests(
+            {
+                "mixed_precision": [False, True],
+                "grad_accum_steps": [1, 2],
+                "use_cpu_offload": [False, True],
+                "run_optim_in_backward": [False, True],
+            },
+            self._test_reduce_output_in_current_stream_training_parity,
+        )
+
+    def _test_reduce_output_in_current_stream_training_parity(
+        self,
+        mixed_precision: bool,
+        grad_accum_steps: int,
+        use_cpu_offload: bool,
+        run_optim_in_backward: bool,
+    ):
+        if use_cpu_offload and run_optim_in_backward:
+            return
+        from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+            DefaultReduceScatter,
+        )
+
+        def run_mode(enable_current_stream: bool):
+            torch.manual_seed(42)
+            model = nn.Sequential(
+                nn.Linear(64, 64),
+                nn.ReLU(),
+                nn.Linear(64, 64),
+                nn.ReLU(),
+                nn.Linear(64, 64),
+            ).to(device_type)
+            for param in model.parameters():
+                dist.broadcast(param.detach(), src=0)
+            mp_policy = (
+                MixedPrecisionPolicy(
+                    param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+                )
+                if mixed_precision
+                else MixedPrecisionPolicy()
+            )
+            offload = CPUOffloadPolicy() if use_cpu_offload else OffloadPolicy()
+            for mod in (model[0], model[2], model[4], model):
+                fully_shard(mod, mp_policy=mp_policy, offload_policy=offload)
+            if enable_current_stream:
+                model.set_reduce_output_in_current_stream(True)
+
+            if run_optim_in_backward:
+                param_optims = {
+                    p: torch.optim.AdamW([p], lr=1e-2, foreach=False)
+                    for p in model.parameters()
+                }
+
+                def _hook(p):
+                    param_optims[p].step()
+                    param_optims[p].zero_grad()
+
+                for p in model.parameters():
+                    p.register_post_accumulate_grad_hook(_hook)
+            else:
+                optim = torch.optim.AdamW(model.parameters(), lr=1e-2, foreach=False)
+
+            dev_mod = torch.get_device_module(device_type)
+            alloc_streams: list[torch.Stream] = []
+            comm_streams: list[torch.Stream] = []
+            orig_alloc = DefaultReduceScatter.allocate
+            orig_call = DefaultReduceScatter.__call__
+
+            def spy_alloc(self_comm, size, *, dtype, device):
+                alloc_streams.append(dev_mod.current_stream())
+                return orig_alloc(self_comm, size, dtype=dtype, device=device)
+
+            def spy_call(self_comm, *args, **kwargs):
+                comm_streams.append(dev_mod.current_stream())
+                return orig_call(self_comm, *args, **kwargs)
+
+            compute_stream = dev_mod.current_stream()
+            losses = []
+            with (
+                mock.patch.object(DefaultReduceScatter, "allocate", spy_alloc),
+                mock.patch.object(DefaultReduceScatter, "__call__", spy_call),
+            ):
+                for step in range(2):
+                    for micro in range(grad_accum_steps):
+                        torch.manual_seed(100 + step * 10 + micro + self.rank)
+                        inp = torch.randn(4, 64, device=device_type)
+                        loss = model(inp).square().sum()
+                        loss.backward()
+                        losses.append(loss.item())
+                    if not run_optim_in_backward:
+                        optim.step()
+                        optim.zero_grad()
+
+            self.assertGreater(len(alloc_streams), 0)
+            self.assertTrue(all(s != compute_stream for s in comm_streams))
+            if enable_current_stream:
+                self.assertTrue(all(s == compute_stream for s in alloc_streams))
+            else:
+                self.assertTrue(any(s != compute_stream for s in alloc_streams))
+
+            params = [p.to_local().detach().cpu() for p in model.parameters()]
+            return losses, params
+
+        ref_losses, ref_params = run_mode(False)
+        cur_losses, cur_params = run_mode(True)
+        for ref_l, cur_l in zip(ref_losses, cur_losses):
+            self.assertAlmostEqual(ref_l, cur_l, places=4)
+        for ref_p, cur_p in zip(ref_params, cur_params):
+            self.assertEqual(cur_p, ref_p, atol=1e-4, rtol=1e-4)
 
 
 if __name__ == "__main__":

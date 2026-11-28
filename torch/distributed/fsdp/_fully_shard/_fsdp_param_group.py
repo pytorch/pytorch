@@ -193,13 +193,15 @@ class _GradientReductionState:
 
 class AllReduceState(NamedTuple):
     # Holding all_reduce_input (the reduce-dtype AR buffer, or the RS output
-    # passed to the all-reduce hook) keeps the caching allocator from reusing
-    # the block across layers. This is a structural invariant, not
-    # bookkeeping: without it, the next layer's RS can reuse the same
-    # physical block before this layer's AR or hook finishes under slow AR,
-    # causing gradient aliasing. See PR #140044, PR #180900.
-    all_reduce_input: torch.Tensor
-    event: torch.Event | None  # all-reduce event
+    # passed to the all-reduce hook, plus any current-stream-allocated
+    # post-reduce buffers) keeps the caching allocator from reusing the block
+    # across layers. This is a structural invariant, not bookkeeping: without
+    # it, the next layer's RS or compute-stream op can reuse the same physical
+    # block before this layer's AR, hook, or post-reduce ops finish, causing
+    # gradient aliasing. See PR #140044, PR #180900.
+    all_reduce_input: torch.Tensor | list[torch.Tensor]
+    event: torch.Event | None  # all-reduce or post-reduce event
+    allocation_stream: torch.Stream | None = None
 
 
 class FSDPParamGroup:
@@ -301,6 +303,10 @@ class FSDPParamGroup:
         # overridden to only do explicit prefetching and avoid inter-stream
         # fragmentation from using separate unshard streams
         self.unshard_async_op: bool = False
+        # Whether to allocate reduce-scatter output and post-reduce
+        # sharded-gradient buffers on the current stream to avoid inter-stream
+        # fragmentation without moving reduction kernels off their comm streams
+        self.reduce_output_in_current_stream: bool = False
         # Whether to unshard in backward: can be overridden by the user if the
         # parameters in this group are not needed for backward (e.g. embedding)
         self.unshard_in_backward: bool = True
@@ -616,12 +622,7 @@ class FSDPParamGroup:
         if self._post_reduce_event is not None:
             current_stream.wait_event(self._post_reduce_event)
             self._post_reduce_event = None
-        if (
-            self._all_reduce_state is not None
-            and self._all_reduce_state.event is not None
-        ):
-            current_stream.wait_event(self._all_reduce_state.event)
-        self._all_reduce_state = None
+        self._release_all_reduce_state()
         if self._reshard_after_forward_event is not None:
             self.comm_ctx.wait_all_gather_streams_on_event(
                 self._reshard_after_forward_event
@@ -840,6 +841,7 @@ class FSDPParamGroup:
                     self.force_sum_reduction_for_comms,
                     prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
                     all_reduce_comm=self._all_reduce_comm,
+                    reduce_output_in_current_stream=self.reduce_output_in_current_stream,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
@@ -894,12 +896,30 @@ class FSDPParamGroup:
                                 "Expected all_reduce_event to be set for non-CPU device"
                             )
                     self._all_reduce_state = AllReduceState(
-                        all_reduce_input, all_reduce_event
+                        all_reduce_input,
+                        all_reduce_event,
+                        self.device_handle.current_stream()
+                        if self.reduce_output_in_current_stream
+                        else None,
                     )
+
+    def _release_all_reduce_state(self) -> None:
+        if (all_reduce_state := self._all_reduce_state) is not None:
+            if all_reduce_state.event is not None:
+                current_stream = self.device_handle.current_stream()
+                if (
+                    all_reduce_state.allocation_stream is not None
+                    and all_reduce_state.allocation_stream != current_stream
+                ):
+                    all_reduce_state.allocation_stream.wait_event(
+                        all_reduce_state.event
+                    )
+                current_stream.wait_event(all_reduce_state.event)
+            self._all_reduce_state = None
 
     def finalize_backward(self):
         self._post_reduce_event = None
-        self._all_reduce_state = None
+        self._release_all_reduce_state()
         for fsdp_param in self.fsdp_params:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()
@@ -1065,12 +1085,7 @@ class FSDPParamGroup:
         if self._post_reduce_event is not None:
             self.device_handle.current_stream().wait_event(self._post_reduce_event)
             self._post_reduce_event = None
-        if (
-            self._all_reduce_state is not None
-            and self._all_reduce_state.event is not None
-        ):
-            self.device_handle.current_stream().wait_event(self._all_reduce_state.event)
-        self._all_reduce_state = None
+        self._release_all_reduce_state()
 
     def _backward_prefetch(self) -> None:
         if self._training_state == TrainingState.PRE_BACKWARD:
