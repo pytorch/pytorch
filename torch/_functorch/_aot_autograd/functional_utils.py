@@ -343,6 +343,10 @@ def gen_alias_from_base(
         out = _functionalization.apply_view_meta_sequence(
             aliased_base_tensor, target_view_meta_sequence.sequence
         )
+        # An empty sequence (e.g. an intermediate that was set_() onto an input)
+        # returns the base itself; never hand the caller's input object back.
+        if out is aliased_base_tensor:
+            out = out.view(out.shape)
         # If re-applying the ViewMeta sequence succeeded, there should be no more
         # problems going forward. We just check we got to the target shape and
         # patch requires_grad flag.
