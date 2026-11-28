@@ -224,6 +224,16 @@ class DynamicShapesOpTests:
             assert_dynamic_dims={0: (0, 1, 2, 3)},
         )
 
+    def test_float_pow_symint_exponent(self):
+        # Bias correction as in Adam-like optimizers: FloatPow(0.95, ToFloat(s0))
+        def fn(x):
+            return torch.lerp(x, x * 2, 0.05 / (1.0 - 0.95 ** x.shape[0]))
+
+        cfn = torch.compile(fn, fullgraph=True, dynamic=True)
+        for n in (8, 13):
+            x = torch.randn(n, device=self.device)
+            self.assertEqual(cfn(x), fn(x))
+
 
 if RUN_CPU:
 
