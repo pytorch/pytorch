@@ -3150,7 +3150,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
     hw_classification = HardwareClassification.ACCELERATOR
     setUp = preserves_device_selection(_TestControlFlowBase.setUp)
 
-    @onlyAccelerator
     def test_cond_gpu(self, device):
         def true_fn(x):
             return x.sin()
@@ -3163,7 +3162,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         result = cond(pred, true_fn, false_fn, [x])
         self.assertEqual(result, torch.cos(x))
 
-    @onlyAccelerator
     def test_cond_autograd_gpu(self, device):
         def true_fn(x):
             return x.sin()
@@ -3250,7 +3248,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         return cond_outputs, cond_inputs
 
     @skipIfTorchDynamo("don't test compile on compile")
-    @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["compile_dynamic_shape"])
     @parametrize("scalar", [False])
@@ -3301,7 +3298,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
             cond_fct, pred_fn, true_fn, false_fn, operands
         )
 
-    @onlyAccelerator
     def test_switch_gpu(self, device):
         def branch0(inp_x):
             return inp_x.sin()
@@ -3314,7 +3310,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         result = switch(index, (branch0, branch1), (x,))
         self.assertEqual(result, torch.cos(x))
 
-    @onlyAccelerator
     def test_switch_autograd_gpu(self, device):
         def branch0(x):
             return x.sin()
@@ -3336,7 +3331,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
             expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
             self.assertEqual(expected_grads, grads)
 
-    @onlyAccelerator
     def test_map_gpu(self, device):
         def f(x, y):
             return x + y
@@ -3347,7 +3341,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         expected = _fake_map(f, xs, y)
         self.assertEqual(expected, res)
 
-    @onlyAccelerator
     def test_while_loop_gpu(self, device):
         def cond_fn(x):
             return x.sum() < 10
@@ -4833,7 +4826,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
                 result1, expected_result, (h1, h2, x1, W_1, b_1, W_2, b_2)
             )
 
-    @onlyAccelerator
     def test_scan_input_mutation(self, device):
         def fct_input_mutation(x, y):
             x.add_(1)
@@ -4851,7 +4843,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_input_mutation, init, x, dim=0)
 
-    @onlyAccelerator
     def test_scan_additional_input_mutation(self, device):
         buf = torch.randn(2, 2, device=device)
 
@@ -4868,7 +4859,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_additional_input_mutation, init, x, dim=0)
 
-    @onlyAccelerator
     def test_scan_input_carry_alias(self, device):
         def fct_input_output_alias(x, y):
             return (x[0], x[1] + y[1]), (x[1] + y[1] + 1, x[1] + y[1] + 2)
@@ -4887,7 +4877,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
 
-    @onlyAccelerator
     def test_scan_input_output_alias(self, device):
         def fct_input_output_alias(x, y):
             return (x[0] + 1, x[1] + y[1]), (x[1], x[1] + y[1] + 2)
@@ -4906,7 +4895,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
 
-    @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_scan_carry_carry_alias(self, device):
         def fct_carry_carry_alias(x, y):
@@ -4927,7 +4915,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_carry_carry_alias, init, inp, dim=0)
 
-    @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_scan_carry_output_alias(self, device):
         def fct_carry_output_alias(x, y):
@@ -4948,7 +4935,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_carry_output_alias, init, inp, dim=0)
 
-    @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("alias_kind", ["disjoint", "overlap", "same_view"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -4977,7 +4963,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         lambda params: params["alias_site"] == "init"
         and params["compile_mode"] in ("none", "eager"),
     )
-    @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("alias_site", ["init", "nested"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -5021,7 +5006,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         if autograd:
             self.check_autograd(result, result_exp, params)
 
-    @onlyAccelerator
     @parametrize("alias_kind", ["disjoint", "overlap"])
     def test_scan_aliased_additional_input_mutation(self, device, alias_kind):
         kv = torch.randn(2, 4, device=device)
@@ -5044,7 +5028,6 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_aliased_mutation, init, xs, dim=0)
 
-    @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile"])
     def test_scan_unaliased_additional_input_mutation(self, device, compile_mode):
@@ -5657,50 +5640,6 @@ class AssociativeScanTestsDevice(TestCase):
                     results_torch.append(op_pt(x, 0))
                 self.assertEqual(results, results_torch)
 
-    @onlyAccelerator
-    @skipCUDAIf(not SM70OrLater, "triton")
-    @unittest.expectedFailure
-    def test_associative_scan_dim_shape_failure(
-        self, device, compile_mode, combine_mode
-    ):
-        num_dims = [2]
-        for num_dim in num_dims:
-            shapes = [9 for _ in range(num_dim)]
-            rnd_scan_dim = 0
-            x = torch.randn(*shapes, device=device)
-
-            kwargs = {
-                "dim": rnd_scan_dim,
-                "reverse": True,
-                "compile_mode": "compile",
-                "combine_mode": "generic",
-            }
-            kwargs_fake = self._prepare_fake_kwargs(kwargs)
-            self._run_test(
-                model=AssociativeScanModels.Simple(**kwargs),
-                model_fake=AssociativeScanModels.Simple(**kwargs_fake),
-                inputs=x,
-            )
-
-    @onlyAccelerator
-    @skipCUDAIf(not SM70OrLater, "triton")
-    def test_associative_scan_pointwise_mixed_device_lowering_error(self, device):
-        def combine_fn(x, y):
-            return (x[0] + y[0], x[1] + y[1])
-
-        class M(torch.nn.Module):
-            def forward(self, a, b):
-                return associative_scan(
-                    combine_fn, (a, b), dim=0, combine_mode="pointwise"
-                )
-
-        from torch._inductor.exc import InductorError
-
-        a = torch.randn(8, 4, device=device)
-        b = torch.randn(8, 4, device="cpu")
-        with self.assertRaisesRegex(InductorError, "is not supported on cpu"):
-            torch.compile(M(), fullgraph=True)(a, b)
-
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -5990,55 +5929,6 @@ class AssociativeScanTestsDevice(TestCase):
             autograd_param=None if not autograd else (inp,),
         )
 
-    # TODO: NestedFn does not accept the kwargs passed here (dim, reverse, ...),
-    # so this fails at model construction. Fix NestedFn's signature to re-enable.
-    @onlyAccelerator
-    @skipCUDAIf(not SM70OrLater, "triton")
-    @unittest.expectedFailure
-    def test_associative_scan_nested(self, device):
-        combine_mode = "pointwise"
-        compile_mode = "eager"
-        reverse_first = False
-        same_direction = False
-
-        reverse_second = reverse_first if same_direction else not reverse_first
-
-        def first_nested_fct(x, y):
-            y_new = associative_scan(
-                second_nested_fct,
-                y,
-                0,
-                reverse=reverse_second,
-                combine_mode=combine_mode,
-            )
-            return x + y_new
-
-        def first_nested_fct_fake(x, y):
-            y_new = _fake_associative_scan(
-                second_nested_fct, y, 0, reverse=reverse_second
-            )
-            return x + y_new
-
-        def second_nested_fct(x, y):
-            return x * y
-
-        inp = torch.randn(3, 10, 2, device=device)
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse_first,
-            "compile_mode": compile_mode,
-            "combine_fn": first_nested_fct,
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        kwargs_fake["combine_fn"] = first_nested_fct_fake
-        self._run_test(
-            model=AssociativeScanModels.NestedFn(**kwargs),
-            model_fake=AssociativeScanModels.NestedFn(**kwargs_fake),
-            inputs=inp,
-        )
-
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("loop_type", ["for"])
@@ -6087,42 +5977,6 @@ class AssociativeScanTestsDevice(TestCase):
             autograd_param=None if not autograd else (inp,),
         )
 
-    # TODO: Does not work because of the usage of vmap within associative_scan
-    # TODO: Re-enable additional parameters again once this issues has been resolved
-    @onlyAccelerator
-    @skipCUDAIf(not SM70OrLater, "triton")
-    @unittest.expectedFailure
-    def test_associative_scan_loop_in_combine_fn_failure(self, device):
-        compile_mode = "none"
-        loop_type = "while"
-        reverse = False
-
-        def combine_fn(x, y):
-            _cnt = torch.zeros_like(y[0, :])
-            if loop_type == "while":
-
-                def cond_fn(ind, loop_val):
-                    return (loop_val < 5)[0]
-
-                def body_fn(ind, loop_val):
-                    return ind + 1, loop_val + torch.abs(ind)
-
-        inp = torch.randn(3, 10, 1, device=device) * 2
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": combine_fn,
-            "combine_mode": "generic",
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=inp,
-        )
-
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
@@ -6158,39 +6012,6 @@ class AssociativeScanTestsDevice(TestCase):
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=inp,
             autograd_param=None if not autograd else (inp,),
-        )
-
-    # TODO: Does not work because of the usage of vmap within associative_scan
-    # TODO: Re-enable additional parameters again once this issues has been resolved
-    @onlyAccelerator
-    @skipCUDAIf(not SM70OrLater, "triton")
-    @unittest.expectedFailure
-    def test_associative_scan_map_in_combine_fn(self, device):
-        compile_mode = "none"
-        reverse = False
-
-        def combine_fn(x, y):
-            def body(x, y):
-                return x + y
-
-            y_init = y[0]
-            y_new = control_flow.map(body, y, y_init)
-            return x * y_new
-
-        inp = torch.randn(3, 10, 1, device=device)
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": combine_fn,
-            "combine_mode": "generic",
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=inp,
         )
 
     @skipCUDAIf(not SM70OrLater, "triton")
@@ -6588,32 +6409,6 @@ class AssociativeScanTestsDevice(TestCase):
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=elements,
         )
-
-    @onlyAccelerator
-    @skipCUDAIf(not SM70OrLater, "triton")
-    def test_associative_scan_different_input_size_wrong_dim(self, device):
-        batch = 5
-        hidden_dim = 3
-        length = 10
-        dstate = 7
-
-        deltaA = torch.randn((batch, hidden_dim, length, dstate), device=device)
-        deltaB_u = torch.randn((batch, hidden_dim, length, dstate), device=device)
-        C = torch.randn((batch, dstate, length), device=device)
-        x = torch.randn((batch, hidden_dim, length, dstate), device=device)
-        y = torch.randn((batch, hidden_dim, length, dstate), device=device)
-        elements = (x, deltaA, deltaB_u, C, y)
-
-        with self.assertRaisesRegex(
-            ValueError,
-            "All xs leaves must have at least 'dim \\+ 1' dimensions",
-        ):
-            associative_scan(
-                get_scan_combine_fn("different_input_size_operator", True),
-                elements,
-                3,
-                combine_mode="pointwise",
-            )
 
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -7014,27 +6809,169 @@ class AssociativeScanTestsDevice(TestCase):
             autograd_param=inp[0:1],
         )
 
-    @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
-    def test_associative_scan_combine_fn_wrong_meta_in_combine_fn(self, device):
-        B, N, C, H, W = 3, 3, 2, 3, 3
-        x = torch.randn(B, N, C, H, W, device=device)
+    @unittest.expectedFailure
+    def test_associative_scan_dim_shape_failure(
+        self, device, compile_mode, combine_mode
+    ):
+        num_dims = [2]
+        for num_dim in num_dims:
+            shapes = [9 for _ in range(num_dim)]
+            rnd_scan_dim = 0
+            x = torch.randn(*shapes, device=device)
 
-        def fct_wrong_dtype(x, y):
-            return (x + y).to(torch.int64)
+            kwargs = {
+                "dim": rnd_scan_dim,
+                "reverse": True,
+                "compile_mode": "compile",
+                "combine_mode": "generic",
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            self._run_test(
+                model=AssociativeScanModels.Simple(**kwargs),
+                model_fake=AssociativeScanModels.Simple(**kwargs_fake),
+                inputs=x,
+            )
 
-        def fct_wrong_device(x, y):
-            return (x + y).to("cpu")
+    # TODO: NestedFn does not accept the kwargs passed here (dim, reverse, ...),
+    # so this fails at model construction. Fix NestedFn's signature to re-enable.
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @unittest.expectedFailure
+    def test_associative_scan_nested(self, device):
+        combine_mode = "pointwise"
+        compile_mode = "eager"
+        reverse_first = False
+        same_direction = False
 
-        def fct_wrong_stride(x, y):
-            return (x + y).to(memory_format=torch.channels_last)
+        reverse_second = reverse_first if same_direction else not reverse_first
 
-        for fct in [fct_wrong_dtype, fct_wrong_device, fct_wrong_stride]:
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Expected initial_xs and combine_fn_output to have same metadata.*",
-            ):
-                associative_scan(fct, x, 0)
+        def first_nested_fct(x, y):
+            y_new = associative_scan(
+                second_nested_fct,
+                y,
+                0,
+                reverse=reverse_second,
+                combine_mode=combine_mode,
+            )
+            return x + y_new
+
+        def first_nested_fct_fake(x, y):
+            y_new = _fake_associative_scan(
+                second_nested_fct, y, 0, reverse=reverse_second
+            )
+            return x + y_new
+
+        def second_nested_fct(x, y):
+            return x * y
+
+        inp = torch.randn(3, 10, 2, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse_first,
+            "compile_mode": compile_mode,
+            "combine_fn": first_nested_fct,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        kwargs_fake["combine_fn"] = first_nested_fct_fake
+        self._run_test(
+            model=AssociativeScanModels.NestedFn(**kwargs),
+            model_fake=AssociativeScanModels.NestedFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    # TODO: Does not work because of the usage of vmap within associative_scan
+    # TODO: Re-enable additional parameters again once this issues has been resolved
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @unittest.expectedFailure
+    def test_associative_scan_loop_in_combine_fn_failure(self, device):
+        compile_mode = "none"
+        loop_type = "while"
+        reverse = False
+
+        def combine_fn(x, y):
+            _cnt = torch.zeros_like(y[0, :])
+            if loop_type == "while":
+
+                def cond_fn(ind, loop_val):
+                    return (loop_val < 5)[0]
+
+                def body_fn(ind, loop_val):
+                    return ind + 1, loop_val + torch.abs(ind)
+
+        inp = torch.randn(3, 10, 1, device=device) * 2
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    # TODO: Does not work because of the usage of vmap within associative_scan
+    # TODO: Re-enable additional parameters again once this issues has been resolved
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @unittest.expectedFailure
+    def test_associative_scan_map_in_combine_fn(self, device):
+        compile_mode = "none"
+        reverse = False
+
+        def combine_fn(x, y):
+            def body(x, y):
+                return x + y
+
+            y_init = y[0]
+            y_new = control_flow.map(body, y, y_init)
+            return x * y_new
+
+        inp = torch.randn(3, 10, 1, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_different_input_size_wrong_dim(self, device):
+        batch = 5
+        hidden_dim = 3
+        length = 10
+        dstate = 7
+
+        deltaA = torch.randn((batch, hidden_dim, length, dstate), device=device)
+        deltaB_u = torch.randn((batch, hidden_dim, length, dstate), device=device)
+        C = torch.randn((batch, dstate, length), device=device)
+        x = torch.randn((batch, hidden_dim, length, dstate), device=device)
+        y = torch.randn((batch, hidden_dim, length, dstate), device=device)
+        elements = (x, deltaA, deltaB_u, C, y)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "All xs leaves must have at least 'dim \\+ 1' dimensions",
+        ):
+            associative_scan(
+                get_scan_combine_fn("different_input_size_operator", True),
+                elements,
+                3,
+                combine_mode="pointwise",
+            )
 
     @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
@@ -7052,7 +6989,6 @@ class AssociativeScanTestsDevice(TestCase):
                 combine_mode="pointwise",
             )
 
-    @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_associative_scan_pointwise_multiple_additional_inputs_autograd(
         self, device
@@ -7094,7 +7030,6 @@ class AssociativeScanTestsDevice(TestCase):
         self.assertEqual(result, result_exp)
         self._check_autograd(result, result_exp, (xs, H))
 
-    @onlyAccelerator
     def test_associative_scan_input_mutation(self, device):
         def fct_input_mutation(x, y):
             x.add_(1)
@@ -7111,7 +7046,6 @@ class AssociativeScanTestsDevice(TestCase):
         ):
             associative_scan(fct_input_mutation, x, 0)
 
-    @onlyAccelerator
     def test_associative_scan_input_output_alias(self, device):
         def fct_input_output_alias(x, y):
             return x[0], x[1] + y[1]
@@ -7129,7 +7063,6 @@ class AssociativeScanTestsDevice(TestCase):
         ):
             associative_scan(fct_input_output_alias, inp, 0)
 
-    @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_associative_scan_output_output_alias(self, device):
         def fct_output_output_alias(x, y):
@@ -7149,7 +7082,11 @@ class AssociativeScanTestsDevice(TestCase):
         ):
             associative_scan(fct_output_output_alias, inp, 0)
 
-    @onlyAccelerator
+    @decorateIf(
+        unittest.skip("pointwise scan requires accelerator codegen"),
+        lambda p: torch.device(p["device"]).type == "cpu"
+        and p["combine_mode"] == "pointwise",
+    )
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_simple(self, device, combine_mode):
         x = torch.randn(3, 4, 2, device=device)
@@ -7174,7 +7111,11 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
-    @onlyAccelerator
+    @decorateIf(
+        unittest.skip("pointwise scan requires accelerator codegen"),
+        lambda p: torch.device(p["device"]).type == "cpu"
+        and p["combine_mode"] == "pointwise",
+    )
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_autograd(self, device, combine_mode):
         # The stack's motivation is an efficient backward, so exercise autograd
@@ -7206,7 +7147,11 @@ class AssociativeScanTestsDevice(TestCase):
         xd = torch.randn(2, 3, 2, dtype=torch.double, device=device, requires_grad=True)
         self.assertTrue(torch.autograd.gradcheck(fn, (xd,)))
 
-    @onlyAccelerator
+    @decorateIf(
+        unittest.skip("pointwise scan requires accelerator codegen"),
+        lambda p: torch.device(p["device"]).type == "cpu"
+        and p["combine_mode"] == "pointwise",
+    )
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_pytree(self, device, combine_mode):
         xs = {
@@ -7243,7 +7188,11 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(xs["a"], xs["b"]), exp)
 
-    @onlyAccelerator
+    @decorateIf(
+        unittest.skip("pointwise scan requires accelerator codegen"),
+        lambda p: torch.device(p["device"]).type == "cpu"
+        and p["combine_mode"] == "pointwise",
+    )
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_reverse(self, device, combine_mode):
         x = torch.randn(3, 4, 2, device=device)
@@ -7270,7 +7219,11 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
-    @onlyAccelerator
+    @decorateIf(
+        unittest.skip("pointwise scan requires accelerator codegen"),
+        lambda p: torch.device(p["device"]).type == "cpu"
+        and p["combine_mode"] == "pointwise",
+    )
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_nested(self, device, combine_mode):
         x = torch.randn(2, 3, 4, 2, device=device)
@@ -7302,7 +7255,11 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
-    @onlyAccelerator
+    @decorateIf(
+        unittest.skip("pointwise scan requires accelerator codegen"),
+        lambda p: torch.device(p["device"]).type == "cpu"
+        and p["combine_mode"] == "pointwise",
+    )
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_additional_inputs(self, device, combine_mode):
         x = torch.randn(3, 4, 2, device=device)
@@ -7330,7 +7287,11 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x, h), exp)
 
-    @onlyAccelerator
+    @decorateIf(
+        unittest.skip("pointwise scan requires accelerator codegen"),
+        lambda p: torch.device(p["device"]).type == "cpu"
+        and p["combine_mode"] == "pointwise",
+    )
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_scan_length_one(self, device, combine_mode):
         x = torch.randn(3, 1, 2, device=device)
@@ -7370,7 +7331,11 @@ class AssociativeScanTestsDevice(TestCase):
         with self.assertRaisesRegex(InductorError, "LoweringException"):
             torch.compile(fn)(x)
 
-    @onlyAccelerator
+    @decorateIf(
+        unittest.skip("pointwise scan requires accelerator codegen"),
+        lambda p: torch.device(p["device"]).type == "cpu"
+        and p["combine_mode"] == "pointwise",
+    )
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_nonzero_in_dims(self, device, combine_mode):
         x = torch.randn(4, 3, 2, device=device)
@@ -7397,7 +7362,11 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
-    @onlyAccelerator
+    @decorateIf(
+        unittest.skip("pointwise scan requires accelerator codegen"),
+        lambda p: torch.device(p["device"]).type == "cpu"
+        and p["combine_mode"] == "pointwise",
+    )
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_nonzero_out_dims(self, device, combine_mode):
         x = torch.randn(3, 4, 2, device=device)
@@ -7425,7 +7394,11 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
-    @onlyAccelerator
+    @decorateIf(
+        unittest.skip("pointwise scan requires accelerator codegen"),
+        lambda p: torch.device(p["device"]).type == "cpu"
+        and p["combine_mode"] == "pointwise",
+    )
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_unbatched_additional_inputs(
         self, device, combine_mode
@@ -7455,7 +7428,11 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x, h), exp)
 
-    @onlyAccelerator
+    @decorateIf(
+        unittest.skip("pointwise scan requires accelerator codegen"),
+        lambda p: torch.device(p["device"]).type == "cpu"
+        and p["combine_mode"] == "pointwise",
+    )
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_nonzero_scan_dim(self, device, combine_mode):
         # The frontend moves the scan dim to 0 (associative_scan.py movedim),
@@ -7483,7 +7460,11 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), exp)
 
-    @onlyAccelerator
+    @decorateIf(
+        unittest.skip("pointwise scan requires accelerator codegen"),
+        lambda p: torch.device(p["device"]).type == "cpu"
+        and p["combine_mode"] == "pointwise",
+    )
     @parametrize("combine_mode", ["generic", "pointwise"])
     def test_associative_scan_in_vmap_zero_length_scan_dim(self, device, combine_mode):
         # Size-0 scan dim under vmap: the frontend short-circuits (see the size-0
@@ -7507,10 +7488,53 @@ class AssociativeScanTestsDevice(TestCase):
         if combine_mode == "generic":
             self.assertEqual(torch.compile(fn)(x), x)
 
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_pointwise_mixed_device_lowering_error(self, device):
+        def combine_fn(x, y):
+            return (x[0] + y[0], x[1] + y[1])
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return associative_scan(
+                    combine_fn, (a, b), dim=0, combine_mode="pointwise"
+                )
+
+        from torch._inductor.exc import InductorError
+
+        a = torch.randn(8, 4, device=device)
+        b = torch.randn(8, 4, device="cpu")
+        with self.assertRaisesRegex(InductorError, "is not supported on cpu"):
+            torch.compile(M(), fullgraph=True)(a, b)
+
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_combine_fn_wrong_meta_in_combine_fn(self, device):
+        B, N, C, H, W = 3, 3, 2, 3, 3
+        x = torch.randn(B, N, C, H, W, device=device)
+
+        def fct_wrong_dtype(x, y):
+            return (x + y).to(torch.int64)
+
+        def fct_wrong_device(x, y):
+            return (x + y).to("cpu")
+
+        def fct_wrong_stride(x, y):
+            return (x + y).to(memory_format=torch.channels_last)
+
+        for fct in [fct_wrong_dtype, fct_wrong_device, fct_wrong_stride]:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Expected initial_xs and combine_fn_output to have same metadata.*",
+            ):
+                associative_scan(fct, x, 0)
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlowTraced(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
@@ -8122,345 +8146,6 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
                 torch.randn(2, 3),
             )
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_cond_traced_not_nested_cudagraphs(self):
-        def true_fn(x):
-            return x.sin()
-
-        def false_fn(x):
-            return x.cos()
-
-        def f(x, y):
-            return cond(y, true_fn, false_fn, [x])
-
-        x = torch.randn(4).cuda()
-        true_pred = torch.tensor(True).cuda()
-        false_pred = torch.tensor(False).cuda()
-
-        _check_compile_cudagraph_backend(self, f, [x, true_pred])
-        _check_compile_cudagraph_backend(self, f, [x, false_pred])
-        _check_compile_many_backends_with_cudagraph(
-            self,
-            f,
-            [x, true_pred],
-        )
-        _check_compile_many_backends_with_cudagraph(
-            self,
-            f,
-            [x, false_pred],
-        )
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_cond_pin_memory_cudagraphs(self):
-        # Make sure that pinned host memory allocations get assigned
-        # to a private pool correctly during stream capture, even
-        # inside of conditional nodes.
-
-        # Ideally, we would call torch.Tensor.pin_memory() directly,
-        # but that is not allowed on fake tensors, so instead we call
-        # an op whose C++ implementation used pinned memory
-        # internally.
-        sizes = [3, 4, 3]
-
-        def true_fn(x):
-            return torch.split_with_sizes_copy(x, sizes)
-
-        def false_fn(x):
-            return torch.split_with_sizes_copy(2 * x, sizes)
-
-        def f(x, y):
-            return cond(y, true_fn, false_fn, [x])
-
-        x = torch.randn(10).cuda()
-        true_pred = torch.tensor(True).cuda()
-        false_pred = torch.tensor(False).cuda()
-
-        _check_compile_cudagraph_backend(self, f, [x, true_pred])
-        _check_compile_cudagraph_backend(self, f, [x, false_pred])
-        _check_compile_many_backends_with_cudagraph(
-            self,
-            f,
-            [x, true_pred],
-        )
-        _check_compile_many_backends_with_cudagraph(
-            self,
-            f,
-            [x, false_pred],
-        )
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_cond_traced_triply_nested_cudagraphs(self):
-        def level3_true(x):
-            return x.sin()
-
-        def level3_false(x):
-            return x.cos()
-
-        def level2_true(x, p2):
-            return cond(p2, level3_true, level3_false, [x])
-
-        def level2_false(x, p2):
-            return cond(p2, lambda x: x + 1, lambda x: x - 1, [x])
-
-        def level1_true(x, p1, p2):
-            return cond(p1, level2_true, level2_false, [x, p2])
-
-        def level1_false(x, p1, p2):
-            return cond(p1, level2_false, level2_true, [x, p2])
-
-        def f(x, p0, p1, p2):
-            return cond(p0, level1_true, level1_false, [x, p1, p2])
-
-        x = torch.randn(4).cuda()
-
-        test_inputs = [
-            [
-                x,
-                torch.tensor(True).cuda(),
-                torch.tensor(True).cuda(),
-                torch.tensor(False).cuda(),
-            ],
-            [
-                x,
-                torch.tensor(False).cuda(),
-                torch.tensor(False).cuda(),
-                torch.tensor(True).cuda(),
-            ],
-        ]
-
-        for args in test_inputs:
-            _check_compile_cudagraph_backend(self, f, args)
-            _check_compile_many_backends_with_cudagraph(self, f, args)
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_while_loop_traced_cudagraphs(self):
-        def f(x, limit):
-            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
-
-            def cond_fn(acc, iteration):
-                return iteration < limit
-
-            def body_fn(acc, iteration):
-                return acc + 2, iteration + 1
-
-            return while_loop(cond_fn, body_fn, (x, init_iter))
-
-        x = torch.randn(4).cuda()
-        limit = torch.tensor(3, device="cuda")
-
-        _check_compile_cudagraph_backend(self, f, [x, limit])
-        _check_compile_many_backends_with_cudagraph(self, f, [x, limit])
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_while_loop_cuda_graph_replay_uses_runtime_condition(self):
-        def cond_fn(acc, iteration, limit):
-            return iteration < limit
-
-        def body_fn(acc, iteration, limit):
-            return acc + 2, iteration + 1
-
-        def f(x, iteration, limit):
-            return torch.ops.higher_order.while_loop(
-                cond_fn, body_fn, (x, iteration), (limit,)
-            )
-
-        x = torch.ones(4, device="cuda")
-        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
-        limit = torch.tensor(3, device="cuda")
-
-        side_stream = torch.cuda.Stream()
-        with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
-            f(x, iteration, limit)
-
-        graph = torch.cuda.CUDAGraph()
-        with (
-            torch.cuda.graph(graph, stream=side_stream),
-            CUDAGraphCaptureControlFlowOpDispatchMode(),
-        ):
-            out = f(x, iteration, limit)
-
-        torch.cuda.current_stream().wait_stream(side_stream)
-
-        for num_iters in [3, 0, 5]:
-            x.fill_(1)
-            iteration.zero_()
-            limit.fill_(num_iters)
-            graph.replay()
-            torch.cuda.synchronize()
-
-            self.assertEqual(out[0], torch.full_like(x, 1 + 2 * num_iters))
-            self.assertEqual(
-                out[1], torch.tensor(num_iters, dtype=torch.int64, device="cuda")
-            )
-            self.assertEqual(x, torch.ones_like(x))
-            self.assertEqual(iteration, torch.zeros_like(iteration))
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_while_loop_cudagraph_kwargs_error(self):
-        def cond_fn(iteration):
-            return iteration < 1
-
-        def body_fn(iteration):
-            return (iteration + 1,)
-
-        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
-        args = (cond_fn, body_fn, (iteration,), ())
-        error = "CUDA graph conditional torch.while_loop does not support kwargs"
-
-        for mode_cls in (
-            CUDAGraphCaptureControlFlowOpDispatchMode,
-            ControlFlowOpWarmupDispatchMode,
-        ):
-            with (
-                self.subTest(mode=mode_cls.__name__),
-                self.assertRaisesRegex(RuntimeError, error),
-            ):
-                mode_cls().__torch_dispatch__(
-                    torch.ops.higher_order.while_loop,
-                    (),
-                    args,
-                    {"unexpected": True},
-                )
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_while_loop_cudagraph_body_pytree_mismatch_error(self):
-        def cond_fn(iteration):
-            return iteration < 1
-
-        def body_fn(iteration):
-            return {"iteration": iteration + 1}
-
-        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
-        graph = torch.cuda.CUDAGraph()
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "body_fn should return the same pytree structure as carried_inputs",
-        ):
-            with (
-                torch.cuda.graph(graph),
-                CUDAGraphCaptureControlFlowOpDispatchMode(),
-            ):
-                torch.ops.higher_order.while_loop(cond_fn, body_fn, (iteration,), ())
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_cond_inside_while_loop_cudagraphs(self):
-        def f(x, limit):
-            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
-
-            def cond_fn(acc, iteration):
-                return iteration < limit
-
-            def body_fn(acc, iteration):
-                pred = iteration % 2 == 0
-                acc = torch.cond(
-                    pred,
-                    lambda acc: acc + 3,
-                    lambda acc: acc - 1,
-                    [acc],
-                )
-                return acc, iteration + 1
-
-            return torch.while_loop(cond_fn, body_fn, (x, init_iter))
-
-        x = torch.randn(4).cuda()
-        limit = torch.tensor(4, device="cuda")
-
-        _check_compile_cudagraph_backend(self, f, [x, limit])
-        _check_compile_many_backends_with_cudagraph(self, f, [x, limit])
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_while_loop_inside_cond_cudagraphs(self):
-        def add_loop(x, limit):
-            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
-
-            def cond_fn(acc, iteration):
-                return iteration < limit
-
-            def body_fn(acc, iteration):
-                return acc + 2, iteration + 1
-
-            acc, _ = torch.while_loop(cond_fn, body_fn, (x, init_iter))
-            return acc
-
-        def sub_loop(x, limit):
-            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
-
-            def cond_fn(acc, iteration):
-                return iteration < limit
-
-            def body_fn(acc, iteration):
-                return acc - 1, iteration + 1
-
-            acc, _ = torch.while_loop(cond_fn, body_fn, (x, init_iter))
-            return acc
-
-        def f(x, pred, limit):
-            return torch.cond(pred, add_loop, sub_loop, [x, limit])
-
-        x = torch.randn(4).cuda()
-        limit = torch.tensor(3, device="cuda")
-
-        for pred in [torch.tensor(True).cuda(), torch.tensor(False).cuda()]:
-            _check_compile_cudagraph_backend(self, f, [x, pred, limit])
-            _check_compile_many_backends_with_cudagraph(self, f, [x, pred, limit])
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-    )
-    def test_cond_traced_record_stream_reuse(self):
-        torch.cuda.memory._set_allocator_settings(
-            "graph_capture_record_stream_reuse:True"
-        )
-        try:
-            predicate = torch.tensor(True, device="cuda")
-
-            def true_fn():
-                return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
-
-            def false_fn():
-                return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
-
-            g = torch.cuda.CUDAGraph()
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "graph_capture_record_stream_reuse:True",
-            ):
-                with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
-                    torch.cond(predicate, true_fn, false_fn, [])
-        finally:
-            torch.cuda.memory._set_allocator_settings(
-                "graph_capture_record_stream_reuse:False"
-            )
-
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
         graphs = self._check_tracing(fn, inp)
@@ -8827,113 +8512,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
     return gt
     """,
         )
-
-    def test_cond_nested_traced(self):
-        def true_nested(y):
-            return y * y
-
-        def false_nested(y):
-            return y + y
-
-        def true_fn(x, pred2):
-            z = cond(pred2, true_nested, false_nested, [x])
-            return x + z
-
-        def false_fn(x, _):
-            return x.cos()
-
-        def f(x, pred, pred2):
-            return cond(pred, true_fn, false_fn, [x, pred2])
-
-        x = torch.randn(4)
-        graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
-
-        result_true_true = graph.forward(
-            x, torch.tensor(True), torch.tensor(True)
-        )  # True + True -> x * x
-        result_true_false = graph.forward(
-            x, torch.tensor(True), torch.tensor(False)
-        )  # True + True -> x + x
-        result_false_true = graph.forward(
-            x, torch.tensor(False), torch.tensor(True)
-        )  # False + either -> cos
-        result_false_false = graph.forward(
-            x, torch.tensor(False), torch.tensor(False)
-        )  # False + either -> cos
-
-        self.assertNotEqual(result_true_true, result_true_false)
-        self.assertFalse(torch.allclose(result_false_true, result_true_true))
-
-        self.assertEqual(result_false_true, result_false_false)
-
-        self.assertEqual(result_true_true, (x * x) + x)
-        self.assertEqual(result_true_false, x + x + x)
-
-        self.assertEqual(result_false_true, torch.cos(x))
-
-        graph = make_fx(f, tracing_mode="symbolic")(
-            x, torch.tensor(False), torch.tensor(False)
-        )
-        self.assertEqual(
-            graph(x, torch.tensor(True), torch.tensor(True)),
-            f(x, torch.tensor(True), torch.tensor(True)),
-        )
-
-        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
-            x_cuda = x.cuda()
-            true_pred = torch.tensor(True).cuda()
-
-            _check_compile_cudagraph_backend(
-                self,
-                f,
-                [x_cuda, true_pred, true_pred],
-            )
-            _check_compile_many_backends_with_cudagraph(
-                self,
-                f,
-                [x_cuda, true_pred, true_pred],
-            )
-
-    def test_cond_functionalized(self):
-        def true_fn(x):
-            y = x.sin()
-            y.add_(4)
-            return x.sin().max() + y.sum()
-
-        def false_fn(x):
-            return x.cos().min()
-
-        def f(x):
-            pred = x.shape[0] == 1
-            return cond(pred, true_fn, false_fn, [x])
-
-        def f_(x, y):
-            return cond(y, true_fn, false_fn, [x])
-
-        example_inputs = (torch.ones(4, 5),)
-        functional_f = torch.func.functionalize(f)
-        self.assertEqual(functional_f(*example_inputs), f(*example_inputs))
-
-        graph_module = make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
-            *example_inputs
-        )
-        self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
-
-        all_ops_in_true_branch = []
-        for node in graph_module.true_graph_0.graph.nodes:
-            if node.op == "call_function":
-                all_ops_in_true_branch.append(node.target)
-
-        self.assertFalse(any(op._schema.is_mutable for op in all_ops_in_true_branch))
-
-        self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
-
-        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
-            pred = torch.tensor(example_inputs[0].shape[0] == 1, device="cuda")
-            _check_compile_cudagraph_backend(self, f_, [torch.ones(4, 5).cuda(), pred])
-            _check_compile_many_backends_with_cudagraph(
-                self, f_, [torch.ones(4, 5).cuda(), pred]
-            )
 
     def test_cond_accepts_torch_function_as_inputs(self):
         a = torch.randn(3, 4)
@@ -9423,62 +9001,6 @@ def forward(self, x_1):
         b = torch.tensor([2.0, 2.0])
         result_true_true = graph.forward(b, torch.tensor(True), torch.tensor(True))
         self.assertEqual(result_true_true, (b * b) + torch.tensor([0.25, 0.25]))
-
-    def test_cond_nested_traced_multi(self):
-        def true_a(y):
-            return y * y
-
-        def false_a(y):
-            return y + y
-
-        def true_b(y, z):
-            return y + z
-
-        def false_b(y, z):
-            return y * z
-
-        def f(x, pred, pred2):
-            a_out = cond(pred, true_a, false_a, [x])
-            b_out = cond(pred2, true_b, false_b, [x, x])
-            return a_out + b_out
-
-        x = torch.randn(4)
-        graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
-
-        self.assertExpectedInline(
-            graph.code.strip(),
-            """\
-def forward(self, x_1, pred_1, pred2_1):
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  pred_1 = true_graph_0 = false_graph_0 = None
-    getitem = cond[0];  cond = None
-    true_graph_1 = self.true_graph_1
-    false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, (x_1,));  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-    getitem_1 = cond_1[0];  cond_1 = None
-    add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
-    return add""",
-        )
-        self.assertExpectedInline(
-            graph.true_graph_0.code.strip(),
-            """\
-def forward(self, arg0_1):
-    mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
-    return (mul,)""",
-        )
-
-        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
-            _check_compile_cudagraph_backend(
-                self,
-                f,
-                [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
-            )
-            _check_compile_many_backends_with_cudagraph(
-                self,
-                f,
-                [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
-            )
 
     def test_raise_error_on_mismatch_type_size(self):
         def true_fn(x):
@@ -12713,6 +12235,518 @@ class GraphModule(torch.nn.Module):
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
+class TestControlFlowCUDAGraphs(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
+
+    def test_cond_nested_traced(self):
+        def true_nested(y):
+            return y * y
+
+        def false_nested(y):
+            return y + y
+
+        def true_fn(x, pred2):
+            z = cond(pred2, true_nested, false_nested, [x])
+            return x + z
+
+        def false_fn(x, _):
+            return x.cos()
+
+        def f(x, pred, pred2):
+            return cond(pred, true_fn, false_fn, [x, pred2])
+
+        x = torch.randn(4)
+        graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
+
+        result_true_true = graph.forward(
+            x, torch.tensor(True), torch.tensor(True)
+        )  # True + True -> x * x
+        result_true_false = graph.forward(
+            x, torch.tensor(True), torch.tensor(False)
+        )  # True + True -> x + x
+        result_false_true = graph.forward(
+            x, torch.tensor(False), torch.tensor(True)
+        )  # False + either -> cos
+        result_false_false = graph.forward(
+            x, torch.tensor(False), torch.tensor(False)
+        )  # False + either -> cos
+
+        self.assertNotEqual(result_true_true, result_true_false)
+        self.assertFalse(torch.allclose(result_false_true, result_true_true))
+
+        self.assertEqual(result_false_true, result_false_false)
+
+        self.assertEqual(result_true_true, (x * x) + x)
+        self.assertEqual(result_true_false, x + x + x)
+
+        self.assertEqual(result_false_true, torch.cos(x))
+
+        graph = make_fx(f, tracing_mode="symbolic")(
+            x, torch.tensor(False), torch.tensor(False)
+        )
+        self.assertEqual(
+            graph(x, torch.tensor(True), torch.tensor(True)),
+            f(x, torch.tensor(True), torch.tensor(True)),
+        )
+
+        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
+            x_cuda = x.cuda()
+            true_pred = torch.tensor(True).cuda()
+
+            _check_compile_cudagraph_backend(
+                self,
+                f,
+                [x_cuda, true_pred, true_pred],
+            )
+            _check_compile_many_backends_with_cudagraph(
+                self,
+                f,
+                [x_cuda, true_pred, true_pred],
+            )
+
+    def test_cond_nested_traced_multi(self):
+        def true_a(y):
+            return y * y
+
+        def false_a(y):
+            return y + y
+
+        def true_b(y, z):
+            return y + z
+
+        def false_b(y, z):
+            return y * z
+
+        def f(x, pred, pred2):
+            a_out = cond(pred, true_a, false_a, [x])
+            b_out = cond(pred2, true_b, false_b, [x, x])
+            return a_out + b_out
+
+        x = torch.randn(4)
+        graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
+
+        self.assertExpectedInline(
+            graph.code.strip(),
+            """\
+def forward(self, x_1, pred_1, pred2_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  pred_1 = true_graph_0 = false_graph_0 = None
+    getitem = cond[0];  cond = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    cond_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, (x_1,));  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+    getitem_1 = cond_1[0];  cond_1 = None
+    add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+    return add""",
+        )
+        self.assertExpectedInline(
+            graph.true_graph_0.code.strip(),
+            """\
+def forward(self, arg0_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
+    return (mul,)""",
+        )
+
+        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
+            _check_compile_cudagraph_backend(
+                self,
+                f,
+                [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
+            )
+            _check_compile_many_backends_with_cudagraph(
+                self,
+                f,
+                [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
+            )
+
+    def test_cond_functionalized(self):
+        def true_fn(x):
+            y = x.sin()
+            y.add_(4)
+            return x.sin().max() + y.sum()
+
+        def false_fn(x):
+            return x.cos().min()
+
+        def f(x):
+            pred = x.shape[0] == 1
+            return cond(pred, true_fn, false_fn, [x])
+
+        def f_(x, y):
+            return cond(y, true_fn, false_fn, [x])
+
+        example_inputs = (torch.ones(4, 5),)
+        functional_f = torch.func.functionalize(f)
+        self.assertEqual(functional_f(*example_inputs), f(*example_inputs))
+
+        graph_module = make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
+            *example_inputs
+        )
+        self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
+
+        all_ops_in_true_branch = []
+        for node in graph_module.true_graph_0.graph.nodes:
+            if node.op == "call_function":
+                all_ops_in_true_branch.append(node.target)
+
+        self.assertFalse(any(op._schema.is_mutable for op in all_ops_in_true_branch))
+
+        self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
+
+        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
+            pred = torch.tensor(example_inputs[0].shape[0] == 1, device="cuda")
+            _check_compile_cudagraph_backend(self, f_, [torch.ones(4, 5).cuda(), pred])
+            _check_compile_many_backends_with_cudagraph(
+                self, f_, [torch.ones(4, 5).cuda(), pred]
+            )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_not_nested_cudagraphs(self):
+        def true_fn(x):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        def f(x, y):
+            return cond(y, true_fn, false_fn, [x])
+
+        x = torch.randn(4).cuda()
+        true_pred = torch.tensor(True).cuda()
+        false_pred = torch.tensor(False).cuda()
+
+        _check_compile_cudagraph_backend(self, f, [x, true_pred])
+        _check_compile_cudagraph_backend(self, f, [x, false_pred])
+        _check_compile_many_backends_with_cudagraph(
+            self,
+            f,
+            [x, true_pred],
+        )
+        _check_compile_many_backends_with_cudagraph(
+            self,
+            f,
+            [x, false_pred],
+        )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_pin_memory_cudagraphs(self):
+        # Make sure that pinned host memory allocations get assigned
+        # to a private pool correctly during stream capture, even
+        # inside of conditional nodes.
+
+        # Ideally, we would call torch.Tensor.pin_memory() directly,
+        # but that is not allowed on fake tensors, so instead we call
+        # an op whose C++ implementation used pinned memory
+        # internally.
+        sizes = [3, 4, 3]
+
+        def true_fn(x):
+            return torch.split_with_sizes_copy(x, sizes)
+
+        def false_fn(x):
+            return torch.split_with_sizes_copy(2 * x, sizes)
+
+        def f(x, y):
+            return cond(y, true_fn, false_fn, [x])
+
+        x = torch.randn(10).cuda()
+        true_pred = torch.tensor(True).cuda()
+        false_pred = torch.tensor(False).cuda()
+
+        _check_compile_cudagraph_backend(self, f, [x, true_pred])
+        _check_compile_cudagraph_backend(self, f, [x, false_pred])
+        _check_compile_many_backends_with_cudagraph(
+            self,
+            f,
+            [x, true_pred],
+        )
+        _check_compile_many_backends_with_cudagraph(
+            self,
+            f,
+            [x, false_pred],
+        )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_triply_nested_cudagraphs(self):
+        def level3_true(x):
+            return x.sin()
+
+        def level3_false(x):
+            return x.cos()
+
+        def level2_true(x, p2):
+            return cond(p2, level3_true, level3_false, [x])
+
+        def level2_false(x, p2):
+            return cond(p2, lambda x: x + 1, lambda x: x - 1, [x])
+
+        def level1_true(x, p1, p2):
+            return cond(p1, level2_true, level2_false, [x, p2])
+
+        def level1_false(x, p1, p2):
+            return cond(p1, level2_false, level2_true, [x, p2])
+
+        def f(x, p0, p1, p2):
+            return cond(p0, level1_true, level1_false, [x, p1, p2])
+
+        x = torch.randn(4).cuda()
+
+        test_inputs = [
+            [
+                x,
+                torch.tensor(True).cuda(),
+                torch.tensor(True).cuda(),
+                torch.tensor(False).cuda(),
+            ],
+            [
+                x,
+                torch.tensor(False).cuda(),
+                torch.tensor(False).cuda(),
+                torch.tensor(True).cuda(),
+            ],
+        ]
+
+        for args in test_inputs:
+            _check_compile_cudagraph_backend(self, f, args)
+            _check_compile_many_backends_with_cudagraph(self, f, args)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_traced_cudagraphs(self):
+        def f(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                return acc + 2, iteration + 1
+
+            return while_loop(cond_fn, body_fn, (x, init_iter))
+
+        x = torch.randn(4).cuda()
+        limit = torch.tensor(3, device="cuda")
+
+        _check_compile_cudagraph_backend(self, f, [x, limit])
+        _check_compile_many_backends_with_cudagraph(self, f, [x, limit])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cuda_graph_replay_uses_runtime_condition(self):
+        def cond_fn(acc, iteration, limit):
+            return iteration < limit
+
+        def body_fn(acc, iteration, limit):
+            return acc + 2, iteration + 1
+
+        def f(x, iteration, limit):
+            return torch.ops.higher_order.while_loop(
+                cond_fn, body_fn, (x, iteration), (limit,)
+            )
+
+        x = torch.ones(4, device="cuda")
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        limit = torch.tensor(3, device="cuda")
+
+        side_stream = torch.cuda.Stream()
+        with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+            f(x, iteration, limit)
+
+        graph = torch.cuda.CUDAGraph()
+        with (
+            torch.cuda.graph(graph, stream=side_stream),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
+        ):
+            out = f(x, iteration, limit)
+
+        torch.cuda.current_stream().wait_stream(side_stream)
+
+        for num_iters in [3, 0, 5]:
+            x.fill_(1)
+            iteration.zero_()
+            limit.fill_(num_iters)
+            graph.replay()
+            torch.cuda.synchronize()
+
+            self.assertEqual(out[0], torch.full_like(x, 1 + 2 * num_iters))
+            self.assertEqual(
+                out[1], torch.tensor(num_iters, dtype=torch.int64, device="cuda")
+            )
+            self.assertEqual(x, torch.ones_like(x))
+            self.assertEqual(iteration, torch.zeros_like(iteration))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cudagraph_kwargs_error(self):
+        def cond_fn(iteration):
+            return iteration < 1
+
+        def body_fn(iteration):
+            return (iteration + 1,)
+
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        args = (cond_fn, body_fn, (iteration,), ())
+        error = "CUDA graph conditional torch.while_loop does not support kwargs"
+
+        for mode_cls in (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+            ControlFlowOpWarmupDispatchMode,
+        ):
+            with (
+                self.subTest(mode=mode_cls.__name__),
+                self.assertRaisesRegex(RuntimeError, error),
+            ):
+                mode_cls().__torch_dispatch__(
+                    torch.ops.higher_order.while_loop,
+                    (),
+                    args,
+                    {"unexpected": True},
+                )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cudagraph_body_pytree_mismatch_error(self):
+        def cond_fn(iteration):
+            return iteration < 1
+
+        def body_fn(iteration):
+            return {"iteration": iteration + 1}
+
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        graph = torch.cuda.CUDAGraph()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "body_fn should return the same pytree structure as carried_inputs",
+        ):
+            with (
+                torch.cuda.graph(graph),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
+            ):
+                torch.ops.higher_order.while_loop(cond_fn, body_fn, (iteration,), ())
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_inside_while_loop_cudagraphs(self):
+        def f(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                pred = iteration % 2 == 0
+                acc = torch.cond(
+                    pred,
+                    lambda acc: acc + 3,
+                    lambda acc: acc - 1,
+                    [acc],
+                )
+                return acc, iteration + 1
+
+            return torch.while_loop(cond_fn, body_fn, (x, init_iter))
+
+        x = torch.randn(4).cuda()
+        limit = torch.tensor(4, device="cuda")
+
+        _check_compile_cudagraph_backend(self, f, [x, limit])
+        _check_compile_many_backends_with_cudagraph(self, f, [x, limit])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_inside_cond_cudagraphs(self):
+        def add_loop(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                return acc + 2, iteration + 1
+
+            acc, _ = torch.while_loop(cond_fn, body_fn, (x, init_iter))
+            return acc
+
+        def sub_loop(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                return acc - 1, iteration + 1
+
+            acc, _ = torch.while_loop(cond_fn, body_fn, (x, init_iter))
+            return acc
+
+        def f(x, pred, limit):
+            return torch.cond(pred, add_loop, sub_loop, [x, limit])
+
+        x = torch.randn(4).cuda()
+        limit = torch.tensor(3, device="cuda")
+
+        for pred in [torch.tensor(True).cuda(), torch.tensor(False).cuda()]:
+            _check_compile_cudagraph_backend(self, f, [x, pred, limit])
+            _check_compile_many_backends_with_cudagraph(self, f, [x, pred, limit])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_record_stream_reuse(self):
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+        try:
+            predicate = torch.tensor(True, device="cuda")
+
+            def true_fn():
+                return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
+
+            def false_fn():
+                return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
+
+            g = torch.cuda.CUDAGraph()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "graph_capture_record_stream_reuse:True",
+            ):
+                with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
+                    torch.cond(predicate, true_fn, false_fn, [])
+        finally:
+            torch.cuda.memory._set_allocator_settings(
+                "graph_capture_record_stream_reuse:False"
+            )
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
 class TestControlFlowTracedDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -12744,6 +12778,8 @@ class TestControlFlowTracedDevice(TestCase):
 
 
 class TestAutoFunctionalizeControlFlow(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
     def test_switch_auto_functionalize_input_mutation(self, dynamic):
@@ -13983,6 +14019,8 @@ _hop_schema_test_schema_types = [
 
 @skipIfTorchDynamo("We don't expect users to torch.compile hop schema generation.")
 class TestHopSchema(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _get_example_val(self, ty: str):
         from torch.fx.experimental.sym_node import SymNode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -14637,26 +14675,18 @@ class TestControlFlowAndRNGCUDA(TestCase):
             self.assertEqual(out.shape, x.shape)
 
 
-only_for = ("cpu", "cuda", "xpu")
-
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
-instantiate_device_type_tests(
-    TestControlFlowTracedDevice, globals(), only_for=only_for, allow_xpu=True
-)
+instantiate_device_type_tests(TestControlFlowTracedDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestAutoFunctionalizeControlFlow)
 instantiate_device_type_tests(
-    TestAutoFunctionalizeControlFlowDevice, globals(), only_for=only_for, allow_xpu=True
+    TestAutoFunctionalizeControlFlowDevice, globals(), allow_xpu=True
 )
 
 instantiate_parametrized_tests(TestControlFlow)
-instantiate_device_type_tests(
-    TestControlFlowDevice, globals(), only_for=only_for, allow_xpu=True
-)
+instantiate_device_type_tests(TestControlFlowDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(AssociativeScanTests)
-instantiate_device_type_tests(
-    AssociativeScanTestsDevice, globals(), only_for=only_for, allow_xpu=True
-)
+instantiate_device_type_tests(AssociativeScanTestsDevice, globals(), allow_xpu=True)
 
 instantiate_parametrized_tests(TestControlFlowAndRNGCUDA)
 
