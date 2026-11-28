@@ -6102,6 +6102,21 @@ class TestTorchDeviceType(TestCase):
             self._test_memory_format_transformations(
                 device, get_generator(mf, shape), transformation_fn, mf, True, default_is_preserve=True)
 
+    @onlyCPU
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_memory_format_copy_channels_last(self, device, dtype):
+        shapes = ((4, 3, 8, 8), (4, 3, 8, 9))
+        for shape in shapes:
+            x = make_tensor(shape, dtype=dtype, device=device)
+            for src in (x, x.contiguous(memory_format=torch.channels_last)):
+                for memory_format in (torch.contiguous_format, torch.channels_last):
+                    dst = torch.empty_like(x, memory_format=memory_format)
+                    dst.copy_(src)
+                    self.assertEqual(dst, x, atol=0, rtol=0)
+            xx = torch.cat([x, x])
+            src = xx.contiguous(memory_format=torch.channels_last)[1:]
+            self.assertEqual(src.contiguous(), xx[1:], atol=0, rtol=0)
+
     def test_memory_format_factory_like_functions_preserve(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):

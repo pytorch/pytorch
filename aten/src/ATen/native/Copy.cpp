@@ -65,6 +65,45 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
       self.numel() >= MIN_SZ;
 }
 
+#if defined(USE_FBGEMM) && defined(__aarch64__)
+bool copy_channels_last_transpose_valid(const Tensor& self, const Tensor& src) {
+  const auto element_size = self.element_size();
+  if (self.dim() != 4 || !self.sizes().equals(src.sizes()) ||
+      self.scalar_type() != src.scalar_type() ||
+      (element_size != 2 && element_size != 4) || self.is_quantized() ||
+      isBitsType(self.scalar_type()) || self.is_neg() != src.is_neg() ||
+      self.is_conj() != src.is_conj() || !fbgemm::fbgemmSupportedCPU()) {
+    return false;
+  }
+  constexpr auto cl = MemoryFormat::ChannelsLast;
+  return (self.is_contiguous() && src.is_contiguous(cl) && !src.is_contiguous()) ||
+      (src.is_contiguous() && self.is_contiguous(cl) && !self.is_contiguous());
+}
+
+template <typename T>
+void copy_channels_last_transpose_(Tensor& self, const Tensor& src) {
+  constexpr int64_t BLOCK_SZ = 64;
+  const int64_t C = self.size(1), HW = self.size(2) * self.size(3);
+  const bool to_contiguous = self.is_contiguous();
+  const int64_t R = to_contiguous ? HW : C;
+  const int64_t K = to_contiguous ? C : HW;
+  const int64_t r_blocks = divup(R, BLOCK_SZ), k_blocks = divup(K, BLOCK_SZ);
+  const T* sp = static_cast<const T*>(src.const_data_ptr());
+  T* dp = static_cast<T*>(self.mutable_data_ptr());
+  const int64_t grain_size = at::internal::GRAIN_SIZE / (std::min(BLOCK_SZ, R) * std::min(BLOCK_SZ, K));
+  at::parallel_for(0, self.size(0) * r_blocks * k_blocks, grain_size, [&](int64_t begin, int64_t end) {
+    for (const auto i : c10::irange(begin, end)) {
+      const int64_t offset = i / (r_blocks * k_blocks) * R * K;
+      const int64_t r = i / k_blocks % r_blocks * BLOCK_SZ;
+      const int64_t k = i % k_blocks * BLOCK_SZ;
+      fbgemm::transpose_simd<T>(
+          std::min(BLOCK_SZ, R - r), std::min(BLOCK_SZ, K - k),
+          sp + offset + r * K + k, K, dp + offset + k * R + r, R);
+    }
+  });
+}
+#endif
+
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)                              \
         AT_DISPATCH_V2(                             \
             TYPE, NAME, AT_WRAP(__VA_ARGS__), kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, \
@@ -354,6 +393,17 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     copy_same_type_transpose_(self, src);
     return self;
   }
+
+#if defined(USE_FBGEMM) && defined(__aarch64__)
+  if (device_type == kCPU && copy_channels_last_transpose_valid(self, src)) {
+    if (self.element_size() == 2) {
+      copy_channels_last_transpose_<uint16_t>(self, src);
+    } else {
+      copy_channels_last_transpose_<float>(self, src);
+    }
+    return self;
+  }
+#endif
 
 #ifdef USE_MPS
   if (self.device().type() == at::kMPS || src.device().type() == at::kMPS) {
