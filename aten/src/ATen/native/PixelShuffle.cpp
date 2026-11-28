@@ -46,10 +46,6 @@ Tensor pixel_shuffle_cpu(const Tensor& self, int64_t upscale_factor) {
 Tensor pixel_unshuffle_cpu(const Tensor& self, int64_t downscale_factor) {
   check_pixel_unshuffle_shapes(self, downscale_factor);
 
-  if (self.numel() == 0) {
-    return self.clone();
-  }
-
   // Format: (B1, ..., Bn), C, H, W
   std::vector<int64_t> output_sizes(self.sizes().begin(), self.sizes().end() - 3);
   output_sizes.insert(output_sizes.end(),
