@@ -223,17 +223,21 @@ TEST(AutogradAPITests, RetainGrad) {
 }
 
 TEST(AutogradAPITests, AnomalyMode) {
-  // Needs to have backtrace as warning and then throw an error
+  // Forward traceback is attached to the thrown error (not a warning).
   torch::autograd::DetectAnomalyGuard detect_anomaly;
   {
-    WarningCapture warnings;
     auto x = torch::tensor({5.0}, torch::requires_grad());
     auto y = x * x;
     auto z = y * y;
     y += 1;
-    ASSERT_THROWS_WITH(z.backward(), "inplace");
-    ASSERT_TRUE(
-        warnings.str().find("Traceback of forward") != std::string::npos);
+    try {
+      z.backward();
+      FAIL() << "expected inplace error";
+    } catch (const c10::Error& e) {
+      std::string msg = e.what_without_backtrace();
+      ASSERT_TRUE(msg.find("inplace") != std::string::npos);
+      ASSERT_TRUE(msg.find("Traceback of forward") != std::string::npos);
+    }
   }
   auto double_backward_produce_nan = [](bool should_throw) {
     auto x = torch::tensor({0.0}, torch::requires_grad());
@@ -242,18 +246,20 @@ TEST(AutogradAPITests, AnomalyMode) {
         // NOLINTNEXTLINE(bugprone-argument-comment)
         grad({y}, {x}, {}, /*retain_graph=*/true, /*create_backward=*/true);
     if (should_throw) {
-      WarningCapture warnings;
-      ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0})});
-                         , "returned nan");
-      auto msgs = warnings.messages();
-      ASSERT_EQ(msgs.size(), 2);
-      ASSERT_TRUE(
-          msgs[0].find("Traceback of forward call that caused the error") !=
-          std::string::npos);
-      ASSERT_TRUE(
-          msgs[1].find(
-              "Traceback of forward call that induced the previous calculation") !=
-          std::string::npos);
+      try {
+        grad({gr[0]}, {x}, {torch::tensor({0.0})});
+        FAIL() << "expected nan error";
+      } catch (const c10::Error& e) {
+        std::string msg = e.what_without_backtrace();
+        ASSERT_TRUE(msg.find("returned nan") != std::string::npos);
+        ASSERT_TRUE(
+            msg.find("Traceback of forward call that caused the error") !=
+            std::string::npos);
+        ASSERT_TRUE(
+            msg.find(
+                "Traceback of forward call that induced the previous calculation") !=
+            std::string::npos);
+      }
     } else {
       grad({gr[0]}, {x}, {torch::tensor({0.0})});
     }

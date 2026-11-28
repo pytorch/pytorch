@@ -24,6 +24,7 @@
 #endif
 
 #include <memory> // for unique_ptr
+#include <string>
 #include <utility>
 
 using namespace torch::autograd;
@@ -91,6 +92,63 @@ void PythonEngine::thread_init(
   }
 }
 
+namespace {
+
+// Attach the anomaly-mode forward traceback to a persisted Python exception
+// without changing its type. Prefer BaseException.add_note (3.11+); on 3.10
+// append to args[0] when that is a string so str(e) still shows the trace.
+void attach_anomaly_trace_to_python_error(
+    python_error& err,
+    const std::string& trace) {
+  if (trace.empty()) {
+    return;
+  }
+  pybind11::gil_scoped_acquire gil;
+  err.message.append("\n").append(trace);
+  if (err.value == nullptr) {
+    return;
+  }
+  bool attached = false;
+  if (PyObject_HasAttrString(err.value, "add_note") != 0) {
+    PyObject* note = PyUnicode_FromString(trace.c_str());
+    if (note != nullptr) {
+      PyObject* result =
+          PyObject_CallMethod(err.value, "add_note", "O", note);
+      attached = result != nullptr;
+      Py_XDECREF(result);
+      Py_DECREF(note);
+    }
+    PyErr_Clear();
+  }
+  if (!attached) {
+    PyObject* args = PyObject_GetAttrString(err.value, "args");
+    if (args != nullptr && PyTuple_Check(args) && PyTuple_GET_SIZE(args) >= 1) {
+      PyObject* first = PyTuple_GET_ITEM(args, 0);
+      if (PyUnicode_Check(first)) {
+        const char* first_c = PyUnicode_AsUTF8(first);
+        if (first_c != nullptr) {
+          std::string combined(first_c);
+          combined.append("\n").append(trace);
+          PyObject* new_first = PyUnicode_FromString(combined.c_str());
+          if (new_first != nullptr) {
+            PyObject* new_args = PyTuple_Pack(1, new_first);
+            if (new_args != nullptr) {
+              attached = PyObject_SetAttrString(err.value, "args", new_args) ==
+                  0;
+              Py_DECREF(new_args);
+            }
+            Py_DECREF(new_first);
+          }
+        }
+      }
+    }
+    Py_XDECREF(args);
+    PyErr_Clear();
+  }
+}
+
+} // namespace
+
 void PythonEngine::thread_on_exception(
     const std::shared_ptr<GraphTask>& graph_task,
     const c10::intrusive_ptr<Node>& fn,
@@ -99,6 +157,15 @@ void PythonEngine::thread_on_exception(
   auto python_err = dynamic_cast<python_error*>(&e);
   if (python_err) {
     python_err->persist();
+    if (AnomalyMode::is_enabled() && fn) {
+      try {
+        attach_anomaly_trace_to_python_error(
+            *python_err, fn->metadata()->format_stack(fn->name()));
+      } catch (...) {
+        pybind11::gil_scoped_acquire gil;
+        PyErr_Clear();
+      }
+    }
   }
   Engine::thread_on_exception(graph_task, fn, e);
 }
