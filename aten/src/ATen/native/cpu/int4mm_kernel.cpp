@@ -827,11 +827,11 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
 
         const size_t dst_stride =
             K * sizeof(int8_t) + sizeof(float) + sizeof(int32_t);
-        for (size_t i = 0; i < M; ++i) {
+        for (const auto i : c10::irange(M)) {
           const uint16_t* row_ptr = src_bf16 + i * K;
           // find min/max
           float mn = FLT_MAX, mx = -FLT_MAX;
-          for (size_t j = 0; j < K; ++j) {
+          for (const auto j : c10::irange(K)) {
             float v = cast_bf16_to_f32(row_ptr[j]);
             mn = std::min(mn, v);
             mx = std::max(mx, v);
@@ -857,7 +857,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
           *reinterpret_cast<int32_t*>(out_ptr + sizeof(float)) = -zp;
           out_ptr += sizeof(float) + sizeof(int32_t);
           // quantize
-          for (size_t j = 0; j < K; ++j) {
+          for (const auto j : c10::irange(K)) {
             float v = cast_bf16_to_f32(row_ptr[j]);
             int32_t q = static_cast<int32_t>(std::round(v * scale)) + zp;
             q = std::clamp(
@@ -880,9 +880,9 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
     const size_t lhs_stride =
         K * sizeof(int8_t) + sizeof(float) + sizeof(int32_t);
     const size_t rhs_stride = roundup(K, 2) / 2;
-    for (size_t i = 0; i < M; ++i) {
+    for (const auto i : c10::irange(M)) {
       const int8_t* lhs_row = lhs + i * lhs_stride;
-      for (size_t j = 0; j < N; ++j) {
+      for (const auto j : c10::irange(N)) {
         int32_t acc = 0;
         const int8_t* lptr = lhs_row;
         const uint8_t* rptr = rhs + j * rhs_stride;
@@ -890,7 +890,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
         int32_t lhs_off =
             *reinterpret_cast<const int32_t*>(lptr + sizeof(float));
         lptr += sizeof(float) + sizeof(int32_t);
-        for (size_t t = 0; t < K; ++t) {
+        for (const auto t : c10::irange(K)) {
           int32_t lv = static_cast<int32_t>(lptr[t]);
           uint8_t bv = rptr[t / 2];
           int32_t rv = ((t & 1) == 0) ? (static_cast<int32_t>(bv & 0xF) - 8)
@@ -996,14 +996,14 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
 
         const size_t lhs_qa8dx_stride = k;
 
-        for (size_t m_idx = 0; m_idx < m; ++m_idx) {
+        for (const auto m_idx : c10::irange(m)) {
           const float* src_ptr = lhs_f32 + m_idx * lhs_qa8dx_stride;
 
           float max0 = -FLT_MAX;
           float min0 = FLT_MAX;
 
           // Find min/max for each channel
-          for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+          for (const auto k_idx : c10::irange(k)) {
             const float src0_0 = src_ptr[k_idx];
 
             max0 = std::max(src0_0, max0);
@@ -1049,7 +1049,7 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
           dst_ptr += sizeof(int32_t);
 
           // Quantize the channels
-          for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+          for (const auto k_idx : c10::irange(k)) {
             const float src0_0 = src_ptr[k_idx];
 
             // Scale the values
@@ -1072,10 +1072,10 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
 
   const size_t rhs_qs4cx_stride = ((((k + 2 - 1) / 2) * 2) / 2);
 
-  for (size_t m_idx = 0; m_idx < m; ++m_idx) {
+  for (const auto m_idx : c10::irange(m)) {
     const int8_t* lhs_ptr_start = (int8_t*)lhs_qa8dx + m_idx * lhs_stride;
 
-    for (size_t n_idx = 0; n_idx < n; ++n_idx) {
+    for (const auto n_idx : c10::irange(n)) {
       // Main f32 accumulator
       int32_t iacc = 0;
 
@@ -1090,7 +1090,7 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
       const int32_t lhs_offset = *(const int32_t*)lhs_ptr;
       lhs_ptr += sizeof(int32_t);
 
-      for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+      for (const auto k_idx : c10::irange(k)) {
         // Get the LHS values
         const int32_t lhs_v0 = (int32_t)lhs_ptr[0];
 
@@ -1158,13 +1158,13 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
     const size_t dst_stride =
         (k * sizeof(int8_t) + sizeof(float) + sizeof(int32_t));
 
-    for (size_t row_idx = 0; row_idx < m; ++row_idx) {
+    for (const auto row_idx : c10::irange(m)) {
       const float* src_ptr = lhs_f32 + row_idx * k;
 
       float max0 = -FLT_MAX;
       float min0 = FLT_MAX;
 
-      for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+      for (const auto k_idx : c10::irange(k)) {
         const float src0_0 = src_ptr[k_idx];
         max0 = std::max(src0_0, max0);
         min0 = std::min(src0_0, min0);
@@ -1197,7 +1197,7 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
       *((int32_t*)dst_ptr) = -nudged_zero_point0;
       dst_ptr += sizeof(int32_t);
 
-      for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+      for (const auto k_idx : c10::irange(k)) {
         const float src0_0 = src_ptr[k_idx];
         int32_t v0_s32 = (int32_t)(std::round(src0_0 * scale0));
         v0_s32 = std::max(
@@ -1219,10 +1219,10 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
   const size_t lhs_stride = k + sizeof(float) + sizeof(int32_t);
   const size_t rhs_stride = (((k + 2 - 1) / 2) * 2) / 2;
 
-  for (size_t row_idx = 0; row_idx < m; ++row_idx) {
+  for (const auto row_idx : c10::irange(m)) {
     const int8_t* lhs_ptr_start = lhs_qa8dx + row_idx * lhs_stride;
 
-    for (size_t col_idx = 0; col_idx < n; ++col_idx) {
+    for (const auto col_idx : c10::irange(n)) {
       float main_acc = 0.0f;
       const int8_t* lhs_ptr = lhs_ptr_start;
       const uint8_t* rhs_ptr = rhs_qs4c32 + col_idx * rhs_stride;
@@ -1232,12 +1232,12 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
       const int32_t lhs_offset = *(const int32_t*)lhs_ptr;
       lhs_ptr += sizeof(int32_t);
 
-      for (size_t block_idx = 0; block_idx < num_blocks_row; ++block_idx) {
+      for (const auto block_idx : c10::irange(num_blocks_row)) {
         const float rhs_scale =
             rhs_scales_fp32[block_idx + col_idx * num_blocks_row];
         int32_t iacc = 0;
 
-        for (size_t i = 0; i < bl; ++i) {
+        for (const auto i : c10::irange(bl)) {
           const size_t k_idx = block_idx * bl + i;
           if (k_idx >= k) {
             break;

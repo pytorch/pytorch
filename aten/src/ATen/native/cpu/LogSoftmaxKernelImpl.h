@@ -139,7 +139,7 @@ serial_vec_logsoftmax_range(
   scalar_t* input_max_data = buffer.get();
   scalar_t* tmp_sum_data = buffer.get() + chunk_size;
 
-  for (int64_t i = begin; i < end; i++) {
+  for (const auto i : c10::irange(begin, end)) {
     int64_t outer_idx = i / num_chunks;
     int64_t k = i % num_chunks;
     int64_t inner_idx_begin = k * chunk_size;
@@ -159,7 +159,7 @@ serial_vec_logsoftmax_range(
     }
 
     // compute max
-    for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+    for (const auto dim_idx : c10::irange(dim_size)) {
       const scalar_t* input_ptr = input_data_base + outer_idx * dim_size * inner_size
           + dim_idx * inner_size + inner_idx_begin;
 
@@ -178,7 +178,7 @@ serial_vec_logsoftmax_range(
     }
 
     // compute sum of (x - max).exp()
-    for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+    for (const auto dim_idx : c10::irange(dim_size)) {
       const scalar_t* input_ptr = input_data_base + outer_idx * dim_size * inner_size
           + dim_idx * inner_size + inner_idx_begin;
 
@@ -201,7 +201,7 @@ serial_vec_logsoftmax_range(
     vec::map([](Vec x) { return x.log(); }, tmp_sum_data, tmp_sum_data, size);
 
     // compute x - max - sum
-    for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+    for (const auto dim_idx : c10::irange(dim_size)) {
       int64_t offset = outer_idx * dim_size * inner_size + dim_idx * inner_size + inner_idx_begin;
       const scalar_t* input_ptr = input_data_base + offset;
       scalar_t* output_ptr = output_data_base + offset;
@@ -243,7 +243,7 @@ serial_vec_logsoftmax_range(
   float* input_buffer_data = input_buffer.get();
 
   // init
-  for (int64_t i = begin; i < end; i++) {
+  for (const auto i : c10::irange(begin, end)) {
     int64_t outer_idx = i / num_chunks;
     int64_t k = i % num_chunks;
     int64_t inner_idx_begin = k * chunk_size;
@@ -264,7 +264,7 @@ serial_vec_logsoftmax_range(
     }
 
     // compute max
-    for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+    for (const auto dim_idx : c10::irange(dim_size)) {
       const scalar_t* input_ptr = input_data_base + outer_idx * dim_size * inner_size
           + dim_idx * inner_size + inner_idx_begin;
       float* input_buffer_ptr = input_buffer_data + dim_idx * chunk_size;
@@ -293,7 +293,7 @@ serial_vec_logsoftmax_range(
     }
 
     // compute sum of (x - max).exp()
-    for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+    for (const auto dim_idx : c10::irange(dim_size)) {
       float* input_buffer_ptr = input_buffer_data + dim_idx * chunk_size;
 
       int64_t d2 = 0;
@@ -320,7 +320,7 @@ serial_vec_logsoftmax_range(
     vec::map([](fVec x) { return x.log(); }, tmp_sum_data, tmp_sum_data, size);
 
     // compute x - max - sum
-    for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+    for (const auto dim_idx : c10::irange(dim_size)) {
       float* input_buffer_ptr = input_buffer_data + dim_idx * chunk_size;
       scalar_t* output_ptr = output_data_base + outer_idx * dim_size * inner_size
           + dim_idx * inner_size + inner_idx_begin;
