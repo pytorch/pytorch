@@ -183,8 +183,6 @@ class _VmapCombineFnWrapper:
         self.out_dims: tuple[Any, ...] | None = None
 
     def __call__(self, *args: Any) -> Any:
-        # Interpret a graph-module combine_fn so re-traced nodes keep their meta
-        # (e.g. recompute tags). Callers see only this wrapper, not the graph.
         outputs, per_slice_out_dims = restore_vmap(
             _maybe_run_with_interpreter(self.combine_fn),
             self.in_dims,
