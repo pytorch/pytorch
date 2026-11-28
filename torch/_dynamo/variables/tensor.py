@@ -40,8 +40,10 @@ from torch._library.opaque_object import (
     is_opaque_constant_type,
     is_opaque_symbolic_type,
 )
+from torch._subclasses.fake_tensor import maybe_get_fake_constant
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
     guard_scalar,
     GuardOnDataDependentSymNode,
     has_free_symbols,
@@ -1966,6 +1968,47 @@ class TensorVariable(VariableTracker):
         raise_type_error(
             tx, "only integer tensors of a single element can be converted to an index"
         )
+
+    def torch_size_item(
+        self,
+        tx: "InstructionTranslatorBase",
+        item_index: int,
+    ) -> VariableTracker:
+        # Converts a tensor item of torch.Size(...) like THPSize_pynew, which
+        # calls __index__ on it and replaces any error with its own message
+        # naming the item's type.
+        msg = (
+            "torch.Size() takes an iterable of 'int' "
+            f"(item {item_index} is '{self.python_type_name()}')"
+        )
+        if (
+            self.dtype is None
+            or self.dtype.is_floating_point
+            or self.dtype.is_complex
+            or not self.valid_size()
+            or not guard_or_false(product(self.size) == 1)
+        ):
+            raise_type_error(tx, msg)
+        constant = maybe_get_fake_constant(self.proxy.node.meta.get("example_value"))
+        if isinstance(constant, torch.Tensor):
+            value = int(constant.item())
+            if not -(2**63) <= value < 2**63:
+                raise_type_error(tx, msg)
+            return ConstantVariable.create(value)
+        if self.dtype is torch.uint64:
+            unimplemented(
+                gb_type="Data-dependent uint64 tensor element in torch.Size",
+                context="torch.uint64 tensor-backed size",
+                explanation="Dynamo cannot safely validate that a data-dependent "
+                "torch.uint64 value fits in torch.Size's signed int64 range.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        item: VariableTracker = self
+        if self.dtype is torch.bool:
+            item = self.call_method(
+                tx, "to", [ConstantVariable.create(torch.int64)], {}
+            )
+        return item.nb_index_impl(tx)
 
     def nb_int_impl(
         self,
