@@ -1889,6 +1889,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         default_factory=lambda: collections.defaultdict(list)
     )
     other_arg_indices: list[int] = field(default_factory=list)
+    data_mutation_indices: set[int] = field(default_factory=set)
 
     def pre_compile(
         self,
@@ -1978,6 +1979,11 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
         )
+        self.data_mutation_indices = {
+            i
+            for i, info in enumerate(fw_metadata.input_info)
+            if info.mutates_data and not info.mutations_hidden_from_autograd
+        }
         replay_views = config.view_replay_for_aliased_outputs
 
         def _unpack_synthetic_bases(primals: tuple[Any, ...]) -> list[Any]:
@@ -2105,6 +2111,15 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                     )
                     buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
                     buf.writeline(f"_bases[{base_idx}] = _b")
+                    # The storage-backed base has its own version counter, so
+                    # invalidate outer autograd graphs through the original inputs.
+                    # Notify only visible data mutations; storage aliases can have
+                    # independent counters, and hidden mutations must not bump them.
+                    mutated_args = ", ".join(
+                        f"args[{i}]" for i in group if i in self.data_mutation_indices
+                    )
+                    if mutated_args:
+                        buf.writeline(f"torch._C._increment_version(({mutated_args},))")
 
             other_items = ", ".join(f"args[{orig}]" for orig in other_indices)
             buf.writeline(f"_new_args = _bases + [{other_items}]")
