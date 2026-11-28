@@ -18,7 +18,11 @@ from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code, sympy_index_symbol_with_prefix
 from torch._inductor.virtualized import V
-from torch.nn.functional import scaled_mm, ScalingType  # type: ignore[attr-defined]
+from torch.nn.functional import (  # type: ignore[attr-defined]
+    scaled_mm,
+    ScalingType,
+    SwizzleType,
+)
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     evaluate_gfx_arch_within,
@@ -38,6 +42,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_quantized import (
     ceil_div,
     to_blocked,
+    to_mnk4,
     to_mx_swizzled_gfx1250,
 )
 from torch.testing._internal.common_utils import (
@@ -60,7 +65,10 @@ from torch.testing._internal.inductor_utils import (
     is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import (
+    has_datacenter_blackwell_tma_device,
+    has_triton_tma_device,
+)
 
 
 _PRIOR_FP32_MATMUL_PRECISION: str | None = None
@@ -1768,6 +1776,450 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize(
+        "shape,path",
+        (
+            # native block-scaled MMA, which reads the packed scales directly
+            ((1536, 1280, 4096), "native"),
+            ((1282, 1153, 4208), "native"),
+            ((2048, 1024, 4096), "native"),
+            # partial 128-row tiles
+            ((16, 256, 256), "native"),
+            ((65, 321, 4208), "native"),
+            # BLOCK_K=256 over 33 K blocks: the last scale tile is half out of bounds
+            ((1282, 1153, 4208), "native_bk256"),
+            # small-tile fp8 dot with register scaling
+            ((256, 320, 384), "software"),
+            ((258, 321, 400), "software"),
+            ((256, 320, 640), "software"),
+            ((16, 256, 256), "software"),
+            ((65, 321, 128), "software"),
+            ((65, 321, 4208), "software"),
+            ((1536, 1280, 384), "software"),
+            # a single K block; 128x256 tiles exceed tensor memory at this K
+            ((16, 256, 128), "native_bn128"),
+        ),
+    )
+    @parametrize("host_side_tma", (False, True))
+    def test_k128_ue8m0_blockwise_scaling_sm100(
+        self, shape, path, host_side_tma, device
+    ):
+        self._check_k128_ue8m0_blockwise_scaling(
+            device, shape, path, host_side_tma=host_side_tma
+        )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize(
+        "shape,path",
+        (
+            ((1536, 1280, 4096), "aten"),
+            ((1536, 1280, 4096), "native"),
+            ((1536, 1280, 4096), "software"),
+            ((1536, 1280, 4096), "autotune"),
+            ((16, 256, 256), "aten"),
+            ((16, 256, 256), "autotune"),
+            # eager rejects N % 16 != 0 with a ValueError, so no ATen choice
+            ((258, 321, 400), "software"),
+            ((258, 321, 400), "autotune"),
+            # K < 32: tcgen05 fp8 MMA needs K >= 32, so no software template
+            ((64, 256, 16), "autotune"),
+        ),
+    )
+    def test_k128_ue8m0_blockwise_scaling_sm100_default_backends(
+        self, shape, path, device
+    ):
+        # With ATen and Triton configured, the eager cuBLASLt op and both
+        # templates are candidates in one autotuning pass over the same inputs.
+        # "autotune" benchmarks them all; the other paths keep one candidate.
+        if path in ("aten", "autotune"):
+            self._skip_without_eager_mnk4(device)
+        names = self._check_k128_ue8m0_blockwise_scaling(
+            device, shape, path, backends="ATEN,TRITON"
+        )
+        _, N, K = shape
+        self.assertEqual("_scaled_mm_v2" in names, N % 16 == 0 and K % 16 == 0, names)
+        self.assertEqual(
+            any("main_loop_sw_scaled_mm_" in name for name in names), K >= 32, names
+        )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize("shape", ((1536, 1280, 4096), (16, 256, 256)))
+    def test_k128_ue8m0_blockwise_scaling_sm100_dynamic_shapes(self, shape, device):
+        # With dynamic N and K the ATen choice must still be offered: the
+        # multiple-of-16 gate guards on the sizes instead of needing them static.
+        self._skip_without_eager_mnk4(device)
+        names = self._check_k128_ue8m0_blockwise_scaling(
+            device, shape, "aten", backends="ATEN,TRITON", dynamic=True
+        )
+        self.assertIn("_scaled_mm_v2", names)
+
+    def _skip_without_eager_mnk4(self, device):
+        # Eager packed MN x K4 scaling needs SM10.x/11.x and cuBLASLt >= 13.8.1.
+        a = torch.zeros((16, 128), device=device, dtype=torch.float8_e4m3fn)
+        b = torch.zeros((16, 128), device=device, dtype=torch.float8_e4m3fn).t()
+        scale = to_mnk4(torch.ones((16, 1), device=device))
+        try:
+            scaled_mm(
+                a,
+                b,
+                scale,
+                ScalingType.BlockWise1x128,
+                scale,
+                ScalingType.BlockWise1x128,
+                swizzle_a=SwizzleType.SWIZZLE_MN_K4,
+                swizzle_b=SwizzleType.SWIZZLE_MN_K4,
+                output_dtype=torch.bfloat16,
+            )
+        except NotImplementedError as e:
+            self.skipTest(f"eager packed MN x K4 scaled_mm is unavailable: {e}")
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize(
+        "path,variant",
+        (
+            # the layout constraint copies A and B to row-major A, column-major B
+            ("native", "nt_mats"),
+            ("native", "float16"),
+            ("software", "float32"),
+            # the native template needs persistent TMA; the software one does not
+            ("software", "no_persistent_tma"),
+        ),
+    )
+    def test_k128_ue8m0_blockwise_scaling_sm100_variants(self, path, variant, device):
+        native_sized = path == "native" or variant == "no_persistent_tma"
+        names = self._check_k128_ue8m0_blockwise_scaling(
+            device,
+            (1536, 1280, 4096) if native_sized else (258, 321, 400),
+            path,
+            output_dtype={"float16": torch.float16, "float32": torch.float32}.get(
+                variant, torch.bfloat16
+            ),
+            nt_mats=variant == "nt_mats",
+            persistent_tma=variant != "no_persistent_tma",
+        )
+        if native_sized:
+            self.assertEqual(
+                any(
+                    "blackwell_ws_persistent_tma_main_loop_scaling_" in name
+                    for name in names
+                ),
+                variant != "no_persistent_tma",
+                names,
+            )
+
+    def _check_k128_ue8m0_blockwise_scaling(
+        self,
+        device,
+        shape,
+        path,
+        *,
+        backends="TRITON",
+        host_side_tma=False,
+        output_dtype=torch.bfloat16,
+        nt_mats=False,
+        persistent_tma=True,
+        dynamic=False,
+    ):
+        """Compile the K128 UE8M0 scaled_mm, keep only the candidates for
+        ``path`` (``"autotune"`` keeps all of them), check the result against an
+        fp32 reference, and return the names of all candidates offered."""
+        from torch._inductor.select_algorithm import (
+            add_feedback_saver,
+            add_preprocessing_fn,
+            clear_feedback_savers,
+            clear_preprocessing_fns,
+        )
+
+        M, N, K = shape
+        k_blocks = ceil_div(K, 128)
+
+        torch.manual_seed(0)
+        a = torch.randint(-4, 5, (M, K), device=device)
+        b_nk = torch.randint(-4, 5, (N, K), device=device)
+        # Make the first partial positive so decoding E8M0 NaN as inf fails.
+        a[0, :128] = 1
+        b_nk[0, :128] = 1
+        a = a.to(torch.float8_e4m3fn)
+        b_nk = b_nk.to(torch.float8_e4m3fn)
+        b = b_nk.t()
+        contraction_dim = (1, 0) if host_side_tma else ()
+
+        def make_scale(outer, modulus, offset, include_nan=False):
+            # One code per (row, K block) drives the reference; the kernel gets
+            # them packed into cuBLASLt's MN x K4 layout.
+            codes = (
+                torch.arange(outer * k_blocks, device=device).reshape(outer, k_blocks)
+                % modulus
+                + offset
+            ).to(torch.uint8)
+            if include_nan:
+                codes[0, 0] = 255
+            # Pack like to_mnk4, but with NaN (0xFF) in the padding, which no
+            # kernel may apply: rows past `outer` and K blocks past K.
+            padded = torch.full(
+                (4 * ceil_div(outer, 4), 4 * ceil_div(k_blocks, 4)),
+                255,
+                dtype=torch.uint8,
+                device=device,
+            )
+            padded[:outer, :k_blocks] = codes
+            packed = padded.reshape(padded.shape[0], -1, 4).permute(1, 0, 2)
+            values = codes.view(torch.float8_e8m0fnu)
+            return packed.contiguous().flatten().view(torch.float8_e8m0fnu), values
+
+        scale_a, scale_a_values = make_scale(M, 7, 124, include_nan=True)
+        scale_b, scale_b_values = make_scale(N, 5, 125)
+
+        expected = torch.zeros((M, N), device=device, dtype=torch.float32)
+        for block in range(k_blocks):
+            k_start = block * 128
+            k_end = min(k_start + 128, K)
+            partial = a[:, k_start:k_end].float() @ b[k_start:k_end].float()
+            expected += (
+                partial
+                * scale_a_values[:, block].float()[:, None]
+                * scale_b_values[:, block].float()[None, :]
+            )
+        expected = expected.to(output_dtype)
+        self.assertTrue(torch.isnan(expected[0, 0]))
+        if nt_mats:
+            a = a.t().contiguous().t()
+            b = b.contiguous()
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                ScalingType.BlockWise1x128,
+                scale_b,
+                ScalingType.BlockWise1x128,
+                swizzle_a=SwizzleType.SWIZZLE_MN_K4,
+                swizzle_b=SwizzleType.SWIZZLE_MN_K4,
+                contraction_dim=contraction_dim,
+                output_dtype=output_dtype,
+                use_fast_accum=False,
+            )
+
+        native = path.startswith("native")
+        forced_config = ()
+        if native:
+            template_name = "blackwell_ws_persistent_tma_main_loop_scaling_"
+            forced_config = {
+                "native": (
+                    "BLOCK_M=128, BLOCK_N=256",
+                    "BLOCK_K=128",
+                    "num_stages=3, num_warps=8",
+                ),
+                "native_bk256": (
+                    "BLOCK_M=128, BLOCK_N=128",
+                    "BLOCK_K=256",
+                    "num_stages=3, num_warps=4",
+                ),
+                "native_bn128": (
+                    "BLOCK_M=128, BLOCK_N=128",
+                    "BLOCK_K=128",
+                    "num_stages=4, num_warps=4",
+                ),
+            }[path]
+        elif path == "software":
+            template_name = "main_loop_sw_scaled_mm_"
+        elif path == "aten":
+            template_name = "_scaled_mm_v2"
+        else:
+            self.assertEqual(path, "autotune")
+            template_name = ""
+        choice_records = []
+
+        def record_and_keep_k128_ue8m0(choices):
+            choice_records.extend(
+                (choice.name, choice.description) for choice in choices
+            )
+            if path == "aten":
+                matching = [
+                    choice for choice in choices if choice.name == "_scaled_mm_v2"
+                ]
+            else:
+                matching = [
+                    choice for choice in choices if template_name in choice.name
+                ]
+            self.assertTrue(matching, choice_records)
+            if not forced_config:
+                return matching
+            forced = [
+                choice
+                for choice in matching
+                if all(field in choice.description for field in forced_config)
+            ]
+            self.assertEqual(len(forced), 1, choice_records)
+            return forced
+
+        aten_timings = []
+
+        def record_aten_timing(timings, *args):
+            aten_timings.extend(
+                t for choice, t in timings.items() if choice.name == "_scaled_mm_v2"
+            )
+
+        torch._dynamo.reset()
+        add_preprocessing_fn(record_and_keep_k128_ue8m0)
+        add_feedback_saver(record_aten_timing)
+        try:
+            with config.patch(
+                {
+                    "fx_graph_cache": False,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": backends,
+                    "triton.enable_persistent_tma_matmul": persistent_tma,
+                    "triton.enable_host_side_tma": host_side_tma,
+                    "test_configs.autotune_choice_name_regex": None,
+                    "test_configs.autotune_choice_desc_regex": None,
+                }
+            ):
+                actual, (code,) = run_and_get_code(
+                    torch.compile(
+                        fn, backend="inductor", fullgraph=True, dynamic=dynamic
+                    ),
+                    a,
+                    b,
+                    scale_a,
+                    scale_b,
+                )
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+            clear_feedback_savers()
+
+        self.assertEqual(actual, expected)
+        if (
+            path == "autotune"
+            and len(choice_records) > 1
+            and any(name == "_scaled_mm_v2" for name, _ in choice_records)
+        ):
+            # autotuning turns a failing benchmark into an inf timing; make sure
+            # cuBLASLt was really timed (a single choice is not benchmarked)
+            self.assertTrue(aten_timings, choice_records)
+            self.assertTrue(all(t < float("inf") for t in aten_timings), aten_timings)
+        if native:
+            # the native block-scaled MMA reads the packed scales itself, so no
+            # scale re-layout kernel runs first
+            FileCheck().check("disallow_acc_multi_buffer=True").check(
+                "scale_a = tl.load("
+            ).check("accumulator = tl.dot_scaled(").run(code)
+            self.assertNotIn("_e8m0_to_fp32", code)
+            if not nt_mats:
+                self.assertNotIn("def triton_poi_fused", code)
+            # host-side descriptors arrive as tensordesc kernel args; device-side
+            # ones are built in the kernel from the same shapes and strides
+            self.assertEqual("tl.make_tensor_descriptor(" in code, not host_side_tma)
+        elif path == "software":
+            # Module-level kernels suffix template helpers with the kernel name.
+            FileCheck().check("scale_block = (k_idx * BLOCK_K) // 128").check(
+                "_e8m0_to_fp32"
+            ).check("partial = tl.dot(").run(code)
+            self.assertNotIn("tl.dot_scaled(", code)
+            self.assertNotIn("def triton_poi_fused", code)
+        elif path == "aten":
+            FileCheck().check("aten._scaled_mm_v2.default(").run(code)
+            self.assertNotIn("tl.dot_scaled(", code)
+            self.assertNotIn("_e8m0_to_fp32", code)
+        return [name for name, _ in choice_records]
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize(
+        "case",
+        (
+            "fp8_output",
+            "no_max_autotune",
+            # max-autotune without the Triton backend: eager is the only candidate
+            "aten_backend_only",
+            "no_swizzle",
+            "blockwise_128x128",
+            "wrong_numel",
+        ),
+    )
+    def test_k128_ue8m0_blockwise_scaling_unsupported_falls_back(self, case, device):
+        from torch._inductor.exc import InductorError
+        from torch._inductor.kernel import mm
+
+        M = N = K = 128
+        a = torch.ones((M, K), device=device, dtype=torch.float8_e4m3fn)
+        b = torch.ones((N, K), device=device, dtype=torch.float8_e4m3fn).t()
+        ones = torch.ones((M, 1), device=device)
+        scale_a = scale_b = to_mnk4(ones)
+        recipe_b = ScalingType.BlockWise1x128
+        swizzle = SwizzleType.SWIZZLE_MN_K4
+        if case == "no_swizzle":
+            scale_a = scale_b = ones.to(torch.float8_e8m0fnu)
+            swizzle = SwizzleType.NO_SWIZZLE
+        elif case == "blockwise_128x128":
+            recipe_b = ScalingType.BlockWise128x128
+        elif case == "wrong_numel":
+            scale_a = scale_a[: scale_a.numel() // 2]
+        output_dtype = torch.float8_e4m3fn if case == "fp8_output" else torch.bfloat16
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                ScalingType.BlockWise1x128,
+                scale_b,
+                recipe_b,
+                swizzle_a=swizzle,
+                swizzle_b=swizzle,
+                output_dtype=output_dtype,
+                use_fast_accum=False,
+            )
+
+        torch._dynamo.reset()
+        with (
+            mock.patch.object(
+                mm,
+                "scaled_mm_v2_fallback",
+                side_effect=RuntimeError("expected scaled_mm_v2 fallback"),
+            ),
+            config.patch(
+                {
+                    "fx_graph_cache": False,
+                    "max_autotune": case != "no_max_autotune",
+                    "max_autotune_gemm_backends": (
+                        "ATEN" if case == "aten_backend_only" else "TRITON"
+                    ),
+                    "triton.enable_persistent_tma_matmul": True,
+                }
+            ),
+            self.assertRaisesRegex(InductorError, "expected scaled_mm_v2 fallback"),
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                a, b, scale_a, scale_b
+            )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(

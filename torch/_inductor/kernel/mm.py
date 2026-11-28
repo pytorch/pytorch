@@ -4,6 +4,8 @@ import logging
 from collections.abc import Sequence
 from typing import Any, cast, Literal
 
+import sympy
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -22,6 +24,7 @@ from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config as inductor_config, distributed_autotune, lowering as L
+from ..codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.flydsl.flydsl_template import FlyDSLTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
@@ -179,6 +182,21 @@ flydsl_mm_template = FlyDSLTemplate(
     source=load_kernel_template("flydsl_mm"),
 )
 
+blackwell_ws_persistent_tma_main_loop_scaling_template = TritonTemplate(
+    name="blackwell_ws_persistent_tma_main_loop_scaling",
+    grid=persistent_mm_grid,
+    source=load_kernel_template(
+        "triton_blackwell_ws_persistent_tma_main_loop_scaled_mm"
+    )
+    + load_kernel_template("triton_gemm_helpers"),
+)
+
+main_loop_sw_scaled_mm_template = TritonTemplate(
+    name="main_loop_sw_scaled_mm",
+    grid=mm_grid,
+    source=load_kernel_template("triton_main_loop_sw_scaled_mm"),
+)
+
 blackwell_ws_persistent_tma_mm_template = TritonTemplate(
     name="blackwell_ws_persistent_tma",
     grid=blackwell_persistent_mm_grid,
@@ -266,6 +284,8 @@ def scaled_mm_v2_choice(
     recipe_b,
     out_dtype,
     use_fast_accum,
+    swizzle_a=0,
+    swizzle_b=0,
     kernel=aten._scaled_mm_v2.out,
     **kwargs,
 ):
@@ -275,10 +295,10 @@ def scaled_mm_v2_choice(
         mat_b,
         [scale_a],
         [recipe_a],
-        [0],
+        [swizzle_a],
         [scale_b],
         [recipe_b],
-        [0],
+        [swizzle_b],
         bias,
         out_dtype,
         [],
@@ -1595,13 +1615,159 @@ def scaled_mm_v2_constraint(
 L.add_layout_constraint(aten._scaled_mm_v2, scaled_mm_v2_constraint)
 
 
-# Inductor has no template or extern choice that understands swizzled scale
-# layouts for _scaled_mm_v2 yet; defer those to the eager op. add_to_fallback_set
-# is False because this handler is invoked manually from the lowering below, not
-# registered as the op's global fallback.
+# Apart from BlockWise1x128 with packed MN x K4 UE8M0 scales on datacenter
+# Blackwell (_tuned_blackwell_main_loop_scaled_mm), Inductor has no template or
+# extern choice that understands swizzled scale layouts for _scaled_mm_v2; defer
+# those to the eager op. add_to_fallback_set is False because this handler is
+# invoked manually from the lowering below, not registered as the op's global
+# fallback.
 scaled_mm_v2_fallback = fallback_handler(
     aten._scaled_mm_v2.default, add_to_fallback_set=False
 )
+
+
+def _is_blackwell_main_loop_scaled_mm(
+    mat_a, mat_b, scale_a, recipe_a, swizzle_a, scale_b, recipe_b, swizzle_b
+) -> bool:
+    # BlockWise1x128 with UE8M0 scales in cuBLASLt's packed MN x K4 layout, the
+    # eager contract on Blackwell, maps onto tcgen05 block-scaled MMA.
+    # Eager also requires N and K to be multiples of 16 and raises ValueError
+    # otherwise. The Triton templates do not need that, so under max-autotune
+    # with the Triton backend such shapes compile and run instead of raising;
+    # only the ATen choice is gated on it.
+    return (
+        len(recipe_a) == len(recipe_b) == 1
+        and recipe_a[0] == recipe_b[0] == ScalingType.BlockWise1x128.value
+        and len(swizzle_a) == len(swizzle_b) == 1
+        and swizzle_a[0] == swizzle_b[0] == SwizzleType.SWIZZLE_MN_K4.value
+        and len(scale_a) == len(scale_b) == 1
+        and scale_a[0].dtype == scale_b[0].dtype == torch.float8_e8m0fnu
+        and mat_a.get_dtype() == mat_b.get_dtype() == torch.float8_e4m3fn
+    )
+
+
+def _tuned_blackwell_main_loop_scaled_mm(
+    mat_a,
+    mat_b,
+    scale_a,
+    scale_b,
+    bias,
+    out_dtype,
+    use_fast_accum,
+    layout,
+    *,
+    recipe_a: int,
+    recipe_b: int,
+    swizzle_a: int,
+    swizzle_b: int,
+):
+    """Datacenter Blackwell (SM10.x/SM11.x) lowering for BlockWise1x128 UE8M0
+    scales in the packed MN x K4 layout. Autotunes the configured backends (the
+    eager cuBLASLt op and the Triton templates) over the same inputs. Returns
+    None, so the caller runs the eager op as it would without this lowering,
+    when the Triton templates cannot apply (e.g. without max-autotune), when
+    whether the ATen choice applies cannot be decided, or when no choice is
+    left. If the Triton heuristics produce no configs, the ATen choice alone
+    is selected."""
+    m, n, k, layout, mat_a, mat_b = mm_args(
+        mat_a, mat_b, layout=layout, out_dtype=out_dtype
+    )
+    _, is_nonzero = _is_static_problem(layout)
+    k_blocks = ceildiv(k, 128)
+    # MN x K4 pads rows to a multiple of 4 and stores one 4-byte word of scales
+    # per (row, four K128 blocks), rows fastest. Mismatched sizes go to eager,
+    # which reports them.
+    scales_match = all(
+        V.graph.sizevars.guard_or_false(
+            sympy.Eq(scale.get_numel(), 16 * ceildiv(outer, 4) * ceildiv(k_blocks, 4))
+        )
+        for scale, outer in ((scale_a, m), (scale_b, n))
+    )
+    # Without enable_float8, use_triton_template limits the output to
+    # bf16/fp16/fp32, which both templates accumulate in fp32. Like other GEMM
+    # templates, these only produce configs under max-autotune; otherwise the
+    # eager op is the only candidate, so leave it to the caller's fallback.
+    if (
+        bias
+        or use_fast_accum
+        or not is_nonzero
+        or not scales_match
+        or not is_datacenter_blackwell_arch()
+        or not use_triton_template(layout)
+    ):
+        return None
+    # Eager rejects N or K that is not a multiple of 16 with a ValueError, which
+    # autotuning would not skip, so the ATen choice needs both to be. Guard on it
+    # for dynamic sizes. If it cannot be decided (unbacked sizes), run the eager
+    # op rather than autotune without cuBLASLt. An unsupported device or
+    # cuBLASLt (< 13.8.1) raises NotImplementedError, which autotuning skips like
+    # a failed choice.
+    offer_aten = False
+    if use_aten_gemm_kernels():
+        multiple_of_16 = [sympy.Eq(sympy.Mod(dim, 16), 0) for dim in (n, k)]
+        offer_aten = all(V.graph.sizevars.guard_or_false(e) for e in multiple_of_16)
+        if not offer_aten and all(
+            V.graph.sizevars.guard_or_true(e) for e in multiple_of_16
+        ):
+            return None
+    name = "scaled_mm"
+    check_supported_striding(mat_a, mat_b)
+    # Every choice reads the packed scales as eager does, so autotuning times
+    # each one's full cost on the same inputs.
+    scale_a, scale_b = (ExternKernel.require_contiguous(s) for s in (scale_a, scale_b))
+    kernel_inputs = MMKernelInputs(
+        [mat_a, mat_b, scale_a, scale_b], mat1_idx=0, mat2_idx=1, out_dtype=out_dtype
+    )
+    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
+    kwarg_overrides: dict[str, dict[str, Any]] = {}
+    if offer_aten:
+        templates_to_use.append(aten__fp8_mm_v2)
+        kwarg_overrides[aten__fp8_mm_v2.uid] = dict(
+            recipe_a=recipe_a,
+            recipe_b=recipe_b,
+            swizzle_a=swizzle_a,
+            swizzle_b=swizzle_b,
+            out_dtype=out_dtype,
+            use_fast_accum=use_fast_accum,
+        )
+    # The software template rescales each K128 partial product in registers and
+    # takes any operands. The native template applies the scales in the tensor
+    # core (tcgen05 block-scaled MMA) but needs persistent TMA and 128-row tiles.
+    templates_to_use.append(main_loop_sw_scaled_mm_template)
+    if use_triton_blackwell_tma_template(
+        mat_a, mat_b, output_layout=layout, add_guards=True
+    ):
+        templates_to_use.append(blackwell_ws_persistent_tma_main_loop_scaling_template)
+    choices = V.choices.get_template_configs(
+        kernel_inputs, templates_to_use, name, kwarg_overrides=kwarg_overrides
+    )
+    if not choices:
+        return None
+    counters["aten_mm_info"][f"aten._scaled_mm_v2.default_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten._scaled_mm_v2.default: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat_a.get_dtype(),
+        mat_b.get_dtype(),
+        layout,
+    )
+    select_kwargs = {}
+    if offer_aten:
+        # The ATen choice builds a FallbackKernel, which needs the lowering
+        # context and adds two operations (the kernel and its MultiOutput), so
+        # the scheduler cannot finalize it as a deferred multi-template choice.
+        # Select during lowering instead.
+        # TODO: let the scheduler finalize FallbackKernel-based extern choices
+        # (the general _scaled_mm_v2 path offers the same aten__fp8_mm_v2), then
+        # drop this so the pick between cuBLASLt and Triton accounts for
+        # epilogue fusion as it does for mm.
+        select_kwargs["return_multi_template"] = False
+    node, _ = autotune_select_algorithm(
+        name, choices, kernel_inputs.nodes(), layout, **select_kwargs
+    )
+    return node
 
 
 @register_lowering(aten._scaled_mm_v2.default, type_promotion_kind=None)
@@ -1714,6 +1880,8 @@ def tuned_scaled_mm_v2(
     #     expresses MX/NVFP4, with NO_SWIZZLE)
     #   - multi-level scales (two-level NVFP4)
     #   - any non-fp32 block scale
+    # The exception is SM100 BlockWise1x128 with packed MN x K4 UE8M0 scales,
+    # which _tuned_blackwell_main_loop_scaled_mm handles when a template applies.
     # Call the eager v2 op directly to preserve its recipes and scale conventions.
     def fallback():
         # contraction_dim is a non-optional int[] in the schema (default []);
@@ -1742,6 +1910,32 @@ def tuned_scaled_mm_v2(
     supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
         recipe_b
     )
+    if _is_blackwell_main_loop_scaled_mm(
+        mat_a, mat_b, scale_a, recipe_a, swizzle_a, scale_b, recipe_b, swizzle_b
+    ) and (
+        not contraction_dim
+        or (
+            len(contraction_dim) == 2
+            and contraction_dim[0] in (1, -1)
+            and contraction_dim[1] in (0, -2)
+        )
+    ):
+        node = _tuned_blackwell_main_loop_scaled_mm(
+            mat_a,
+            mat_b,
+            scale_a[0],
+            scale_b[0],
+            bias,
+            out_dtype,
+            use_fast_accum,
+            layout,
+            recipe_a=recipe_a[0],
+            recipe_b=recipe_b[0],
+            swizzle_a=swizzle_a[0],
+            swizzle_b=swizzle_b[0],
+        )
+        if node is not None:
+            return node
     if (
         any(s != 0 for s in swizzle_a)
         or any(s != 0 for s in swizzle_b)
