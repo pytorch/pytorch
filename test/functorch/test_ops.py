@@ -945,6 +945,12 @@ class TestOperatorsDevice(TestCase):
             tol1("masked.cumprod", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("cumprod", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("linalg.vander", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+            # backward summation order depends on process-wide autograd sequence numbers
+            tol1(
+                "linalg.lstsq",
+                {torch.float32: tol(atol=1e-04, rtol=1e-05)},
+                device_type="xpu",
+            ),
         ),
     )
     def test_vjpvjp(self, device, dtype, op):
