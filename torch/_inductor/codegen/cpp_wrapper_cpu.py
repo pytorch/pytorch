@@ -178,7 +178,7 @@ class DeferredCpuTritonCallWrapper:
             "const std::optional<std::string>& cubin_dir_ = std::nullopt"
         )
 
-        prefix.writeline(f"static __attribute__((noinline)) void {self.wrapper_name}(")
+        prefix.writeline(f"static AOTI_NOINLINE void {self.wrapper_name}(")
         with prefix.indent():
             for i, param in enumerate(param_lines):
                 comma = "," if i < len(param_lines) - 1 else ""
@@ -1646,6 +1646,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
         prefix.writeline("#endif")
         prefix.writeline("#include <mutex>")
+        prefix.writeline("#include <torch/csrc/inductor/aoti_runtime/utils.h>")
         prefix.writeline(
             "#include <torch/csrc/inductor/aoti_runtime/cpu_triton_runtime_wrappers.h>"
         )
