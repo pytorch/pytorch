@@ -969,6 +969,8 @@ def save(
            os.PathLike object containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
+        _use_new_zipfile_serialization (bool, optional): If ``True``, use the
+            zipfile-based format. If ``False``, use the legacy format. Default: ``True``.
 
     .. note::
         A common PyTorch convention is to save tensors using .pt file extension.
@@ -979,9 +981,8 @@ def save(
 
     .. note::
         The 1.6 release of PyTorch switched ``torch.save`` to use a new
-        zipfile-based file format. ``torch.load`` still retains the ability to
-        load files in the old format. If for any reason you want ``torch.save``
-        to use the old format, pass the kwarg ``_use_new_zipfile_serialization=False``.
+        zipfile-based file format. ``torch.load`` can also read files saved in the
+        legacy format.
 
     Example:
         >>> # xdoctest: +SKIP("makes cwd dirty")
