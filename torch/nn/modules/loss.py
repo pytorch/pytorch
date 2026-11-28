@@ -1459,6 +1459,11 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             Computer Vision
             <https://arxiv.org/abs/1512.00567>`__.
             Default: :math:`0.0`.
+        logit_softcap (float, optional): If set to a positive value
+            :math:`c`, the logits are capped as
+            :math:`c \tanh(\text{logits} / c)` before the softmax.
+            See :func:`~torch.nn.functional.linear_cross_entropy`.
+            Default: ``None``.
         options (LinearCrossEntropyOptions, optional): Specify
             chunking strategy options, see
             :class:`~torch.nn.LinearCrossEntropyOptions`
@@ -1525,12 +1530,14 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         "reduction",
         "ignore_index",
         "label_smoothing",
+        "logit_softcap",
     ]
     num_classes: int
     out_features: tuple[int, ...]
     reduction: str
     ignore_index: int | None
     label_smoothing: float
+    logit_softcap: float | None
     options: LinearCrossEntropyOptions | None
 
     def __init__(
@@ -1546,6 +1553,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         weight: Tensor | None = None,
         ignore_index: int | None = None,
         label_smoothing: float = 0.0,
+        logit_softcap: float | None = None,
         options: LinearCrossEntropyOptions | None = None,
     ) -> None:
         if weight is not None and weight.shape != (num_classes,):
@@ -1563,6 +1571,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         self.out_features = out_features
         self.ignore_index = ignore_index
         self.label_smoothing = label_smoothing
+        self.logit_softcap = logit_softcap
         # Linear does not support multi-dimensional weights. To
         # circumvent this limitation, we store the linear weights as
         # two-dimensional weights and reshape it to multi-dimensional
@@ -1596,6 +1605,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             reduction=self.reduction,
             ignore_index=self.ignore_index,
             label_smoothing=self.label_smoothing,
+            logit_softcap=self.logit_softcap,
             options=self.options,
         )
 

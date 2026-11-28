@@ -468,6 +468,7 @@ def linear_cross_entropy(
     reduction: str = ...,
     ignore_index: int | None = ...,
     label_smoothing: float = ...,
+    logit_softcap: float | None = ...,
     options: LinearCrossEntropyOptions | None = ...,
 ) -> Tensor: ...
 
