@@ -6,6 +6,7 @@
 
 import contextlib
 import importlib
+import logging
 import os
 import sys
 import time
@@ -34,6 +35,7 @@ from torch.testing._internal.inductor_utils import (
     RUN_CPU,
     RUN_GPU,
 )
+from torch.testing._internal.logging_utils import logs_to_string
 
 
 if IS_WINDOWS and IS_CI:
@@ -270,6 +272,53 @@ class TestSubprocess(TestCase):
             self.assertGreater(_AsyncFxCompile._stat_eager_runs, 0)
             self.assertEqual(_AsyncFxCompile._stat_bg_started, 2)
             self.assertEqual(_AsyncFxCompile._stat_bg_finished, 2)
+
+    def test_artifact_logging_enabled_after_worker_start(self):
+        # Start the (reused) compile worker before enabling the artifacts so it
+        # can't pick them up from TORCH_LOGS at spawn time.
+        torch.compile(lambda x: x + 1)(torch.randn(4))
+
+        stream, ctx = logs_to_string("torch._inductor.compile_fx", "post_grad_graphs")
+        with ctx():
+            torch.compile(lambda x: x * 2)(torch.randn(4))
+        self.assertEqual(stream.getvalue().count("AFTER POST GRAD"), 1)
+
+        # ir_post_fusion is off by default, so enabling it also flips propagate.
+        stream, ctx = logs_to_string("torch._inductor.debug", "ir_post_fusion")
+        with ctx():
+            torch.compile(lambda x: x * 3)(torch.randn(4))
+        self.assertEqual(stream.getvalue().count("AFTER FUSION"), 1)
+
+    def test_logger_state_configures_child_only_artifact_loggers(self):
+        from torch._inductor.compile_fx_ext import _LoggerState
+        from torch._logging import _internal
+
+        parent_log_state = _internal.LogState()
+        parent_log_state.enable_artifact("fusion")
+        logger_state = _LoggerState()
+        logger_state.log_state = parent_log_state
+
+        # Created after the snapshot, like an artifact logger in a module that
+        # only the compile worker has imported.
+        module = "torch._inductor.test_compile_subprocess_child_only"
+        child_only = _internal.getArtifactLogger(module, "fusion")
+        self.assertFalse(child_only.propagate)
+
+        child_log_state = _internal._get_log_state()
+        with logger_state as captured_logs:
+            child_only.debug("child-only record")
+            # Created during the compile, like a module first imported then.
+            late = _internal.getArtifactLogger(module + "_late", "fusion")
+            late.debug("late record")
+        records = captured_logs.finish()
+
+        self.assertEqual(
+            [r.getMessage() for r in records], ["child-only record", "late record"]
+        )
+        self.assertIs(_internal._get_log_state(), child_log_state)
+        self.assertFalse(child_only.propagate)
+        self.assertFalse(late.propagate)
+        self.assertEqual(late.level, logging.NOTSET)
 
 
 if RUN_CPU:
