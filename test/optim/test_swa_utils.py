@@ -154,6 +154,32 @@ class TestSWAUtilsGeneric(TestCase):
             for b_avg, b_swa in zip(dnn.buffers(), averaged_dnn.module.buffers()):
                 self.assertEqual(b_avg, b_swa)
 
+    @parametrize(
+        "factory_name",
+        ["get_ema_multi_avg_fn", "get_ema_avg_fn"],
+    )
+    @parametrize(
+        "decay,should_raise",
+        [
+            (float("nan"), True),
+            (-0.1, True),
+            (1.5, True),
+            (0.0, False),
+            (0.5, False),
+            (1.0, False),
+        ],
+    )
+    def test_ema_avg_fn_validates_decay(self, factory_name, decay, should_raise):
+        factory = {
+            "get_ema_multi_avg_fn": get_ema_multi_avg_fn,
+            "get_ema_avg_fn": get_ema_avg_fn,
+        }[factory_name]
+        if should_raise:
+            with self.assertRaisesRegex(ValueError, "Invalid decay value"):
+                factory(decay=decay)
+        else:
+            factory(decay=decay)
+
     def test_bn_update_eval_momentum(self):
         objects = 100
         input_channels = 3
