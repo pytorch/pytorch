@@ -2079,8 +2079,8 @@ optim_db: list[OptimizerInfo] = [
         Muon,
         optim_inputs_func=optim_inputs_func_muon,
         optim_error_inputs_func=optim_error_inputs_func_muon,
-        supported_impls=(),
-        not_og_supported_flags=(),
+        supported_impls=("foreach",),
+        not_og_supported_flags=("foreach",),
         supports_complex=False,
         decorators=(
             # XPU backend kernels accumulate float32 rounding differently from CPU,
@@ -2103,6 +2103,13 @@ optim_db: list[OptimizerInfo] = [
                 ),
                 "CompiledOptimizerParityTests",
                 "test_correctness",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
             ),
         ),
     ),

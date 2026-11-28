@@ -9,7 +9,9 @@ import torch
 from torch import Tensor
 
 from .optimizer import (
+    _default_to_fused_or_foreach,
     _disable_dynamo_if_unsupported,
+    _foreach_doc,
     _functional_api_doc,
     _params_doc,
     _to_scalar,
@@ -29,8 +31,27 @@ DEFAULT_C = 2.0315
 DEFAULT_NS_STEPS = 5
 
 
+def _newtonschulz_iterations(
+    ortho_update: Tensor, ns_coefficients: tuple[float, float, float], ns_steps: int
+) -> Tensor:
+    a, b, c = ns_coefficients
+    tall = ortho_update.size(0) > ortho_update.size(1)
+    if tall:
+        ortho_update = ortho_update.T
+    for _ in range(ns_steps):
+        gram_matrix = ortho_update @ ortho_update.T
+        gram_update = torch.addmm(
+            gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
+        )
+        ortho_update = torch.addmm(ortho_update, gram_update, ortho_update, beta=a)
+    return ortho_update.T if tall else ortho_update
+
+
 def _zeropower_via_newtonschulz(
-    grad: Tensor, ns_coefficients: tuple[float, float, float], ns_steps: int, eps: float
+    update: Tensor,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
 ) -> Tensor:
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
@@ -44,31 +65,36 @@ def _zeropower_via_newtonschulz(
     Implementation reference: https://github.com/KellerJordan/Muon/blob/master/muon.py
     with suggestions by @jxbz, @leloykun, and @YouJiacheng.
     """
-    if ns_steps >= 100:
-        raise ValueError(
-            "Number of steps must be less than 100 for computational efficiency"
-        )
-    if len(grad.shape) != 2:
-        raise ValueError("Input tensor gradient must be a 2D matrix")
-    if len(ns_coefficients) != 3:
-        raise ValueError("Coefficients must be a tuple of exactly 3 values")
-    a, b, c = ns_coefficients
-    ortho_grad = grad.to(dtype=torch.bfloat16, copy=True)
-    if grad.size(0) > grad.size(1):
-        ortho_grad = ortho_grad.T
+    ortho_update = update.to(dtype=torch.bfloat16, copy=True)
     # Ensure spectral norm is at most 1
-    ortho_grad.div_(ortho_grad.norm().clamp(min=eps))
-    # Perform the NS iterations
-    for _ in range(ns_steps):
-        gram_matrix = ortho_grad @ ortho_grad.T
-        gram_update = torch.addmm(
-            gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
-        )
-        ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
+    ortho_update.div_(ortho_update.norm().clamp(min=eps))
+    return _newtonschulz_iterations(ortho_update, ns_coefficients, ns_steps)
 
-    if grad.size(0) > grad.size(1):
-        ortho_grad = ortho_grad.T
-    return ortho_grad
+
+def _multi_tensor_zeropower_via_newtonschulz(
+    updates: list[Tensor],
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+) -> list[Tensor]:
+    """
+    Multi-tensor version of :func:`_zeropower_via_newtonschulz`.
+
+    Some operations (e.g. the norm computation) are fused across tensors, but the
+    Newton-Schulz iterations run in a for loop: they are built on matmuls
+    (``mm`` / ``addmm``), which have no ``_foreach_*`` counterpart.
+
+    To keep the peak memory low, each entry of ``updates`` is replaced in place as
+    soon as its successor is computed, so that it can be freed.
+    """
+    for i, u in enumerate(updates):
+        updates[i] = u.to(torch.bfloat16, copy=True)
+    norms = torch._foreach_clamp_min(torch._foreach_norm(updates), eps)
+    torch._foreach_div_(updates, norms)
+    del norms
+    for i, u in enumerate(updates):
+        updates[i] = _newtonschulz_iterations(u, ns_coefficients, ns_steps)
+    return updates
 
 
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
@@ -99,6 +125,8 @@ class Muon(Optimizer):
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
         adjust_lr_fn: str | None = None,
+        *,
+        foreach: bool | None = None,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -126,6 +154,7 @@ class Muon(Optimizer):
             "eps": eps,
             "ns_steps": ns_steps,
             "adjust_lr_fn": adjust_lr_fn,
+            "foreach": foreach,
         }
         super().__init__(params, defaults)
 
@@ -135,6 +164,13 @@ class Muon(Optimizer):
                     raise ValueError(
                         f"Muon only supports 2D parameters whereas we found a parameter with size: {p.size()}"
                     )
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        # Backfill defaults for flags introduced after the original release so
+        # that state dicts saved by older versions of Muon load cleanly.
+        for group in self.param_groups:
+            group.setdefault("foreach", None)
 
     def _init_group(
         self,
@@ -193,6 +229,7 @@ class Muon(Optimizer):
                 params_with_grad,
                 grads,
                 muon_momentum_bufs,
+                foreach=group["foreach"],
                 lr=lr,
                 weight_decay=weight_decay,
                 momentum=momentum,
@@ -281,6 +318,7 @@ Muon.__doc__ = (
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original", "match_rms_adamw", and "spectral_unclamped".
             If not specified, we will default to use "original". (default: None)
+        {_foreach_doc}. The Newton-Schulz iterations still run per parameter.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -343,6 +381,8 @@ def _single_tensor_muon(
         buf = muon_momentum_bufs[i]
         buf.lerp_(grad, 1 - momentum)
         update = grad.lerp(buf, momentum) if nesterov else buf
+        if update.ndim != 2:
+            raise ValueError("Muon update must be a 2D matrix")
 
         update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
 
@@ -350,6 +390,54 @@ def _single_tensor_muon(
 
         param.mul_(1 - lr * weight_decay)
         param.add_(update, alpha=-adjusted_lr)
+
+
+def _multi_tensor_muon(
+    params: list[Tensor],
+    grads: list[Tensor],
+    muon_momentum_bufs: list[Tensor],
+    *,
+    lr: float,
+    weight_decay: float,
+    momentum: float,
+    nesterov: bool,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+    adjust_lr_fn: str | None,
+    has_complex: bool,
+) -> None:
+    lr = _to_scalar(lr)
+    if has_complex:
+        raise ValueError("Complex parameters are not supported")
+    if not params:
+        return
+    for g in grads:
+        if g.ndim != 2:
+            raise ValueError("Param gradient must be a 2D matrix")
+
+    torch._foreach_lerp_(muon_momentum_bufs, grads, 1 - momentum)
+    if nesterov:
+        updates = list(torch._foreach_lerp(grads, muon_momentum_bufs, momentum))
+    else:
+        updates = list(muon_momentum_bufs)
+
+    updates = _multi_tensor_zeropower_via_newtonschulz(
+        updates, ns_coefficients, ns_steps, eps
+    )
+
+    torch._foreach_mul_(params, 1 - lr * weight_decay)
+
+    # Group the add by shape: the adjusted lr depends on the shape, and
+    # _foreach_add_ takes a single alpha per call.
+    add_groups: dict[tuple[int, int], list[int]] = {}
+    for i, p in enumerate(params):
+        add_groups.setdefault((p.size(0), p.size(1)), []).append(i)
+    for indices in add_groups.values():
+        group_params = [params[i] for i in indices]
+        group_updates = [updates[i] for i in indices]
+        adjusted_lr = _adjust_lr(lr, adjust_lr_fn, group_params[0].shape)
+        torch._foreach_add_(group_params, group_updates, alpha=-adjusted_lr)
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_muon)
@@ -369,10 +457,22 @@ def muon(
     adjust_lr_fn: str | None,
     has_complex: bool,
 ) -> None:
-    if foreach is not None and foreach:
-        raise RuntimeError("Foreach is not supported for Muon yet")
+    if ns_steps >= 100:
+        raise ValueError(
+            "Number of steps must be less than 100 for computational efficiency"
+        )
+    if len(ns_coefficients) != 3:
+        raise ValueError("Coefficients must be a tuple of exactly 3 values")
 
-    func = _single_tensor_muon
+    if foreach is None:
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable=False, use_fused=False
+        )
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+
+    func = _multi_tensor_muon if foreach else _single_tensor_muon
 
     func(
         params,

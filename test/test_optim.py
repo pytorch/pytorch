@@ -886,14 +886,19 @@ class TestOptimRenewed(TestCase):
                 )
                 model.to(dtype=dtype, device=device)
 
-                # foreach/fused optimizers should be tested with a
-                # zero_size tensor as its last param.
-                # ref: https://github.com/pytorch/pytorch/issues/100701
-                empty_param = torch.empty(
-                    (), device=device, dtype=dtype, requires_grad=True
-                )
-                empty_param.grad = torch.rand_like(empty_param)
-                params = list(model.parameters()) + [empty_param]
+                if optim_cls.__name__ == "Muon":
+                    # Muon only accepts 2D parameters, so filter out the 1D
+                    # biases.
+                    params = [p for p in model.parameters() if p.ndim == 2]
+                else:
+                    # foreach/fused optimizers should be tested with a
+                    # zero_size tensor as its last param.
+                    # ref: https://github.com/pytorch/pytorch/issues/100701
+                    empty_param = torch.empty(
+                        (), device=device, dtype=dtype, requires_grad=True
+                    )
+                    empty_param.grad = torch.rand_like(empty_param)
+                    params = list(model.parameters()) + [empty_param]
 
                 optimizer = optim_cls(params, **kwargs)
                 if grad_scale is not None and flag_value:
@@ -1062,7 +1067,11 @@ class TestOptimRenewed(TestCase):
     @largeTensorTest("72GB")
     @serialTest()
     @optims(
-        [optim for optim in optim_db if "foreach" in optim.supported_impls],
+        [
+            optim
+            for optim in optim_db
+            if "foreach" in optim.supported_impls and optim.optim_cls.__name__ != "Muon"
+        ],
         dtypes=[torch.float16],
     )
     def test_foreach_large_tensor(self, device, dtype, optim_info):
@@ -1946,7 +1955,7 @@ class TestOptimRenewed(TestCase):
 
         def _get_model_and_input_tensor(device, dtype, optim_cls):
             if optim_cls.__name__ == "Muon":
-                # Muon only accepts 2D parameter.
+                # Muon only accepts 2D parameters.
                 model = torch.nn.Linear(10, 4, bias=False)
                 input = torch.rand(10, device=device, dtype=dtype)
             else:
@@ -2707,14 +2716,21 @@ class TestOptimRenewed(TestCase):
         from torch.optim import Adam, AdamW
 
         optim_cls = optim_info.optim_cls
-        model = torch.nn.Linear(5, 5)
+        model = torch.nn.Linear(5, 5, bias=optim_cls.__name__ != "Muon")
         model.to(dtype=dtype, device=device)
         inpt = torch.rand(2, 5, dtype=dtype, device=device)
 
         import inspect
 
-        # AdamW dispatches to superclass' adam
-        if optim_cls is AdamW:
+        if optim_cls.__name__ == "Muon":
+            # Muon.__module__ is overridden to torch.optim, so getmodule() would not
+            # find the implementation module.
+            import torch.optim._muon as muon_module
+
+            module = muon_module
+            module_name = "_multi_tensor_muon"
+        elif optim_cls is AdamW:
+            # AdamW dispatches to superclass' adam
             module = inspect.getmodule(Adam)
             module_name = "_multi_tensor_adam"
         else:
@@ -2970,8 +2986,9 @@ class TestOptimRenewed(TestCase):
 
     @dtypes(torch.float32, torch.bfloat16)
     @parametrize("nesterov", [False, True])
+    @parametrize("foreach", [False, True])
     def test_muon_orthogonalization_does_not_alias_momentum_buffer(
-        self, device, dtype, nesterov
+        self, device, dtype, nesterov, foreach
     ):
         momentum = 0.9
         param = Parameter(torch.zeros(8, 5, device=device, dtype=dtype))
@@ -2982,6 +2999,7 @@ class TestOptimRenewed(TestCase):
             weight_decay=0,
             momentum=momentum,
             nesterov=nesterov,
+            foreach=foreach,
         )
         expected = torch.zeros_like(param)
         expected.lerp_(param.grad, 1 - momentum)
