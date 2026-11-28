@@ -109,6 +109,7 @@ from torch.testing._internal.common_utils import (
     set_cwd,
     skipIfCachingAllocatorDisabled,
     skipIfCppFakeTensor,
+    skipIfRocmWindows,
     skipIfWindowsXPU,
     skipIfXpu,
     TEST_MPS,
@@ -888,6 +889,10 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(
         not HAS_GPU or GPU_TYPE != "cuda",
         "Pinned async constant copy is CUDA/ROCm-only",
+    )
+    @skipIfRocmWindows(
+        msg="the 10 s torch.cuda._sleep kernel never completes on the R9700 CI VMs, so "
+        "load_constants blocks in hipEventSynchronize forever"
     )
     @patch.dict(os.environ, {"AOTI_COPY_USE_PINNED_ASYNC": "1"})
     def test_constants_pinned_async_update_waits_for_queued_run(self):

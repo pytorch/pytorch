@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     isRocmArchAnyOf,
     MI200_ARCH,
+    NAVI4_ARCH,
     parametrize,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
@@ -692,8 +693,8 @@ if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
     # the remaining default-mode numerical difference.
     del ROCM_UNARY_NUMERICAL_XFAILS["inductor_numerics"]["log10"]
 
-if isRocmArchAnyOf(("gfx1151",)):
-    # #191552 comes from packed FP32 code, which gfx1151 does not have.
+if isRocmArchAnyOf(("gfx1151",) + NAVI4_ARCH):
+    # #191552 comes from packed FP32 code, which RDNA 3.5 and RDNA 4 do not have.
     del ROCM_BATCH_INVARIANCE_XFAILS["inductor_default"]["log1p"]
 
 
