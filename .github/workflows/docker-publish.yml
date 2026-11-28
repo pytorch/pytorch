@@ -1,0 +1,252 @@
+# Owner(s): ["module: ci"]
+# Builds and pushes the CI images for ciflow/docker PR runs.
+#
+# docker-builds runs the workflow file from the PR's commit, so the PR controls
+# it, and it no longer pushes for ciflow/docker. This workflow always runs from
+# main (workflow_run), and only it, main and release builds can push to
+# pytorch/ci-image. It takes nothing from the PR run but its commit SHA:
+#   - The tag is the .ci/docker tree hash at that commit, and the image is built
+#     from that tree, so tag T only ever holds a build of tree T. Main reuses it
+#     only once tree T has been reviewed and merged.
+#   - The PR's build.sh only runs in plan-only mode, offline, in a container
+#     with no credentials, on a job with no cloud access.
+#   - BuildKit fetches the commit itself (git context), so no PR file is on the
+#     runner that holds the push credentials.
+name: docker-publish
+
+on:
+  workflow_run:
+    workflows: [docker-builds]
+    types: [requested]
+
+permissions: {}
+
+env:
+  ECR_REPOSITORY: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image
+  GHCR_REPOSITORY: ghcr.io/pytorch/ci-image
+  HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+
+jobs:
+  plan:
+    if: >-
+      github.repository_owner == 'pytorch' &&
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_branch, 'ciflow/docker/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    outputs:
+      docker-tag: ${{ steps.plan.outputs.docker-tag }}
+      images: ${{ steps.plan.outputs.images }}
+    steps:
+      - name: Check the commit SHA
+        run: |
+          if [[ ! "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Not a commit SHA: ${HEAD_SHA}"
+            exit 1
+          fi
+
+      # Untrusted files: read them as data, and only run them in the sandbox below
+      - name: Check out the PR commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          persist-credentials: false
+          sparse-checkout: |
+            .ci/docker
+            .github/workflows/docker-builds.yml
+
+      - name: Plan the builds
+        id: plan
+        env:
+          # ubuntu:24.04, pinned so the sandbox can't change under us
+          SANDBOX_IMAGE: ubuntu@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b
+        run: |
+          set -euo pipefail
+          plan_dir="${RUNNER_TEMP}/plan"
+          mkdir -p "${plan_dir}"
+
+          # The image names in the PR's docker-builds matrix
+          mapfile -t images < <(
+            yq -r '.jobs."docker-build".strategy.matrix
+              | ((."docker-image-name" // []) + [(.include // [])[]."docker-image-name"])
+              | .[]' .github/workflows/docker-builds.yml | sort -u
+          )
+          for image in "${images[@]}"; do
+            if [[ ! "${image}" =~ ^pytorch-linux-[a-z0-9.-]+$ ]]; then
+              echo "::error::Bad image name: ${image}"
+              exit 1
+            fi
+            # No network, no credentials, read-only source: the PR's build.sh
+            # can only write the plan file
+            timeout 120 docker run --rm --network none --read-only \
+              --cap-drop ALL --security-opt no-new-privileges \
+              --pids-limit 256 --memory 1g \
+              --user "$(id -u):$(id -g)" \
+              -e BUILD_PLAN_FILE="/out/${image}" \
+              -v "${PWD}:/src:ro" -v "${plan_dir}:/out" -w /src/.ci/docker \
+              "${SANDBOX_IMAGE}" ./build.sh "${image}" > /dev/null
+          done
+
+          echo "docker-tag=$(git rev-parse HEAD:.ci/docker)" >> "${GITHUB_OUTPUT}"
+          python3 - "${plan_dir}" "${images[@]}" <<'EOF'
+          import json, os, re, sys
+
+          # A plan is untrusted: accept only what a docker build needs
+          ARG = re.compile(r"[A-Z][A-Z0-9_]*=[A-Za-z0-9._:/+=@,~-]*")
+          plan_dir, images = sys.argv[1], sys.argv[2:]
+          out = []
+          for image in images:
+              path = os.path.join(plan_dir, image)
+              if not os.path.isfile(path):
+                  continue  # build.sh builds nothing for this image, e.g. xla
+              if os.path.getsize(path) > 65536:
+                  sys.exit(f"{image}: plan too large")
+              plan = {"dockerfile": None, "platform": None, "args": []}
+              for line in open(path):
+                  key, _, value = line.rstrip("\n").partition("=")
+                  if key == "dockerfile" and re.fullmatch(r"[a-z0-9-]+/Dockerfile", value):
+                      plan["dockerfile"] = value
+                  elif key == "platform" and value in ("", "linux/riscv64"):
+                      plan["platform"] = value
+                  elif key == "build-arg" and ARG.fullmatch(value) and not value.startswith("BUILDKIT_"):
+                      plan["args"].append(value)
+                  else:
+                      sys.exit(f"{image}: bad plan line {line!r}")
+              if plan["dockerfile"] is None or plan["platform"] is None:
+                  sys.exit(f"{image}: incomplete plan")
+              out.append({
+                  "image": image,
+                  "arch": "arm64" if "aarch64" in image else "amd64",
+                  "dockerfile": plan["dockerfile"],
+                  "platform": plan["platform"],
+                  "build-args": " ".join(plan["args"]),
+              })
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"images={json.dumps(out)}\n")
+          EOF
+
+  publish:
+    needs: plan
+    if: needs.plan.outputs.images != '[]'
+    runs-on: ${{ matrix.arch == 'arm64' && 'mt-l-arm64g4-16-62' || 'mt-l-x86iavx512-8-64' }}
+    container:
+      image: ghcr.io/actions/actions-runner:latest
+    # Only this workflow (always from main) can use the environment, and so the
+    # push role and GHCR_PAT
+    environment: docker-publish
+    permissions:
+      id-token: write
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.images) }}
+    env:
+      IMAGE: ${{ matrix.image }}
+      DOCKER_TAG: ${{ needs.plan.outputs.docker-tag }}
+      DOCKERFILE: ${{ matrix.dockerfile }}
+      PLATFORM: ${{ matrix.platform }}
+      BUILD_ARGS: ${{ matrix.build-args }}
+      BUILDKIT_ADDR: tcp://buildkitd-${{ matrix.arch }}.buildkit:1234
+    steps:
+      # Re-check the plan here: this job holds the credentials
+      - name: Check the plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${DOCKER_TAG}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${IMAGE}" =~ ^pytorch-linux-[a-z0-9.-]+$ ]]
+          [[ "${DOCKERFILE}" =~ ^[a-z0-9-]+/Dockerfile$ ]]
+          [[ -z "${PLATFORM}" || "${PLATFORM}" == "linux/riscv64" ]]
+          read -ra args <<< "${BUILD_ARGS}"
+          for arg in "${args[@]}"; do
+            [[ "${arg}" =~ ^[A-Z][A-Z0-9_]*=[A-Za-z0-9._:/+=@,~-]*$ && "${arg}" != BUILDKIT_* ]]
+          done
+
+      - name: Login to ECR
+        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        with:
+          aws-role-to-assume: arn:aws:iam::308535385114:role/ci-image-publish
+
+      - name: Login to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: pytorch
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Set up Docker Buildx (remote, no bootstrap)
+        shell: bash
+        run: docker buildx create --name remote-buildkit --driver remote --use "${BUILDKIT_ADDR}"
+
+      # Same as docker-builds: never rebuild a tag in place
+      - name: Check whether the image already exists
+        id: exists
+        shell: bash
+        run: |
+          target="${ECR_REPOSITORY}:${IMAGE}-${DOCKER_TAG}"
+          for attempt in 1 2 3; do
+            if err=$(docker buildx imagetools inspect "${target}" 2>&1 > /dev/null); then
+              echo "exists=true" >> "${GITHUB_OUTPUT}"
+              echo "::notice::${target} already exists, not rebuilding it"
+              exit 0
+            fi
+            if grep -qiE 'not found|manifest unknown' <<< "${err}"; then
+              exit 0
+            fi
+            echo "${err}" >&2
+            if (( attempt < 3 )); then
+              sleep $((attempt * 15))
+            fi
+          done
+          echo "::error::Could not tell whether ${target} exists, so not rebuilding it in place"
+          exit 1
+
+      - name: Build and push to ECR
+        if: steps.exists.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -ra args <<< "${BUILD_ARGS}"
+          buildx_args=()
+          for arg in "${args[@]}"; do
+            buildx_args+=(--build-arg "${arg}")
+          done
+          platform=()
+          if [[ -n "${PLATFORM}" ]]; then
+            platform=(--platform "${PLATFORM}")
+          fi
+          target="${ECR_REPOSITORY}:${IMAGE}-${DOCKER_TAG}"
+          cache_ref="${ECR_REPOSITORY}:${IMAGE}-buildcache"
+          # BuildKit fetches .ci/docker at the commit itself
+          context="https://github.com/pytorch/pytorch.git#${HEAD_SHA}:.ci/docker"
+
+          # As in build.sh: wait out a cold or full BuildKit pool, but fail
+          # on build errors
+          for attempt in $(seq 1 360); do
+            if docker buildx build --progress=plain \
+                "${platform[@]}" "${buildx_args[@]}" \
+                -f "${DOCKERFILE}" \
+                --cache-from "type=registry,ref=${cache_ref}" \
+                --cache-to "type=registry,ref=${cache_ref},mode=max,image-manifest=true,oci-mediatypes=true" \
+                --push --provenance=false -t "${target}" \
+                "${context}" 2>&1 | tee build.log; then
+              exit 0
+            fi
+            if ! grep -qiE "waiting for connection|context deadline exceeded|server preface|failed to (dial|list workers)|connection (refused|reset)|no such host|transport: Error|i/o timeout|use of closed network connection|EOF" build.log; then
+              exit 1
+            fi
+            echo "Remote BuildKit not ready yet (attempt ${attempt}); retrying in 15s..." >&2
+            sleep 15
+          done
+          exit 1
+
+      - name: Mirror image to GHCR
+        shell: bash
+        run: |
+          docker buildx imagetools create \
+            -t "${GHCR_REPOSITORY}:${IMAGE}-${DOCKER_TAG}" \
+            "${ECR_REPOSITORY}:${IMAGE}-${DOCKER_TAG}"

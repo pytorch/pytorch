@@ -6,7 +6,8 @@
 
 set -ex
 
-TOPDIR=$(git rev-parse --show-toplevel)
+# build.sh is at .ci/docker; no git here, so the plan-only mode runs without it
+TOPDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
 image="$1"
 shift
@@ -428,50 +429,70 @@ if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
   fi
 fi
 
+# The image's build arguments, as `--build-arg KEY=VALUE` pairs
+build_args=(
+  --build-arg "BUILD_ENVIRONMENT=${image}"
+  --build-arg "LLVMDEV=${LLVMDEV:-}"
+  --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}"
+  --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}"
+  --build-arg "GLIBC_VERSION=${GLIBC_VERSION}"
+  --build-arg "CLANG_VERSION=${CLANG_VERSION}"
+  --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}"
+  --build-arg "PYTHON_FREETHREADED=${PYTHON_FREETHREADED}"
+  --build-arg "PYTHON_VERSION=${PYTHON_VERSION}"
+  --build-arg "GCC_VERSION=${GCC_VERSION}"
+  --build-arg "CUDA_VERSION=${CUDA_VERSION}"
+  --build-arg "KATEX=${KATEX:-}"
+  --build-arg "ROCM_VERSION=${ROCM_VERSION:-}"
+  --build-arg "THEROCK_INDEX_URL=${THEROCK_INDEX_URL:-}"
+  --build-arg "USE_MSLK=${USE_MSLK:-}"
+  --build-arg "IMAGE_NAME=${IMAGE_NAME}"
+  --build-arg "TRITON=${TRITON}"
+  --build-arg "TRITON_CPU=${TRITON_CPU}"
+  --build-arg "ONNX=${ONNX}"
+  --build-arg "TVM=${TVM}"
+  --build-arg "DOCS=${DOCS}"
+  --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}"
+  --build-arg "EXECUTORCH=${EXECUTORCH}"
+  --build-arg "HALIDE=${HALIDE}"
+  --build-arg "PALLAS=${PALLAS}"
+  --build-arg "TPU=${TPU}"
+  --build-arg "TSAN=${TSAN}"
+  --build-arg "XPU_VERSION=${XPU_VERSION}"
+  --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}"
+  --build-arg "OMIX_VERSION=${OMIX_VERSION}"
+  --build-arg "ACL=${ACL:-}"
+  --build-arg "OPENBLAS=${OPENBLAS:-}"
+  --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}"
+  --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}"
+  --build-arg "CUPTI_PYTHON=${CUPTI_PYTHON:-}"
+  --build-arg "PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL:-}"
+  --build-arg "PIP_PREFER_BINARY=${PIP_PREFER_BINARY:-}"
+)
+dockerfile="$(dirname "${DOCKERFILE}")/Dockerfile"
+
+# Plan-only mode: write what to build instead of building it. The trusted
+# docker-publish workflow runs this, with no network or credentials, on a
+# commit it may not trust, then builds the image itself from the plan.
+if [[ -n "${BUILD_PLAN_FILE:-}" ]]; then
+  {
+    echo "dockerfile=${dockerfile}"
+    echo "platform=${platform_flag#--platform }"
+    for ((i = 1; i < ${#build_args[@]}; i += 2)); do
+      echo "build-arg=${build_args[i]}"
+    done
+  } > "${BUILD_PLAN_FILE}"
+  exit 0
+fi
+
 # Build image
 build_image() {
   docker buildx build \
        ${progress_flag} \
        ${platform_flag:-} \
        ${cache_flag} \
-       --build-arg "BUILD_ENVIRONMENT=${image}" \
-       --build-arg "LLVMDEV=${LLVMDEV:-}" \
-       --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
-       --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
-       --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
-       --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
-       --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
-       --build-arg "PYTHON_FREETHREADED=${PYTHON_FREETHREADED}" \
-       --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
-       --build-arg "GCC_VERSION=${GCC_VERSION}" \
-       --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
-       --build-arg "KATEX=${KATEX:-}" \
-       --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "THEROCK_INDEX_URL=${THEROCK_INDEX_URL:-}" \
-       --build-arg "USE_MSLK=${USE_MSLK:-}" \
-       --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
-       --build-arg "TRITON=${TRITON}" \
-       --build-arg "TRITON_CPU=${TRITON_CPU}" \
-       --build-arg "ONNX=${ONNX}" \
-       --build-arg "TVM=${TVM}" \
-       --build-arg "DOCS=${DOCS}" \
-       --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
-       --build-arg "EXECUTORCH=${EXECUTORCH}" \
-       --build-arg "HALIDE=${HALIDE}" \
-       --build-arg "PALLAS=${PALLAS}" \
-       --build-arg "TPU=${TPU}" \
-       --build-arg "TSAN=${TSAN}" \
-       --build-arg "XPU_VERSION=${XPU_VERSION}" \
-       --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
-       --build-arg "OMIX_VERSION=${OMIX_VERSION}" \
-       --build-arg "ACL=${ACL:-}" \
-       --build-arg "OPENBLAS=${OPENBLAS:-}" \
-       --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
-       --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
-       --build-arg "CUPTI_PYTHON=${CUPTI_PYTHON:-}" \
-       --build-arg "PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL:-}" \
-       --build-arg "PIP_PREFER_BINARY=${PIP_PREFER_BINARY:-}" \
-       -f $(dirname ${DOCKERFILE})/Dockerfile \
+       "${build_args[@]}" \
+       -f "${dockerfile}" \
        ${output_flag} \
        "$@" \
        .
