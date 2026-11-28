@@ -93,6 +93,7 @@ from .schemas import (
     CacheableAOTConfig,
     ViewAndMutationMeta,
 )
+from .utils import resolve_compiled_graph_wrapper
 
 
 _CanonicalSetMetadata = collections.namedtuple(
@@ -1242,9 +1243,14 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             cache_key, debug_lines = autograd_cache_key(
                 mod, args, aot_config, compiler_config_extra, act_input_paths
             )
-            result = AOTAutogradCache._lookup(
-                cache_key, local, remote, args, cache_info, aot_config
-            )
+            if resolve_compiled_graph_wrapper() is None:
+                result = AOTAutogradCache._lookup(
+                    cache_key, local, remote, args, cache_info, aot_config
+                )
+            else:
+                cache_info["cache_status_detailed"] = (
+                    "skipped: compiled_graph_wrapper is set"
+                )
         except Exception as e:
             record_bypass(e)
 
@@ -1260,6 +1266,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             (entry, pickled_content) = result
             try:
                 fx_config = create_fx_config(compiler_config_extra, compile_region_name)
+                if compiler_config_extra is not None:
+                    fx_config["graph_id"] = compiler_config_extra.graph_id
                 compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                 # Make the compiled_fn serializable, where the serialize function just
                 # makes a copy of the original entry before post compile via the pickled content
