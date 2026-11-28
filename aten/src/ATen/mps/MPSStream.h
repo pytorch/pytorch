@@ -7,7 +7,10 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include <ATen/mps/MPSDevice.h>
 #include <c10/core/DeviceGuard.h>
@@ -30,6 +33,7 @@ typedef id<MTLComputeCommandEncoder> MTLComputeCommandEncoder_t;
 typedef id<MTLSharedEvent> MTLSharedEvent_t;
 typedef id<MTLDevice> MTLDevice_t;
 typedef id<MTLBuffer> MTLBuffer_t;
+@class MPSRecordingEncoder;
 #else
 #include <dispatch/dispatch.h>
 typedef void* MPSCommandBuffer_t;
@@ -120,6 +124,82 @@ class TORCH_API MPSStream {
     _hasWorkSinceQuerySignal = true;
   }
 
+  // Graph capture (torch.accelerator.Graph, see MetalGraphImpl.mm): while a
+  // capture records, ops run as usual and every Metal kernel dispatch and blit
+  // on this stream is also recorded. replay() re-encodes the recorded steps
+  // against the same buffers on the stream it is called on.
+  struct CapturedMetalKernel {
+    void* pso = nullptr; // id<MTLComputePipelineState>, retained
+    struct BufferBinding {
+      void* buffer; // id<MTLBuffer>
+      size_t offset;
+      unsigned index;
+    };
+    struct BytesBinding {
+      std::vector<uint8_t> data;
+      unsigned index;
+    };
+    struct ThreadgroupMemoryBinding {
+      size_t length;
+      unsigned index;
+    };
+    // useResource:usage: declares a resource accessed only indirectly (e.g. via
+    // a raw GPU address embedded in an argument buffer) so Metal can track it
+    // for residency/hazards; it is not implied by setBuffer/setBytes, so it
+    // must be captured and reissued separately on replay.
+    struct ResourceUsage {
+      void* resource; // id<MTLResource>, retained
+      unsigned long usage; // MTLResourceUsage bitmask
+    };
+    std::vector<BufferBinding> buffers;
+    std::vector<BytesBinding> bytes;
+    std::vector<ThreadgroupMemoryBinding> threadgroupMemory;
+    std::vector<ResourceUsage> resourceUsages;
+    uint64_t gridX = 0, gridY = 0, gridZ = 0;
+    uint64_t tgX = 0, tgY = 0, tgZ = 0;
+    bool useThreadgroups = false; // true = dispatchThreadgroups, false = dispatchThreads
+  };
+  // A Metal kernel dispatch, or a buffer-to-buffer blit if metalKernel is null.
+  struct CapturedStep {
+    std::unique_ptr<CapturedMetalKernel> metalKernel;
+    void* blitSrc = nullptr; // id<MTLBuffer>, retained
+    void* blitDst = nullptr; // id<MTLBuffer>, retained
+    size_t blitLength = 0;
+    size_t blitSrcOffset = 0;
+    size_t blitDstOffset = 0;
+  };
+  // The recorded steps, plus every MTLBuffer they re-bind on replay, retained
+  // and pinned in the allocator until releaseCapture().
+  struct Capture {
+    std::vector<CapturedStep> steps;
+    std::vector<const void*> boundBuffers; // id<MTLBuffer>
+  };
+
+  // Starts recording and returns the capture's id, unique across streams.
+  uint64_t captureBegin();
+  // Stops recording `captureId`, which must be the capture this stream records.
+  Capture captureEnd(uint64_t captureId);
+  void replay(const Capture& capture);
+  static void releaseCapture(Capture& capture);
+
+  // The id of the capture being recorded, 0 if none.
+  uint64_t activeCaptureId() const {
+    return _activeCaptureId.load(std::memory_order_acquire);
+  }
+  bool captureMode() const {
+    return activeCaptureId() != 0;
+  }
+
+  // Called by MPSRecordingEncoder to push a finalized Metal kernel recording.
+  void pushCapturedMetalKernel(std::unique_ptr<CapturedMetalKernel> kernel);
+
+  // Retains an MTLBuffer that the capture being recorded will re-bind on
+  // replay and pins it in the allocator, so that once its tensor is freed it is
+  // not handed to an unrelated tensor whose data replay would then read. No-op
+  // when nothing is recording. Called for every buffer MPSRecordingEncoder binds
+  // or declares with useResource, every recorded blit, and get_tensor_gpu_address().
+  void captureNoteBuffer(MTLBuffer_t buffer);
+
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const {
     return _stream.device_index();
@@ -171,6 +251,22 @@ class TORCH_API MPSStream {
   std::mutex _commandBufferErrorMutex;
   std::optional<CommandBufferError> _commandBufferError;
 
+  std::atomic<uint64_t> _activeCaptureId{0};
+  // The capture being recorded. Queue-confined.
+  Capture _recording;
+  // Buffers registered by captureNoteBuffer(), which get_tensor_gpu_address() may
+  // call from outside the serial queue, so it has its own lock. Moved into the Capture at captureEnd().
+  std::mutex _notedBuffersMutex;
+  std::unordered_set<const void*> _notedBuffers;
+  // Sets _activeCaptureId, keeping the process-global recording count that
+  // isAnyStreamCapturing() reads in sync. 0 stops recording. Queue-confined.
+  void setActiveCaptureId(uint64_t id);
+#ifdef __OBJC__
+  MPSRecordingEncoder* _recordingEncoder = nil;
+#else
+  void* _recordingEncoder = nullptr;
+#endif
+
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();
   void commitAndWait();
@@ -198,6 +294,27 @@ TORCH_API void setCurrentMPSStream(MPSStream* stream);
  * Get the default MPS stream
  */
 TORCH_API MPSStream* getDefaultMPSStream();
+
+/**
+ * True if any MPS stream is currently recording a graph capture. Reading it
+ * never creates a stream, so unlike `getCurrentMPSStream()->captureMode()` it can
+ * be used as a probe before MPS has been initialized. No stream can be recording
+ * unless one already exists, so a false result is authoritative.
+ */
+TORCH_API bool isAnyStreamCapturing();
+
+/**
+ * True if the current stream is recording a graph capture.
+ */
+TORCH_API bool isCurrentStreamCapturing();
+
+/**
+ * Raises if the current stream is recording a graph capture. For work that
+ * replay cannot reproduce (CPU fallbacks, MPSGraph and MPS-framework kernels that
+ * bypass MPSRecordingEncoder, RNG); `attempt` names it, as in
+ * at::cuda::assertNotCapturing.
+ */
+TORCH_API void assertNotCapturing(std::string_view attempt);
 
 /**
  * Get a stream from the pool. There are 32 streams in the pool which live for

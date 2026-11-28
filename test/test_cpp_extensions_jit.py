@@ -1754,6 +1754,21 @@ class TestCppExtensionJITMPS(_TestCppExtensionJITBase):
         module.mps_add_one_new_context(mps_output)
         self.assertEqual(cpu_output + 1.0, mps_output.to("cpu"))
 
+        # Work encoded on torch::mps::get_command_buffer() bypasses graph capture
+        # recording, so a capture must reject it rather than drop it on replay.
+        with self.assertRaisesRegex(RuntimeError, "get_dispatch_queue"):
+            with torch.accelerator.Graph():
+                module.mps_add_one_new_context(mps_output)
+        self.assertEqual(cpu_output + 1.0, mps_output.to("cpu"))
+
+        # An encoder call that capture does not record must raise, not be dropped.
+        with self.assertRaisesRegex(
+            RuntimeError, "memoryBarrierWithScope: is not one of them"
+        ):
+            with torch.accelerator.Graph():
+                module.mps_add_one_after_barrier(mps_output)
+        self.assertEqual(cpu_output + 1.0, mps_output.to("cpu"))
+
 
 @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
 @torch.testing._internal.common_utils.markDynamoStrictTest

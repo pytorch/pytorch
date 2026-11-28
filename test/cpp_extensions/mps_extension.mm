@@ -78,8 +78,24 @@ void mps_add_one_new_encoder(const at::Tensor& input) {
   }
 }
 
+// Encodes on the stream's encoder with a call graph capture does not record, so
+// a capture must raise instead of dropping it from replay.
+void mps_add_one_after_barrier(const at::Tensor& input) {
+  using namespace at::native::mps;
+  auto kernelPSO = lib.getPipelineStateForFunc("add_one");
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+    [computeEncoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
+    [computeEncoder setComputePipelineState:kernelPSO];
+    mtl_setArgs(computeEncoder, input);
+    mtl_dispatch1DJob(computeEncoder, kernelPSO, input.numel());
+  });
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("get_cpu_add_output", &get_cpu_add_output);
   m.def("get_mps_add_output", &get_mps_add_output);
   m.def("mps_add_one_new_context", &mps_add_one_new_encoder);
+  m.def("mps_add_one_after_barrier", &mps_add_one_after_barrier);
 }

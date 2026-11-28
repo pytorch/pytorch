@@ -2,6 +2,7 @@
 
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#import <ATen/mps/MPSRecordingEncoder.h>
 #include <ATen/mps/MPSStream.h>
 #include <c10/metal/error.h>
 #include <c10/util/CallOnce.h>
@@ -42,6 +43,28 @@ bool commandBufferFailed(id<MTLCommandBuffer> cb, bool& is_oom, int32_t& code, s
 //-----------------------------------------------------------------
 //  MPSStream
 //-----------------------------------------------------------------
+
+namespace {
+// Number of streams currently recording a capture. Lets isAnyStreamCapturing()
+// answer without touching (and thereby creating) a stream.
+std::atomic<int> recording_stream_count{0};
+// Process-wide, so a capture id names its capture across streams.
+std::atomic<uint64_t> next_capture_id{1};
+} // namespace
+
+bool isAnyStreamCapturing() {
+  return recording_stream_count.load(std::memory_order_acquire) != 0;
+}
+
+bool isCurrentStreamCapturing() {
+  return isAnyStreamCapturing() && getCurrentMPSStream()->captureMode();
+}
+
+void assertNotCapturing(std::string_view attempt) {
+  TORCH_CHECK(!isCurrentStreamCapturing(),
+              attempt,
+              " during MPS graph capture: replay could not reproduce it. Run it outside the capture.");
+}
 
 MPSStream::MPSStream(Stream stream) : _stream(stream) {
   _queryEvent = [MPSDevice::getInstance()->device() newSharedEvent];
@@ -101,6 +124,12 @@ id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
   ++_kernelsSinceCommit;
   markWorkEncoded();
 
+  if (_activeCaptureId.load(std::memory_order_acquire) != 0) {
+    if (!_recordingEncoder) {
+      _recordingEncoder = [[MPSRecordingEncoder alloc] initWithEncoder:_commandEncoder stream:this];
+    }
+    return (id<MTLComputeCommandEncoder>)_recordingEncoder;
+  }
   return _commandEncoder;
 }
 
@@ -193,6 +222,9 @@ void MPSStream::endKernelCoalescing() {
     [_commandEncoder endEncoding];
     [_commandEncoder release];
     _commandEncoder = nil;
+    // Recording encoder wraps the now-stale inner encoder; release it.
+    [_recordingEncoder release];
+    _recordingEncoder = nil;
   }
 }
 
@@ -310,6 +342,22 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
       }
       [blitEncoder endEncoding];
 
+      // Blits bypass the recording encoder, so record them here. Buffers are
+      // retained here and released in releaseCapture().
+      if (captureMode()) {
+        CapturedStep step;
+        step.blitSrc = (__bridge void*)srcBuffer;
+        step.blitDst = (__bridge void*)dstBuffer;
+        [srcBuffer retain];
+        [dstBuffer retain];
+        step.blitLength = length;
+        step.blitSrcOffset = srcOffset;
+        step.blitDstOffset = dstOffset;
+        _recording.steps.push_back(std::move(step));
+        captureNoteBuffer(srcBuffer);
+        captureNoteBuffer(dstBuffer);
+      }
+
       // profilerId has a value only if copy profiling is enabled
       if (profileId) {
         getMPSProfiler().endProfileCopy(profileId, syncType, this);
@@ -337,6 +385,10 @@ void MPSStream::copy_and_sync(id<MTLBuffer> srcBuffer,
 }
 
 void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType) {
+  // A capture records Metal kernels only.
+  TORCH_CHECK(!captureMode(),
+              "An op implemented with MPSGraph during MPS graph capture: replay could not reproduce it. ",
+              "Run it outside the capture.");
   auto& profiler = getMPSProfiler();
   const bool isGraphProfilingEnabled = profiler.isOperationProfilingEnabled();
 
@@ -373,6 +425,196 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
 
 id<MTLBuffer> MPSStream::getErrorBuffer() {
   return _errorBuffer;
+}
+
+void MPSStream::setActiveCaptureId(uint64_t id) {
+  const bool wasRecording = _activeCaptureId.load(std::memory_order_relaxed) != 0;
+  const bool isRecording = id != 0;
+  // Publish the transition in the order that keeps the count a safe over-
+  // approximation: a reader must never see count == 0 while a stream is still
+  // recording, or it would skip the per-stream check and report "not capturing".
+  if (isRecording && !wasRecording) {
+    recording_stream_count.fetch_add(1, std::memory_order_release);
+  }
+  _activeCaptureId.store(id, std::memory_order_release);
+  if (!isRecording && wasRecording) {
+    recording_stream_count.fetch_sub(1, std::memory_order_release);
+  }
+}
+
+void MPSStream::captureNoteBuffer(id<MTLBuffer> buffer) {
+  if (!buffer || !captureMode()) {
+    return;
+  }
+  const void* ptr = (__bridge const void*)buffer;
+  std::lock_guard<std::mutex> lock(_notedBuffersMutex);
+  // Re-check under the lock: captureEnd() drains this set, and an op may still
+  // be wrapping buffers as the capture ends.
+  if (!captureMode()) {
+    return;
+  }
+  if (_notedBuffers.insert(ptr).second) {
+    [buffer retain];
+    getIMPSAllocator()->pinBufferForCapture(ptr);
+  }
+}
+
+uint64_t MPSStream::captureBegin() {
+  __block uint64_t captureId = 0;
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
+    // Checked inside the queue, so two simultaneous callers cannot both pass.
+    TORCH_CHECK(!getMPSProfiler().isOperationProfilingEnabled(),
+                "MPS graph capture requires MPSProfiler operation profiling to be disabled.");
+    TORCH_CHECK(!captureMode(), "MPS graph capture already in progress on this stream");
+    captureId = next_capture_id.fetch_add(1, std::memory_order_relaxed);
+    // Start on a fresh encoder: encoder bindings are sticky, so recording into
+    // one that pre-capture ops already bound would let a captured kernel inherit
+    // state that was never recorded and so is absent on replay.
+    endKernelCoalescing();
+    setActiveCaptureId(captureId);
+  });
+  return captureId;
+}
+
+MPSStream::Capture MPSStream::captureEnd(uint64_t captureId) {
+  Capture capture;
+  Capture* ended = &capture;
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
+    TORCH_CHECK(activeCaptureId() == captureId, "capture ", captureId, " is not the one recording on this stream");
+    setActiveCaptureId(0);
+    // Close the encoder the capture recorded into, so later ops do not encode
+    // against inherited capture state.
+    endKernelCoalescing();
+    *ended = std::move(_recording);
+    _recording = Capture();
+    // Drained after clearing the active id, so a late registration cannot land
+    // in the set after it has been moved.
+    std::lock_guard<std::mutex> lock(_notedBuffersMutex);
+    ended->boundBuffers.assign(_notedBuffers.begin(), _notedBuffers.end());
+    _notedBuffers.clear();
+  });
+  return capture;
+}
+
+void MPSStream::releaseCapture(Capture& capture) {
+  for (auto& step : capture.steps) {
+    if (!step.metalKernel) {
+      [(__bridge id<MTLBuffer>)step.blitSrc release];
+      [(__bridge id<MTLBuffer>)step.blitDst release];
+      continue;
+    }
+    for (auto& b : step.metalKernel->buffers) {
+      [(__bridge id<MTLBuffer>)b.buffer release];
+    }
+    for (auto& r : step.metalKernel->resourceUsages) {
+      [(__bridge id<MTLResource>)r.resource release];
+    }
+    [(__bridge id<MTLComputePipelineState>)step.metalKernel->pso release];
+  }
+  for (const void* ptr : capture.boundBuffers) {
+    getIMPSAllocator()->unpinBufferForCapture(ptr);
+    [(__bridge id<MTLBuffer>)ptr release];
+  }
+  capture = Capture();
+}
+
+void MPSStream::pushCapturedMetalKernel(std::unique_ptr<CapturedMetalKernel> kernel) {
+  // The recording encoder is only driven from blocks on _serialQueue, which is
+  // what makes the unsynchronized _recording access below safe.
+  dispatch_assert_queue(_serialQueue);
+  TORCH_INTERNAL_ASSERT(captureMode(), "pushCapturedMetalKernel called outside capture mode");
+  for (const auto& b : kernel->buffers) {
+    captureNoteBuffer((__bridge id<MTLBuffer>)b.buffer);
+  }
+  // useResource: resources reach the kernel by raw GPU address (argument buffers
+  // in the fused optimizers, index tensors in advanced indexing) rather than
+  // through setBuffer, so they need the same reservation. Pinning something the
+  // allocator does not own is harmless: the pin key simply never matches.
+  for (const auto& r : kernel->resourceUsages) {
+    captureNoteBuffer((__bridge id<MTLBuffer>)r.resource);
+  }
+  CapturedStep step;
+  step.metalKernel = std::move(kernel);
+  _recording.steps.push_back(std::move(step));
+}
+
+void MPSStream::replay(const Capture& capture) {
+  const Capture* replayed = &capture;
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
+    if (replayed->steps.empty()) {
+      return;
+    }
+    endKernelCoalescing();
+    // A replay inside a capture on this stream must land in that capture. Kernel
+    // steps are recorded by the recording encoder as they dispatch; blits encode
+    // directly, so they are duplicated below. The outer capture re-executes this
+    // one's work, so it reserves the same buffers: this graph may be released first.
+    const bool recording = captureMode();
+    if (recording) {
+      for (const void* ptr : replayed->boundBuffers) {
+        captureNoteBuffer((__bridge id<MTLBuffer>)ptr);
+      }
+    }
+    for (const auto& step : replayed->steps) {
+      if (!step.metalKernel) {
+        endKernelCoalescing();
+        id<MTLBuffer> srcBuffer = (__bridge id<MTLBuffer>)step.blitSrc;
+        id<MTLBuffer> dstBuffer = (__bridge id<MTLBuffer>)step.blitDst;
+        id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
+        markWorkEncoded();
+        // Match the 2GB-chunked copy in MPSStream::copy (see #124335).
+        constexpr size_t max_copy_size = 0x80000000; // 2GB
+        size_t bytes_copied = 0;
+        size_t bytes_remains = step.blitLength;
+        while (bytes_remains > 0) {
+          NSUInteger bytes_to_copy = std::min(max_copy_size, bytes_remains);
+          [blitEncoder copyFromBuffer:srcBuffer
+                         sourceOffset:(NSUInteger)step.blitSrcOffset + bytes_copied
+                             toBuffer:dstBuffer
+                    destinationOffset:(NSUInteger)step.blitDstOffset + bytes_copied
+                                 size:bytes_to_copy];
+          bytes_copied += bytes_to_copy;
+          bytes_remains -= bytes_to_copy;
+        }
+        [blitEncoder endEncoding];
+        if (recording) {
+          CapturedStep dup;
+          dup.blitSrc = (__bridge void*)[srcBuffer retain];
+          dup.blitDst = (__bridge void*)[dstBuffer retain];
+          dup.blitLength = step.blitLength;
+          dup.blitSrcOffset = step.blitSrcOffset;
+          dup.blitDstOffset = step.blitDstOffset;
+          _recording.steps.push_back(std::move(dup));
+        }
+      } else {
+        const auto& mk = *step.metalKernel;
+        auto enc = commandEncoder();
+        [enc setComputePipelineState:(__bridge id<MTLComputePipelineState>)mk.pso];
+        for (const auto& b : mk.buffers) {
+          [enc setBuffer:(__bridge id<MTLBuffer>)b.buffer offset:b.offset atIndex:b.index];
+        }
+        for (const auto& b : mk.bytes) {
+          [enc setBytes:b.data.data() length:b.data.size() atIndex:b.index];
+        }
+        for (const auto& tm : mk.threadgroupMemory) {
+          [enc setThreadgroupMemoryLength:tm.length atIndex:tm.index];
+        }
+        for (const auto& r : mk.resourceUsages) {
+          [enc useResource:(__bridge id<MTLResource>)r.resource usage:(MTLResourceUsage)r.usage];
+        }
+        auto gridSize = MTLSizeMake(mk.gridX, mk.gridY, mk.gridZ);
+        auto tgSize = MTLSizeMake(mk.tgX, mk.tgY, mk.tgZ);
+        if (mk.useThreadgroups) {
+          [enc dispatchThreadgroups:gridSize threadsPerThreadgroup:tgSize];
+        } else {
+          [enc dispatchThreads:gridSize threadsPerThreadgroup:tgSize];
+        }
+      }
+      // As eager does after every op, so the GPU starts on the first steps while the rest are still being encoded.
+      commitIfNeeded();
+    }
+    synchronize(SyncType::COMMIT_ADAPTIVE);
+  });
 }
 
 void MPSStream::checkLastError() {

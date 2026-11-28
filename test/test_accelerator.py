@@ -7,7 +7,10 @@ import unittest
 from contextlib import nullcontext
 
 import torch
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_utils import (
     NoTest,
     run_tests,
@@ -339,6 +342,45 @@ class TestAccelerator(TestCase):
                     t = torch.empty(16, dtype=dtype, device=acc)
                     t = t.to(reference_dtype)
                     t = t.to(dtype)
+
+    @skipCUDAIf(True, "CUDA does not register a torch.accelerator.Graph backend yet")
+    def test_graph_replay_reads_updated_inputs(self, device):
+        x = torch.ones(1024, device=device)
+        s = torch.Stream()
+        g = torch.accelerator.Graph()
+        with s, g:
+            out = x * 2 + 1
+        torch.accelerator.current_stream().wait_stream(s)
+        for value in (2.0, 3.0):
+            x.fill_(value)
+            out.fill_(float("nan"))
+            g.replay()
+            self.assertEqual(out, torch.full_like(x, value * 2 + 1))
+
+    @skipCUDAIf(True, "CUDA does not register a torch.accelerator.Graph backend yet")
+    def test_graph_reset_then_recapture(self, device):
+        x = torch.ones(16, device=device)
+        g = torch.accelerator.Graph()
+        with g:
+            first = x + 1
+        g.reset()
+        with self.assertRaisesRegex(RuntimeError, "preceding successful capture"):
+            g.replay()
+        with g:
+            second = x * 3
+        x.fill_(2.0)
+        first.fill_(float("nan"))
+        g.replay()
+        self.assertEqual(second, torch.full_like(x, 6.0))
+        self.assertTrue(first.isnan().all())
+
+    @skipCUDAIf(True, "CUDA does not register a torch.accelerator.Graph backend yet")
+    def test_graph_empty_capture_warns(self, device):
+        g = torch.accelerator.Graph()
+        with self.assertWarnsRegex(UserWarning, "is empty"):
+            with g:
+                pass
+        g.replay()
 
 
 instantiate_device_type_tests(

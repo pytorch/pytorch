@@ -85,6 +85,8 @@ void MPSHooks::commitStream() const {
 }
 
 void* MPSHooks::getCommandBuffer() const {
+  // Work an extension encodes on the raw command buffer bypasses MPSRecordingEncoder.
+  at::mps::assertNotCapturing("torch::mps::get_command_buffer()");
   auto stream = at::mps::getCurrentMPSStream();
   dispatch_assert_queue(stream->queue());
   // Release pending computeCommandEncoder, as extensions is likely to allocate new one
@@ -94,6 +96,9 @@ void* MPSHooks::getCommandBuffer() const {
 }
 
 void* MPSHooks::getDispatchQueue() const {
+  // Extensions fetch the queue before encoding on the raw command buffer inside
+  // it, where the check in getCommandBuffer() could only abort, not raise.
+  at::mps::assertNotCapturing("torch::mps::get_dispatch_queue()");
   return at::mps::getCurrentMPSStream()->queue();
 }
 

@@ -222,11 +222,13 @@ void MPSEventPool::resetEvent(id_t event_id, MPSStream* stream, bool enable_timi
 }
 
 void MPSEventPool::recordEvent(id_t event_id, bool syncEvent, MPSStream* stream) {
+  assertNotCapturing("Recording an MPS event");
   MPSEvent* event = getInUseEvent(event_id);
   event->record(/*needsLock*/ true, syncEvent, stream);
 }
 
 void MPSEventPool::waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream) {
+  assertNotCapturing("Waiting on an MPS event");
   MPSEvent* event = getInUseEvent(event_id);
   event->wait(/*needsLock*/ true, syncEvent, stream);
 }

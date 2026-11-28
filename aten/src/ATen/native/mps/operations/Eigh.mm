@@ -42,6 +42,7 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
   const bool unsupported_dtype = (dtype != kFloat && dtype != kComplexFloat);
 
   if (unsupported_dtype || !fits) {
+    assertNotCapturing("linalg.eigh CPU fallback");
     if (!fits) {
       TORCH_WARN_ONCE("linalg.eigh: matrix too large to stage in MPS threadgroup memory (",
                       2 * staging_bytes,

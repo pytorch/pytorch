@@ -586,6 +586,13 @@ void MPSHeapAllocatorImpl::erase_available_buffer(BufferPool& pool, BufferBlock*
 
 void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   TORCH_INTERNAL_ASSERT(buffer_block->in_use);
+  // A capture re-binds this buffer on replay: keep it allocated until unpinned.
+  if (!m_capture_pinned.empty()) {
+    if (auto it = m_capture_pinned.find((__bridge const void*)buffer_block->buffer); it != m_capture_pinned.end()) {
+      it->second.freed_block = buffer_block;
+      return;
+    }
+  }
 
   BufferPool& pool = *buffer_block->heap->pool;
   // Makes sure the BufferBlock* isn't already present in the pool we're freeing it back into.
@@ -846,6 +853,25 @@ bool MPSHeapAllocatorImpl::wait_for_pending_free_buffers(BufferPool& pool) {
   return !buffers.empty() && waitForEvents(buffers);
 }
 
+void MPSHeapAllocatorImpl::pinBufferForCapture(const void* ptr) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  m_capture_pinned[ptr].count++;
+}
+
+void MPSHeapAllocatorImpl::unpinBufferForCapture(const void* ptr) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  auto it = m_capture_pinned.find(ptr);
+  TORCH_INTERNAL_ASSERT(it != m_capture_pinned.end(), "unpinning a buffer no capture pinned");
+  if (--it->second.count != 0) {
+    return;
+  }
+  BufferBlock* freed_block = it->second.freed_block;
+  m_capture_pinned.erase(it);
+  if (freed_block) {
+    free_buffer(freed_block);
+  }
+}
+
 id_t MPSHeapAllocatorImpl::getBufferId(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
@@ -1062,6 +1088,12 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
   id_t getBufferId(const void* ptr) const override {
     return _getAllocImpl().getBufferId(ptr);
+  };
+  void pinBufferForCapture(const void* ptr) const override {
+    _getAllocImpl().pinBufferForCapture(ptr);
+  };
+  void unpinBufferForCapture(const void* ptr) const override {
+    _getAllocImpl().unpinBufferForCapture(ptr);
   };
   IntArrayRef getBufferShape(const void* ptr) const override {
     return _getAllocImpl().getBufferShape(ptr);
