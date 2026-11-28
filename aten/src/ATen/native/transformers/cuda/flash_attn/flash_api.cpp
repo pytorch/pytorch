@@ -129,10 +129,8 @@ void set_params_fprop(Flash_fwd_params &params,
         params.k_batch_stride = k.stride(0);
         params.v_batch_stride = v.stride(0);
         params.o_batch_stride = out.stride(0);
-        if (seqlenq_ngroups_swapped) {
-             params.q_batch_stride *= seqlen_q;
-             params.o_batch_stride *= seqlen_q;
-        }
+        // mha_varlen_fwd's packed path passes 4D views of q and out, whose stride(0) already is
+        // the batch stride; do not scale it by seqlen_q as upstream does for its 3D packed q.
     }
 
     params.cu_seqlens_q = static_cast<int *>(cu_seqlens_q_d);
@@ -667,24 +665,31 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     const int page_block_size = !paged_KV ? 1 : k.size(1);
     TORCH_CHECK(!paged_KV || page_block_size % 256 == 0, "Paged KV cache block size must be divisible by 256");
 
-    if (max_seqlen_q == 1 && !alibi_slopes_.has_value()) { is_causal = false; }  // causal=true is the same as causal=false in this case
+    // Canonicalize is_causal into window_size_right = 0 (set_params_fprop derives params.is_causal from it).
     if (is_causal) { window_size_right = 0; }
 
     void *cu_seqlens_q_d = cu_seqlens_q.data_ptr();
 
     // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
     // H/t Daniel Haziza
-    const int seqlenq_ngroups_swapped = max_seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size_og % 8 == 0 && !alibi_slopes_.has_value();
+    // Requires q.size(0) == batch_size (no empty sequences) since packing drops cu_seqlens_q;
+    // window_size_right == 0 (bottom-right causal) masks nothing for a 1-token query.
+    const int seqlenq_ngroups_swapped = max_seqlen_q == 1 && q.size(0) == batch_size && num_heads > num_heads_k && window_size_left < 0 && window_size_right <= 0 && p_dropout == 0.f && head_size_og % 8 == 0 && !alibi_slopes_.has_value();
+    // Route causal packed decode through split-KV (must be computed before clearing window_size_right):
+    // its 1-split KV tile matches the standard causal kernel, while non-causal stays on the standard
+    // kernel to match sm86/sm89 hdim-128 mixed batches (preserving num_splits=1 batch invariance).
+    const bool force_split_kernel = paged_KV || (seqlenq_ngroups_swapped && window_size_right == 0);
     at::Tensor temp_q = q;
     const int ngroups = num_heads / num_heads_k;
     if (seqlenq_ngroups_swapped) {
-        temp_q = q.reshape({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2).reshape({batch_size * ngroups, num_heads_k, head_size_og});
+        temp_q = q.view({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2);
         max_seqlen_q = ngroups;
         num_heads = num_heads_k;
         cu_seqlens_q_d = nullptr;
+        window_size_right = -1;
     }
 
-    const int total_q = temp_q.sizes()[0];
+    const int total_q = seqlenq_ngroups_swapped ? batch_size * ngroups : temp_q.size(0);
 
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
@@ -694,7 +699,11 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     if (window_size_left >= max_seqlen_k) { window_size_left = -1; }
     if (window_size_right >= max_seqlen_k) { window_size_right = -1; }
 
-    CHECK_SHAPE(temp_q, total_q, num_heads, head_size_og);
+    if (seqlenq_ngroups_swapped) {
+        CHECK_SHAPE(temp_q, batch_size, ngroups, num_heads, head_size_og);
+    } else {
+        CHECK_SHAPE(temp_q, total_q, num_heads, head_size_og);
+    }
     if (!paged_KV) {
         const int total_k = k.size(0);
         CHECK_SHAPE(k, total_k, num_heads_k, head_size_og);
@@ -727,12 +736,13 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
         CHECK_ALIGNED(out);
         CHECK_SHAPE(out, sizes[0], sizes[1], head_size_og);
-        if (seqlenq_ngroups_swapped) {
-            out = out.reshape({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2).reshape({batch_size * ngroups, num_heads_k, head_size_og});
-        }
         if (head_size_og % 8 != 0) { out = at::empty_like(q_padded); }
     } else {
-        out = at::empty_like(q_padded);
+        out = at::empty_like(q);
+    }
+    at::Tensor out_kernel = out;
+    if (seqlenq_ngroups_swapped) {
+        out_kernel = out.view({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2);
     }
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
@@ -768,7 +778,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                      seqlen_q_rounded, seqlen_k_rounded,
                      num_heads, num_heads_k,
                      head_size, head_size_rounded,
-                     q_padded, k_padded, v_padded, out,
+                     q_padded, k_padded, v_padded, out_kernel,
                      cu_seqlens_q_d,
                      cu_seqlens_k.data_ptr(),
                      seqused_k.has_value() ? seqused_k.value().data_ptr() : nullptr,
@@ -791,10 +801,15 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     params.page_block_size = page_block_size;
     // Keep references to these tensors to extend their lifetime
     at::Tensor softmax_lse_accum, out_accum;
+    // All packed calls may split (force_split_kernel only controls the 1-split kernel).
     if (paged_KV || seqlenq_ngroups_swapped) {
+        // Split-KV combine ignores cu_seqlens_q and indexes by batch_idx * o_batch_stride
+        // (0 for varlen q), so only split packed calls or a single full-length sequence (#194167).
+        // TODO: allow ngroups == 1 on the packed path so multi-sequence paged MHA decode can split.
+        const bool can_split = seqlenq_ngroups_swapped || (batch_size == 1 && q.size(0) == max_seqlen_q);
         std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
                            head_size, max_seqlen_k, max_seqlen_q,
-                           head_size_rounded, p_dropout, num_splits, dprops, opts);
+                           head_size_rounded, p_dropout, can_split ? num_splits : 1, dprops, opts);
     }
 
     // [Note] BC breaking change to flash seed/offset
@@ -821,7 +836,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
     if (max_seqlen_k > 0) {
         auto stream = at::cuda::getCurrentCUDAStream().stream();
-        run_mha_fwd(params, stream, paged_KV);
+        run_mha_fwd(params, stream, force_split_kernel);
     } else {
         // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
         out.zero_();
@@ -829,10 +844,13 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     }
 
     if (seqlenq_ngroups_swapped) {
-        std::array<int64_t, 4> size_before = {batch_size, max_seqlen_q, num_heads_k, head_size_og};
-        std::array<int64_t, 3> size_after = {batch_size, num_heads_k * max_seqlen_q, head_size_og};
-        out = out.reshape(size_before).transpose(1, 2).reshape(size_after);
-        q_padded = q_padded.reshape(size_before).transpose(1, 2).reshape(size_after);
+        q_padded = q;
+        // Split-KV with num_splits <= 1 skips the combine kernel and writes LSE as
+        // (nheads_kv, b, ngroups) instead of (nheads_kv, ngroups, b).
+        // TODO: remove once row_offset_lseaccum in flash_fwd_kernel.h handles seqlenq_ngroups_swapped.
+        if (force_split_kernel && params.num_splits <= 1) {
+            softmax_lse = softmax_lse.view({num_heads, batch_size, max_seqlen_q}).transpose(1, 2);
+        }
         softmax_lse = softmax_lse.reshape({num_heads * max_seqlen_q, batch_size});
     }
 
