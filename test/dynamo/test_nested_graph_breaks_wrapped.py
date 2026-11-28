@@ -84,12 +84,14 @@ tests = [
     test_hooks.HooksTests,
     test_list.TupleTests,
     test_misc.MiscTests,
+    test_misc.MiscTestsCUDA,
     test_modules.NNModuleTests,
     test_recompiles.RecompileTests,
     test_repros.ReproTests,
     test_subgraphs.SubGraphTests,
 ]
 tests.extend(test_functions.get_function_device_test_classes())
+tests.extend(test_misc.get_misc_device_test_classes())
 
 test = None
 for test in tests:
