@@ -106,6 +106,8 @@ def _no_grad_trunc_normal_(
         )
 
     with torch.no_grad():
+        if std == 0:
+            return tensor.fill_(min(max(mean, a), b))
         p = norm_cdf((b - mean) / std) - norm_cdf((a - mean) / std)
 
         if p > 0.3:
