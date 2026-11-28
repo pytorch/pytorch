@@ -1840,6 +1840,36 @@ class TestMaxAutotune(TestCase):
             FileCheck().check_not("extern_kernels.convolution").run(code[0])
             self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
 
+    @parametrize("spatial_dims", (1, 2, 3))
+    def test_conv1x1_via_mm(self, spatial_dims):
+        # conv1x1_via_mm is offered to autotuning for every spatial rank
+        from torch._inductor.kernel.conv import conv1x1_via_mm
+
+        N, C_in, C_out, S = 2, 32, 64, 8
+        spatial = [S] * spatial_dims
+        x = torch.randn(N, C_in, *spatial, device=GPU_TYPE)
+        w = torch.randn(C_out, C_in, *([1] * spatial_dims), device=GPU_TYPE)
+        out = torch.empty(N, C_out, *spatial, device=GPU_TYPE)
+        if spatial_dims > 1:
+            channels_last = (
+                torch.channels_last if spatial_dims == 2 else torch.channels_last_3d
+            )
+            x, w, out = (t.to(memory_format=channels_last) for t in (x, w, out))
+
+        conv1x1_via_mm(x, w, out=out)
+        expected = torch.convolution(
+            x,
+            w,
+            None,
+            [1] * spatial_dims,
+            [0] * spatial_dims,
+            [1] * spatial_dims,
+            False,
+            [0] * spatial_dims,
+            1,
+        )
+        self.assertEqual(out, expected, atol=1e-4, rtol=1e-4)
+
     @fresh_cache()
     @config.patch(max_autotune=True, max_fusion_size=2)
     def test_jit_fusion_matches_aot_fusion(self):

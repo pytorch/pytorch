@@ -368,10 +368,12 @@ aten_convolution = ExternKernelChoice(
 
 
 def conv1x1_via_mm(x, w, *, out):
-    w = torch.squeeze(torch.squeeze(w, -1), -1)
-    return torch.matmul(
-        x.permute(0, 2, 3, 1), w.permute(1, 0), out=out.permute(0, 2, 3, 1)
-    )
+    for _ in range(w.ndim - 2):
+        w = torch.squeeze(w, -1)
+    ndim = x.ndim
+    perm = list(range(ndim))
+    perm.append(perm.pop(1))  # NC... -> N...C
+    return torch.matmul(x.permute(perm), w.permute(1, 0), out=out.permute(perm))
 
 
 aten_conv1x1_via_mm = ExternKernelChoice(conv1x1_via_mm, None)
