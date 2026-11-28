@@ -96,9 +96,8 @@ def import_results() -> TestPrioritizations:
     return tp
 
 
-def main() -> None:
+def _prioritizations(recorder: Any = None) -> tuple[AggregatedHeuristics, TestPrioritizations]:
     selected_tests = TESTS
-
     aggregated_heuristics: AggregatedHeuristics = AggregatedHeuristics(selected_tests)
 
     get_test_times()
@@ -110,9 +109,52 @@ def main() -> None:
     copy_pytest_cache()
     copy_additional_previous_failures()
 
-    aggregated_heuristics = get_test_prioritizations(selected_tests)
+    if recorder is None:
+        aggregated_heuristics = get_test_prioritizations(selected_tests)
+    else:
+        aggregated_heuristics = get_test_prioritizations(
+            selected_tests, capture=recorder.capture
+        )
+    return aggregated_heuristics, aggregated_heuristics.get_aggregated_priorities()
 
-    test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
+
+def main() -> None:
+    context = None
+    requested_branch = (
+        os.getenv("GITHUB_HEAD_REF") == "cicd-td-same-input-qualification-20261123"
+    )
+    if requested_branch:
+        from tools.testing.target_determination import qualification
+
+        try:
+            context = qualification.experiment_context()
+        except Exception as error:
+            qualification.emit_result({"status": "invalid", "error": str(error)[:1000]})
+            raise
+    if context is None:
+        if requested_branch and os.getenv("CI") == "true":
+            qualification.emit_result(
+                {"status": "not_run", "reason": "Owned ordinary event gate did not activate"}
+            )
+        aggregated_heuristics, test_prioritizations = _prioritizations()
+    else:
+        from tools.testing.target_determination import qualification
+
+        try:
+            recorder = qualification.SnapshotRecorder(TESTS, HEURISTICS)
+            aggregated_heuristics, test_prioritizations = _prioritizations(recorder)
+            report = qualification.run_ci_qualification(
+                recorder, aggregated_heuristics, test_prioritizations, context
+            )
+        except Exception as error:
+            report = (
+                error.report
+                if isinstance(error, qualification.QualificationInvalid) and error.report
+                else {"status": "invalid", "error": str(error)[:1000], "context": context}
+            )
+            qualification.emit_result(report)
+            raise
+        qualification.emit_result(report)
 
     print("Aggregated Heuristics")
     print(test_prioritizations.get_info_str(verbose=False))
