@@ -2733,6 +2733,58 @@ class TestFlyDSLHTIDevice(TestCase):
             msg=f"{bad_launches} of {launches} launches differ from the idle-GPU output",
         )
 
+    @largeTensorTest("2GB", device="cuda")
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
+    def test_hti_main_loop_with_several_workgroups_per_cu(self, device, dtype):
+        import flydsl.compiler as flyc
+        import flydsl.expr as fx
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
+            GEMM_DTYPE_BF16,
+            GEMM_DTYPE_FP16,
+            gemm_gfx950,
+            make_gemm_gfx950_param,
+        )
+
+        # The second wave group runs one barrier behind the first, so the first
+        # group refills B half 0 in the main loop while the second group may
+        # still have reads of it queued. With several of these small
+        # workgroups on each CU, a late read of K tile kt returns K tile kt + 2,
+        # the tile copied into that buffer.
+        # Inputs in {-1, 0, 1} keep every output exact.
+        m = n = 8192
+        k = 1024
+        param = make_gemm_gfx950_param(
+            dtype_id=GEMM_DTYPE_BF16 if dtype == torch.bfloat16 else GEMM_DTYPE_FP16,
+            tile_m=64,
+            tile_n=128,
+            tile_k=64,
+            m_waves=2,
+            n_waves=2,
+            use_half_tile_interleaved=True,
+            a_is_transposed=False,
+            b_is_transposed=True,
+        )
+        a = torch.randint(-1, 2, (m, k), device=device).to(dtype)
+        b = torch.randint(-1, 2, (n, k), device=device).to(dtype).t()
+        expected = (a.double() @ b.double()).to(dtype)
+        out = torch.empty(m, n, device=device, dtype=dtype)
+        args = [flyc.from_torch_tensor(t).mark_layout_dynamic() for t in (out, a, b)]
+        args.extend((param, fx.Stream(torch.cuda.current_stream(device).cuda_stream)))
+        launch = flyc.compile(gemm_gfx950, *args)
+        bad_launches = torch.zeros((), dtype=torch.int64, device=device)
+        launches = 500
+        for _ in range(launches):
+            out.fill_(float("nan"))
+            launch(*args)
+            bad_launches += (out != expected).any()
+        bad_launches = bad_launches.item()
+        self.assertEqual(
+            bad_launches,
+            0,
+            msg=f"{bad_launches} of {launches} launches are not exact",
+        )
+
 
 instantiate_device_type_tests(TestFlyDSLHTIDevice, globals(), only_for="cuda")
 
