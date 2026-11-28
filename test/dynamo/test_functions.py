@@ -654,7 +654,6 @@ partial_fn = functools.partial(fn, scale=2)
         for actual, expected in opt_fn():
             self.assertEqual(actual, expected)
 
-    @unittest.expectedFailure
     def test_itertools_islice_intlike(self):
         # CPython issue #30537: islice can accept integer-like objects as arguments.
         class IntLike:
@@ -665,22 +664,79 @@ partial_fn = functools.partial(fn, scale=2)
                 return self.val
 
         def fn():
-            self.assertEqual(
-                list(itertools.islice(range(100), IntLike(10))), list(range(10))
-            )
-            self.assertEqual(
+            return (
+                list(itertools.islice(range(100), IntLike(10))),
                 list(itertools.islice(range(100), IntLike(10), IntLike(50))),
-                list(range(10, 50)),
-            )
-            self.assertEqual(
                 list(
                     itertools.islice(range(100), IntLike(10), IntLike(50), IntLike(5))
                 ),
-                list(range(10, 50, 5)),
             )
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        opt_fn()
+        self.assertEqual(
+            opt_fn(), (list(range(10)), list(range(10, 50)), list(range(10, 50, 5)))
+        )
+
+    @parametrize(
+        "name, args",
+        (
+            ("islice", (1, 2)),
+            ("islice", ([1], -1)),
+            ("islice", ([1], 1.5)),
+            ("islice", ([1], -1, 2)),
+            ("islice", ([1], 0, 2, 0)),
+            ("islice", ([1],)),
+            ("islice", ([1], 0, 1, 2, 3)),
+            ("islice", ([1], 2**100)),
+            ("islice", ([1], 2**100, 5)),
+            ("dropwhile", (bool, 1)),
+            ("takewhile", (bool, 1)),
+            ("starmap", (bool, 1)),
+            ("permutations", ([1, 2], 1.5)),
+            ("permutations", (1, 1.5)),
+            ("combinations", ([1, 2], 1.5)),
+            ("combinations", (1, 1.5)),
+            ("combinations_with_replacement", ([1, 2], 1.5)),
+            ("combinations_with_replacement", (1, 1.5)),
+            ("combinations_with_replacement", (1, -1)),
+            ("tee", ([1], -1)),
+            ("tee", (1, -1)),
+            ("tee", ([1], 1.5)),
+        ),
+    )
+    def test_itertools_invalid_args_raise_at_call(self, name, args):
+        itertools_fn = getattr(itertools, name)
+
+        def fn(x):
+            try:
+                itertools_fn(*args)
+            except (TypeError, ValueError) as exc:
+                return x + 1, type(exc), str(exc)
+            return x, None, None
+
+        expected = fn(torch.zeros(1))
+        self.assertIsNotNone(expected[1])
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(torch.zeros(1))
+        self.assertEqual(actual, expected)
+
+    @parametrize("bounds", ((0, 2**64), (2**64,), (-2,), (0, -1), (-(2**64),)))
+    def test_list_index_bounds_like_cpython(self, bounds):
+        a, b, c = object(), object(), object()
+
+        def fn(x):
+            try:
+                return x + [a, b, c].index(b, *bounds)
+            except ValueError:
+                return x - 1
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_itertools_tee_zero_does_not_iterate(self):
+        def fn():
+            return itertools.tee(1, 0)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
     def test_bin_oct_hex_index(self):
         # bin/oct/hex dispatch through __index__ (CPython PyNumber_ToBase).
