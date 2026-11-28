@@ -1106,12 +1106,14 @@ class TestInductorDynamic(DynamicShapesTestCase):
     def _assert_dual_launch(self, compiled, fn, args, max_numel):
         """Run compiled(*args), check it matches fn(*args), and check that only the
         expected kernels ran: the int32 ones if max_numel (the largest buffer size, in
-        elements) is at most _INT32_TEST_LIMIT, else the int64 ones."""
+        elements) is at most _INT32_TEST_LIMIT, else the int64 ones. Returns the
+        launches."""
         expected = fn(*args)
         with _record_launches() as launched:
             self.assertEqual(compiled(*args), expected)
         side = "i32" if max_numel <= _INT32_TEST_LIMIT else "i64"
         self.assertEqual({dtype for dtype, _ in launched}, {side})
+        return launched
 
     @onlyAccelerator
     @parametrize("cooperative", [False, True])
@@ -1167,16 +1169,15 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
     @onlyAccelerator
     @serialTest()
-    @largeTensorTest("3GB")  # measured peak: 2.25 GiB
+    @largeTensorTest("5GB")  # measured peak: 4.1 GiB (add)
+    @parametrize("op", ["sum", "add"])
     @parametrize("dual", [False, True])
-    def test_dual_index_dtype_past_int32(self, device, dual):
-        """A real input past 2**31 elements, after compiling on a small one: without
-        dual_index_dtype_kernels the int32 kernel's size guard fails and the graph
-        recompiles; with it the int64 kernel runs, tuned for sizes past 2**31, and
-        nothing recompiles."""
-
-        def fn(x):
-            return x.sum(-1)
+    def test_dual_index_dtype_past_int32(self, device, op, dual):
+        """A real input past 2**31 elements, after compiling on a small one, for a
+        reduction and a pointwise kernel: without dual_index_dtype_kernels the int32
+        kernel's size guard fails and the graph recompiles; with it the int64 kernel
+        runs, tuned for sizes past 2**31, and nothing recompiles."""
+        fn = {"sum": lambda x: x.sum(-1), "add": lambda x: x + 1}[op]
 
         counter = CompileCounterWithBackend("inductor")
         compiled = torch.compile(fn, backend=counter, dynamic=True)
@@ -1187,8 +1188,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
             big = torch.randint(
                 -3, 3, (2**16 + 1, 2**15), dtype=torch.int8, device=device
             )
-            # In chunks: eager sum upcasts int8 to int64, 16 GiB for all of big.
-            expected = torch.cat([chunk.sum(-1) for chunk in big.split(2**10)])
             with _record_launches() as launched, _record_launch_numels() as numels:
                 actual = compiled(big)
             if dual:
@@ -1202,7 +1201,10 @@ class TestInductorDynamic(DynamicShapesTestCase):
                 for dtype, size_hints in launched:
                     if dtype == "i64":
                         self.assertGreaterEqual(math.prod(size_hints.values()), 2**31)
-            self.assertEqual(actual, expected)
+            # Compare in chunks: eager on all of big needs another full-size output,
+            # and sum upcasts int8 to int64 (16 GiB).
+            for out, chunk in zip(actual.split(2**10), big.split(2**10), strict=True):
+                self.assertEqual(out, fn(chunk))
         # Without dual kernels, the int32 kernel's size guard fails and recompiles.
         self.assertEqual(counter.frame_count, 1 if dual else 2)
 
@@ -1355,20 +1357,78 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertNotIn("2147483647", str(entry.guard_manager))
 
     @onlyAccelerator
-    def test_dual_index_dtype_keeps_pointwise_guard(self, device):
-        """Pointwise kernels are not covered yet: they keep a single int32 kernel and
-        its size guard."""
+    @parametrize("op", ["elementwise", "transposed", "index_select"])
+    def test_dual_index_dtype_pointwise(self, device, op):
+        """test_dual_index_dtype_reductions for pointwise kernels: a 1D elementwise
+        kernel, a 2D-tiled one (transposed copy) and an indirect-indexing gather from a
+        source larger than the output."""
+        fn = {
+            "elementwise": lambda x, idx: x * 2 + 1,
+            "transposed": lambda x, idx: x.t().contiguous() + 1,
+            "index_select": lambda x, idx: x.index_select(0, idx) + 1,
+        }[op]
+
+        def inputs(rows):
+            # x has more rows than idx (its own size symbol), so the gather's int32
+            # condition must include the source, not only the output.
+            x = torch.randn(rows + 20, 512, device=device)
+            return x, torch.randint(0, rows + 20, (rows,), device=device)
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        with config.patch(dual_index_dtype_kernels=True), _lowered_int32_limit():
+            args = inputs(64)
+            self.assertEqual(compiled(*args), fn(*args))
+            # x is the largest buffer: (rows + 20) * 512 elements. At 120 rows the
+            # gather's output fits the limit and x does not.
+            for rows in [512, 3, 300, 120, 64]:
+                launched = self._assert_dual_launch(
+                    compiled, fn, inputs(rows), (rows + 20) * 512
+                )
+                if op == "transposed":
+                    self.assertTrue(
+                        all(hints and "y" in hints for _, hints in launched)
+                    )
+        self.assertEqual(counter.frame_count, 1)
+        (entry,) = _debug_get_cache_entry_list(fn.__code__)
+        self.assertNotIn("2147483647", str(entry.guard_manager))
+
+    @onlyAccelerator
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_dual_index_dtype_unbacked(self, device):
+        """test_dual_index_dtype_pointwise for an unbacked size, which has no hint to
+        guard on (by default one int64 kernel): the int32 kernel runs whenever the
+        size fits."""
+
+        def fn(n):
+            return torch.ones(n.item(), 512, device=device) * 2 + 1
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        with config.patch(dual_index_dtype_kernels=True), _lowered_int32_limit():
+            for rows in [64, 200, 3]:
+                self._assert_dual_launch(
+                    compiled, fn, (torch.tensor(rows),), rows * 512
+                )
+        self.assertEqual(counter.frame_count, 1)
+
+    @onlyAccelerator
+    def test_dual_index_dtype_assume_32bit_indexing(self, device):
+        """assume_32bit_indexing takes precedence over dual_index_dtype_kernels: a
+        single int32 kernel, with its size guard."""
 
         def fn(x):
             return x * 2 + 1
 
-        x = torch.randn(8, 1152, device=device)
-        with config.patch(dual_index_dtype_kernels=True):
-            actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), x)
-        self.assertEqual(actual, fn(x))
-        guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
-        self.assertIn("<= 2147483647", guards)
-        self.assertNotIn("'xnumel': 'i64'", code)
+        compiled = torch.compile(fn, dynamic=True)
+        x = torch.randn(64, 512, device=device)
+        with config.patch(dual_index_dtype_kernels=True, assume_32bit_indexing=True):
+            self.assertEqual(compiled(x), fn(x))
+            with _record_launches() as launched:
+                compiled(x)
+        self.assertEqual([dtype for dtype, _ in launched], ["i32"])
+        (entry,) = _debug_get_cache_entry_list(fn.__code__)
+        self.assertIn("2147483647", str(entry.guard_manager))
 
     @onlyAccelerator
     @torch._dynamo.config.patch(
