@@ -112,6 +112,12 @@ struct TORCH_API PyObjectConversionInterface {
 
   // Decode UTF-8 bytes into a new-reference Python str. The GIL must be held.
   virtual PyObject* string_to_pyobject(std::string_view str) const = 0;
+
+  // Whether obj is Python None. The GIL must be held.
+  virtual bool is_none_pyobject(PyObject* obj) const = 0;
+
+  // Return a new reference to Python None. The GIL must be held.
+  virtual PyObject* new_none_pyobject() const = 0;
 };
 
 // Install the conversion implementation. Called once by libtorch_python when it

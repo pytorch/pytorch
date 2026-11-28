@@ -4,6 +4,8 @@
 #include <torch/csrc/stable/tensor.h>
 
 #include <exception>
+#include <optional>
+#include <string>
 
 // Importable (abi3) module functions that exercise the 2.16 Python interop
 // stable shims: a raw PyObject arrives straight from Python (no dispatcher
@@ -87,6 +89,14 @@ PyObject* string_roundtrip(PyObject* /*self*/, PyObject* obj) {
   });
 }
 
+// PyObject -> T -> PyObject through the generic from_pyobject / to_pyobject.
+template <typename T>
+PyObject* roundtrip(PyObject* /*self*/, PyObject* obj) {
+  return call([&] {
+    return torch::stable::to_pyobject(torch::stable::from_pyobject<T>(obj));
+  });
+}
+
 PyMethodDef methods[] = {
     {"layout_roundtrip", layout_roundtrip, METH_O, nullptr},
     {"tensor_layout", tensor_layout, METH_O, nullptr},
@@ -96,6 +106,26 @@ PyMethodDef methods[] = {
     {"double_roundtrip", double_roundtrip, METH_O, nullptr},
     {"double_error_message", double_error_message, METH_O, nullptr},
     {"string_roundtrip", string_roundtrip, METH_O, nullptr},
+    {"optional_bool_roundtrip",
+     roundtrip<std::optional<bool>>,
+     METH_O,
+     nullptr},
+    {"optional_int64_roundtrip",
+     roundtrip<std::optional<int64_t>>,
+     METH_O,
+     nullptr},
+    {"optional_string_roundtrip",
+     roundtrip<std::optional<std::string>>,
+     METH_O,
+     nullptr},
+    {"optional_tensor_roundtrip",
+     roundtrip<std::optional<torch::stable::Tensor>>,
+     METH_O,
+     nullptr},
+    {"optional_device_roundtrip",
+     roundtrip<std::optional<torch::stable::Device>>,
+     METH_O,
+     nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyModuleDef moduledef = {

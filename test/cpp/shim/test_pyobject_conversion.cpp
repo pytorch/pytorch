@@ -218,4 +218,24 @@ TEST(TorchPyObjectConversion, StringDataValidatedBeforePythonConversion) {
       nullptr);
 }
 
+TEST(TorchPyObjectConversion, NoneNoopErrorsWithoutLibtorchPython) {
+  int dummy = 0;
+  bool is_none_out = true;
+  expect_noop_error(torch_is_none_pyobject(&dummy, &is_none_out));
+  EXPECT_TRUE(is_none_out);
+
+  void* py_out = nullptr;
+  expect_noop_error(torch_new_none_pyobject(&py_out));
+  EXPECT_EQ(py_out, nullptr);
+}
+
+TEST(TorchPyObjectConversion, NullPyObjectIsNotNone) {
+  bool is_none_out = true;
+  EXPECT_EQ(torch_is_none_pyobject(nullptr, &is_none_out), AOTI_TORCH_FAILURE);
+  EXPECT_TRUE(is_none_out);
+  const char* message = torch_exception_get_what_without_backtrace();
+  ASSERT_NE(message, nullptr);
+  EXPECT_NE(std::strstr(message, "py_obj must not be null"), nullptr);
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
