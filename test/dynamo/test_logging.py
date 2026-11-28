@@ -434,7 +434,7 @@ Found from :
         exitstack.close()
 
     @requires_distributed()
-    @requires_cuda_and_triton
+    @requires_gpu
     @make_logging_test(ddp_graphs=True)
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):
@@ -450,14 +450,23 @@ Found from :
 
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(find_free_port())
-        dist.init_process_group("gloo", rank=0, world_size=1)
+        dist.init_process_group(
+            dist.get_default_backend_for_device(device_type), rank=0, world_size=1
+        )
+        # make_logging_test runs this body twice in the same process, so the
+        # process group must be torn down even when the body raises -- otherwise
+        # the second run fails with "trying to initialize the default process
+        # group twice!" and hides the original error.
+        try:
+            model = DDP(
+                ToyModel().to(f"{device_type}:0"), device_ids=[0], bucket_cap_mb=4
+            )
+            ddp_model = torch.compile(model, backend="inductor")
 
-        model = DDP(ToyModel().to("cuda:0"), device_ids=[0], bucket_cap_mb=4)
-        ddp_model = torch.compile(model, backend="inductor")
+            ddp_model(torch.randn(1024, 1024, device=f"{device_type}:0"))
+        finally:
+            dist.destroy_process_group()
 
-        ddp_model(torch.randn(1024, 1024, device="cuda:0"))
-
-        dist.destroy_process_group()
         self.assertEqual(len([r for r in records if "__ddp_graphs" in r.name]), 4)
 
     # check that logging to a child log of a registered logger
