@@ -182,15 +182,13 @@ def load_torchbind_test_lib():
     elif IS_SANDCASTLE or IS_FBCODE:
         lib_file_path = Path("//caffe2/test/cpp/jit:test_custom_class_registrations")
     else:
-        if IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-
-        if not lib_file_path.exists():
+        lib_name = "torchbind_test.dll" if IS_WINDOWS else "libtorchbind_test.so"
+        try:
+            lib_file_path = find_library_location(lib_name)
+        except FileNotFoundError as e:
             raise unittest.SkipTest(
-                f"torchbind test library not found: {lib_file_path}"
-            )
+                f"torchbind test library not found: {lib_name}"
+            ) from e
 
     torch.ops.load_library(str(lib_file_path))
 
