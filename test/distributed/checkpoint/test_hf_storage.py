@@ -272,7 +272,7 @@ class TestHfStorage(TestCase):
             # Verify results - the target tensors should now contain the values from our test tensor
             self.assertTrue(torch.equal(state_dict["tensor_0"], tensor_0))
 
-            mock_safe_open.assert_called_once_with(filename=file_path, framework="pt")
+            mock_safe_open.assert_called_once_with(file_path, framework="pt")
             mock_context.__enter__.return_value.get_slice.assert_called_with("tensor_0")
 
     def test_write_metadata_hf(self) -> None:

@@ -3,11 +3,10 @@ import dataclasses
 import json
 import logging
 import math
-from pathlib import Path
 from typing import Any
 
 import torch
-from torch.distributed.checkpoint._hf_utils import _metadata_fn
+from torch.distributed.checkpoint._hf_utils import _metadata_fn, _open_safetensors
 from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
     MetadataIndex,
@@ -146,11 +145,10 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
 
     def _load_quantization_metadata(self):
         """Load quantization metadata from the checkpoint."""
-        checkpoint_path = Path(self.path)
         # Load weight mapping from index file
-        index_file = checkpoint_path / _metadata_fn
+        index_file = self.fs.concat_path(self.path, _metadata_fn)
 
-        with open(index_file) as f:
+        with self.fs.create_stream(index_file, "r") as f:
             index_data = json.load(f)
             weight_map = index_data.get("weight_map", {})
             self._build_weight_scale_mapping(weight_map)
@@ -552,12 +550,8 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                 scale_inv = safetensor_file.get_tensor(scale_fqn)
             else:
                 # Scale tensor is in a different file, need to open it
-                from safetensors import safe_open  # type: ignore[import]
-
-                scale_file_path = Path(self.path) / scale_file_name
-                with safe_open(
-                    scale_file_path, framework="pt", device="cpu"
-                ) as scale_file:
+                scale_file_path = self.fs.concat_path(self.path, scale_file_name)
+                with _open_safetensors(self.fs, scale_file_path) as scale_file:
                     scale_inv = scale_file.get_tensor(scale_fqn)
 
             # Get the full tensor shape from our O(1) lookup cache
