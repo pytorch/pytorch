@@ -8,6 +8,7 @@ import pickle
 import tempfile
 import unittest
 from multiprocessing.reduction import ForkingPickler
+from unittest.mock import patch
 
 from numpy.testing import assert_array_equal
 
@@ -85,6 +86,31 @@ class DummyMLP(torch.nn.Module):
 
 class DTensorTest(DTensorContinuousTestBase):
     world_size = NUM_DEVICES
+
+    @with_comms
+    def test_custom_op_handler_fallthrough(self):
+        # A custom op handler that returns the fallthrough sentinel has its op
+        # dispatched as if it had no handler. This one re-dispatches the call once
+        # and declines the nested call, as handlers that rewrite some calls do.
+        mesh = self.build_device_mesh()
+        x = distribute_tensor(
+            torch.randn(8, 4, device=self.device_type), mesh, [Shard(0)]
+        )
+        dispatcher = DTensor._op_dispatcher
+        calls = []
+
+        def handler(op_call, args, kwargs):
+            calls.append(op_call)
+            if len(calls) == 1:
+                return op_call(*args, **kwargs)
+            return dispatcher._custom_op_handler_fallthrough
+
+        op = torch.ops.aten.sin.default
+        with patch.dict(dispatcher._custom_op_handlers, {op: handler}):
+            out = torch.sin(x)
+        self.assertEqual(calls, [op, op])
+        self.assertEqual(out.placements, (Shard(0),))
+        self.assertEqual(out.full_tensor(), torch.sin(x.full_tensor()))
 
     @with_comms
     def test_dtensor_constructor(self):

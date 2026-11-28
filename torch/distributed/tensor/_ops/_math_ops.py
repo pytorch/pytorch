@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, cast
 
 import torch
+from torch._library.utils import fill_defaults
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
@@ -14,6 +15,9 @@ from torch.distributed.tensor._op_schema import (
     OpSpec,
     OpStrategy,
     RuntimeSchemaInfo,
+)
+from torch.distributed.tensor._ops._pointwise_ops import (
+    _common_pointwise_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _ShardingPlaceholder,
@@ -38,7 +42,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.fx.experimental.symbolic_shapes import guard_or_false
+from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
 
 aten = torch.ops.aten
@@ -1389,6 +1393,167 @@ def nll_loss_backward_single_dim_strategy(
     return strategies
 
 
+# Overloads are listed explicitly: autogen-derived .out strategies would drop the
+# full-mesh filter below (autogen's _clone_strategy_info doesn't copy it).
+_POINTWISE_LOSS_OPS = [
+    aten.binary_cross_entropy.default,
+    aten.binary_cross_entropy.out,
+    aten.binary_cross_entropy_with_logits.default,
+    aten.binary_cross_entropy_with_logits.out,
+    aten.huber_loss.default,
+    aten.huber_loss.out,
+    aten.mse_loss.default,
+    aten.mse_loss.out,
+    aten.smooth_l1_loss.default,
+    aten.smooth_l1_loss.out,
+    aten.soft_margin_loss.default,
+    aten.soft_margin_loss.out,
+]
+_POINTWISE_LOSS_BACKWARD_OPS = [
+    aten.binary_cross_entropy_backward.default,
+    aten.binary_cross_entropy_backward.grad_input,
+    aten.huber_loss_backward.default,
+    aten.huber_loss_backward.out,
+    aten.mse_loss_backward.default,
+    aten.mse_loss_backward.grad_input,
+    aten.smooth_l1_loss_backward.default,
+    aten.smooth_l1_loss_backward.grad_input,
+    aten.soft_margin_loss_backward.default,
+    aten.soft_margin_loss_backward.grad_input,
+]
+_BINARY_CROSS_ENTROPY_OPS = {
+    aten.binary_cross_entropy.default,
+    aten.binary_cross_entropy.out,
+    aten.binary_cross_entropy_backward.default,
+    aten.binary_cross_entropy_backward.grad_input,
+}
+_elementwise_single_dim_strategy = _common_pointwise_single_dim_strategy()
+
+
+# op -> (position, default) of its ``reduction`` argument, read once because
+# op._schema.arguments copies every Argument on each access and the custom op
+# handler below runs on every call of these ops.
+_LOSS_REDUCTION_ARG = {
+    op: next(
+        (i, a.default_value)
+        for i, a in enumerate(op._schema.arguments)
+        if a.name == "reduction"
+    )
+    for op in _POINTWISE_LOSS_OPS + _POINTWISE_LOSS_BACKWARD_OPS
+}
+
+
+def _loss_reduction(
+    op: torch._ops.OpOverload, args: Sequence[object]
+) -> tuple[int, object]:
+    """Return the position and value of the loss op's ``reduction`` argument."""
+    idx, default = _LOSS_REDUCTION_ARG[op]
+    return idx, args[idx] if len(args) > idx else default
+
+
+def _pointwise_loss_backward_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    """Run a "mean" loss backward as a "sum" one with grad_output / numel.
+
+    The backward kernels divide by their input's numel for "mean", which on a
+    shard is the local numel. Their result is linear in grad_output and the
+    "mean" result is the "sum" one divided by numel, so this rewrite lets them
+    run sharded; a DTensor's numel() is the global one. Scaling grad_output
+    first rounds like autograd's backward of ``reduction="none"`` + ``.mean()``.
+    Other reductions, and the rewritten call itself, dispatch as usual.
+    """
+    reduction_idx, reduction = _loss_reduction(op_call, args)
+    if reduction != Reduction.MEAN.value:
+        return DTensor._op_dispatcher._custom_op_handler_fallthrough
+    args, kwargs = fill_defaults(op_call._schema, args, kwargs)
+    grad_output = cast(torch.Tensor, args[0])
+    numel = cast(torch.Tensor, args[1]).numel()
+    # aten.div.Scalar keeps numel a Python scalar; `grad_output / numel` would
+    # wrap it in a tensor, which sends the division down DTensor's slower
+    # dispatch path.
+    args = (
+        aten.div.Scalar(grad_output, numel),
+        *args[1:reduction_idx],
+        Reduction.SUM.value,
+        *args[reduction_idx + 1 :],
+    )
+    return op_call(*args, **kwargs)
+
+
+def _pointwise_loss_full_mesh_strategy_filter(
+    _mesh: DeviceMesh,
+    _op_schema: OpSchema,
+    input_specs: list[DTensorSpec],
+    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
+) -> bool:
+    """Reject Partial("avg") outputs unless every rank holds the same number of
+    input elements: averaging per-rank means is only correct then."""
+    output_spec = output_specs[0] if isinstance(output_specs, tuple) else output_specs
+    if output_spec is None or Partial("avg") not in output_spec.placements:
+        return True
+    return all(
+        _is_spec_evenly_sharded_on_dim(spec, dim)
+        for spec in input_specs
+        for dim in range(spec.ndim)
+    )
+
+
+@register_single_dim_strategy(
+    _POINTWISE_LOSS_OPS + _POINTWISE_LOSS_BACKWARD_OPS,
+    schema_info=RuntimeSchemaInfo(2, static_kwargkey=["out", "grad_input"]),
+    allow_uneven_sharding=True,
+    allow_unbacked_sharding=True,
+    full_mesh_strategy_filter=_pointwise_loss_full_mesh_strategy_filter,
+)
+def pointwise_loss_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Losses that compute an elementwise loss and then apply ``reduction``.
+
+    The forward kernel reduces its local shard, so "sum" and "mean" turn a
+    sharded input into Partial("sum") and Partial("avg") outputs; the full-mesh
+    filter keeps Partial("avg") to even shards. The backward kernels divide by
+    the local numel for "mean", so no sharded rule is valid for them; DTensor
+    runs them as "sum" instead (see _pointwise_loss_backward_handler).
+    Otherwise the losses are elementwise in all their tensor arguments. An
+    ``out`` or ``grad_input`` tensor takes the output's placement.
+    """
+    _, reduction = _loss_reduction(op, args_schema)
+    is_backward = op in _POINTWISE_LOSS_BACKWARD_OPS
+    if op in _BINARY_CROSS_ENTROPY_OPS:
+        # The BCE kernels squeeze (grad,) input and target instead of broadcasting
+        # them, so they only match the elementwise rule below when those have one
+        # shape; a 0-d grad (reduction "sum" or "mean") broadcasts either way.
+        shapes = [t.shape for t in args_schema[: 2 + is_backward] if len(t.shape)]
+        if not all(guard_or_false(sym_eq(s, shapes[0])) for s in shapes[1:]):
+            return []
+    output_partial: Partial | None
+    if is_backward:
+        # The backward kernels treat every reduction other than "mean" like "sum".
+        if reduction == Reduction.MEAN.value:
+            return []
+        output_partial = None
+    elif reduction == Reduction.NONE.value:
+        output_partial = None
+    elif reduction == Reduction.SUM.value:
+        output_partial = Partial("sum")
+    elif reduction == Reduction.MEAN.value:
+        output_partial = Partial("avg")
+    else:
+        return []
+
+    strategies = _elementwise_single_dim_strategy(op, args_schema, kwargs_schema)
+    if output_partial is not None:
+        strategies = [[output_partial, *s[1:]] for s in strategies]
+    num_out_kwargs = sum(isinstance(v, TensorMeta) for v in kwargs_schema.values())
+    return [s + [s[0]] * num_out_kwargs for s in strategies]
+
+
 @register_single_dim_strategy(
     [aten.native_layer_norm.default],
     schema_info=RuntimeSchemaInfo(1),
@@ -2158,3 +2323,6 @@ DTensor._op_dispatcher.sharding_propagator.op_to_scalar_shape_adjuster[
 DTensor._op_dispatcher.sharding_propagator.op_to_scalar_shape_adjuster[
     aten.native_group_norm_backward.default
 ] = _adjust_group_norm_scalars
+DTensor._op_dispatcher._custom_op_handlers.update(
+    dict.fromkeys(_POINTWISE_LOSS_BACKWARD_OPS, _pointwise_loss_backward_handler)
+)
