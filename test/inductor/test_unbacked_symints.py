@@ -21,22 +21,31 @@ from torch.testing._internal.common_device_type import (
     preserves_device_selection,
     skipCPUIf,
     skipCUDAIf,
-    skipGPUIf,
 )
-from torch.testing._internal.common_utils import decorateIf, parametrize, skipIfXpu
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.common_utils import (
+    decorateIf,
+    HardwareClassification,
+    parametrize,
+    skipIfXpu,
+)
+from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.printers import PythonPrinter
 
 
 class TestUnbackedSymints(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     setUp = preserves_device_selection(InductorTestCase.setUp)
     setUpClass = classmethod(
         preserves_device_selection(InductorTestCase.setUpClass.__func__)
     )
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand(self, device):
         def fn(x, y):
@@ -57,7 +66,10 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_ok_with_runtime_assert(self, device):
         def fn(x):
@@ -68,7 +80,10 @@ class TestUnbackedSymints(InductorTestCase):
         x = make_tensor(32, 4, device=device, dtype=torch.float32, exclude_zero=True)
         torch.compile(fn, fullgraph=True)(x)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_broadcast_tensors(self, device):
         def fn(x):
@@ -97,39 +112,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(x)
         torch.testing.assert_close(actual, expected)
 
-    def test_remove_no_ops_unbacked_shape_dde(self, device):
-        # Regression: fake_tensors_eq in remove_no_ops used `shape1 != shape2`,
-        # which raises GuardOnDataDependentSymNode when the tuples contain
-        # two different unbacked SymInts (u0 vs u1).
-        from torch._inductor.fx_passes.joint_graph import remove_no_ops
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        shape_env = ShapeEnv()
-        with FakeTensorMode(shape_env=shape_env):
-            u0 = shape_env.create_unbacked_symint()
-            u1 = shape_env.create_unbacked_symint()
-            ones_val = torch.empty((u0, 128), device=device)
-            x_val = torch.empty((u1, 128), device=device)
-
-        graph = torch.fx.Graph()
-        ones_node = graph.placeholder("ones")
-        x_node = graph.placeholder("x")
-        ones_node.meta["val"] = ones_val
-        x_node.meta["val"] = x_val
-        mul = graph.call_function(torch.ops.aten.mul.Tensor, (ones_node, x_node))
-        mul.meta["val"] = ones_val
-        graph.output(mul)
-        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
-
-        # Must not raise. Shapes are not provably equal, so mul must stay.
-        remove_no_ops(gm, OrderedSet(), OrderedSet([ones_node]))
-        self.assertEqual(
-            sum(1 for n in gm.graph.nodes if n.target is torch.ops.aten.mul.Tensor),
-            1,
-        )
-
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_autotuning(self, device):
         def fn(x, y):
@@ -153,7 +139,10 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_split_with_sizes(self, device):
         def fn(x, y):
@@ -169,7 +158,10 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_view_of_slice(self, device):
         # Tests View.create(slice, size_with_unbacked_symint)
@@ -191,7 +183,7 @@ class TestUnbackedSymints(InductorTestCase):
         unittest.skip("Triton kernel requires GPU"),
         lambda params: params["device"] == "cpu",
     )
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_kernel_grid(self, device):
         if device == "cpu":
@@ -213,7 +205,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_nonzero_in_inference_mode(self, device):
         def fn(x):
@@ -227,7 +222,10 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @inductor_config.patch({"max_autotune": True})
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_equivalent_backed_unbacked(self, device):
@@ -261,7 +259,10 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipCPUIf(True, "precision not good enough on CPU")
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_vertical_pointwise_reduction_fusion(self, device):
         # reset in case we run both cpu and cuda tests
@@ -290,7 +291,10 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     @parametrize(
         "torch_fn", [torch.mm, torch.bmm, torch.addmm], name_fn=lambda fn: fn.__name__
@@ -328,7 +332,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_range_tree_divisor(self, device):
         def fn(x, num):
@@ -345,7 +352,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_unbacked_masked_scatter(self, device):
         def fn(value, mask):
@@ -361,7 +371,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_unbacked_repeat(self, device):
         def fn(x, a, b):
@@ -379,7 +392,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch(
         {"capture_scalar_outputs": True, "capture_dynamic_output_shape_ops": True}
     )
@@ -396,7 +412,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     @parametrize("dynamic", [False, True, None])
     def test_unbacked_slice_on_subclass(self, device, dynamic):
@@ -485,7 +504,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual.t, expected.t)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
     def test_issue_143498(self, device):
         class Model(torch.nn.Module):
@@ -541,7 +563,10 @@ class TestUnbackedSymints(InductorTestCase):
         model = Model()
         self.assertEqual(torch.compile(model)(*example_inputs), model(*example_inputs))
 
-    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_einsum(self, device):
         def fn(q, k, vector, scalar):
@@ -568,7 +593,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_softmax(self, device):
         def fn(x):
@@ -588,7 +616,10 @@ class TestUnbackedSymints(InductorTestCase):
         unittest.skip("scaled_dot_product_flash_attention has no CPU backend"),
         lambda params: params["device"] == "cpu",
     )
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
@@ -618,7 +649,10 @@ class TestUnbackedSymints(InductorTestCase):
         unittest.skip("scaled_dot_product_attention has no CPU backend"),
         lambda params: params["device"] == "cpu",
     )
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdfpa_unbacked_strides(self, device):
@@ -647,7 +681,10 @@ class TestUnbackedSymints(InductorTestCase):
         y = torch.tensor([1.0, 0.0], device=device)
         torch.compile(fn, fullgraph=True)(x, y)
 
-    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_unbacked_linear_layer_norm_input(self, device):
         class MyModel(torch.nn.Module):
@@ -678,7 +715,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = model(*inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_to_int_with_unbacked_size(self, device):
         def fn(x):
@@ -699,7 +739,10 @@ class TestUnbackedSymints(InductorTestCase):
         unittest.skip("Combo kernels must be for GPU."),
         lambda params: params["device"] == "cpu",
     )
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     @inductor_config.patch({"combo_kernels": True, "benchmark_combo_kernel": True})
     def test_combo_kernel_size_hint_failure(self, device):
@@ -726,7 +769,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     @inductor_config.patch({"benchmark_kernel": True})
     def test_triton_kernel_with_unbacked_symint_fallback(self, device):
@@ -751,7 +797,10 @@ class TestUnbackedSymints(InductorTestCase):
     @skipIfXpu(
         msg="Invalid SPIR-V module,https://github.com/intel/torch-xpu-ops/issues/2329"
     )
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @inductor_config.patch({"max_autotune": True})
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_autotune_with_unbacked_stride(self, device):
@@ -773,7 +822,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_fmod_with_out_arg(self, device):
         def fn(x):
@@ -786,7 +838,10 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipCPUIf(True, "Triton codegen bug only affects GPU")
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_pow_type_mismatch(self, device):
         """
@@ -816,7 +871,10 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipCPUIf(True, "Triton codegen bug only affects GPU")
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_trunc_large_float_scalar_tensor(self, device):
         import math
@@ -833,7 +891,10 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipCPUIf(True, "Triton codegen bug only affects GPU")
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_trunc_float_scalar_tensor_preserves_positive_zero(self, device):
         import math
@@ -851,7 +912,10 @@ class TestUnbackedSymints(InductorTestCase):
         self.assertEqual(actual, expected)
 
     @skipCPUIf(True, "Triton codegen bug only affects GPU")
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_pow_symbolic_int_exponent(self, device):
         """
@@ -888,7 +952,10 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipCPUIf(True, "Triton codegen bug only affects GPU")
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_pow_symbolic_negative_int_exponent(self, device):
         def fn(x, exponent_src):
@@ -903,7 +970,10 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_slice_unbacked_bindings_with_later_constraint(self, device):
         # Regression test for https://github.com/pytorch/pytorch/issues/166460
@@ -935,7 +1005,10 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipIfXpu(msg="standalone_compile coverage is CUDA-only")
     @skipCPUIf(True, "requires gpu and triton")
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @decorateIf(
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
+    )
     def test_standalone_compile_reuses_fallback_unbacked_binding(self, device):
         from torch._inductor import standalone_compile
         from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
@@ -1066,34 +1139,6 @@ class TestUnbackedSymints(InductorTestCase):
         result = compiled_fn(tx, ty)
         self.assertEqual(result, 30)
 
-    def test_override_optimization_hint_concrete_int_noop(self, device):
-        """Test that override_optimization_hint on a plain int is a no-op."""
-        torch._dynamo.override_optimization_hint(42, 100)
-
-    def test_override_optimization_hint_rejects_wrong_type(self, device):
-        """Test that override_optimization_hint raises TypeError on non-int/non-SymInt."""
-        with self.assertRaisesRegex(TypeError, "expects a torch.SymInt or int"):
-            torch._dynamo.override_optimization_hint(3.14, 100)
-        with self.assertRaisesRegex(TypeError, "expects a torch.SymInt or int"):
-            torch._dynamo.override_optimization_hint("hello", 100)
-
-    def test_override_optimization_hint_rejects_non_int_val(self, device):
-        """Test that override_optimization_hint rejects non-int val."""
-        with self.assertRaisesRegex(TypeError, "val to be an int"):
-            torch._dynamo.override_optimization_hint(42, 3.14)
-        with self.assertRaisesRegex(TypeError, "val to be an int"):
-            torch._dynamo.override_optimization_hint(42, "hello")
-
-    def test_override_optimization_hint_rejects_derived_expression(self, device):
-        """Test that override_optimization_hint rejects derived expressions like u0 + 1."""
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        shape_env = ShapeEnv()
-        u = shape_env.create_unbacked_symint()
-        v = u + 1  # derived expression: u0 + 1
-        with self.assertRaisesRegex(ValueError, "single unbacked symbol"):
-            torch._dynamo.override_optimization_hint(v, 42)
-
     def test_override_optimization_hint_rejects_backed_symbol(self, device):
         """Test that override_optimization_hint rejects backed (non-unbacked) symbols."""
 
@@ -1158,273 +1203,10 @@ class TestUnbackedSymints(InductorTestCase):
         result = compiled_fn(t)
         self.assertEqual(result, 8)
 
-    def test_stride_order_uses_unbacked_optimization_hint(self, device):
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        shape_env = ShapeEnv()
-        seq = shape_env.create_unbacked_symint()
-        torch._dynamo.override_optimization_hint(seq, 16)
-
-        stride_order = ir.get_stride_order(
-            [256 * sympy.Max(1, seq.node.expr // 2), 256, 1],
-            shape_env,
-        )
-        self.assertEqual(stride_order, [2, 1, 0])
-
-    def test_stride_ordered_uses_symbolic_divisibility(self, device):
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        shape_env = ShapeEnv()
-        seq = shape_env.create_unbacked_symint().node.expr
-        sizevars = SizeVarAllocator(shape_env)
-        graph = mock.Mock(sizevars=sizevars)
-
-        layout = ir.FixedLayout(
-            torch.device(device),
-            torch.float32,
-            size=[seq, 8, 16],
-            stride=[256 * seq, 256, 1],
-        )
-        with V.set_graph_handler(graph):
-            with mock.patch.object(
-                sizevars,
-                "optimization_hint",
-                side_effect=AssertionError("unexpected optimization hint"),
-            ):
-                self.assertTrue(layout.is_stride_ordered([2, 1, 0]))
-
-    def test_stride_ordered_rejects_unproved_unbacked_layout(self, device):
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        shape_env = ShapeEnv()
-        seq = shape_env.create_unbacked_symint().node.expr
-        sizevars = SizeVarAllocator(shape_env)
-        graph = mock.Mock(sizevars=sizevars)
-
-        layout = ir.FixedLayout(
-            torch.device(device),
-            torch.float32,
-            size=[seq, 2],
-            stride=[seq, 2],
-        )
-        with V.set_graph_handler(graph):
-            with mock.patch.object(
-                sizevars,
-                "optimization_hint",
-                side_effect=AssertionError("unexpected optimization hint"),
-            ):
-                self.assertFalse(layout.is_stride_ordered([1, 0]))
-
     @decorateIf(
-        unittest.skip("wrapper codegen unit test only needs one device"),
-        lambda p: p["device"] != "cpu",
+        unittest.skip("requires triton"),
+        lambda params: torch.device(params["device"]).type != "cpu" and not HAS_TRITON,
     )
-    def test_python_wrapper_binds_symbol_from_compound_input_expr(self, device):
-        if device != "cpu":
-            self.skipTest("wrapper codegen unit test only needs one device")
-
-        from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        s0 = sympy.Symbol("s0", integer=True)
-        s1 = sympy.Symbol("s1", integer=True)
-        s2 = sympy.Symbol("s2", integer=True)
-        shape_env = ShapeEnv()
-        u0 = shape_env.create_unbacked_symint().node.expr
-        shape_env.replacements[s0] = s2
-        sizevars = SizeVarAllocator(shape_env)
-        graph_inputs = {}
-        graph = mock.Mock(
-            sizevars=sizevars,
-            graph_inputs=graph_inputs,
-            graph_input_names=list(graph_inputs),
-            symbolic_input_sources={},
-        )
-
-        value = ir.TensorBox.create(
-            ir.InputBuffer(
-                name="arg0_1",
-                layout=ir.FixedLayout(
-                    torch.device(device),
-                    torch.float32,
-                    size=[s0 + 1, 2 * s1, u0 + 1],
-                    stride=[2 * s1, 1, 1],
-                ),
-            )
-        )
-        graph_inputs["arg0_1"] = value
-        graph.graph_input_names = list(graph_inputs)
-
-        wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
-        wrapper.prefix = IndentedBuffer()
-
-        with V.set_graph_handler(graph):
-            wrapper.codegen_inputs()
-
-        code = wrapper.prefix.getvalue()
-        self.assertIn("arg0_1_size = arg0_1.size()", code)
-        self.assertIn("arg0_1_size_0 = arg0_1_size[0]", code)
-        self.assertIn("arg0_1_size_1 = arg0_1_size[1]", code)
-        self.assertRegex(code, r"s0 = .*arg0_1_size_0")
-        self.assertIn("s2 = s0", code)
-        self.assertIn("s1 = arg0_1_size_1 // 2", code)
-        self.assertRegex(code, r"u0 = .*arg0_1_size_2")
-
-        cpp_wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
-        cpp_wrapper.prefix = IndentedBuffer()
-        cpp_wrapper.unbacked_symbol_decls = OrderedSet()
-        with V.set_graph_handler(graph):
-            cpp_wrapper.codegen_inputs()
-
-        cpp_code = cpp_wrapper.prefix.getvalue()
-        self.assertIn("auto arg0_1_size = arg0_1.sizes();", cpp_code)
-        self.assertIn("int64_t arg0_1_size_0 = arg0_1_size[0];", cpp_code)
-        self.assertRegex(cpp_code, r"int64_t s0 = .*arg0_1_size_0")
-        self.assertIn("int64_t s2 = s0;", cpp_code)
-        self.assertIn("int64_t s1 = c10::div_floor_integer", cpp_code)
-        self.assertIn("arg0_1_size_1", cpp_code)
-        self.assertRegex(cpp_code, r"int64_t u0 = .*arg0_1_size_2")
-        self.assertIn(str(u0), cpp_wrapper.unbacked_symbol_decls)
-        cpp_wrapper.declare = "auto "
-        self.assertEqual(str(u0), cpp_wrapper.codegen_unbacked_symbol_decl(u0))
-
-        from torch.utils._sympy.functions import FloorDiv
-
-        s3 = sympy.Symbol("s3", integer=True)
-        graph_inputs = {
-            "arg0_1": ir.TensorBox.create(
-                ir.InputBuffer(
-                    name="arg0_1",
-                    layout=ir.FixedLayout(
-                        torch.device(device),
-                        torch.float32,
-                        size=[FloorDiv(s3, 2)],
-                        stride=[1],
-                    ),
-                )
-            ),
-            "arg1_1": ir.TensorBox.create(
-                ir.InputBuffer(
-                    name="arg1_1",
-                    layout=ir.FixedLayout(
-                        torch.device(device),
-                        torch.float32,
-                        size=[s3],
-                        stride=[1],
-                    ),
-                )
-            ),
-        }
-        graph = mock.Mock(
-            sizevars=SizeVarAllocator(ShapeEnv()),
-            graph_inputs=graph_inputs,
-            graph_input_names=list(graph_inputs),
-            symbolic_input_sources={},
-        )
-
-        wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
-        wrapper.prefix = IndentedBuffer()
-        with V.set_graph_handler(graph):
-            wrapper.codegen_inputs()
-        code = wrapper.prefix.getvalue()
-        self.assertNotIn("arg0_1_size_0 = arg0_1_size[0]", code)
-        self.assertIn("s3 = arg1_1_size[0]", code)
-
-        cpp_wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
-        cpp_wrapper.prefix = IndentedBuffer()
-        cpp_wrapper.unbacked_symbol_decls = OrderedSet()
-        with V.set_graph_handler(graph):
-            cpp_wrapper.codegen_inputs()
-        cpp_code = cpp_wrapper.prefix.getvalue()
-        self.assertNotIn("int64_t arg0_1_size_0 = arg0_1_size[0];", cpp_code)
-        self.assertIn("int64_t s3 = arg1_1_size[0];", cpp_code)
-
-        s4 = sympy.Symbol("s4", integer=True)
-        s5 = sympy.Symbol("s5", integer=True)
-        graph_inputs = {
-            "arg0_1": ir.TensorBox.create(
-                ir.InputBuffer(
-                    name="arg0_1",
-                    layout=ir.FixedLayout(
-                        torch.device(device),
-                        torch.float32,
-                        size=[s4 + s5, s4],
-                        stride=[1, 1],
-                    ),
-                )
-            ),
-        }
-        graph = mock.Mock(
-            sizevars=SizeVarAllocator(ShapeEnv()),
-            graph_inputs=graph_inputs,
-            graph_input_names=list(graph_inputs),
-            symbolic_input_sources={},
-        )
-
-        wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
-        wrapper.prefix = IndentedBuffer()
-        with V.set_graph_handler(graph):
-            wrapper.codegen_inputs()
-        code = wrapper.prefix.getvalue()
-        self.assertIn("s4 = arg0_1_size[1]", code)
-        self.assertRegex(code, r"s5 = .*arg0_1_size_0")
-
-        cpp_wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
-        cpp_wrapper.prefix = IndentedBuffer()
-        cpp_wrapper.unbacked_symbol_decls = OrderedSet()
-        with V.set_graph_handler(graph):
-            cpp_wrapper.codegen_inputs()
-        cpp_code = cpp_wrapper.prefix.getvalue()
-        self.assertIn("int64_t s4 = arg0_1_size[1];", cpp_code)
-        self.assertRegex(cpp_code, r"int64_t s5 = .*arg0_1_size_0")
-
-    def test_stride_ordered_handles_reciprocal_in_divisibility_check(self, device):
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        shape_env = ShapeEnv()
-        seq = shape_env.create_unbacked_symint().node.expr
-        shape_env.constrain_symbol_range(seq, 4, 1024)
-        half = FloorDiv(seq, 2)
-        reduced = FloorDiv(half**2, half)
-        left = 16 * reduced - 30
-        right = 16 * (64 * half * reduced - 120 * half - 120 * reduced + 225)
-        sizevars = SizeVarAllocator(shape_env)
-        graph = mock.Mock(sizevars=sizevars)
-
-        layout = ir.FixedLayout(
-            torch.device(device),
-            torch.float32,
-            size=[seq, 2],
-            stride=[left, right],
-        )
-        with V.set_graph_handler(graph):
-            with mock.patch.object(
-                sizevars,
-                "optimization_hint",
-                side_effect=AssertionError("unexpected optimization hint"),
-            ):
-                self.assertTrue(layout.is_stride_ordered([0, 1]))
-
-        fallback_sizevars = mock.Mock()
-        fallback_sizevars.guard_or_false.return_value = False
-        fallback_sizevars.statically_known_multiple_of.return_value = False
-        graph = mock.Mock(sizevars=fallback_sizevars)
-        with V.set_graph_handler(graph):
-            self.assertFalse(ir.Layout._stride_expr_ge_or_false(left, right))
-
-        fallback_sizevars.statically_known_multiple_of.assert_called_once_with(
-            left, right
-        )
-        guard = fallback_sizevars.guard_or_false.call_args.args[0]
-        negative_powers = [
-            power
-            for power in guard.atoms(sympy.Pow)
-            if power.args[1].is_negative is True
-        ]
-        self.assertEqual(negative_powers, [])
-        self.assertIn("%", PythonPrinter().doprint(guard))
-
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     @inductor_config.patch(
         {"max_complex_pointwise_cat_inputs": 1, "max_pointwise_cat_inputs": 1}
@@ -1509,7 +1291,330 @@ class TestUnbackedSymints(InductorTestCase):
         x = torch.randn(6, 5, device=device)
         self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
 
-    def test_dynamic_reshape_indexer_unbacked(self, device):
+
+class TestUnbackedSymintsGeneric(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_remove_no_ops_unbacked_shape_dde(self):
+        # Regression: fake_tensors_eq in remove_no_ops used `shape1 != shape2`,
+        # which raises GuardOnDataDependentSymNode when the tuples contain
+        # two different unbacked SymInts (u0 vs u1).
+        from torch._inductor.fx_passes.joint_graph import remove_no_ops
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+            ones_val = torch.empty((u0, 128), device="cpu")
+            x_val = torch.empty((u1, 128), device="cpu")
+
+        graph = torch.fx.Graph()
+        ones_node = graph.placeholder("ones")
+        x_node = graph.placeholder("x")
+        ones_node.meta["val"] = ones_val
+        x_node.meta["val"] = x_val
+        mul = graph.call_function(torch.ops.aten.mul.Tensor, (ones_node, x_node))
+        mul.meta["val"] = ones_val
+        graph.output(mul)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        # Must not raise. Shapes are not provably equal, so mul must stay.
+        remove_no_ops(gm, OrderedSet(), OrderedSet([ones_node]))
+        self.assertEqual(
+            sum(1 for n in gm.graph.nodes if n.target is torch.ops.aten.mul.Tensor),
+            1,
+        )
+
+    def test_stride_ordered_uses_symbolic_divisibility(self):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint().node.expr
+        sizevars = SizeVarAllocator(shape_env)
+        graph = mock.Mock(sizevars=sizevars)
+
+        layout = ir.FixedLayout(
+            torch.device("cpu"),
+            torch.float32,
+            size=[seq, 8, 16],
+            stride=[256 * seq, 256, 1],
+        )
+        with V.set_graph_handler(graph):
+            with mock.patch.object(
+                sizevars,
+                "optimization_hint",
+                side_effect=AssertionError("unexpected optimization hint"),
+            ):
+                self.assertTrue(layout.is_stride_ordered([2, 1, 0]))
+
+    def test_stride_ordered_rejects_unproved_unbacked_layout(self):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint().node.expr
+        sizevars = SizeVarAllocator(shape_env)
+        graph = mock.Mock(sizevars=sizevars)
+
+        layout = ir.FixedLayout(
+            torch.device("cpu"),
+            torch.float32,
+            size=[seq, 2],
+            stride=[seq, 2],
+        )
+        with V.set_graph_handler(graph):
+            with mock.patch.object(
+                sizevars,
+                "optimization_hint",
+                side_effect=AssertionError("unexpected optimization hint"),
+            ):
+                self.assertFalse(layout.is_stride_ordered([1, 0]))
+
+    def test_stride_ordered_handles_reciprocal_in_divisibility_check(self):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint().node.expr
+        shape_env.constrain_symbol_range(seq, 4, 1024)
+        half = FloorDiv(seq, 2)
+        reduced = FloorDiv(half**2, half)
+        left = 16 * reduced - 30
+        right = 16 * (64 * half * reduced - 120 * half - 120 * reduced + 225)
+        sizevars = SizeVarAllocator(shape_env)
+        graph = mock.Mock(sizevars=sizevars)
+
+        layout = ir.FixedLayout(
+            torch.device("cpu"),
+            torch.float32,
+            size=[seq, 2],
+            stride=[left, right],
+        )
+        with V.set_graph_handler(graph):
+            with mock.patch.object(
+                sizevars,
+                "optimization_hint",
+                side_effect=AssertionError("unexpected optimization hint"),
+            ):
+                self.assertTrue(layout.is_stride_ordered([0, 1]))
+
+        fallback_sizevars = mock.Mock()
+        fallback_sizevars.guard_or_false.return_value = False
+        fallback_sizevars.statically_known_multiple_of.return_value = False
+        graph = mock.Mock(sizevars=fallback_sizevars)
+        with V.set_graph_handler(graph):
+            self.assertFalse(ir.Layout._stride_expr_ge_or_false(left, right))
+
+        fallback_sizevars.statically_known_multiple_of.assert_called_once_with(
+            left, right
+        )
+        guard = fallback_sizevars.guard_or_false.call_args.args[0]
+        negative_powers = [
+            power
+            for power in guard.atoms(sympy.Pow)
+            if power.args[1].is_negative is True
+        ]
+        self.assertEqual(negative_powers, [])
+        self.assertIn("%", PythonPrinter().doprint(guard))
+
+    def test_python_wrapper_binds_symbol_from_compound_input_expr(self):
+        from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        s0 = sympy.Symbol("s0", integer=True)
+        s1 = sympy.Symbol("s1", integer=True)
+        s2 = sympy.Symbol("s2", integer=True)
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint().node.expr
+        shape_env.replacements[s0] = s2
+        sizevars = SizeVarAllocator(shape_env)
+        graph_inputs = {}
+        graph = mock.Mock(
+            sizevars=sizevars,
+            graph_inputs=graph_inputs,
+            graph_input_names=list(graph_inputs),
+            symbolic_input_sources={},
+        )
+
+        value = ir.TensorBox.create(
+            ir.InputBuffer(
+                name="arg0_1",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[s0 + 1, 2 * s1, u0 + 1],
+                    stride=[2 * s1, 1, 1],
+                ),
+            )
+        )
+        graph_inputs["arg0_1"] = value
+        graph.graph_input_names = list(graph_inputs)
+
+        wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
+        wrapper.prefix = IndentedBuffer()
+
+        with V.set_graph_handler(graph):
+            wrapper.codegen_inputs()
+
+        code = wrapper.prefix.getvalue()
+        self.assertIn("arg0_1_size = arg0_1.size()", code)
+        self.assertIn("arg0_1_size_0 = arg0_1_size[0]", code)
+        self.assertIn("arg0_1_size_1 = arg0_1_size[1]", code)
+        self.assertRegex(code, r"s0 = .*arg0_1_size_0")
+        self.assertIn("s2 = s0", code)
+        self.assertIn("s1 = arg0_1_size_1 // 2", code)
+        self.assertRegex(code, r"u0 = .*arg0_1_size_2")
+
+        cpp_wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
+        cpp_wrapper.prefix = IndentedBuffer()
+        cpp_wrapper.unbacked_symbol_decls = OrderedSet()
+        with V.set_graph_handler(graph):
+            cpp_wrapper.codegen_inputs()
+
+        cpp_code = cpp_wrapper.prefix.getvalue()
+        self.assertIn("auto arg0_1_size = arg0_1.sizes();", cpp_code)
+        self.assertIn("int64_t arg0_1_size_0 = arg0_1_size[0];", cpp_code)
+        self.assertRegex(cpp_code, r"int64_t s0 = .*arg0_1_size_0")
+        self.assertIn("int64_t s2 = s0;", cpp_code)
+        self.assertIn("int64_t s1 = c10::div_floor_integer", cpp_code)
+        self.assertIn("arg0_1_size_1", cpp_code)
+        self.assertRegex(cpp_code, r"int64_t u0 = .*arg0_1_size_2")
+        self.assertIn(str(u0), cpp_wrapper.unbacked_symbol_decls)
+        cpp_wrapper.declare = "auto "
+        self.assertEqual(str(u0), cpp_wrapper.codegen_unbacked_symbol_decl(u0))
+
+        from torch.utils._sympy.functions import FloorDiv
+
+        s3 = sympy.Symbol("s3", integer=True)
+        graph_inputs = {
+            "arg0_1": ir.TensorBox.create(
+                ir.InputBuffer(
+                    name="arg0_1",
+                    layout=ir.FixedLayout(
+                        torch.device("cpu"),
+                        torch.float32,
+                        size=[FloorDiv(s3, 2)],
+                        stride=[1],
+                    ),
+                )
+            ),
+            "arg1_1": ir.TensorBox.create(
+                ir.InputBuffer(
+                    name="arg1_1",
+                    layout=ir.FixedLayout(
+                        torch.device("cpu"),
+                        torch.float32,
+                        size=[s3],
+                        stride=[1],
+                    ),
+                )
+            ),
+        }
+        graph = mock.Mock(
+            sizevars=SizeVarAllocator(ShapeEnv()),
+            graph_inputs=graph_inputs,
+            graph_input_names=list(graph_inputs),
+            symbolic_input_sources={},
+        )
+
+        wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
+        wrapper.prefix = IndentedBuffer()
+        with V.set_graph_handler(graph):
+            wrapper.codegen_inputs()
+        code = wrapper.prefix.getvalue()
+        self.assertNotIn("arg0_1_size_0 = arg0_1_size[0]", code)
+        self.assertIn("s3 = arg1_1_size[0]", code)
+
+        cpp_wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
+        cpp_wrapper.prefix = IndentedBuffer()
+        cpp_wrapper.unbacked_symbol_decls = OrderedSet()
+        with V.set_graph_handler(graph):
+            cpp_wrapper.codegen_inputs()
+        cpp_code = cpp_wrapper.prefix.getvalue()
+        self.assertNotIn("int64_t arg0_1_size_0 = arg0_1_size[0];", cpp_code)
+        self.assertIn("int64_t s3 = arg1_1_size[0];", cpp_code)
+
+        s4 = sympy.Symbol("s4", integer=True)
+        s5 = sympy.Symbol("s5", integer=True)
+        graph_inputs = {
+            "arg0_1": ir.TensorBox.create(
+                ir.InputBuffer(
+                    name="arg0_1",
+                    layout=ir.FixedLayout(
+                        torch.device("cpu"),
+                        torch.float32,
+                        size=[s4 + s5, s4],
+                        stride=[1, 1],
+                    ),
+                )
+            ),
+        }
+        graph = mock.Mock(
+            sizevars=SizeVarAllocator(ShapeEnv()),
+            graph_inputs=graph_inputs,
+            graph_input_names=list(graph_inputs),
+            symbolic_input_sources={},
+        )
+
+        wrapper = PythonWrapperCodegen.__new__(PythonWrapperCodegen)
+        wrapper.prefix = IndentedBuffer()
+        with V.set_graph_handler(graph):
+            wrapper.codegen_inputs()
+        code = wrapper.prefix.getvalue()
+        self.assertIn("s4 = arg0_1_size[1]", code)
+        self.assertRegex(code, r"s5 = .*arg0_1_size_0")
+
+        cpp_wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
+        cpp_wrapper.prefix = IndentedBuffer()
+        cpp_wrapper.unbacked_symbol_decls = OrderedSet()
+        with V.set_graph_handler(graph):
+            cpp_wrapper.codegen_inputs()
+        cpp_code = cpp_wrapper.prefix.getvalue()
+        self.assertIn("int64_t s4 = arg0_1_size[1];", cpp_code)
+        self.assertRegex(cpp_code, r"int64_t s5 = .*arg0_1_size_0")
+
+    def test_override_optimization_hint_concrete_int_noop(self):
+        """Test that override_optimization_hint on a plain int is a no-op."""
+        torch._dynamo.override_optimization_hint(42, 100)
+
+    def test_override_optimization_hint_rejects_wrong_type(self):
+        """Test that override_optimization_hint raises TypeError on non-int/non-SymInt."""
+        with self.assertRaisesRegex(TypeError, "expects a torch.SymInt or int"):
+            torch._dynamo.override_optimization_hint(3.14, 100)
+        with self.assertRaisesRegex(TypeError, "expects a torch.SymInt or int"):
+            torch._dynamo.override_optimization_hint("hello", 100)
+
+    def test_override_optimization_hint_rejects_non_int_val(self):
+        """Test that override_optimization_hint rejects non-int val."""
+        with self.assertRaisesRegex(TypeError, "val to be an int"):
+            torch._dynamo.override_optimization_hint(42, 3.14)
+        with self.assertRaisesRegex(TypeError, "val to be an int"):
+            torch._dynamo.override_optimization_hint(42, "hello")
+
+    def test_override_optimization_hint_rejects_derived_expression(self):
+        """Test that override_optimization_hint rejects derived expressions like u0 + 1."""
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        u = shape_env.create_unbacked_symint()
+        v = u + 1  # derived expression: u0 + 1
+        with self.assertRaisesRegex(ValueError, "single unbacked symbol"):
+            torch._dynamo.override_optimization_hint(v, 42)
+
+    def test_stride_order_uses_unbacked_optimization_hint(self):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint()
+        torch._dynamo.override_optimization_hint(seq, 16)
+
+        stride_order = ir.get_stride_order(
+            [256 * sympy.Max(1, seq.node.expr // 2), 256, 1],
+            shape_env,
+        )
+        self.assertEqual(stride_order, [2, 1, 0])
+
+    def test_dynamic_reshape_indexer_unbacked(self):
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         def reindex(old_size_fn, new_size_fn):
