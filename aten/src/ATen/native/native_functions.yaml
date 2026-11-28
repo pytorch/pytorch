@@ -567,8 +567,9 @@
   structured: True
   structured_inherits: TensorIteratorBase
   ufunc_inner_loop:
-    Generic: add (AllAndComplex, BFloat16, Half, ComplexHalf)
-    ScalarOnly: add (Bool)
+    Generic: add (AllAndComplex, BFloat16, Half)
+    # ComplexHalf is ScalarOnly because the vectorized ufunc::add overload has no c10::complex<c10::Half> widening path
+    ScalarOnly: add (Bool, ComplexHalf)
   dispatch:
     SparseCPU, SparseMeta: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda
