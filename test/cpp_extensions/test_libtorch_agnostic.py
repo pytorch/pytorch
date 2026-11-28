@@ -851,6 +851,33 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(OverflowError, "int too large to convert to float"):
             roundtrip(10**400)
 
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_string_roundtrip(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.string_roundtrip
+        for value in ("", "h\u00e9llo \u4e16\u754c", "a\x00b"):
+            self.assertEqual(roundtrip(value), value)
+        # bytes are read as is and come back as a UTF-8 decoded str.
+        self.assertEqual(roundtrip(b"a\x00\xc3\xa9"), "a\x00\u00e9")
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_string_rejects(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.string_roundtrip
+        for value in (1, bytearray(b"a"), None):
+            with self.assertRaisesRegex(RuntimeError, "expected str or bytes"):
+                roundtrip(value)
+        # A lone surrogate cannot be encoded as UTF-8 ...
+        with self.assertRaisesRegex(UnicodeEncodeError, "surrogates not allowed"):
+            roundtrip("\ud800")
+        # ... and invalid UTF-8 bytes cannot be decoded back into a str.
+        with self.assertRaisesRegex(UnicodeDecodeError, "invalid start byte"):
+            roundtrip(b"\xff")
+
     @skipIfTorchVersionLessThan(2, 16)
     @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
     def test_my_add(self, device):

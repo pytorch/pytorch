@@ -71,6 +71,12 @@ struct NoopPyObjectConversion final : PyObjectConversionInterface {
   PyObject* double_to_pyobject(double /*value*/) const override {
     TORCH_CHECK(false, kNoImplMsg);
   }
+  std::string string_from_pyobject(PyObject* /*obj*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  PyObject* string_to_pyobject(std::string_view /*str*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
 };
 
 const NoopPyObjectConversion noop_impl;

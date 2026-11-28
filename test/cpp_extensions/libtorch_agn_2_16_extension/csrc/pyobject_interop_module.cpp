@@ -80,6 +80,13 @@ PyObject* double_error_message(PyObject* /*self*/, PyObject* obj) {
   return nullptr;
 }
 
+PyObject* string_roundtrip(PyObject* /*self*/, PyObject* obj) {
+  return call([&] {
+    return torch::stable::string_to_pyobject(
+        torch::stable::string_from_pyobject(obj));
+  });
+}
+
 PyMethodDef methods[] = {
     {"layout_roundtrip", layout_roundtrip, METH_O, nullptr},
     {"tensor_layout", tensor_layout, METH_O, nullptr},
@@ -88,6 +95,7 @@ PyMethodDef methods[] = {
     {"int64_roundtrip", int64_roundtrip, METH_O, nullptr},
     {"double_roundtrip", double_roundtrip, METH_O, nullptr},
     {"double_error_message", double_error_message, METH_O, nullptr},
+    {"string_roundtrip", string_roundtrip, METH_O, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyModuleDef moduledef = {

@@ -195,4 +195,27 @@ TEST(TorchPyObjectConversion, ScalarNoopErrorsWithoutLibtorchPython) {
   EXPECT_EQ(py_out, nullptr);
 }
 
+TEST(TorchPyObjectConversion, StringNoopErrorsWithoutLibtorchPython) {
+  int dummy = 0;
+  StringHandle string_out = nullptr;
+  expect_noop_error(torch_string_from_pyobject(&dummy, &string_out));
+  EXPECT_EQ(string_out, nullptr);
+
+  const char data[] = "data";
+  void* py_out = nullptr;
+  expect_noop_error(torch_string_to_pyobject(data, sizeof(data) - 1, &py_out));
+  EXPECT_EQ(py_out, nullptr);
+}
+
+TEST(TorchPyObjectConversion, StringDataValidatedBeforePythonConversion) {
+  void* py_out = nullptr;
+  EXPECT_EQ(torch_string_to_pyobject(nullptr, 1, &py_out), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+  const char* message = torch_exception_get_what_without_backtrace();
+  ASSERT_NE(message, nullptr);
+  EXPECT_NE(
+      std::strstr(message, "data must not be null unless length is 0"),
+      nullptr);
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
